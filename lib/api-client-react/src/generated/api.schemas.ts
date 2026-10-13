@@ -7332,6 +7332,111 @@ export interface ServerJob {
   expiresAt: string;
 }
 
+export interface ApplyScheduledJobCleanupPlan {
+  /** @pattern ^[0-9a-f]{64}$ */
+  manifestDigest: string;
+  /**
+     * @minLength 3
+     * @maxLength 200
+     */
+  reason: string;
+}
+
+export type ScheduledJobCleanupGroupScope = typeof ScheduledJobCleanupGroupScope[keyof typeof ScheduledJobCleanupGroupScope];
+
+
+export const ScheduledJobCleanupGroupScope = {
+  live: 'live',
+} as const;
+
+export type ScheduledJobCleanupMemberStatus = typeof ScheduledJobCleanupMemberStatus[keyof typeof ScheduledJobCleanupMemberStatus];
+
+
+export const ScheduledJobCleanupMemberStatus = {
+  queued: 'queued',
+  running: 'running',
+  succeeded: 'succeeded',
+  failed: 'failed',
+  cancelled: 'cancelled',
+} as const;
+
+export type ScheduledJobCleanupMemberLeaseState = typeof ScheduledJobCleanupMemberLeaseState[keyof typeof ScheduledJobCleanupMemberLeaseState];
+
+
+export const ScheduledJobCleanupMemberLeaseState = {
+  none: 'none',
+  valid: 'valid',
+  expired: 'expired',
+  incomplete: 'incomplete',
+} as const;
+
+export interface ScheduledJobCleanupMember {
+  id: string;
+  /** @maxLength 200 */
+  actorId: string;
+  status: ScheduledJobCleanupMemberStatus;
+  /** @minimum 0 */
+  attempt: number;
+  /** @minimum 1 */
+  maxAttempts: number;
+  /** @minimum 0 */
+  attemptReceiptCount: number;
+  leaseState: ScheduledJobCleanupMemberLeaseState;
+  expiresAt: string;
+  /** @nullable */
+  finishedAt: string | null;
+  /** @pattern ^[0-9a-f]{64}$ */
+  rowDigest: string;
+  candidate: boolean;
+  disposition: string;
+}
+
+export interface ScheduledJobCleanupGroup {
+  scope: ScheduledJobCleanupGroupScope;
+  /** @maxLength 128 */
+  idempotencyKey: string;
+  /** @maxItems 20 */
+  members: ScheduledJobCleanupMember[];
+}
+
+export interface ScheduledJobCleanupPlan {
+  planId: string;
+  /** @pattern ^[0-9a-f]{64}$ */
+  manifestDigest: string;
+  proposedAt: string;
+  expiresAt: string;
+  truncated: boolean;
+  /** @minimum 0 */
+  skippedOversizedGroups: number;
+  /**
+     * @minimum 0
+     * @maximum 50
+     */
+  candidateCount: number;
+  /** @maxItems 50 */
+  candidateIds: string[];
+  /** @maxItems 10 */
+  groups: ScheduledJobCleanupGroup[];
+}
+
+export type ApplyScheduledJobCleanupResultOutcome = typeof ApplyScheduledJobCleanupResultOutcome[keyof typeof ApplyScheduledJobCleanupResultOutcome];
+
+
+export const ApplyScheduledJobCleanupResultOutcome = {
+  applied: 'applied',
+} as const;
+
+export interface ApplyScheduledJobCleanupResult {
+  outcome: ApplyScheduledJobCleanupResultOutcome;
+  /**
+     * @minimum 0
+     * @maximum 50
+     */
+  deletedCount: number;
+  /** @maxItems 50 */
+  candidateIds: string[];
+}
+
 export type ManagerActionItemCategory = typeof ManagerActionItemCategory[keyof typeof ManagerActionItemCategory];
 
 

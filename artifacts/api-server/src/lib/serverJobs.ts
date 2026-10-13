@@ -290,10 +290,11 @@ export function createScheduledEvaluationQueueMonitor() {
 const scheduledEvaluationQueueMonitor = createScheduledEvaluationQueueMonitor();
 
 /**
- * Read only bounded aggregate metrics. Duplicate keys are grouped by stored
- * unexpired rows grouped by stored scope and canonical time bucket, across
- * actor ids, so alternate scheduler identities cannot hide duplicate work.
- * Raw group values are never returned.
+ * Read-only bounded aggregate metrics. Duplicate work is grouped by the full
+ * stored idempotency key and scope, across actor ids, so alternate scheduler
+ * identities cannot hide duplicates without conflating legacy per-date keys
+ * that happen to share a trailing time bucket. Raw group values are never
+ * returned.
  */
 export async function readScheduledEvaluationQueueSnapshot(
   nowMs = Date.now(),
@@ -310,10 +311,10 @@ export async function readScheduledEvaluationQueueSnapshot(
     gt(serverJobsTable.expiresAt, new Date(nowMs)),
   ));
 
-  const bucket = sql<string>`split_part(${serverJobsTable.idempotencyKey}, ':', 3)`;
+  const idempotencyKey = serverJobsTable.idempotencyKey;
   const duplicateGroups = await db.select({
     scope: serverJobsTable.scope,
-    bucket,
+    idempotencyKey,
     totalDuplicateGroups: sql<number>`count(*) over()::int`,
     rowCount: sql<number>`count(*)::int`,
     queued: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'queued')::int`,
@@ -357,8 +358,8 @@ export async function readScheduledEvaluationQueueSnapshot(
     eq(serverJobsTable.type, "scheduled-evaluation"),
     gt(serverJobsTable.expiresAt, new Date(nowMs)),
     sql`${serverJobsTable.idempotencyKey} ~ '^scheduled-evaluation:[^:]+:[0-9]+$'`,
-  )).groupBy(serverJobsTable.scope, bucket).having(sql`count(*) > 1`)
-    .orderBy(sql`min(${serverJobsTable.createdAt}) asc`, asc(serverJobsTable.scope), asc(bucket))
+  )).groupBy(serverJobsTable.scope, idempotencyKey).having(sql`count(*) > 1`)
+    .orderBy(sql`min(${serverJobsTable.createdAt}) asc`, asc(serverJobsTable.scope), asc(idempotencyKey))
     .limit(SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS + 1);
 
   const boundedDuplicateGroups = duplicateGroups.slice(0, SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS);
@@ -369,7 +370,7 @@ export async function readScheduledEvaluationQueueSnapshot(
     const hasUnleasedRunningWork = group.runningManualReview > 0;
     return {
       bucketFingerprint: createHmac("sha256", duplicateInventoryFingerprintKey)
-        .update(`${group.scope}\u0000${group.bucket}`)
+        .update(`${group.scope}\u0000${group.idempotencyKey}`)
         .digest("hex")
         .slice(0, 24),
       rowCount: nonNegativeCount(group.rowCount),

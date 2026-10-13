@@ -137,6 +137,10 @@ const EVENT_SCHEMAS: Record<string, AuditEventSchema> = {
   incident_workflow_updated: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   incident_note_added: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   profile_data_health_repair: { required: ["outcome", "count"], allowed: ["outcome", "count"] },
+  scheduled_job_cleanup: {
+    required: ["outcome", "reason", "candidateIds"],
+    allowed: ["outcome", "reason", "candidateIds"],
+  },
   account_disabled: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   account_enabled: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   sessions_revoked: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
@@ -171,12 +175,23 @@ function boundedString(value: unknown, max = MAX_STRING): string | undefined {
 
 /** Redacts arbitrary legacy event input into the small operational evidence schema. */
 export function redactAuditChanges(value: unknown): Record<string, unknown> {
-  const allowed = new Set(["count", "outcome", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId", "fieldNames", "correlationId"]);
+  const allowed = new Set(["count", "outcome", "reason", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId", "candidateIds", "fieldNames", "correlationId"]);
   const output: Record<string, unknown> = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return output;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!allowed.has(key)) continue;
-    if (key === "fieldNames") {
+    if (key === "candidateIds") {
+      if (
+        Array.isArray(raw) &&
+        raw.length <= 50 &&
+        raw.every((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id))
+      ) {
+        output.candidateIds = [...new Set(raw as string[])];
+      }
+    } else if (key === "reason") {
+      const reason = boundedString(raw, 200);
+      if (reason) output.reason = reason;
+    } else if (key === "fieldNames") {
       if (
         Array.isArray(raw) &&
         raw.length <= RECIPE_AUDIT_FIELD_NAMES.size &&

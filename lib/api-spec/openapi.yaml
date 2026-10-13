@@ -4383,6 +4383,47 @@ paths:
               schema: { $ref: "#/components/schemas/ServerJob" }
         "404": { description: Job is not in this actor's scope }
 
+  /server-jobs/scheduled-evaluation-cleanup/plans:
+    post:
+      operationId: createScheduledJobCleanupPlan
+      tags: [serverJobs]
+      summary: Create a bounded, read-only manifest for exact duplicate scheduled jobs
+      description: Manager-only and live-scope only. Creating a plan does not alter server jobs. The returned digest must be explicitly approved by a manager before any deletion.
+      responses:
+        "201":
+          description: Persisted immutable cleanup plan for later explicit approval
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduledJobCleanupPlan" }
+        "403": { description: Manager role and manage-staff capability required; sandbox is denied }
+
+  /server-jobs/scheduled-evaluation-cleanup/plans/{planId}/apply:
+    post:
+      operationId: applyScheduledJobCleanupPlan
+      tags: [serverJobs]
+      summary: Approve and apply one exact scheduled-job cleanup manifest
+      description: Manager-only and live-scope only. The server rechecks every manifest row and lease under serializable transaction locks. Changed plans fail closed.
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplyScheduledJobCleanupPlan" }
+      responses:
+        "200":
+          description: Approved plan applied; only listed terminal rows without attempt receipts were deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplyScheduledJobCleanupResult" }
+        "400": { description: Invalid approval request }
+        "403": { description: Manager role and manage-staff capability required; sandbox is denied }
+        "409":
+          description: "Manifest changed, expired, contains no candidates, or was already finalized"
+
   /server-jobs/{id}/cancel:
     post:
       operationId: cancelServerJob
@@ -13386,6 +13427,77 @@ components:
         startedAt: { type: [string, "null"], format: date-time }
         finishedAt: { type: [string, "null"], format: date-time }
         expiresAt: { type: string, format: date-time }
+
+    ApplyScheduledJobCleanupPlan:
+      type: object
+      additionalProperties: false
+      required: [manifestDigest, reason]
+      properties:
+        manifestDigest: { type: string, pattern: "^[0-9a-f]{64}$" }
+        reason: { type: string, minLength: 3, maxLength: 200 }
+
+    ScheduledJobCleanupPlan:
+      type: object
+      additionalProperties: false
+      required: [planId, manifestDigest, proposedAt, expiresAt, truncated, skippedOversizedGroups, candidateCount, candidateIds, groups]
+      properties:
+        planId: { type: string, format: uuid }
+        manifestDigest: { type: string, pattern: "^[0-9a-f]{64}$" }
+        proposedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        skippedOversizedGroups: { type: integer, minimum: 0 }
+        candidateCount: { type: integer, minimum: 0, maximum: 50 }
+        candidateIds:
+          type: array
+          maxItems: 50
+          items: { type: string, format: uuid }
+        groups:
+          type: array
+          maxItems: 10
+          items: { $ref: "#/components/schemas/ScheduledJobCleanupGroup" }
+
+    ScheduledJobCleanupGroup:
+      type: object
+      additionalProperties: false
+      required: [scope, idempotencyKey, members]
+      properties:
+        scope: { type: string, enum: [live] }
+        idempotencyKey: { type: string, maxLength: 128 }
+        members:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/ScheduledJobCleanupMember" }
+
+    ScheduledJobCleanupMember:
+      type: object
+      additionalProperties: false
+      required: [id, actorId, status, attempt, maxAttempts, attemptReceiptCount, leaseState, expiresAt, finishedAt, rowDigest, candidate, disposition]
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: string, maxLength: 200 }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        attempt: { type: integer, minimum: 0 }
+        maxAttempts: { type: integer, minimum: 1 }
+        attemptReceiptCount: { type: integer, minimum: 0 }
+        leaseState: { type: string, enum: [none, valid, expired, incomplete] }
+        expiresAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        rowDigest: { type: string, pattern: "^[0-9a-f]{64}$" }
+        candidate: { type: boolean }
+        disposition: { type: string }
+
+    ApplyScheduledJobCleanupResult:
+      type: object
+      additionalProperties: false
+      required: [outcome, deletedCount, candidateIds]
+      properties:
+        outcome: { type: string, enum: [applied] }
+        deletedCount: { type: integer, minimum: 0, maximum: 50 }
+        candidateIds:
+          type: array
+          maxItems: 50
+          items: { type: string, format: uuid }
 
     ManagerActionItem:
       type: object

@@ -26,6 +26,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let serverJobsTable: DbModule["serverJobsTable"];
 let serverJobAttemptsTable: DbModule["serverJobAttemptsTable"];
+let scheduledJobCleanupPlansTable: DbModule["scheduledJobCleanupPlansTable"];
 let auditLogsTable: DbModule["auditLogsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
@@ -55,6 +56,7 @@ const ACTOR = "route-job-actor";
 const OTHER_LIVE_ACTOR = "route-job-other-live-actor";
 const SANDBOX_ACTOR = "route-job-sandbox-actor";
 const OTHER_SANDBOX_ACTOR = "route-job-other-sandbox-actor";
+const OPERATOR_ACTOR = "route-job-operator";
 const IDEMPOTENCY_KEY = "route-job-confirmation-lost";
 const SENSITIVE_IDEMPOTENCY_KEY = "job-sensitive-input-001";
 const JOB_BODY = {
@@ -101,6 +103,7 @@ beforeAll(async () => {
   pool = dbMod.pool;
   serverJobsTable = dbMod.serverJobsTable;
   serverJobAttemptsTable = dbMod.serverJobAttemptsTable;
+  scheduledJobCleanupPlansTable = dbMod.scheduledJobCleanupPlansTable;
   auditLogsTable = dbMod.auditLogsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
@@ -177,7 +180,8 @@ beforeEach(async () => {
   confirmationLoss = undefined;
   clearUserValidityCache();
   await db.execute(sql`
-    TRUNCATE ${serverJobsTable}, ${serverJobAttemptsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
+    TRUNCATE ${serverJobsTable}, ${serverJobAttemptsTable}, ${scheduledJobCleanupPlansTable},
+      ${userRolesTable}, ${usersTable}, ${rolesTable}
     RESTART IDENTITY CASCADE
   `);
   await seedRoles();
@@ -207,12 +211,18 @@ beforeEach(async () => {
       passwordHash: "synthetic-test-password-hash",
       sandbox: true,
     },
+    {
+      id: OPERATOR_ACTOR,
+      username: "route-job-operator",
+      passwordHash: "synthetic-test-password-hash",
+    },
   ]);
   await db.insert(userRolesTable).values([
     { userId: ACTOR, role: "manager" },
     { userId: OTHER_LIVE_ACTOR, role: "manager" },
     { userId: SANDBOX_ACTOR, role: "manager" },
     { userId: OTHER_SANDBOX_ACTOR, role: "manager" },
+    { userId: OPERATOR_ACTOR, role: "operator" },
   ]);
 });
 
@@ -260,6 +270,26 @@ async function submitJobAt(
     method: "POST",
     headers: headers(actorId),
     body: JSON.stringify(body),
+  });
+}
+
+async function createCleanupPlan(actorId = ACTOR): Promise<Response> {
+  return fetch(`${baseUrl}/api/server-jobs/scheduled-evaluation-cleanup/plans`, {
+    method: "POST",
+    headers: headers(actorId),
+    body: "{}",
+  });
+}
+
+async function applyCleanupPlan(
+  plan: { planId: string; manifestDigest: string },
+  actorId = ACTOR,
+  reason = "Owner-approved duplicate cleanup",
+): Promise<Response> {
+  return fetch(`${baseUrl}/api/server-jobs/scheduled-evaluation-cleanup/plans/${plan.planId}/apply`, {
+    method: "POST",
+    headers: headers(actorId),
+    body: JSON.stringify({ manifestDigest: plan.manifestDigest, reason }),
   });
 }
 
@@ -671,6 +701,260 @@ describe("server job route idempotency", () => {
       .toEqual(["running", "running"]);
     expect((await db.select({ value: count() }).from(serverJobAttemptsTable))[0]?.value).toBe(1);
     expect((await db.select({ value: count() }).from(auditLogsTable))[0]?.value).toBe(auditCountBefore);
+  });
+
+  it("does not merge different legacy date keys that share a time suffix", async () => {
+    const now = Date.now();
+    const suffix = "1791290340000";
+    await db.insert(serverJobsTable).values([
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-date-a",
+        idempotencyKey: `scheduled-evaluation:2026-10-06:${suffix}`,
+        input: { date: "2026-10-06", scheduledFor: 1791290398722 },
+        status: "succeeded", finishedAt: new Date(now), expiresAt: new Date(now + 60_000),
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-date-b",
+        idempotencyKey: `scheduled-evaluation:2026-10-07:${suffix}`,
+        input: { date: "2026-10-07", scheduledFor: 1791290398722 },
+        status: "succeeded", finishedAt: new Date(now), expiresAt: new Date(now + 60_000),
+      },
+    ]);
+
+    const inventory = await readScheduledEvaluationQueueSnapshot(now);
+    const plan = await createCleanupPlan();
+    const planBody = await plan.json() as {
+      planId: string; manifestDigest: string; candidateCount: number; groups: unknown[];
+    };
+
+    expect(inventory.duplicateTimeBucketGroups).toBe(0);
+    expect(planBody.candidateCount).toBe(0);
+    expect(planBody.groups).toEqual([]);
+    expect((await applyCleanupPlan(planBody)).status).toBe(409);
+    expect((await db.select({ value: count() }).from(serverJobsTable))[0]?.value).toBe(2);
+  });
+
+  it("limits plan creation and approval to live managers", async () => {
+    expect((await createCleanupPlan(OPERATOR_ACTOR)).status).toBe(403);
+    expect((await createCleanupPlan(SANDBOX_ACTOR)).status).toBe(403);
+
+    const malformed = await fetch(`${baseUrl}/api/server-jobs/scheduled-evaluation-cleanup/plans`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ deleteAll: true }),
+    });
+    expect(malformed.status).toBe(400);
+    expect((await db.select({ value: count() }).from(scheduledJobCleanupPlansTable))[0]?.value).toBe(0);
+  });
+
+  it("applies only the exact approved terminal rows and preserves runnable, leased, and receipt-bearing jobs", async () => {
+    const now = Date.now();
+    const key = `scheduled-evaluation:live:${Date.parse("2030-04-05T12:00:00.000Z")}`;
+    const expiresAt = new Date(now + 60 * 60_000);
+    const [queued, leased, terminalWithReceipt, removable, ...unused] =
+      await db.insert(serverJobsTable).values([
+        {
+          scope: "live", type: "scheduled-evaluation", actorId: "keep-queued", idempotencyKey: key,
+          input: { scheduledFor: 1 }, expiresAt,
+        },
+        {
+          scope: "live", type: "scheduled-evaluation", actorId: "keep-leased", idempotencyKey: key,
+          input: { scheduledFor: 1 }, status: "running", attempt: 1, maxAttempts: 3,
+          leaseToken: "00000000-0000-4000-8000-000000000101", leaseExpiresAt: new Date(now + 60_000),
+          expiresAt,
+        },
+        {
+          scope: "live", type: "scheduled-evaluation", actorId: "keep-history", idempotencyKey: key,
+          input: { scheduledFor: 1 }, status: "failed", attempt: 1, maxAttempts: 3,
+          finishedAt: new Date(now), expiresAt,
+        },
+        {
+          scope: "live", type: "scheduled-evaluation", actorId: "remove-terminal", idempotencyKey: key,
+          input: { scheduledFor: 1 }, status: "succeeded", finishedAt: new Date(now), expiresAt,
+        },
+      ]).returning();
+    expect(unused).toHaveLength(0);
+    await db.insert(serverJobAttemptsTable).values([
+      { jobId: leased!.id, attempt: 1, workerId: "cleanup-test-worker" },
+      { jobId: terminalWithReceipt!.id, attempt: 1, workerId: "cleanup-test-worker", outcome: "failed" },
+    ]);
+
+    const proposalResponse = await createCleanupPlan();
+    expect(proposalResponse.status).toBe(201);
+    const plan = await proposalResponse.json() as {
+      planId: string; manifestDigest: string; candidateCount: number; candidateIds: string[];
+      groups: Array<{ members: Array<{ id: string; candidate: boolean; disposition: string }> }>;
+    };
+    expect(plan.candidateCount).toBe(1);
+    expect(plan.candidateIds).toEqual([removable!.id]);
+    expect(plan.groups[0]?.members.find(({ id }) => id === terminalWithReceipt!.id)?.disposition)
+      .toBe("preserve_attempt_receipts");
+    expect(plan.groups[0]?.members.find(({ id }) => id === queued!.id)?.disposition)
+      .toBe("preserve_runnable_job");
+
+    const jobsBeforeApproval = await db.select({ id: serverJobsTable.id }).from(serverJobsTable);
+    expect(jobsBeforeApproval).toHaveLength(4);
+    const approvalReason = "Approved after exact manifest review";
+    const appliedResponse = await applyCleanupPlan(plan, ACTOR, approvalReason);
+    expect(appliedResponse.status).toBe(200);
+    expect(await appliedResponse.json()).toEqual({
+      outcome: "applied",
+      deletedCount: 1,
+      candidateIds: [removable!.id],
+    });
+
+    const survivors = await db.select().from(serverJobsTable);
+    expect(survivors.map(({ id }) => id)).toEqual(expect.arrayContaining([
+      queued!.id, leased!.id, terminalWithReceipt!.id,
+    ]));
+    expect(survivors).toHaveLength(3);
+    expect(survivors.find(({ id }) => id === queued!.id)?.status).toBe("queued");
+    expect(survivors.find(({ id }) => id === leased!.id)?.leaseToken)
+      .toBe("00000000-0000-4000-8000-000000000101");
+    expect((await db.select().from(serverJobAttemptsTable)).map(({ jobId }) => jobId))
+      .toEqual(expect.arrayContaining([leased!.id, terminalWithReceipt!.id]));
+    const audit = (await db.select().from(auditLogsTable))
+      .filter(({ action, resource }) => action === "scheduled_job_cleanup" && resource === "scheduled-job-cleanup-plan")
+      .at(-1);
+    expect(audit).toMatchObject({
+      scope: "live",
+      actor: ACTOR,
+      action: "scheduled_job_cleanup",
+      changes: {
+        outcome: "applied",
+        reason: approvalReason,
+        candidateIds: [removable!.id],
+      },
+    });
+  });
+
+  it("fails closed and audits a stale plan after a candidate changes", async () => {
+    const now = Date.now();
+    const key = `scheduled-evaluation:live:${Date.parse("2030-04-06T12:00:00.000Z")}`;
+    const rows = await db.insert(serverJobsTable).values([
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "stale-old", idempotencyKey: key,
+        input: {}, status: "succeeded", finishedAt: new Date(now), expiresAt: new Date(now + 60_000),
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "stale-new", idempotencyKey: key,
+        input: {}, status: "failed", finishedAt: new Date(now), expiresAt: new Date(now + 60_000),
+      },
+    ]).returning();
+    const proposal = await (await createCleanupPlan()).json() as {
+      planId: string; manifestDigest: string; candidateIds: string[];
+    };
+    expect(proposal.candidateIds).toHaveLength(1);
+    await db.update(serverJobsTable).set({
+      status: "queued",
+      finishedAt: null,
+    }).where(eq(serverJobsTable.id, proposal.candidateIds[0]!));
+
+    const response = await applyCleanupPlan(proposal, ACTOR, "Review became stale");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ outcome: "stale" });
+    expect((await db.select().from(serverJobsTable)).map(({ id }) => id))
+      .toEqual(expect.arrayContaining(rows.map(({ id }) => id)));
+    const [planRow] = await db.select().from(scheduledJobCleanupPlansTable)
+      .where(eq(scheduledJobCleanupPlansTable.id, proposal.planId));
+    expect(planRow?.status).toBe("stale");
+    const audit = (await db.select().from(auditLogsTable))
+      .filter(({ action, changes }) =>
+        action === "scheduled_job_cleanup" &&
+        (changes as Record<string, unknown>).reason === "Review became stale")
+      .at(-1);
+    expect(audit?.changes).toMatchObject({
+      outcome: "stale",
+      reason: "Review became stale",
+      candidateIds: proposal.candidateIds,
+    });
+  });
+
+  it("serializes approval against a concurrent worker claim", async () => {
+    const now = Date.now();
+    const key = `scheduled-evaluation:live:${Date.parse("2030-04-07T12:00:00.000Z")}`;
+    const rows = await db.insert(serverJobsTable).values([
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "claim-race-queued",
+        idempotencyKey: key, input: {}, expiresAt: new Date(now + 60 * 60_000),
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "claim-race-terminal",
+        idempotencyKey: key, input: {}, status: "succeeded", finishedAt: new Date(now),
+        expiresAt: new Date(now + 60 * 60_000),
+      },
+    ]).returning();
+    const proposal = await (await createCleanupPlan()).json() as {
+      planId: string; manifestDigest: string; candidateIds: string[];
+    };
+    expect(proposal.candidateIds).toContain(rows[1]!.id);
+
+    const [approval, claim] = await Promise.all([
+      applyCleanupPlan(proposal, ACTOR, "Race check"),
+      new ServerJobWorker("cleanup-approval-race").claimNext(),
+    ]);
+    expect(claim?.job.id).toBe(rows[0]!.id);
+    expect([200, 409]).toContain(approval.status);
+    const remaining = await db.select().from(serverJobsTable);
+    expect(remaining.some(({ id, status }) => id === rows[0]!.id && status === "running")).toBe(true);
+    if (approval.status === 409) {
+      expect(remaining.some(({ id }) => id === rows[1]!.id)).toBe(true);
+    } else {
+      expect(remaining.some(({ id }) => id === rows[1]!.id)).toBe(false);
+    }
+    expect((await db.select().from(serverJobAttemptsTable)).some(({ jobId }) => jobId === rows[0]!.id)).toBe(true);
+  });
+
+  it("rolls back job deletion and plan approval if audit persistence fails", async () => {
+    const now = Date.now();
+    const key = `scheduled-evaluation:live:${Date.parse("2030-04-08T12:00:00.000Z")}`;
+    const rows = await db.insert(serverJobsTable).values([
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "rollback-a", idempotencyKey: key,
+        input: {}, status: "succeeded", finishedAt: new Date(now), expiresAt: new Date(now + 60_000),
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "rollback-b", idempotencyKey: key,
+        input: {}, status: "failed", finishedAt: new Date(now), expiresAt: new Date(now + 60_000),
+      },
+    ]).returning();
+    const proposal = await (await createCleanupPlan()).json() as {
+      planId: string; manifestDigest: string; candidateIds: string[];
+    };
+    await killer.query(`
+      CREATE OR REPLACE FUNCTION test_reject_cleanup_audit() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'scheduled_job_cleanup' THEN
+          RAISE EXCEPTION 'synthetic cleanup audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+    `);
+    await killer.query(`
+      CREATE TRIGGER test_reject_cleanup_audit
+      BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION test_reject_cleanup_audit()
+    `);
+    try {
+      const response = await applyCleanupPlan(proposal, ACTOR, "Rollback on audit failure");
+      expect(response.status).toBe(500);
+    } finally {
+      await killer.query("DROP TRIGGER IF EXISTS test_reject_cleanup_audit ON audit_logs");
+      await killer.query("DROP FUNCTION IF EXISTS test_reject_cleanup_audit()");
+    }
+
+    expect((await db.select().from(serverJobsTable)).map(({ id }) => id))
+      .toEqual(expect.arrayContaining(rows.map(({ id }) => id)));
+    const [planRow] = await db.select().from(scheduledJobCleanupPlansTable)
+      .where(eq(scheduledJobCleanupPlansTable.id, proposal.planId));
+    expect(planRow?.status).toBe("pending");
+    expect((await db.select().from(auditLogsTable))
+      .some(({ action, changes }) =>
+        action === "scheduled_job_cleanup" &&
+        (changes as Record<string, unknown>).reason === "Rollback on audit failure"))
+      .toBe(false);
   });
 
   it.each([

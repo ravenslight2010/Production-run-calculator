@@ -35,6 +35,8 @@ import type {
   ApplicatorBatchEvidenceMutationResult,
   ApplicatorBatchFinalization,
   ApplyAiRetentionCleanup200,
+  ApplyScheduledJobCleanupPlan,
+  ApplyScheduledJobCleanupResult,
   ApprovePasswordResetResult,
   AuditAiMemoryHealth200,
   AuditLogPage,
@@ -255,6 +257,7 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  ScheduledJobCleanupPlan,
   SearchFinalizedOperationalReportsParams,
   ServerJob,
   SetFloorMode,
@@ -16387,6 +16390,171 @@ export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>
 
 
 
+
+export const getCreateScheduledJobCleanupPlanUrl = () => {
+
+
+
+
+  return `/api/server-jobs/scheduled-evaluation-cleanup/plans`
+}
+
+/**
+ * Manager-only and live-scope only. Creating a plan does not alter server jobs. The returned digest must be explicitly approved by a manager before any deletion.
+ * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
+ */
+export const createScheduledJobCleanupPlan = async ( options?: Parameters<typeof customFetch>[1]): Promise<ScheduledJobCleanupPlan> => {
+
+  return customFetch<ScheduledJobCleanupPlan>(getCreateScheduledJobCleanupPlanUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateScheduledJobCleanupPlanMutationKey = () => ['createScheduledJobCleanupPlan'] as const;
+
+export const getCreateScheduledJobCleanupPlanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, TError,void, TContext> => {
+
+const mutationKey = getCreateScheduledJobCleanupPlanMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, void> = () => {
+
+
+          return  createScheduledJobCleanupPlan(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateScheduledJobCleanupPlanMutationResult = NonNullable<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>>
+
+    export type CreateScheduledJobCleanupPlanMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
+ */
+export const useCreateScheduledJobCleanupPlan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateScheduledJobCleanupPlanMutationOptions(options), queryClient);
+    }
+
+export const getApplyScheduledJobCleanupPlanUrl = (planId: string,) => {
+
+
+
+
+  return `/api/server-jobs/scheduled-evaluation-cleanup/plans/${planId}/apply`
+}
+
+/**
+ * Manager-only and live-scope only. The server rechecks every manifest row and lease under serializable transaction locks. Changed plans fail closed.
+ * @summary Approve and apply one exact scheduled-job cleanup manifest
+ */
+export const applyScheduledJobCleanupPlan = async (planId: string,
+    applyScheduledJobCleanupPlanBody: ApplyScheduledJobCleanupPlan, options?: Parameters<typeof customFetch>[1]): Promise<ApplyScheduledJobCleanupResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ApplyScheduledJobCleanupResult>(getApplyScheduledJobCleanupPlanUrl(planId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(applyScheduledJobCleanupPlanBody)
+  }
+);}
+
+
+
+
+
+export const getApplyScheduledJobCleanupPlanMutationKey = () => ['applyScheduledJobCleanupPlan'] as const;
+
+export const getApplyScheduledJobCleanupPlanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, TError,ApplyScheduledJobCleanupPlanMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, TError,ApplyScheduledJobCleanupPlanMutationVariables, TContext> => {
+
+const mutationKey = getApplyScheduledJobCleanupPlanMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, ApplyScheduledJobCleanupPlanMutationVariables> = (props) => {
+          const {planId,data} = props ?? {};
+
+          return  applyScheduledJobCleanupPlan(planId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyScheduledJobCleanupPlanMutationResult = NonNullable<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>>
+    export type ApplyScheduledJobCleanupPlanMutationBody = BodyType<ApplyScheduledJobCleanupPlan>
+    export type ApplyScheduledJobCleanupPlanMutationError = ErrorType<void>
+    export type ApplyScheduledJobCleanupPlanMutationVariables = {planId: string;data: BodyType<ApplyScheduledJobCleanupPlan>}
+
+    /**
+ * @summary Approve and apply one exact scheduled-job cleanup manifest
+ */
+export const useApplyScheduledJobCleanupPlan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, TError,ApplyScheduledJobCleanupPlanMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>,
+        TError,
+        ApplyScheduledJobCleanupPlanMutationVariables,
+        TContext
+      > => {
+      return useMutation(getApplyScheduledJobCleanupPlanMutationOptions(options), queryClient);
+    }
 
 export const getCancelServerJobUrl = (id: string,) => {
 

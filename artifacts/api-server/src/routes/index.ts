@@ -360,6 +360,16 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     method: "POST", path: "/server-jobs/:id/cancel", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: CAPABILITIES, capabilityMatch: "any",
   },
+  {
+    method: "POST", path: "/server-jobs/scheduled-evaluation-cleanup/plans",
+    ownership: "manager-only", scope: "live-only", sandbox: "denied",
+    capabilities: ["manage-staff"], capabilityMatch: "all", managerRole: true,
+  },
+  {
+    method: "POST", path: "/server-jobs/scheduled-evaluation-cleanup/plans/:planId/apply",
+    ownership: "manager-only", scope: "live-only", sandbox: "denied",
+    capabilities: ["manage-staff"], capabilityMatch: "all", managerRole: true,
+  },
 ];
 
 /**

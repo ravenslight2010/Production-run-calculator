@@ -433,6 +433,24 @@ export const createServerJobResponseProgressMin = 0;
 export const createServerJobResponseProgressMax = 100;
 export const getServerJobResponseProgressMin = 0;
 export const getServerJobResponseProgressMax = 100;
+export const createScheduledJobCleanupPlanResponseManifestDigestRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createScheduledJobCleanupPlanResponseSkippedOversizedGroupsMin = 0;
+export const createScheduledJobCleanupPlanResponseCandidateCountMin = 0;
+export const createScheduledJobCleanupPlanResponseCandidateCountMax = 50;
+export const createScheduledJobCleanupPlanResponseCandidateIdsMax = 50;
+export const createScheduledJobCleanupPlanResponseGroupsItemIdempotencyKeyMax = 128;
+export const createScheduledJobCleanupPlanResponseGroupsItemMembersItemActorIdMax = 200;
+export const createScheduledJobCleanupPlanResponseGroupsItemMembersItemAttemptMin = 0;
+export const createScheduledJobCleanupPlanResponseGroupsItemMembersItemAttemptReceiptCountMin = 0;
+export const createScheduledJobCleanupPlanResponseGroupsItemMembersItemRowDigestRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createScheduledJobCleanupPlanResponseGroupsItemMembersMax = 20;
+export const createScheduledJobCleanupPlanResponseGroupsMax = 10;
+export const applyScheduledJobCleanupPlanBodyManifestDigestRegExp = new RegExp('^[0-9a-f]{64}$');
+export const applyScheduledJobCleanupPlanBodyReasonMin = 3;
+export const applyScheduledJobCleanupPlanBodyReasonMax = 200;
+export const applyScheduledJobCleanupPlanResponseDeletedCountMin = 0;
+export const applyScheduledJobCleanupPlanResponseDeletedCountMax = 50;
+export const applyScheduledJobCleanupPlanResponseCandidateIdsMax = 50;
 export const cancelServerJobResponseProgressMin = 0;
 export const cancelServerJobResponseProgressMax = 100;
 export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
@@ -6687,6 +6705,79 @@ export const GetServerJobResponse = zod.object({
   "startedAt": zod.coerce.date().nullish(),
   "finishedAt": zod.coerce.date().nullish(),
   "expiresAt": zod.coerce.date()
+})
+
+
+/**
+ * Manager-only and live-scope only. Creating a plan does not alter server jobs. The returned digest must be explicitly approved by a manager before any deletion.
+ * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+export const CreateScheduledJobCleanupPlanResponse = zod.object({
+  "planId": zod.uuid(),
+  "manifestDigest": zod.string().regex(createScheduledJobCleanupPlanResponseManifestDigestRegExp),
+  "proposedAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date(),
+  "truncated": zod.boolean(),
+  "skippedOversizedGroups": zod.int().min(createScheduledJobCleanupPlanResponseSkippedOversizedGroupsMin),
+  "candidateCount": zod.int().min(createScheduledJobCleanupPlanResponseCandidateCountMin).max(createScheduledJobCleanupPlanResponseCandidateCountMax),
+  "candidateIds": zod.array(zod.uuid()).max(createScheduledJobCleanupPlanResponseCandidateIdsMax),
+  "groups": zod.array(zod.object({
+  "scope": zod.enum(['live']),
+  "idempotencyKey": zod.string().max(createScheduledJobCleanupPlanResponseGroupsItemIdempotencyKeyMax),
+  "members": zod.array(zod.object({
+  "id": zod.uuid(),
+  "actorId": zod.string().max(createScheduledJobCleanupPlanResponseGroupsItemMembersItemActorIdMax),
+  "status": zod.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']),
+  "attempt": zod.int().min(createScheduledJobCleanupPlanResponseGroupsItemMembersItemAttemptMin),
+  "maxAttempts": zod.int().min(1),
+  "attemptReceiptCount": zod.int().min(createScheduledJobCleanupPlanResponseGroupsItemMembersItemAttemptReceiptCountMin),
+  "leaseState": zod.enum(['none', 'valid', 'expired', 'incomplete']),
+  "expiresAt": zod.coerce.date(),
+  "finishedAt": zod.coerce.date().nullable(),
+  "rowDigest": zod.string().regex(createScheduledJobCleanupPlanResponseGroupsItemMembersItemRowDigestRegExp),
+  "candidate": zod.boolean(),
+  "disposition": zod.string()
+})).max(createScheduledJobCleanupPlanResponseGroupsItemMembersMax)
+})).max(createScheduledJobCleanupPlanResponseGroupsMax)
+})
+
+
+/**
+ * Manager-only and live-scope only. The server rechecks every manifest row and lease under serializable transaction locks. Changed plans fail closed.
+ * @summary Approve and apply one exact scheduled-job cleanup manifest
+ */
+export const ApplyScheduledJobCleanupPlanParams = zod.object({
+  "planId": zod.uuid()
+})
+
+
+
+
+export const ApplyScheduledJobCleanupPlanBody = zod.object({
+  "manifestDigest": zod.string().regex(applyScheduledJobCleanupPlanBodyManifestDigestRegExp),
+  "reason": zod.string().min(applyScheduledJobCleanupPlanBodyReasonMin).max(applyScheduledJobCleanupPlanBodyReasonMax)
+})
+
+
+
+
+
+export const ApplyScheduledJobCleanupPlanResponse = zod.object({
+  "outcome": zod.enum(['applied']),
+  "deletedCount": zod.int().min(applyScheduledJobCleanupPlanResponseDeletedCountMin).max(applyScheduledJobCleanupPlanResponseDeletedCountMax),
+  "candidateIds": zod.array(zod.uuid()).max(applyScheduledJobCleanupPlanResponseCandidateIdsMax)
 })
 
 
