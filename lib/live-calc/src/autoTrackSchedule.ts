@@ -190,7 +190,8 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       input.calc.ppm,
       input.calc.sauceEffBarrel,
     );
-    if (cadence > 0) {
+    const legacyInitialization = input.progress?.sauceStockInitialized === false;
+    if (cadence > 0 || legacyInitialization) {
       const channel = "sauce-stock" as const;
       const state = input.coordination?.[channel];
       const owned = netCanonical(channel);
@@ -199,7 +200,9 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
         channel,
         dueAt,
         dueNow: elapsedSec >= dueAt,
-        nextDueAt: owned ? Math.max(dueAt + cadence, dueAt + 1) : elapsedSec + cadence,
+        nextDueAt: owned
+          ? Math.max(dueAt + cadence, dueAt + 1)
+          : dueAt + Math.max(cadence, 1),
         canonical: owned,
       });
     }

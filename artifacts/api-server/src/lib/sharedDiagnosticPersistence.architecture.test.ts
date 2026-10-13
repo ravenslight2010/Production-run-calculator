@@ -277,9 +277,20 @@ function hasDatabaseTransactionOnPathFromDiagnosticWriter(source: string): boole
 
   return functions.some(
     (fn) =>
-      /diagnostic|persist|write|record|store/i.test(fn.name) &&
+      diagnosticWriterName(fn.name) &&
       isTransactionReachable(fn, new Set()),
   );
+}
+
+function diagnosticWriterName(name: string): boolean {
+  const tokens = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const writerVerbs = new Set(["persist", "write", "record", "store", "save", "insert", "upsert"]);
+  return tokens.some((token) => token === "diagnostic" || token === "diagnostics")
+    && tokens.some((token) => writerVerbs.has(token));
 }
 
 function diagnosticPersistenceViolation(source: string): boolean {
@@ -369,6 +380,21 @@ describe("shared health-diagnostic persistence architecture", () => {
     expect(diagnosticPersistenceViolation(coordinated)).toBe(false);
     expect(diagnosticPersistenceViolation(ordinaryTransaction)).toBe(false);
     expect(diagnosticPersistenceViolation(diagnosticModuleWithOrdinaryTransaction)).toBe(false);
+  });
+
+  it("ignores ordinary event transactions beside diagnostic getters", () => {
+    const diagnosticGetterWithOrdinaryTransaction = `
+      import { db } from "@workspace/db";
+      export type SyncOutboxLagDiagnostics = { pending: number };
+      export function getSyncOutboxLagDiagnostics() {
+        return { pending: 0 };
+      }
+      export async function recordSyncOutboxEvent() {
+        return db.transaction(async (tx) => tx);
+      }
+    `;
+
+    expect(diagnosticPersistenceViolation(diagnosticGetterWithOrdinaryTransaction)).toBe(false);
   });
 
   it("keeps production diagnostic stores behind the shared coordinator", () => {

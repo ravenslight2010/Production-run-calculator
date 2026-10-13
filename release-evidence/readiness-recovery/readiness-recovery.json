@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "kind": "readiness-recovery",
   "environment": "release",
-  "deploymentId": "app-build:d4c79702-92fd-42fa-9c84-5434fe4d31af",
-  "revision": "source-sha256:bad76cc4c8ecd73028e18dd155290084343301e052c9df76012c426a4440843c",
-  "generatedAt": "2026-10-12T03:31:26.372Z",
-  "expiresAt": "2026-10-19T03:31:26.372Z",
+  "deploymentId": "app-build:7d3ef15d-12b2-4d84-af47-1a09bebed532",
+  "revision": "source-sha256:3ad250858a17d31672cba6e3a6d5d1f3e5f07e14ee8a7b68f4062f184c55da1e",
+  "generatedAt": "2026-10-13T21:07:05.466Z",
+  "expiresAt": "2026-10-20T21:07:05.466Z",
   "retention": {
     "maxSamples": 60,
     "maxAgeMs": 604800000
@@ -15,7 +15,7 @@
   },
   "samples": [
     {
-      "capturedAt": "2026-10-12T03:31:15.121Z",
+      "capturedAt": "2026-10-13T21:06:54.182Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -53,7 +53,7 @@
       ]
     },
     {
-      "capturedAt": "2026-10-12T03:31:20.407Z",
+      "capturedAt": "2026-10-13T21:06:59.477Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -91,7 +91,7 @@
       ]
     },
     {
-      "capturedAt": "2026-10-12T03:31:25.810Z",
+      "capturedAt": "2026-10-13T21:07:04.872Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
