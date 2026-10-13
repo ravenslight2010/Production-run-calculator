@@ -3,6 +3,16 @@ const MAX_LOG_BYTES = 16 * 1024 * 1024;
 const MAX_LOG_LINES = 20_000;
 const MAX_PLATFORM_METRICS_AGE_MS = 24 * 60 * 60 * 1_000;
 const SAMPLE_EVENT = "database_capacity_sample";
+const UNAVAILABLE_REASON_CODES = [
+  "pool_checkout_timeout",
+  "pool_checkout_failed",
+  "capacity_query_timeout",
+  "capacity_query_cancelled",
+  "capacity_query_failed",
+  "invalid_capacity_result",
+  "legacy_unclassified",
+] as const;
+type CapacityUnavailableReason = typeof UNAVAILABLE_REASON_CODES[number];
 
 type JsonRecord = Record<string, unknown>;
 
@@ -41,6 +51,7 @@ type CapacitySample = {
   database: {
     status: "observed" | "non_primary" | "unavailable";
     primaryVerified: boolean;
+    unavailableReason: CapacityUnavailableReason | null;
     maxConnections?: number;
     superuserReservedSlots?: number;
     roleReservedSlots?: number;
@@ -194,6 +205,10 @@ function parseCapacitySample(value: JsonRecord): CapacitySample {
   if (!isRecord(build) || !isRecord(pool) || !isRecord(database)) {
     throw new Error("Capacity sample is missing required sections.");
   }
+  const schemaVersion = value.schemaVersion;
+  if (schemaVersion !== 1 && schemaVersion !== 2) {
+    throw new Error("Capacity sample has an unsupported schema version.");
+  }
   const appBuildId = build.appBuildId;
   const sourceFingerprintSha256 = build.sourceFingerprintSha256;
   if (typeof appBuildId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(appBuildId) ||
@@ -210,6 +225,21 @@ function parseCapacitySample(value: JsonRecord): CapacitySample {
       (status === "observed") !== primaryVerified) {
     throw new Error("Capacity sample primary status is inconsistent.");
   }
+  let unavailableReason: CapacityUnavailableReason | null = null;
+  if (status === "unavailable") {
+    const reason = database.unavailableReason;
+    if (reason === undefined && schemaVersion === 1) {
+      unavailableReason = "legacy_unclassified";
+    } else if (typeof reason === "string" &&
+        UNAVAILABLE_REASON_CODES.includes(reason as CapacityUnavailableReason) &&
+        reason !== "legacy_unclassified") {
+      unavailableReason = reason as CapacityUnavailableReason;
+    } else {
+      throw new Error("Capacity sample has an invalid unavailable reason.");
+    }
+  } else if (database.unavailableReason !== undefined) {
+    throw new Error("Available capacity sample cannot include an unavailable reason.");
+  }
   const sample: CapacitySample = {
     capturedAtUtc: utcTimestamp(value.capturedAt, "sample timestamp"),
     intervalMs: safeCount(value.intervalMs, "sample interval", 1),
@@ -224,6 +254,7 @@ function parseCapacitySample(value: JsonRecord): CapacitySample {
     database: {
       status,
       primaryVerified,
+      unavailableReason,
     },
   };
   if (sample.pool.total > sample.pool.max || sample.pool.idle > sample.pool.total) {
@@ -390,6 +421,14 @@ export function buildSseCapacityReport(input: {
   );
   const samples = coverage.samples;
   const observed = samples.filter((sample) => sample.database.status === "observed");
+  const unavailableReasonCounts = Object.fromEntries(
+    UNAVAILABLE_REASON_CODES.map((reason) => [reason, 0]),
+  ) as Record<CapacityUnavailableReason, number>;
+  for (const sample of samples) {
+    if (sample.database.status === "unavailable" && sample.database.unavailableReason !== null) {
+      unavailableReasonCounts[sample.database.unavailableReason] += 1;
+    }
+  }
   const identities = new Set(samples.map((sample) =>
     `${sample.appBuildId}:${sample.sourceFingerprintSha256}`));
   const sourceFingerprints = new Set(samples.map((sample) => sample.sourceFingerprintSha256));
@@ -556,6 +595,7 @@ export function buildSseCapacityReport(input: {
         sample.database.status === "non_primary").length,
       unavailableCount: samples.filter((sample) =>
         sample.database.status === "unavailable").length,
+      unavailableReasonCounts,
       unstructuredLineCount: parsedLogs.unstructuredLines,
       sampleIntervalMs: coverage.sampleIntervalMs,
       expectedMinimumSamples: coverage.expectedMinimumSamples,

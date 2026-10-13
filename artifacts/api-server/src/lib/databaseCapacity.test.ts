@@ -42,21 +42,67 @@ describe("read-only database capacity collection", () => {
     });
   });
 
-  it("reports checkout failure without retrying or leaking the error", async () => {
+  it("classifies checkout failures without retrying or leaking the error", async () => {
     const f = fixture();
     vi.mocked(f.pool.connect).mockRejectedValueOnce(new Error("credential-bearing error"));
-    expect(await collectDatabaseCapacity(f.pool)).toEqual({ status: "unavailable", primaryVerified: false });
+    expect(await collectDatabaseCapacity(f.pool)).toEqual({
+      status: "unavailable",
+      primaryVerified: false,
+      unavailableReason: "pool_checkout_failed",
+    });
     expect(f.pool.connect).toHaveBeenCalledTimes(1);
     expect(f.release).not.toHaveBeenCalled();
+
+    const timeout = fixture();
+    vi.mocked(timeout.pool.connect).mockRejectedValueOnce(
+      new Error("timeout exceeded when trying to connect"),
+    );
+    expect(await collectDatabaseCapacity(timeout.pool)).toMatchObject({
+      unavailableReason: "pool_checkout_timeout",
+    });
+
+    const codedTimeout = fixture();
+    vi.mocked(codedTimeout.pool.connect).mockRejectedValueOnce(
+      Object.assign(new Error("network failure"), { code: "ETIMEDOUT" }),
+    );
+    expect(await collectDatabaseCapacity(codedTimeout.pool)).toMatchObject({
+      unavailableReason: "pool_checkout_timeout",
+    });
+  });
+
+  it("classifies query timeouts, cancellations, and other query failures", async () => {
+    const timeout = fixture();
+    timeout.query.mockRejectedValueOnce(new Error("Query read timeout"));
+    expect(await collectDatabaseCapacity(timeout.pool)).toMatchObject({
+      unavailableReason: "capacity_query_timeout",
+    });
+
+    const cancelled = fixture();
+    cancelled.query.mockRejectedValueOnce(Object.assign(new Error("cancelled"), { code: "57014" }));
+    expect(await collectDatabaseCapacity(cancelled.pool)).toMatchObject({
+      unavailableReason: "capacity_query_cancelled",
+    });
+
+    const failed = fixture();
+    failed.query.mockRejectedValueOnce(new Error("private SQL failure"));
+    expect(await collectDatabaseCapacity(failed.pool)).toMatchObject({
+      unavailableReason: "capacity_query_failed",
+    });
   });
 
   it("discards a client on SQL failure or invalid counts", async () => {
     const f = fixture();
     f.query.mockRejectedValueOnce(new Error("private SQL failure"));
-    expect((await collectDatabaseCapacity(f.pool)).status).toBe("unavailable");
+    expect(await collectDatabaseCapacity(f.pool)).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "capacity_query_failed",
+    });
     expect(f.release).toHaveBeenCalledWith(true);
     const invalid = fixture({ max_connections: "100" });
-    expect((await collectDatabaseCapacity(invalid.pool)).status).toBe("unavailable");
+    expect(await collectDatabaseCapacity(invalid.pool)).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "invalid_capacity_result",
+    });
     expect(invalid.release).toHaveBeenCalledWith(true);
   });
 
@@ -72,6 +118,7 @@ describe("read-only database capacity collection", () => {
     expect(log.info).toHaveBeenCalledTimes(1);
     expect(log.info.mock.calls[0][0]).toMatchObject({
       event: "database_capacity_sample",
+      schemaVersion: 2,
       pool: { max: 10, total: 10, idle: 2, waiting: 4 },
       build: { appBuildId: "app-build:test", platformBuildId: null },
       limitations: { autoscaleCurrentInstances: null, autoscaleMaximumInstances: null },

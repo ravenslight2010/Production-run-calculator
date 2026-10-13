@@ -9,6 +9,35 @@ type BuildIdentity = {
   sourceFingerprintSha256?: string;
   platformBuildId?: string | null;
 };
+type CapacityFailureStage = "pool_checkout" | "capacity_query" | "capacity_result";
+
+const TIMEOUT_CODES = new Set(["ETIMEOUT", "ETIMEDOUT", "ESOCKETTIMEDOUT"]);
+
+function errorDetails(error: unknown): { code: string | null; message: string | null } {
+  if (!(error instanceof Error)) return { code: null, message: null };
+  const code = "code" in error && typeof error.code === "string" ? error.code : null;
+  return { code, message: error.message };
+}
+
+function isRecognizedTimeout(error: unknown): boolean {
+  const details = errorDetails(error);
+  return (details.code !== null && TIMEOUT_CODES.has(details.code)) ||
+    details.message === "Query read timeout" ||
+    details.message === "timeout exceeded when trying to connect" ||
+    details.message === "Connection terminated due to connection timeout" ||
+    details.message === "timeout expired";
+}
+
+function unavailableReason(stage: CapacityFailureStage, error: unknown) {
+  const details = errorDetails(error);
+  if (stage === "pool_checkout") {
+    return isRecognizedTimeout(error) ? "pool_checkout_timeout" : "pool_checkout_failed";
+  }
+  if (stage === "capacity_result") return "invalid_capacity_result";
+  if (isRecognizedTimeout(error)) return "capacity_query_timeout";
+  if (details.code === "57014") return "capacity_query_cancelled";
+  return "capacity_query_failed";
+}
 
 // Only numeric settings and counts leave PostgreSQL. No database, role, host,
 // application names, queries, or operational records are selected.
@@ -44,9 +73,11 @@ function identity(build: BuildIdentity | null) {
 export async function collectDatabaseCapacity(pool: CapacityPool) {
   let client: PoolClient | undefined;
   let discard = false;
+  let stage: CapacityFailureStage = "pool_checkout";
   try {
     // The shared pool's cancellation-safe checkout deadline remains unchanged.
     client = await pool.connect();
+    stage = "capacity_query";
     const query = (text: string) => {
       // node-postgres supports the per-query client deadline at runtime; its
       // public QueryConfig type omits this field, so retain the typed config
@@ -58,6 +89,7 @@ export async function collectDatabaseCapacity(pool: CapacityPool) {
     await query("SET LOCAL statement_timeout = '1000ms'");
     const result = await query(CAPACITY_SQL);
     await query("COMMIT");
+    stage = "capacity_result";
     const row = result.rows[0];
     if (!row || typeof row.replica !== "boolean") throw new Error("invalid capacity result");
     const maximum = count(row.max_connections);
@@ -79,11 +111,15 @@ export async function collectDatabaseCapacity(pool: CapacityPool) {
       estimatedOrdinarySlotsRemaining: row.replica
         ? null : Math.max(0, maximum - superuserReserved - roleReserved - clients),
     };
-  } catch {
+  } catch (error) {
     // Destroy rather than return a potentially timed-out/read-only transaction
     // to the shared pool. Never log raw PostgreSQL errors or retry under load.
     discard = true;
-    return { status: "unavailable", primaryVerified: false };
+    return {
+      status: "unavailable",
+      primaryVerified: false,
+      unavailableReason: unavailableReason(stage, error),
+    };
   } finally {
     client?.release(discard);
   }
@@ -104,7 +140,7 @@ export function startDatabaseCapacityCollection(
       if (!stopped) {
         log.info({
           event: "database_capacity_sample",
-          schemaVersion: 1,
+          schemaVersion: 2,
           environment: process.env.NODE_ENV === "production" ? "production" : "development",
           capturedAt: new Date().toISOString(),
           intervalMs: DATABASE_CAPACITY_INTERVAL_MS,

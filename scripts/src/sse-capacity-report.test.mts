@@ -38,10 +38,14 @@ const platformMetrics = {
   peakMetricsSource: "replit-monitoring-export",
 };
 
-function sample(capturedAt: string, database: Record<string, unknown> = {}) {
+function sample(
+  capturedAt: string,
+  database: Record<string, unknown> = {},
+  schemaVersion = 1,
+) {
   return {
     event: "database_capacity_sample",
-    schemaVersion: 1,
+    schemaVersion,
     environment: "production",
     capturedAt,
     intervalMs: 300_000,
@@ -256,6 +260,50 @@ test("unavailable or non-primary samples break peak-window completeness", () => 
   const result = report([completeSamples[0], unavailable, completeSamples[2]]);
   assert.equal(result.capacitySamples.completeForWindow, false);
   assert.equal(result.budgetAssessment.gate, "UNKNOWN");
+  assert.equal(result.capacitySamples.unavailableReasonCounts.legacy_unclassified, 1);
+});
+
+test("reports bounded unavailable reasons without treating failures as complete samples", () => {
+  const unavailable = sample("2026-10-11T00:05:00.000Z", {
+    status: "unavailable",
+    primaryVerified: false,
+    unavailableReason: "pool_checkout_timeout",
+    error: "must-not-be-retained",
+  }, 2);
+  const result = report([completeSamples[0], unavailable, completeSamples[2]]);
+  assert.equal(result.capacitySamples.unavailableCount, 1);
+  assert.equal(result.capacitySamples.unavailableReasonCounts.pool_checkout_timeout, 1);
+  assert.equal(result.capacitySamples.completeForWindow, false);
+  assert.equal(result.budgetAssessment.gate, "UNKNOWN");
+  assert.equal(JSON.stringify(result).includes("must-not-be-retained"), false);
+});
+
+test("requires a v2 failure reason and rejects every reason outside the allowlist", () => {
+  const missingReason = sample("2026-10-11T00:05:00.000Z", {
+    status: "unavailable",
+    primaryVerified: false,
+  }, 2);
+  assert.throws(() => report([completeSamples[0], missingReason, completeSamples[2]]));
+
+  const validReasons = new Set([
+    "pool_checkout_timeout",
+    "pool_checkout_failed",
+    "capacity_query_timeout",
+    "capacity_query_cancelled",
+    "capacity_query_failed",
+    "invalid_capacity_result",
+  ]);
+  fc.assert(fc.property(
+    fc.string().filter((reason) => !validReasons.has(reason)),
+    (reason) => {
+      const invalid = sample("2026-10-11T00:05:00.000Z", {
+        status: "unavailable",
+        primaryVerified: false,
+        unavailableReason: reason,
+      }, 2);
+      assert.throws(() => report([completeSamples[0], invalid, completeSamples[2]]));
+    },
+  ));
 });
 
 test("mixed source revisions and unstructured lines cannot prove a budget", () => {
