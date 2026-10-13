@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureReleaseIdentity } from "./release-source-identity.mjs";
 import {
@@ -2056,6 +2056,71 @@ async function run(): Promise<void> {
     sharedLibraryProjects,
     "the root TypeScript project must reference every composite shared library under lib/",
   );
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const sharedLibraryPackages = await Promise.all(
+    sharedLibraryProjects.map(async (projectPath) => {
+      const packageDirectory = resolve(repositoryRoot, projectPath);
+      const packageJson = JSON.parse(
+        await readFile(join(packageDirectory, "package.json"), "utf8"),
+      ) as {
+        name?: string;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
+      };
+      assert.ok(
+        packageJson.name,
+        `${projectPath} must have a named workspace package`,
+      );
+      return {
+        packageDirectory,
+        packageJson,
+        projectPath,
+      };
+    }),
+  );
+  const buildableLibraryDirectories = new Map(
+    sharedLibraryPackages.map(({ packageDirectory, packageJson }) => [
+      packageJson.name!,
+      packageDirectory,
+    ]),
+  );
+  assert.equal(
+    buildableLibraryDirectories.size,
+    sharedLibraryPackages.length,
+    "shared-library workspace package names must be unique",
+  );
+  for (const { packageDirectory, packageJson, projectPath } of sharedLibraryPackages) {
+    const tsconfig = JSON.parse(
+      await readFile(join(packageDirectory, "tsconfig.json"), "utf8"),
+    ) as { references?: Array<{ path: string }> };
+    const dependencyNames = [
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+      ...Object.keys(packageJson.peerDependencies ?? {}),
+      ...Object.keys(packageJson.optionalDependencies ?? {}),
+    ].filter((name) => name.startsWith("@workspace/"));
+    const referencedDirectories = new Set(
+      (tsconfig.references ?? []).map(({ path }) => {
+        const referencePath = resolve(packageDirectory, path);
+        return referencePath.endsWith(".json")
+          ? resolve(referencePath, "..")
+          : referencePath;
+      }),
+    );
+    // Only dependencies with a buildable project discovered under lib/ need a
+    // TypeScript project reference; workspace packages without one stay out.
+    const missingBuildableDependencies = dependencyNames.filter((name) => {
+      const dependencyDirectory = buildableLibraryDirectories.get(name);
+      return dependencyDirectory && !referencedDirectories.has(dependencyDirectory);
+    });
+    assert.deepEqual(
+      missingBuildableDependencies,
+      [],
+      `${packageJson.name} (${projectPath}) must reference every buildable shared-library dependency`,
+    );
+  }
   for (const contract of consumerTypecheckContracts) {
     const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(
       (candidate) => candidate.label === contract.label,
