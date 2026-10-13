@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne, or, sql } from "drizzle-orm";
 import { db, incidentsTable, auditLogsTable, type Incident } from "@workspace/db";
 import { newUserId } from "./auth";
 import { currentScope } from "./requestScope";
@@ -143,10 +143,25 @@ export async function createIncident(input: CreateIncidentInput): Promise<Incide
 // caller's session so a sandbox-scoped manager never sees live incidents (and a
 // live manager never sees sandbox test noise).
 export async function listIncidents(): Promise<IncidentDTO[]> {
+  const resolvedIncidentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const rows = await db
     .select()
     .from(incidentsTable)
-    .where(eq(incidentsTable.scope, currentScope()))
+    .where(and(
+      eq(incidentsTable.scope, currentScope()),
+      or(
+        // Keep active work visible regardless of age. A row is treated as
+        // resolved if either state field says resolved, for legacy consistency.
+        and(
+          ne(incidentsTable.status, "resolved"),
+          ne(incidentsTable.workflowState, "resolved"),
+        ),
+        // Old resolved rows without a timestamp are retained for review because
+        // their age since resolution cannot be determined safely.
+        isNull(incidentsTable.resolvedAt),
+        gt(incidentsTable.resolvedAt, resolvedIncidentCutoff),
+      ),
+    ))
     .orderBy(desc(incidentsTable.createdAt));
   return rows.map(toDTO);
 }

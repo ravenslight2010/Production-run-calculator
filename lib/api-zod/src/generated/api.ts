@@ -7227,7 +7227,7 @@ export const ReportIncidentResponse = zod.object({
 
 
 /**
- * Returns recorded incidents (newest first) for a manager to review, including the captured context and the AI diagnosis.
+ * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
  * @summary List incidents (manager only)
  */
 export const ListIncidentsResponseItem = zod.object({
