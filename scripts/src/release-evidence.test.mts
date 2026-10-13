@@ -2009,6 +2009,11 @@ async function run(): Promise<void> {
     rootPackage.scripts?.["typecheck:libs"]?.trim(),
     "the root package must keep its typecheck:libs script defined",
   );
+  assert.match(
+    rootPackage.scripts?.["typecheck:libs"] ?? "",
+    /^node\s+\.\/node_modules\/typescript\/bin\/tsc\s+--build(?:\s|$)/u,
+    "the root typecheck:libs script must run the TypeScript project-reference build",
+  );
   for (const contract of consumerTypecheckContracts) {
     const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(
       (candidate) => candidate.label === contract.label,
