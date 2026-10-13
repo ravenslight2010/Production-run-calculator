@@ -2122,6 +2122,68 @@ async function run(): Promise<void> {
     );
   }
   for (const contract of consumerTypecheckContracts) {
+    const packageDirectory = resolve(
+      fileURLToPath(new URL(contract.packagePath, import.meta.url)),
+      "..",
+    );
+    const packageJson = JSON.parse(
+      await readFile(join(packageDirectory, "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    const dependencyNames = [
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+      ...Object.keys(packageJson.peerDependencies ?? {}),
+      ...Object.keys(packageJson.optionalDependencies ?? {}),
+    ].filter((name) => name.startsWith("@workspace/"));
+    const tsconfigFiles = (await readdir(packageDirectory))
+      .filter((name) => /^tsconfig(?:\..+)?\.json$/u.test(name))
+      // This API diagnostic-only config deliberately bypasses reference
+      // rebuilds so routes can be checked against the last successful
+      // api-zod declarations; the full API config below owns its dependency graph.
+      .filter(
+        (name) =>
+          !(
+            contract.packageName === "@workspace/api-server" &&
+            name === "tsconfig.routes.json"
+          ),
+      )
+      .sort();
+    assert.ok(
+      tsconfigFiles.includes("tsconfig.json"),
+      `${contract.packageName} must keep its primary TypeScript config`,
+    );
+    for (const tsconfigFile of tsconfigFiles) {
+      const tsconfig = JSON.parse(
+        await readFile(join(packageDirectory, tsconfigFile), "utf8"),
+      ) as { references?: Array<{ path: string }> };
+      const referencedDirectories = new Set(
+        (tsconfig.references ?? []).map(({ path }) => {
+          const referencePath = resolve(packageDirectory, path);
+          return referencePath.endsWith(".json")
+            ? resolve(referencePath, "..")
+            : referencePath;
+        }),
+      );
+      // Dependencies without a TypeScript project under lib/ (for example,
+      // factory-constants, formula-guard, ingredient-catalog, and
+      // typescript-api-v6) cannot participate in the project-reference graph.
+      const missingBuildableDependencies = dependencyNames.filter((name) => {
+        const dependencyDirectory = buildableLibraryDirectories.get(name);
+        return dependencyDirectory && !referencedDirectories.has(dependencyDirectory);
+      });
+      assert.deepEqual(
+        missingBuildableDependencies,
+        [],
+        `${contract.packageName} (${tsconfigFile}) must reference every buildable shared-library dependency`,
+      );
+    }
+  }
+  for (const contract of consumerTypecheckContracts) {
     const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(
       (candidate) => candidate.label === contract.label,
     );

@@ -8,13 +8,70 @@
   "include": ["src"],
   "references": [
     {
-      "path": "../../lib/db"
+      "path": "../../lib/ai-memory"
+    },
+    {
+      "path": "../../lib/anomaly"
     },
     {
       "path": "../../lib/api-zod"
     },
     {
+      "path": "../../lib/cheese-recipes"
+    },
+    {
+      "path": "../../lib/cycle-count"
+    },
+    {
+      "path": "../../lib/day-summary"
+    },
+    {
+      "path": "../../lib/db"
+    },
+    {
+      "path": "../../lib/freezer-pull"
+    },
+    {
+      "path": "../../lib/incident-cluster"
+    },
+    {
       "path": "../../lib/integrations-openai-ai-server"
+    },
+    {
+      "path": "../../lib/inventory-math"
+    },
+    {
+      "path": "../../lib/live-calc"
+    },
+    {
+      "path": "../../lib/merge-suggest"
+    },
+    {
+      "path": "../../lib/mix-reconcile"
+    },
+    {
+      "path": "../../lib/mixes"
+    },
+    {
+      "path": "../../lib/named-recipes"
+    },
+    {
+      "path": "../../lib/premix-import"
+    },
+    {
+      "path": "../../lib/production-rules"
+    },
+    {
+      "path": "../../lib/schedule-optimize"
+    },
+    {
+      "path": "../../lib/spec-import"
+    },
+    {
+      "path": "../../lib/spec-reconcile"
+    },
+    {
+      "path": "../../lib/sync-contract"
     }
   ]
 }

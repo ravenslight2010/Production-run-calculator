@@ -16,10 +16,31 @@
   },
   "references": [
     {
-      "path": "../../lib/api-client-react"
+      "path": "../../lib/ai-memory"
     },
     {
       "path": "../../lib/allergen"
+    },
+    {
+      "path": "../../lib/api-client-react"
+    },
+    {
+      "path": "../../lib/cheese-import"
+    },
+    {
+      "path": "../../lib/cheese-recipes"
+    },
+    {
+      "path": "../../lib/cheese-reconcile"
+    },
+    {
+      "path": "../../lib/cycle-count"
+    },
+    {
+      "path": "../../lib/day-summary"
+    },
+    {
+      "path": "../../lib/downtime-trends"
     },
     {
       "path": "../../lib/fill-missing"
@@ -31,16 +52,64 @@
       "path": "../../lib/inventory-math"
     },
     {
+      "path": "../../lib/live-calc"
+    },
+    {
+      "path": "../../lib/merge-suggest"
+    },
+    {
+      "path": "../../lib/mix-reconcile"
+    },
+    {
+      "path": "../../lib/mixes"
+    },
+    {
       "path": "../../lib/name-match"
+    },
+    {
+      "path": "../../lib/named-recipes"
+    },
+    {
+      "path": "../../lib/onboarding"
+    },
+    {
+      "path": "../../lib/premix-import"
     },
     {
       "path": "../../lib/production-rules"
     },
     {
-      "path": "../../lib/schedule-move"
+      "path": "../../lib/profile-cleanup"
+    },
+    {
+      "path": "../../lib/recipe-apply"
     },
     {
       "path": "../../lib/recipe-guide-import"
+    },
+    {
+      "path": "../../lib/schedule-move"
+    },
+    {
+      "path": "../../lib/scheduled-recipe-check"
+    },
+    {
+      "path": "../../lib/setup-math-check"
+    },
+    {
+      "path": "../../lib/shipping-import"
+    },
+    {
+      "path": "../../lib/spec-export"
+    },
+    {
+      "path": "../../lib/spec-import"
+    },
+    {
+      "path": "../../lib/spec-reconcile"
+    },
+    {
+      "path": "../../lib/sync-contract"
     }
   ]
 }
