@@ -55,8 +55,9 @@ requested validation.
 
 **How to apply:** Inspect the lock-owning workflow's process tree and latest log
 before retrying. Do not terminate an unrelated release workflow without owner
-approval; if it remains stuck, report the blocked check and the specific retry
-needed.
+approval. If approved, stop it to release the lock. A task-validation job that
+already exhausted its poll budget will not resume when the lock clears; rerun
+the exact configured validation command before retrying task completion.
 
 Parallel release commands can also race while pnpm installs workspace links,
 producing symlink-collision errors after the initial thread failures.

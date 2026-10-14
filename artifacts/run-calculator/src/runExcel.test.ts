@@ -1,8 +1,6 @@
 // @vitest-environment node
 //
-// Unit tests for mergeImportRuns — combines same brand+flavor import runs on the
-// same day into one run (cases summed, distinct notes joined). Mirrored verbatim
-// web <-> mobile (replit.md parity), so testing the web copy guards both.
+// Unit tests for workbook import parsing and run merging.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -205,8 +203,7 @@ describe("collectImportAliases", () => {
 //
 // These guard the real-file shape: per-day header rows
 // ["<label>", <date-serial>, "Brand","Flavor","Units","Customer","Ship","PO"],
-// run rows beneath, and a subtotal row with blank brand/flavor. Mirrored
-// verbatim web <-> mobile, so testing the web copy guards both.
+// run rows beneath, and a subtotal row with blank brand/flavor.
 
 import * as XLSX from "xlsx";
 import {
@@ -320,18 +317,26 @@ describe("parseScheduleWorkbook", () => {
     expect(res.errors).toHaveLength(1);
   });
 
-  it("reports blank-brand non-run marker rows (notes/holidays) as errors, not runs", () => {
+  it("skips confirmed non-pizza schedule activities and keeps unknown blank-brand text on the error path", () => {
     const wb = wbWith({
       "Week 1": [
         HEADER(SERIAL_20260622),
+        ["", "", "", "Carton Lowes Meat Lovers", 5, "", "", ""],
+        ["", "", "", "carton pinsa", "", "", "", ""],
         ["", "", "", "Closed - Holiday", "", "", "", ""],
+        ["", "", "", "Inventory count", "", "", "", ""],
+        ["", "", "", "QC School", "", "", "", ""],
+        ["", "", "", "Breakfast is old shells and old labels", "", "", "", ""],
+        ["", "", "", "Unclassified schedule note", "", "", "", ""],
         ["", "", "Acme", "Cheese", 10, "", "", ""],
       ],
     });
     const res = parseScheduleWorkbook(wb);
     expect(res.rows).toHaveLength(1);
     expect(res.rows[0].brand).toBe("Acme");
-    expect(res.errors.some((e) => e.message === "Missing Brand")).toBe(true);
+    expect(res.rows[0].rowNumber).toBe(8);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0]).toMatchObject({ message: "Missing Brand" });
   });
 
   it("silently skips stray numeric cells in the Brand column (no run, no error)", () => {
@@ -474,16 +479,16 @@ describe("filterImportFromDate", () => {
     const wb = wbWith({
       S: [
         HEADER(SERIAL_20260622),
-        ["", "", "", "Closed - Holiday", "", "", "", ""],
+        ["", "", "", "Unclassified event note", "", "", "", ""],
         [],
         HEADER(SERIAL_20260629),
-        ["", "", "", "INVENTORY", "", "", "", ""],
+        ["", "", "", "Unclassified maintenance note", "", "", "", ""],
       ],
     });
     const parsed = parseScheduleWorkbook(wb);
     // Both blank-brand rows are reported before filtering.
     expect(parsed.errors.filter((e) => e.message === "Missing Brand")).toHaveLength(2);
-    // Importing from the later date drops the earlier day's skip warning.
+    // Importing from the later date drops the earlier day's review error.
     const out = filterImportFromDate(parsed, "2026-06-29");
     const msgs = out.errors.map((e) => e.message);
     expect(msgs.filter((m) => m === "Missing Brand")).toHaveLength(1);
@@ -492,7 +497,7 @@ describe("filterImportFromDate", () => {
 
   it("attaches the day-block date to schedule skip errors", () => {
     const wb = wbWith({
-      S: [HEADER(SERIAL_20260629), ["", "", "", "QC School", "", "", "", ""]],
+      S: [HEADER(SERIAL_20260629), ["", "", "", "Unclassified schedule note", "", "", "", ""]],
     });
     const parsed = parseScheduleWorkbook(wb);
     const err = parsed.errors.find((e) => e.message === "Missing Brand");
@@ -524,8 +529,6 @@ describe("filterImportFromDate", () => {
 //
 // Guards the "don't duplicate today's runs on re-import" rule: file rows for
 // today matching a run the floor already started/ended are dropped one-for-one.
-// Mirrored verbatim web <-> mobile, so testing the web copy guards both.
-
 describe("skipAlreadyRanRuns", () => {
   const row = (brand: string, flavor: string, casesPlanned = 10) => ({
     brand,

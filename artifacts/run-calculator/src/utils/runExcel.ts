@@ -6,11 +6,8 @@ import { fmtClock, fmtTime } from "../utils";
 /**
  * Shared Excel (.xlsx) + QuickBooks CSV row model for production runs.
  *
- * This module is intentionally mirrored verbatim in the mobile app
- * (artifacts/run-calculator-mobile/utils/runExcel.ts) per the web/mobile parity
- * rule in replit.md. Columns, validation, fuzzy matching and the QuickBooks
- * layout MUST stay identical across both apps. Adapt only platform IO at the UI
- * layer, never the row model below.
+ * The maintained product is the responsive web app; keep platform IO at the UI
+ * layer and keep the workbook row model deterministic.
  */
 
 export const RUN_EXPORT_COLUMNS = [
@@ -199,7 +196,7 @@ export function parseRunWorkbook(data: ArrayBuffer | Uint8Array, sourceFile?: st
  *    (rows carry their own date; `multiDay: true`).
  *  - Otherwise the flat single-sheet format (header on row 1; one date chosen in
  *    the dialog).
- * Used by the array path (web) and the base64 path (mobile).
+ * Used by the web workbook-upload path.
  */
 export function parseWorkbookObject(wb: XLSX.WorkBook, sourceFile?: string): ImportParseResult {
   if (workbookIsSchedule(wb)) return parseScheduleWorkbook(wb, sourceFile);
@@ -386,9 +383,23 @@ function buildScheduleNotes(
 
 /**
  * Parse a multi-sheet day-block schedule planner into dated import rows. Every
- * run row gets the date of the block it sits under; rows with no resolvable date
- * or no brand are reported as errors. Always returns `multiDay: true`.
+ * run row gets the date of the block it sits under. Confirmed non-pizza activity
+ * markers are skipped; other rows with no resolvable date or brand are reported
+ * as errors. Always returns `multiDay: true`.
  */
+function isKnownNonPizzaScheduleEntry(flavor: string): boolean {
+  const normalized = flavor.trim().toLowerCase().replace(/\s+/g, " ");
+  return (
+    normalized.startsWith("carton ") ||
+    normalized.startsWith("closed -") ||
+    normalized === "inventory" ||
+    normalized.startsWith("inventory ") ||
+    normalized === "qc school" ||
+    normalized.startsWith("qc school ") ||
+    normalized === "breakfast is old shells and old labels"
+  );
+}
+
 export function parseScheduleWorkbook(wb: XLSX.WorkBook, sourceFile?: string): ImportParseResult {
   const rows: ImportRow[] = [];
   const errors: ImportParseError[] = [];
@@ -437,6 +448,10 @@ export function parseScheduleWorkbook(wb: XLSX.WorkBook, sourceFile?: string): I
         // create (and so they don't inflate the skipped-rows count).
         if (isNumericLikeCell(brand) || (!brand && isNumericLikeCell(flavor))) continue;
         rowCounter++;
+        // These confirmed schedule activities are not pizza runs. Keep their
+        // known source markers out of the run import, but leave unfamiliar
+        // blank-brand text on the normal review/error path below.
+        if (!brand && isKnownNonPizzaScheduleEntry(flavor)) continue;
         if (!date) {
           errors.push({ rowNumber: rowCounter, message: `"${brand || flavor}" has no day date` });
           continue;
