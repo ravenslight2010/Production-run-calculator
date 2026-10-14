@@ -925,7 +925,7 @@ upstream TypeScript 7 compatibility statement.
 | TypeDoc | 0.28.20 | 0.28.20 | Its published TypeScript peer range ends at `6.0.x`; this remains a direct blocker to making TypeScript 7 the compiler seen by TypeDoc. |
 | `typedoc-plugin-markdown` | 4.13.0 | 4.14.0 | Both declare TypeDoc `0.28.x`; the plugin release notes tie its compatibility to TypeDoc releases. Neither declares a TypeScript 7 support path. |
 | `typedoc-plugin-coverage` | 4.0.3 | 4.0.3 | Declares TypeDoc `0.28.x`; it must be qualified alongside TypeDoc, not treated as independently supporting TypeScript 7. |
-| Orval | 8.40.0 | 8.42.0 | Latest published metadata declares TypeDoc `^0.28.19` and markdown plugin peers, but no direct TypeScript peer. Updating Orval alone does not remove TypeDoc's TypeScript 6 ceiling. |
+| Orval | 8.40.0 | 8.43.0 | Latest published metadata declares TypeDoc `^0.28.19` and markdown plugin peers, but no direct TypeScript peer. Updating Orval alone does not remove TypeDoc's TypeScript 6 ceiling. |
 | Vite | 8.3.2 | 8.3.4 | No TypeScript peer declaration. Existing config-loader/build smokes remain the meaningful repository evidence. |
 | Vitest | 5.0.3 | 5.0.4 | No TypeScript peer declaration; its Vite peer range includes Vite 8. This does not qualify compiler-API consumers. |
 | `tsx` | 4.23.13 / 4.23.15 | 4.23.15 | No TypeScript peer declaration; it depends on esbuild. Existing script execution does not establish a TypeScript 7 API contract. |
@@ -936,6 +936,25 @@ TypeScript 6.0.3 for TypeDoc, checks the resolved TypeDoc/plugin versions and pe
 and runs a disposable documentation smoke. The separate TypeScript 7 codegen bridge keeps
 that toolchain isolated while checking candidate-generated API declarations. The newer
 Orval and markdown-plugin stable releases do not change this boundary.
+
+### Independent verification on 2026-10-14
+
+- `pnpm run check:typescript-api-v6` passed all 12 boundary tests and reported TypeScript
+  API version 6.0.3 with zero direct-import bypasses.
+- `pnpm run check:typescript-7-codegen-bridge` passed. Its disposable frozen install used
+  `--strict-peer-dependencies` without overrides or suppressed peer warnings, resolved
+  TypeScript 6.0.3 for the API-spec package and TypeScript 7.0.2 for the candidate CLI,
+  smoke-tested the locked TypeDoc 0.28.20 / markdown plugin 4.13.0 / coverage plugin 4.0.3
+  combination, ran Orval 8.40.0 generation freshness checks, and built generated API
+  declarations with the TypeScript 7 CLI.
+- A separate disposable strict-peer install of TypeScript 7.0.2 with the current registry
+  latest TypeDoc 0.28.20, markdown plugin 4.14.0, coverage plugin 4.0.3, and Orval 8.43.0
+  failed with `ERR_PNPM_PEER_DEP_ISSUES` for TypeDoc's unmet TypeScript peer. No peer
+  override or warning suppression was used. This is direct evidence that the latest
+  published documentation/codegen graph still cannot install with TypeScript 7 as its
+  compiler peer.
+- No TypeScript 7 promotion command was run, and the repository package manifests and
+  lockfile were not changed.
 
 ## Repository state and existing coverage
 
@@ -1057,7 +1076,7 @@ Published package metadata:
   [`typedoc-plugin-markdown@4.14.0`](https://www.npmjs.com/package/typedoc-plugin-markdown/v/4.14.0)
   — TypeScript and TypeDoc peer metadata.
 - [`typedoc-plugin-coverage@4.0.3`](https://www.npmjs.com/package/typedoc-plugin-coverage/v/4.0.3)
-  and [`orval@8.42.0`](https://www.npmjs.com/package/orval/v/8.42.0) — coupled plugin and
+  and [`orval@8.43.0`](https://www.npmjs.com/package/orval/v/8.43.0) — coupled plugin and
   generator peer metadata.
 - [`@typescript/typescript6`](https://www.npmjs.com/package/@typescript/typescript6) —
   current compatibility package version.
