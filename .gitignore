@@ -65,6 +65,8 @@ Thumbs.db
 !.local/evidence/
 !.local/evidence/workbook-import-audit/
 !.local/evidence/workbook-import-audit/**
+# Keep the local workbook-audit evidence available to workspace tasks, but out of Git checkpoints.
+.local/evidence/workbook-import-audit/
 .local/custom_skills/**/.fingerprint
 .local/custom_skills/review-before-shipping/
 .local/test-evidence/
