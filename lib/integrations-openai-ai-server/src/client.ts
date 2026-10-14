@@ -295,7 +295,7 @@ function fallbackTriggerFor(error: unknown): GeminiFallbackTrigger | null {
     : error;
   const status = statusOf(cause);
   if (status === 429) return "rate_limited";
-  if (status === 503) return "service_unavailable";
+  if (status === 503 || status === 504) return "service_unavailable";
   if (isRetiredModelError(cause)) return "retired_model";
   return null;
 }
@@ -356,7 +356,10 @@ function isChainAdvanceError(error: unknown): boolean {
     return false;
   }
   const status = statusOf(cause);
-  return status === 429 || status === 503 || isRetiredModelError(cause);
+  // A remote gateway deadline is an availability failure, not our local
+  // request timeout. Healthy backups can recover a stalled upstream model.
+  // Keep client cancellation/timeouts and other gateway errors ineligible.
+  return status === 429 || status === 503 || status === 504 || isRetiredModelError(cause);
 }
 
 function isSafetyBlockedResponse(response: GenerateContentResponse): boolean {

@@ -70,3 +70,11 @@ scope. Shared policy prose alone had not made descriptions self-contained.
 description, including follow-ups. Keep project-specific authoring guidance in
 editable project-owned files, not platform-managed skills. A policy test guards
 instructions but cannot guarantee isolated task-runner compliance.
+
+## Evidence snapshots and managed merge readiness
+
+Do not assume a task's automatic code checkpoint includes its operational evidence. Repository-whitelisted audit files can remain untracked after the code commit and block the managed rebase as a dirty worktree.
+
+**Why:** The completion checkpoint omitted eligible audit artifacts while Git still considered them changes. Ignoring the whole metadata directory would have overridden the repository's deliberate evidence-retention rules.
+
+**How to apply:** Inspect the exact remaining paths and ignore exceptions. Managed commit hooks may exclude local metadata even when explicitly staged; retain a sanitized, bounded handoff in a normal shared evidence directory and ignore local originals without deleting them. Never sweep all agent metadata into Git, erase artifacts, or bypass managed rebase continuation.

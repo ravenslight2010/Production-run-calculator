@@ -151,3 +151,4 @@
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.
 - [SSE test-reader timeouts](sse-test-reader-timeouts.md) — retain pending raw stream reads across timeouts so an abandoned parser cannot consume the next event and create false delivery failures.
 - [Sync listener stop diagnostics](sync-listener-stop-diagnostics.md) — clear lag samples on shutdown and fence metric writes from in-flight drains that resume afterward.
+- [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.

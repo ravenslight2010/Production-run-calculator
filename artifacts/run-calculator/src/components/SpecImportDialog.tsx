@@ -1995,10 +1995,10 @@ export default function SpecImportDialog({
                   data-testid="spec-import-unresolved"
                   role="status"
                 >
-                  <p className="text-sm font-medium text-amber-800">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
                     {prepared.unresolved.length} unresolved source section{prepared.unresolved.length === 1 ? "" : "s"}
                   </p>
-                  <p className="mt-1 text-sm text-amber-700">
+                  <p className="mt-1 text-sm text-amber-700 dark:text-amber-200">
                     {prepared.aiFallbackUnsupported
                       ? "This workbook is not a supported pizza-spec, dough, or sauce recipe source. Use its dedicated importer or choose a supported workbook."
                       : prepared.aiRetryBlocked

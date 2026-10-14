@@ -326,6 +326,34 @@ describe("Gemini adapter resilience", () => {
       .toEqual(["gemini-test", "gemini-test"]);
   });
 
+  it("recovers an upstream gateway deadline using the bounded fallback chain", async () => {
+    vi.useFakeTimers();
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver(sample => metrics.push(sample));
+    generateContent
+      .mockRejectedValueOnce(transient(504))
+      .mockRejectedValueOnce(transient(504))
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    const request = openai.chat.completions.create(params);
+    const settled = expect(request).resolves.toEqual({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await settled;
+
+    expect(generateContent.mock.calls.map(request => request[0].model)).toEqual([
+      "gemini-test", "gemini-test", "gemini-3.5-flash",
+    ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung, requestResult, fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "service_unavailable" },
+    ]);
+  });
+
   it("advances to a fallback after exhausting transient retries and preserves the primary", async () => {
     vi.useFakeTimers();
     const metrics: GeminiRequestMetrics[] = [];
