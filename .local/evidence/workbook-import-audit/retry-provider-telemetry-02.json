@@ -1,7 +1,0 @@
-{
-  "environment": "isolated-test-database-with-real-provider",
-  "sanitization": "Allowlisted bounded provider metric fields only; no payloads or credentials.",
-  "events": [],
-  "captureOutcome": "NO_MATCHING_EVENTS_RETAINED",
-  "coverageGap": "No bounded model metrics retained; upstream call counts, token usage and costs remain unverified."
-}
