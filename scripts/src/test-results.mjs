@@ -54,7 +54,7 @@ const MAX_AGGREGATION_DEPTH = 12;
 const MAX_VITEST_COUNT_SUMMARIES = 128;
 const MAX_VITEST_COUNT_SUMMARY_BYTES = 4096;
 const API_RELEASE_VITEST_PACKAGE = "@workspace/api-server";
-const API_RELEASE_VITEST_STEP_LABEL = "API unit tests (release shard 1/7)";
+const API_RELEASE_VITEST_STEP_LABEL = "API unit tests (release shard 1/9)";
 const VITEST_COUNT_REPORTER_PATH = resolve(
   scriptDir,
   "vitest-count-reporter.mjs",
@@ -90,18 +90,25 @@ const SAFE_REASONS = new Set([
   "Structured test-step outcomes were unavailable.",
 ]);
 const RELEASE_STEP_LANE_GROUPS = Object.freeze([
-  { laneId: "api-unit-isolated", labels: ["API unit tests (release shard 1/7)"] },
+  { laneId: "api-unit-isolated", labels: ["API unit tests (release shard 1/9)"] },
   {
     laneId: "api-integration-shards",
     labels: [
-      "API integration tests (release shard 2/7)",
-      "API integration tests (release shard 3/7)",
-      "API integration tests (release shard 4/7)",
+      "API integration tests (release shard 2/9)",
+      "API integration tests (release shard 3/9)",
+      "API integration tests (release shard 4/9)",
     ],
   },
-  { laneId: "api-roles", labels: ["API role/capability tests (release shard 5/7)"] },
-  { laneId: "api-sync", labels: ["API sync tests (release shard 6/7)"] },
-  { laneId: "api-sync-sse", labels: ["API sync SSE tests (release shard 7/7)"] },
+  { laneId: "api-roles", labels: ["API role/capability tests (release shard 5/9)"] },
+  {
+    laneId: "api-sync",
+    labels: [
+      "API sync tests (release shard 6/9)",
+      "API sync tests (release shard 7/9)",
+      "API sync tests (release shard 8/9)",
+    ],
+  },
+  { laneId: "api-sync-sse", labels: ["API sync SSE tests (release shard 9/9)"] },
   {
     laneId: "api-sync-convergence",
     labels: ["API sync convergence tests (isolated PostgreSQL)"],

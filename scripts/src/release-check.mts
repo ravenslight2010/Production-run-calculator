@@ -969,6 +969,13 @@ const REPORT_KEY_ROTATION_PREFLIGHT_LABEL =
 const REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE =
   "report-key-rotation-preflight.json";
 
+export const API_RELEASE_SYNC_SHARD_SCRIPT_NAMES = [
+  "test:release:sync:1",
+  "test:release:sync:2",
+  "test:release:sync:3",
+] as const;
+export const API_RELEASE_SYNC_SSE_SCRIPT_NAME = "test:release:sync-sse";
+
 export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
   general: [
     "test:release:integration:1",
@@ -977,7 +984,10 @@ export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
   ],
   dedicated: {
     roles: ["test:release:roles"],
-    sync: ["test:release:sync", "test:release:sync-sse"],
+    sync: [
+      ...API_RELEASE_SYNC_SHARD_SCRIPT_NAMES,
+      API_RELEASE_SYNC_SSE_SCRIPT_NAME,
+    ],
     syncConvergence: ["test:sync-convergence:isolated"],
   },
 } as const;
@@ -1069,6 +1079,102 @@ export function apiIntegrationTestShardInventoryErrors(
   return errors;
 }
 
+export function apiSyncReleaseShardInventoryErrors(
+  syncTestSource: string,
+  scripts: ApiReleaseScripts,
+): string[] {
+  const errors: string[] = [];
+  const shardPatterns: Array<{ name: string; pattern: RegExp }> = [];
+  const describeTitles = [
+    ...syncTestSource.matchAll(/^describe\("([^"]+)"\s*,/gm),
+  ].map((match) => match[1]);
+  if (describeTitles.length === 0) {
+    return ["No top-level describe groups found in the sync integration test."];
+  }
+
+  for (const scriptName of API_RELEASE_SYNC_SHARD_SCRIPT_NAMES) {
+    const command = scripts[scriptName];
+    if (!command) {
+      errors.push(`Missing API sync release shard script: ${scriptName}`);
+      continue;
+    }
+    if (!command.includes("src/routes/sync.integration.test.ts")) {
+      errors.push(
+        `API sync release shard ${scriptName} does not name src/routes/sync.integration.test.ts.`,
+      );
+      continue;
+    }
+    const patternMatch = command.match(/--testNamePattern='([^']+)'/);
+    if (!patternMatch) {
+      errors.push(
+        `API sync release shard ${scriptName} must declare a bounded test-name pattern.`,
+      );
+      continue;
+    }
+    try {
+      shardPatterns.push({
+        name: scriptName,
+        pattern: new RegExp(patternMatch[1]),
+      });
+    } catch {
+      errors.push(
+        `API sync release shard ${scriptName} has an invalid test-name pattern.`,
+      );
+    }
+  }
+
+  let ssePattern: RegExp | undefined;
+  const sseCommand = scripts[API_RELEASE_SYNC_SSE_SCRIPT_NAME];
+  if (!sseCommand) {
+    errors.push(
+      `Missing API sync release shard script: ${API_RELEASE_SYNC_SSE_SCRIPT_NAME}`,
+    );
+  } else if (!sseCommand.includes("src/routes/sync.integration.test.ts")) {
+    errors.push(
+      `API sync release shard ${API_RELEASE_SYNC_SSE_SCRIPT_NAME} does not name src/routes/sync.integration.test.ts.`,
+    );
+  } else {
+    const patternMatch = sseCommand.match(/--testNamePattern='([^']+)'/);
+    if (!patternMatch) {
+      errors.push(
+        `API sync release shard ${API_RELEASE_SYNC_SSE_SCRIPT_NAME} must declare a bounded test-name pattern.`,
+      );
+    } else {
+      try {
+        ssePattern = new RegExp(patternMatch[1]);
+      } catch {
+        errors.push(
+          `API sync release shard ${API_RELEASE_SYNC_SSE_SCRIPT_NAME} has an invalid test-name pattern.`,
+        );
+      }
+    }
+  }
+
+  for (const title of describeTitles) {
+    const matchingShards = shardPatterns
+      .filter(({ pattern }) => pattern.test(title))
+      .map(({ name }) => name);
+    const isSseGroup = /\/sync\/events/u.test(title);
+    const matchesSseShard = ssePattern?.test(title) ?? false;
+    if (isSseGroup) {
+      if (matchingShards.length > 0 || !matchesSseShard) {
+        errors.push(
+          `SSE sync test group "${title}" must belong only to ${API_RELEASE_SYNC_SSE_SCRIPT_NAME}.`,
+        );
+      }
+    } else if (matchingShards.length !== 1) {
+      errors.push(
+        `Non-SSE sync test group "${title}" belongs to ${matchingShards.length} release shards (${matchingShards.join(", ") || "none"}); expected exactly one.`,
+      );
+    } else if (matchesSseShard) {
+      errors.push(
+        `Non-SSE sync test group "${title}" is also assigned to ${API_RELEASE_SYNC_SSE_SCRIPT_NAME}.`,
+      );
+    }
+  }
+  return errors;
+}
+
 export async function assertApiIntegrationTestShardInventory(
   projectRoot = rootDir,
 ): Promise<void> {
@@ -1086,6 +1192,16 @@ export async function assertApiIntegrationTestShardInventory(
     integrationTestPaths,
     apiPackageJson.scripts ?? {},
   );
+  const syncTestSource = await readFile(
+    resolve(apiRoot, "src/routes/sync.integration.test.ts"),
+    "utf8",
+  );
+  errors.push(
+    ...apiSyncReleaseShardInventoryErrors(
+      syncTestSource,
+      apiPackageJson.scripts ?? {},
+    ),
+  );
   if (errors.length > 0) {
     throw new Error(
       `API release shard inventory is invalid:\n${errors.join("\n")}`,
@@ -1095,7 +1211,7 @@ export async function assertApiIntegrationTestShardInventory(
 
 export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
-    label: "API unit tests (release shard 1/7)",
+    label: "API unit tests (release shard 1/9)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
     env: {
       NODE_ENV: "test",
@@ -1108,7 +1224,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 2/7)",
+    label: "API integration tests (release shard 2/9)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -1121,7 +1237,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 3/7)",
+    label: "API integration tests (release shard 3/9)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -1134,7 +1250,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 4/7)",
+    label: "API integration tests (release shard 4/9)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -1147,7 +1263,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API role/capability tests (release shard 5/7)",
+    label: "API role/capability tests (release shard 5/9)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:roles"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -1155,15 +1271,31 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync tests (release shard 6/7)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
+    label: "API sync tests (release shard 6/9)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync:1"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
   {
-    label: "API sync SSE tests (release shard 7/7)",
+    label: "API sync tests (release shard 7/9)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync:2"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync tests (release shard 8/9)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync:3"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync SSE tests (release shard 9/9)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -2213,7 +2345,7 @@ function printHelp(): void {
     "The full browser suite requires a disposable isolated test database.",
   );
   console.log(
-    "The API test gate runs seven bounded shards; role/capability and sync SSE tests run separately.",
+    "The API test gate runs nine bounded steps; non-SSE sync tests use three coverage-checked shards, with role/capability and sync SSE tests isolated.",
   );
   console.log(
     `Parallel release stages use at most ${RELEASE_CHECK_DEFAULT_CONCURRENCY} children by default; API/database shards are capped at ${RELEASE_CHECK_API_CONCURRENCY}. Set RELEASE_CHECK_MAX_CONCURRENCY=1 for constrained local environments.`,
@@ -4666,7 +4798,7 @@ async function main(): Promise<void> {
           if (step.group === "api-test-shards") apiActive += 1;
           console.log(`[${index + 1}/${steps.length}] ${step.label}`);
           const isApiUnitReleaseStep =
-            step.label === "API unit tests (release shard 1/7)";
+            step.label === "API unit tests (release shard 1/9)";
           const releaseVitestCountsDirectory =
             process.env.TEST_RESULTS_RELEASE_VITEST_COUNTS_DIR?.trim();
           const releaseVitestRunId =

@@ -306,13 +306,17 @@ async function startIsolatedApiProcess(): Promise<{
   return new Promise((resolve, reject) => {
     let output = "";
     let settled = false;
+    let childClosed = false;
     let startupTimer: NodeJS.Timeout | undefined;
     let forceKillTimer: NodeJS.Timeout | undefined;
+    child.once("close", () => {
+      childClosed = true;
+    });
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
       if (startupTimer) clearTimeout(startupTimer);
-      if (child.closed || child.exitCode !== null || child.signalCode !== null) {
+      if (childClosed || child.exitCode !== null || child.signalCode !== null) {
         reject(error);
         return;
       }

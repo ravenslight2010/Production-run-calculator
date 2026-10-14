@@ -25,7 +25,10 @@ import {
 } from "./release-concurrency-stress.mts";
 import {
   apiIntegrationTestShardInventoryErrors,
+  apiSyncReleaseShardInventoryErrors,
   API_RELEASE_INTEGRATION_SCRIPT_NAMES,
+  API_RELEASE_SYNC_SHARD_SCRIPT_NAMES,
+  API_RELEASE_SYNC_SSE_SCRIPT_NAME,
   API_INTEGRATION_SHARD_TIMEOUT_MS,
   API_INTEGRATION_SHARD_WARNING_MS,
   API_SHARD_TIMEOUT_MS,
@@ -279,6 +282,30 @@ async function run(): Promise<void> {
     [],
     "every API integration test file must belong to exactly one logical release shard",
   );
+  const syncTestSource = await readFile(
+    resolve(rootDir, "artifacts/api-server/src/routes/sync.integration.test.ts"),
+    "utf8",
+  );
+  assert.deepEqual(
+    apiSyncReleaseShardInventoryErrors(
+      syncTestSource,
+      apiPackageJson.scripts ?? {},
+    ),
+    [],
+    "every non-SSE sync test group must belong to exactly one bounded sync shard",
+  );
+  const duplicateSyncShardScripts = {
+    ...apiPackageJson.scripts,
+    "test:release:sync:3": apiPackageJson.scripts?.["test:release:sync:1"],
+  };
+  assert.match(
+    apiSyncReleaseShardInventoryErrors(
+      syncTestSource,
+      duplicateSyncShardScripts,
+    ).join("\n"),
+    /completed-run inventory corrections from sync writes/,
+    "overlapping sync shard assignments must identify the affected test group",
+  );
 
   const duplicateFixtureScripts = {
     ...apiPackageJson.scripts,
@@ -326,7 +353,23 @@ async function run(): Promise<void> {
     "the isolated convergence test must be named by its dedicated release script",
   );
 
-  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 7);
+  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 9);
+  const nonSseSyncReleaseSteps = RELEASE_CHECK_API_SHARD_STEPS.filter((step) =>
+    step.label.startsWith("API sync tests"),
+  );
+  assert.deepEqual(
+    nonSseSyncReleaseSteps.map((step) => step.args.at(-1)),
+    API_RELEASE_SYNC_SHARD_SCRIPT_NAMES,
+    "the release gate must execute every non-SSE sync shard exactly once",
+  );
+  const syncSseReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find((step) =>
+    step.label.startsWith("API sync SSE tests"),
+  );
+  assert.equal(
+    syncSseReleaseStep?.args.at(-1),
+    API_RELEASE_SYNC_SSE_SCRIPT_NAME,
+    "SSE coverage must remain in its separate release step",
+  );
   const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
   const fullReleaseGateInventory = releaseGateLabelsForMode("full");
   assert.equal(

@@ -267,15 +267,19 @@ test("release step summaries map structured outcomes into the shared lane contra
   };
   const outcomes = [
     {
-      label: "API unit tests (release shard 1/7)",
+      label: "API unit tests (release shard 1/9)",
       status: "FAIL",
       durationMs: 20,
       counts: apiUnitCounts,
     },
-    { label: "API integration tests (release shard 2/7)", status: "PASS", durationMs: 30 },
-    { label: "API integration tests (release shard 3/7)", status: "PASS", durationMs: 35 },
-    { label: "API integration tests (release shard 4/7)", status: "PASS", durationMs: 25 },
-    { label: "API role/capability tests (release shard 5/7)", status: "NOT REACHED", durationMs: 0 },
+    { label: "API integration tests (release shard 2/9)", status: "PASS", durationMs: 30 },
+    { label: "API integration tests (release shard 3/9)", status: "PASS", durationMs: 35 },
+    { label: "API integration tests (release shard 4/9)", status: "PASS", durationMs: 25 },
+    { label: "API role/capability tests (release shard 5/9)", status: "NOT REACHED", durationMs: 0 },
+    { label: "API sync tests (release shard 6/9)", status: "PASS", durationMs: 20 },
+    { label: "API sync tests (release shard 7/9)", status: "PASS", durationMs: 22 },
+    { label: "API sync tests (release shard 8/9)", status: "PASS", durationMs: 18 },
+    { label: "API sync SSE tests (release shard 9/9)", status: "PASS", durationMs: 25 },
     { label: "browser WebKit smoke", status: "INFRASTRUCTURE TIMEOUT", durationMs: 500 },
     { label: "browser phone/tablet WebKit compatibility", status: "PASS", durationMs: 650 },
   ];
@@ -285,6 +289,9 @@ test("release step summaries map structured outcomes into the shared lane contra
   assert.deepEqual(resultFor("api-unit-isolated").counts, apiUnitCounts);
   assert.equal(resultFor("api-integration-shards").status, "PASS");
   assert.equal(resultFor("api-roles").status, "CANCELLED");
+  assert.equal(resultFor("api-sync").status, "PASS");
+  assert.equal(resultFor("api-sync").durationMs, 60);
+  assert.equal(resultFor("api-sync-sse").status, "PASS");
   assert.equal(resultFor("browser-webkit").status, "TIMEOUT");
   assert.equal(resultFor("browser-main").status, "INFRASTRUCTURE_ERROR");
   assert.equal(resultFor("api-integration-shards").durationMs, 90);
@@ -790,7 +797,7 @@ test("API unit release totals require one current summary and persist count-only
     catalog,
     [
       {
-        label: "API unit tests (release shard 1/7)",
+        label: "API unit tests (release shard 1/9)",
         status: "FAIL",
         durationMs: 30,
         counts: expectedCounts,

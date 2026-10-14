@@ -1966,7 +1966,7 @@ async function run(): Promise<void> {
     "non-Replit CI should preserve its configured release concurrency",
   );
   const apiUnitReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find(
-    (step) => step.label === "API unit tests (release shard 1/7)",
+    (step) => step.label === "API unit tests (release shard 1/9)",
   );
   const consumerTypecheckContracts = [
     {
