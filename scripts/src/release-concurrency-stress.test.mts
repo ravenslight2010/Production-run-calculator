@@ -26,7 +26,10 @@ import {
 import {
   apiIntegrationTestShardInventoryErrors,
   API_RELEASE_INTEGRATION_SCRIPT_NAMES,
+  API_INTEGRATION_SHARD_TIMEOUT_MS,
+  API_INTEGRATION_SHARD_WARNING_MS,
   API_SHARD_TIMEOUT_MS,
+  API_SHARD_WARNING_MS,
   assertApiIntegrationTestShardInventory,
   RELEASE_CHECK_API_SHARD_STEPS,
   RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP,
@@ -361,13 +364,30 @@ async function run(): Promise<void> {
     fullReleaseGateInventory.includes("browser calendar tests"),
     "the full release must retain the standard isolated calendar gate",
   );
+  const generalIntegrationSteps = RELEASE_CHECK_API_SHARD_STEPS.filter(
+    (step) => step.label.startsWith("API integration tests"),
+  );
+  assert.equal(generalIntegrationSteps.length, 3);
   assert.ok(
-    RELEASE_CHECK_API_SHARD_STEPS.every(
+    generalIntegrationSteps.every(
       (step) =>
         step.group === "api-test-shards" &&
-        step.timeoutMs === API_SHARD_TIMEOUT_MS,
+        step.timeoutMs === API_INTEGRATION_SHARD_TIMEOUT_MS &&
+        step.warningMs === API_INTEGRATION_SHARD_WARNING_MS,
     ),
-    "the disposable lane must reuse the exact bounded API release shard definitions",
+    "general integration shards must use their longer bounded timeout",
+  );
+  const remainingApiSteps = RELEASE_CHECK_API_SHARD_STEPS.filter(
+    (step) => !generalIntegrationSteps.includes(step),
+  );
+  assert.ok(
+    remainingApiSteps.every(
+      (step) =>
+        step.group === "api-test-shards" &&
+        step.timeoutMs === API_SHARD_TIMEOUT_MS &&
+        step.warningMs === API_SHARD_WARNING_MS,
+    ),
+    "unit, role, and sync shards must keep the shorter API timeout",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").every(

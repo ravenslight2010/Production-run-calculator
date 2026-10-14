@@ -276,6 +276,10 @@ export type BrowserDurationRegression = {
 // release window.
 export const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 export const API_SHARD_WARNING_MS = 6 * 60_000;
+// The general integration shards run many per-file disposable database setup
+// hooks serially. Give only these three shards a longer, still-bounded window.
+export const API_INTEGRATION_SHARD_TIMEOUT_MS = 12 * 60_000;
+export const API_INTEGRATION_SHARD_WARNING_MS = 10 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
 export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
@@ -1111,8 +1115,8 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
       "run",
       "test:release:integration:1",
     ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
@@ -1124,8 +1128,8 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
       "run",
       "test:release:integration:2",
     ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
@@ -1137,8 +1141,8 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
       "run",
       "test:release:integration:3",
     ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
