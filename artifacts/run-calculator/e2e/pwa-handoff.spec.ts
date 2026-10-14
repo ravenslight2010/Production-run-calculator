@@ -37,7 +37,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const packageRoot = path.resolve(import.meta.dirname, "..");
+const packageRoot =
+  process.env.PWA_HANDOFF_PACKAGE_ROOT?.trim() ||
+  path.resolve(import.meta.dirname, "..");
 
 type Version = "old" | "new";
 
@@ -303,6 +305,109 @@ test.describe("PWA update handoff", () => {
     if (fixture) await rm(fixture.root, { recursive: true, force: true });
   });
 
+  test("serves app shell and declared install assets from the production build", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer({
+      old: fixture.oldDir,
+      new: fixture.newDir,
+    });
+
+    try {
+      await page.addInitScript(() => {
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-offline-start-run",
+            brand: "Offline",
+            flavor: "Startup",
+            startedAt: Date.now(),
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      const installContract = await page.evaluate(async () => {
+        const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+        if (!link) throw new Error("The production document has no manifest link");
+        const response = await fetch(link.href);
+        if (!response.ok) throw new Error(`Manifest request failed: ${response.status}`);
+        const manifest = await response.json() as {
+          name?: string;
+          short_name?: string;
+          start_url?: string;
+          scope?: string;
+          display?: string;
+          icons?: Array<{ src: string; sizes?: string; purpose?: string }>;
+        };
+        const icons = await Promise.all((manifest.icons ?? []).map(async (icon) => {
+          const iconUrl = new URL(icon.src, link.href);
+          const iconResponse = await fetch(iconUrl);
+          return {
+            src: icon.src,
+            sizes: icon.sizes ?? null,
+            purpose: icon.purpose ?? null,
+            status: iconResponse.status,
+            contentType: iconResponse.headers.get("content-type"),
+          };
+        }));
+        return {
+          manifestPath: new URL(link.href).pathname,
+          manifest,
+          icons,
+        };
+      });
+
+      expect(installContract.manifestPath).toBe("/manifest.webmanifest");
+      expect(installContract.manifest).toMatchObject({
+        name: "Production Run Calculator",
+        short_name: "Run Calc",
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+      });
+      expect(installContract.icons).toEqual([
+        expect.objectContaining({ src: "pwa-64x64.png", sizes: "64x64", status: 200 }),
+        expect.objectContaining({ src: "pwa-192x192.png", sizes: "192x192", status: 200 }),
+        expect.objectContaining({ src: "pwa-512x512.png", sizes: "512x512", status: 200 }),
+        expect.objectContaining({
+          src: "maskable-icon-512x512.png",
+          sizes: "512x512",
+          purpose: "maskable",
+          status: 200,
+        }),
+      ]);
+
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+      await page.context().setOffline(true);
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("heading", { name: "Unable to open Run Calculator" })).toBeVisible({
+        timeout: 20_000,
+      });
+    } finally {
+      await page.context().setOffline(false);
+      await server.close();
+    }
+  });
+
   test("preserves unsafe work, then auto-reloads after safe inactivity", async ({
     page,
   }) => {
@@ -508,7 +613,13 @@ test.describe("PWA update handoff", () => {
       });
       await expect(page.getByRole("button", { name: "Update and reload" })).toHaveCount(0);
       expect(server.staleAssetRequestCount()).toBe(1);
-      expect(pageErrors).toEqual([]);
+      // The isolated fixture has no internet connection. WebKit reports
+      // external Google Fonts stylesheet fetch failures through pageerror;
+      // those do not represent an app chunk or service-worker failure.
+      const unexpectedPageErrors = pageErrors.filter(
+        (message) => !message.includes("fonts.googleapis.com/css2"),
+      );
+      expect(unexpectedPageErrors).toEqual([]);
     } finally {
       await server.close();
     }
