@@ -116,7 +116,7 @@ const EMPTY_KNOWN = {
   cheeseRecipes: [] as string[],
 };
 
-/** Partial workbook: only the plural "Pizza Specs" tab makes it AI-eligible. */
+/** Partial workbook: its plural "Pizza Specs" sheet title is the parse cue. */
 function goodBuffer(): ArrayBuffer {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
