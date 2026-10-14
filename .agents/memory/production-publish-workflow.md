@@ -44,3 +44,18 @@ identity matches; unavailable samples are gaps, not zeros. Known-reserve
 headroom remains estimated while provider reserves are unknown, and a quiet
 sample cannot establish headroom at a separate saturated moment. Keep the
 decision open until peak-aligned measurements and instance counts are available.
+
+Before recommending a republish, compare the live build fingerprint and verified
+Git revision with both the current checkout and its prepared-source record. If
+the live revision is not available in the task checkout, do not refresh the
+publish record and deploy that checkout: it may omit merged changes and roll
+production backward. Reconcile to the live/merged source first.
+
+**Why:** An isolated task checkout can lag behind a newer published build even
+when its own working tree is clean; a successful publish from that checkout
+would not necessarily preserve later production fixes.
+
+**How to apply:** Verify the reported live revision exists locally and that its
+source fingerprint matches the checkout before preparing another publish. If
+it does not, stop and request a source reconciliation rather than treating a
+new build identity as proof that the task's code is live.

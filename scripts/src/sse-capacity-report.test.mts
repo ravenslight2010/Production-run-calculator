@@ -306,6 +306,46 @@ test("requires a v2 failure reason and rejects every reason outside the allowlis
   ));
 });
 
+test("reports allowlisted unavailable reasons and keeps pre-v2 history unclassified", () => {
+  const samples = [
+    sample(windowStart, {
+      status: "unavailable",
+      primaryVerified: false,
+      unavailableReason: "pool_checkout_failed",
+    }, 2),
+    sample("2026-10-11T00:05:00.000Z", {
+      status: "unavailable",
+      primaryVerified: false,
+      unavailableReason: "capacity_query_failed",
+    }, 2),
+    sample(windowEnd, { status: "unavailable", primaryVerified: false }),
+  ];
+  const result = report(samples);
+  assert.deepEqual(result.capacitySamples.unavailableReasonCounts, {
+    pool_checkout_timeout: 0,
+    pool_checkout_failed: 1,
+    capacity_query_timeout: 0,
+    capacity_query_cancelled: 0,
+    capacity_query_failed: 1,
+    invalid_capacity_result: 0,
+    legacy_unclassified: 1,
+  });
+  assert.equal(result.capacitySamples.unavailableCount, 3);
+  assert.equal(result.capacitySamples.completeForWindow, false);
+  assert.throws(
+    () => report([sample(windowStart, {
+      status: "unavailable",
+      primaryVerified: false,
+      unavailableReason: "private SQL error",
+    })]),
+    /invalid unavailable reason/i,
+  );
+  assert.throws(
+    () => report([sample(windowStart, { unavailableReason: "pool_checkout_failed" })]),
+    /cannot include an unavailable reason/i,
+  );
+});
+
 test("mixed source revisions and unstructured lines cannot prove a budget", () => {
   const mixed = {
     ...completeSamples[1],

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "kind": "sse-capacity-reason-code-followup",
+  "capturedAtUtc": "2026-10-14T04:14:20.652Z",
+  "environment": "production",
+  "captureMethod": [
+    "Replit deployment metadata and live /api/build-info",
+    "Segmented event-filtered deployment-log queries for database_capacity_sample after 2026-10-13T17:50:00.000Z",
+    "Allowlist-only projection of sampler fields; raw log lines were not retained"
+  ],
+  "deployment": {
+    "active": true,
+    "deploymentType": "autoscale",
+    "buildSuccessful": true,
+    "appBuildId": "app-build:9ce95468-785e-41be-9187-97ec9eff4902",
+    "gitRevision": "044a6f59ef3e2505e36d82a9eae6ff3d9178a1bb",
+    "sourcePolicy": "production-source-v3",
+    "sourceFingerprintSha256": "ef4ce563df7ce3f99e2e379433715ee29e7c2392ab7cf22bc70fff532e3cf388",
+    "sampleIdentityMatchesLiveBuildInfo": true
+  },
+  "capacityObservation": {
+    "captureWindowUtc": [
+      "2026-10-14T01:43:17.784Z",
+      "2026-10-14T04:09:39.970Z"
+    ],
+    "sampleSchemaVersion": 2,
+    "sampleIntervalMs": 300000,
+    "sampleCount": 30,
+    "uniqueSampleTimes": 30,
+    "primaryObservedSamples": 10,
+    "unavailableSamples": 20,
+    "unavailableReasonCounts": {
+      "pool_checkout_timeout": 14,
+      "capacity_query_timeout": 6
+    },
+    "maximumPoolWaiters": 12,
+    "cadenceCoveredAtOnePointFiveIntervals": true,
+    "completeForRepresentativeWindow": false,
+    "representsPeakHeadroom": false,
+    "rawLogsRetained": false
+  },
+  "interpretation": "The samples match the current live build and have continuous five-minute cadence, but cover only about 2 hours 26 minutes and 20 of 30 readings are unavailable. The codes classify 14 pool-checkout timeouts and 6 capacity-query timeouts; they do not establish the underlying cause. The window is not complete primary coverage or confirmed peak evidence.",
+  "historicalReasonCodes": "The 2026-10-11 schema-version-1 samples predate reason-code logging and remain unclassified; they were not backfilled.",
+  "latestCheck": {
+    "capturedAtUtc": "2026-10-14T16:05:35.583Z",
+    "environment": "production",
+    "captureMethod": "Segmented event-filtered deployment-log query and live /api/build-info; only allowlisted fields retained",
+    "deployment": {
+      "active": true,
+      "deploymentType": "autoscale",
+      "buildSuccessful": true,
+      "appBuildId": "app-build:21bef786-a21a-4479-b57e-8dd70b87fa2e",
+      "gitRevision": "2db1484d341400aaed39b3b1ce9a28795f392110",
+      "sourcePolicy": "production-source-v3",
+      "sourceFingerprintSha256": "ec61f722c23ad57d66c97f96aec8a8e9e7cead99bc2a1760326766e626129ed5",
+      "sampleIdentityMatchesLiveBuildInfo": true
+    },
+    "capacityObservation": {
+      "captureWindowUtc": [
+        "2026-10-14T04:36:05.976Z",
+        "2026-10-14T16:04:55.607Z"
+      ],
+      "sampleSchemaVersion": 2,
+      "sampleIntervalMs": 300000,
+      "sampleCount": 138,
+      "uniqueSampleTimes": 138,
+      "primaryObservedSamples": 68,
+      "unavailableSamples": 70,
+      "unavailableReasonCounts": {
+        "pool_checkout_timeout": 44,
+        "capacity_query_timeout": 26
+      },
+      "maximumPoolWaiters": 12,
+      "cadenceCoveredAtOnePointFiveIntervals": true,
+      "longestContinuousPrimaryObservedRun": {
+        "sampleCount": 18,
+        "startUtc": "2026-10-14T13:40:20.477Z",
+        "endUtc": "2026-10-14T15:03:59.046Z"
+      },
+      "completeForRepresentativeWindow": false,
+      "representsPeakHeadroom": false,
+      "rawLogsRetained": false
+    },
+    "interpretation": "This latest live-source window spans about 11 hours 28 minutes with continuous five-minute cadence, but 70 of 138 readings are unavailable. The longest uninterrupted primary-observed run is 18 samples (about 1 hour 24 minutes). The failure-stage codes do not establish the underlying cause, and no independent peak confirmation is available."
+  }
+}

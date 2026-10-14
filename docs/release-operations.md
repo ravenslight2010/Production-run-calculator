@@ -118,13 +118,33 @@ The 2026-10-11 follow-up is retained in
 [`evidence/sse-capacity-observation-2026-10-11.json`](evidence/sse-capacity-observation-2026-10-11.json).
 It summarizes 101 sanitized samples from the same logged source fingerprint:
 35 primary observations and 66 unavailable results, with pool waiters reaching
-16. The owner confirmed an Autoscale maximum of 3 machines. With one API
+16. The historical records did not include failure-stage reason codes, so the
+unavailable results cannot be retrospectively attributed to checkout, query, or
+result-validation failures. The owner confirmed an Autoscale maximum of 3 machines. With one API
 process and a maximum pool size of 10 per machine, that bounds API pool usage
 to 30 connections against 446 ordinary PostgreSQL slots, leaving 416 for other
 clients before provider limits. But current/peak process counts, peak
 non-API clients, and provider limits remain unverified; the partial log window
 and one read-replica snapshot do not prove peak headroom. This remains a NO-GO
 capacity result; keep live peer SSE **NOT SUPPORTED**.
+The 2026-10-13 reason-code follow-up is retained in
+[`evidence/sse-capacity-reason-code-followup-2026-10-13.json`](evidence/sse-capacity-reason-code-followup-2026-10-13.json).
+Its nine new-build samples match the live source fingerprint; four were primary
+observations and five were unavailable (three pool-checkout timeouts and two
+capacity-query timeouts). The roughly 40-minute check is not a complete
+representative or peak-aligned window, and the reason codes classify stages
+rather than root causes. Historical samples remain unclassified.
+An earlier 2026-10-14 follow-up is retained in
+[`evidence/sse-capacity-reason-code-followup-2026-10-14.json`](evidence/sse-capacity-reason-code-followup-2026-10-14.json).
+Its 30 samples match the current live build and cover about 2 hours 26 minutes,
+but 20 readings were unavailable (14 pool-checkout timeouts and 6
+capacity-query timeouts). Although cadence was continuous, the window is not
+complete primary coverage and has no independent peak confirmation.
+A later check in that record covers 138 samples over about 11 hours 28 minutes
+from a newer live build, with continuous cadence but 70 unavailable readings
+(44 pool-checkout timeouts and 26 capacity-query timeouts). Its longest
+continuous primary-observed run is 18 samples; the full window remains
+incomplete and peak representativeness is unconfirmed.
 The updated isolated two-process test, including retention-gap reconciliation,
 readiness, and shutdown cleanup, is retained in
 [`evidence/sync-peer-fanout-2026-10-11.json`](evidence/sync-peer-fanout-2026-10-11.json).

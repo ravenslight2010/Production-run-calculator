@@ -23,6 +23,18 @@ A task rebase also requires a clean worktree before it can start. Preserve inten
 
 **How to apply:** Inspect the exact untracked paths, confirm their contents and ignore rules, and resolve them with the owner before retrying the managed continuation callback.
 
+The managed conflict-resolution callback does not own a rebase started directly in
+the shell; it can return `no_active_reconcile` even while the shell rebase has
+unresolved conflicts.
+
+**Why:** Conflict continuation is bound to the platform-managed reconciliation
+state, not merely to the repository's Git rebase state.
+
+**How to apply:** Use the managed flow to start and continue managed rebases. If
+a shell-started rebase conflicts and no managed reconciliation is active, preserve
+a named baseline and restore that shell operation before choosing a narrower sync
+or requesting a supported managed rebase.
+
 If managed finalization fails during Git LFS fetch and the designated base remote prompts for SSH authentication, treat it as a remote-access setup failure, not a file conflict. Keep the task commit intact; do not attempt a manual rebase or provide an interactive credential.
 
 **Why:** A task could not complete its managed rebase because the LFS fetch had no usable SSH authentication, even though the code validation passed and the worktree was clean.

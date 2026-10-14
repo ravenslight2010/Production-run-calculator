@@ -31,6 +31,11 @@
     "sampleCount": 101,
     "primaryObservedSamples": 35,
     "unavailableSamples": 66,
+    "unavailableSampleFailureReasons": {
+      "status": "not recorded by this historical sampler build",
+      "classification": "unspecified",
+      "note": "Failure-stage reason codes were added after this capture; these records cannot be retrospectively classified."
+    },
     "postgresMaxConnections": 450,
     "knownReservedSlots": 4,
     "clientBackendsRange": [
