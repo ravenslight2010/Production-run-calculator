@@ -125,7 +125,7 @@ function goodBuffer(): ArrayBuffer {
       ["Brand", "Flavor", "Cases"],
       [BRAND, "Cheese", "120"],
     ]),
-    "Specs",
+    "Pizza Specs",
   );
   return XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }

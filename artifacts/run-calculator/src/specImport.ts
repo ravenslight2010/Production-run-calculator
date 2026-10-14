@@ -1192,8 +1192,8 @@ function hasSpecRecipeSignals(grids: SheetGrid[], sourceFile?: string): boolean 
   }
   const contentCue =
     /\boz\s*\/?\s*pizza\b/i.test(sample) ||
-    /\bpizza.{0,60}(?:spec|recipe)\b/i.test(sample) ||
-    /\b(?:spec|recipe).{0,60}\bpizza\b/i.test(sample) ||
+    /\bpizza.{0,60}(?:specs?|recipe)\b/i.test(sample) ||
+    /\b(?:specs?|recipe).{0,60}\bpizza\b/i.test(sample) ||
     /\bdough.{0,60}(?:mix|recipe|procedure)\b/i.test(sample) ||
     /\b(?:mix|recipe|procedure).{0,60}\bdough\b/i.test(sample) ||
     /\bsauce.{0,60}(?:recipe|ingredient|mix|procedure)\b/i.test(sample) ||

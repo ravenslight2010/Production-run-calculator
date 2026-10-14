@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "kind": "readiness-recovery",
   "environment": "release",
-  "deploymentId": "app-build:7d3ef15d-12b2-4d84-af47-1a09bebed532",
-  "revision": "source-sha256:3ad250858a17d31672cba6e3a6d5d1f3e5f07e14ee8a7b68f4062f184c55da1e",
-  "generatedAt": "2026-10-13T21:07:05.466Z",
-  "expiresAt": "2026-10-20T21:07:05.466Z",
+  "deploymentId": "app-build:21bef786-a21a-4479-b57e-8dd70b87fa2e",
+  "revision": "source-sha256:ec61f722c23ad57d66c97f96aec8a8e9e7cead99bc2a1760326766e626129ed5",
+  "generatedAt": "2026-10-14T04:45:26.094Z",
+  "expiresAt": "2026-10-21T04:45:26.094Z",
   "retention": {
     "maxSamples": 60,
     "maxAgeMs": 604800000
@@ -15,7 +15,7 @@
   },
   "samples": [
     {
-      "capturedAt": "2026-10-13T21:06:54.182Z",
+      "capturedAt": "2026-10-14T04:45:14.937Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -23,7 +23,7 @@
         "startup": "ok",
         "database": "ok",
         "dependencies": "ok",
-        "backgroundWorkers": "unknown"
+        "backgroundWorkers": "ok"
       },
       "workers": [
         {
@@ -53,7 +53,7 @@
       ]
     },
     {
-      "capturedAt": "2026-10-13T21:06:59.477Z",
+      "capturedAt": "2026-10-14T04:45:20.294Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -61,7 +61,7 @@
         "startup": "ok",
         "database": "ok",
         "dependencies": "ok",
-        "backgroundWorkers": "unknown"
+        "backgroundWorkers": "ok"
       },
       "workers": [
         {
@@ -91,7 +91,7 @@
       ]
     },
     {
-      "capturedAt": "2026-10-13T21:07:04.872Z",
+      "capturedAt": "2026-10-14T04:45:25.534Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -99,7 +99,7 @@
         "startup": "ok",
         "database": "ok",
         "dependencies": "ok",
-        "backgroundWorkers": "unknown"
+        "backgroundWorkers": "ok"
       },
       "workers": [
         {

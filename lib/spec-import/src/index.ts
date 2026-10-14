@@ -14,7 +14,7 @@ import {
 } from "@workspace/name-match";
 
 /** Shared by the web parser, API evidence exporter, and distillation validator. */
-export const SPEC_IMPORT_PARSE_VERSION = "45";
+export const SPEC_IMPORT_PARSE_VERSION = "46";
 
 // ── Core data shapes ────────────────────────────────────────────────────────
 
