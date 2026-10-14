@@ -306,18 +306,36 @@ async function startIsolatedApiProcess(): Promise<{
   return new Promise((resolve, reject) => {
     let output = "";
     let settled = false;
+    let startupTimer: NodeJS.Timeout | undefined;
+    let forceKillTimer: NodeJS.Timeout | undefined;
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
-      reject(error);
+      if (startupTimer) clearTimeout(startupTimer);
+      if (child.closed || child.exitCode !== null || child.signalCode !== null) {
+        reject(error);
+        return;
+      }
+      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      child.once("close", () => {
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        reject(error);
+      });
+      child.kill("SIGTERM");
     };
+    startupTimer = setTimeout(
+      () => fail(new Error("Isolated API process did not become ready within 60 seconds")),
+      60_000,
+    );
     child.stdout.on("data", (chunk: Buffer | string) => {
+      if (settled) return;
       output += chunk.toString();
       for (const line of output.split("\n").slice(0, -1)) {
         try {
           const message = JSON.parse(line) as { port?: number };
           if (Number.isInteger(message.port) && message.port! > 0) {
             settled = true;
+            if (startupTimer) clearTimeout(startupTimer);
             resolve({ child, url: `http://127.0.0.1:${message.port}` });
             return;
           }
@@ -518,10 +536,20 @@ describe("server job route idempotency", () => {
   });
 
   it("returns one canonical job across isolated API processes", async () => {
-    const instances = await Promise.all([
+    const startup = await Promise.allSettled([
       startIsolatedApiProcess(),
       startIsolatedApiProcess(),
     ]);
+    const instances = startup.flatMap((result) => (
+      result.status === "fulfilled" ? [result.value] : []
+    ));
+    const startupFailure = startup.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (startupFailure) {
+      await Promise.all(instances.map(({ child }) => stopIsolatedApiProcess(child)));
+      throw startupFailure.reason;
+    }
 
     try {
       const responses = await Promise.all(
@@ -552,7 +580,7 @@ describe("server job route idempotency", () => {
     } finally {
       await Promise.all(instances.map(({ child }) => stopIsolatedApiProcess(child)));
     }
-  });
+  }, 90_000);
 
   it("inventories duplicate scheduled buckets without mutating rows or audit records", async () => {
     const now = Date.now();

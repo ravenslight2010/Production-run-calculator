@@ -184,8 +184,10 @@ describe("SpecImportInventoryImpact", () => {
     expect(screen.getByText("Per case · no planned case count")).toBeTruthy();
     expect(screen.getByText("Acme — Supreme")).toBeTruthy();
     expect(screen.getByText("Acme — Veggie")).toBeTruthy();
-    expect(screen.getByText(/Short by .*lbs/)).toBeTruthy();
-    expect(screen.getByText(/shortage not estimated without a planned case count/)).toBeTruthy();
+    expect(await screen.findByText(/Short by .*lbs/)).toBeTruthy();
+    expect(
+      await screen.findByText(/shortage not estimated without a planned case count/),
+    ).toBeTruthy();
     expect(inventoryApi.fetchInventory).toHaveBeenCalledTimes(1);
     for (const [name, mutation] of Object.entries(inventoryApi)) {
       if (name === "fetchInventory") continue;
