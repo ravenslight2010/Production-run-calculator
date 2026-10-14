@@ -875,3 +875,207 @@ The following checks were run while preparing this audit:
 The failed checks are intentionally retained in the audit record. A future promotion report
 must distinguish these unavailable or infrastructure-blocked prerequisites from compiler
 diagnostics instead of collapsing them into a TypeScript compatibility result.
+
+---
+
+# Fresh reassessment — 2026-10-14
+
+**Assessment date:** 2026-10-14
+**Authoritative compiler:** TypeScript 6.0.3
+**Installed candidate:** TypeScript 7.0.2 (`typescript-native`)
+**Recommendation:** **Keep the existing advisory comparison and TypeScript 6 authority. No additional TypeScript 7 adoption step is justified yet.**
+
+This section supersedes earlier statements in this document about the latest published
+versions, the current comparison harness, and unresolved B3/B4 findings. It is a research
+update, not an approval to change compiler, dependencies, CI, editor settings, or retained
+release evidence.
+
+## Current upstream status
+
+The official TypeScript release list identifies **7.0.2** as the latest stable TypeScript 7
+release and **6.0.3** as the current TypeScript 6 release. The 7.0.2 release is dated
+2026-08-20. The npm `latest` tag is also 7.0.2. npm's `next` tag resolves to
+`7.1.0-dev.20261014.1`, which is a development build, not a stable release.
+
+TypeScript 7.0.2 still does not provide a stable JavaScript compiler API at the package
+root: its root export is version metadata, while programmatic entry points are under
+`typescript/unstable/*`. Microsoft's Compiler API wiki, edited 2026-08-17, still warns that
+its examples describe TypeScript 6.0 and earlier and that TypeScript 7.1 has a different
+API. The 7.1 iteration plan lists API stabilization work, but its current schedule places
+the stable release on **2026-11-24**, after this assessment date. A development package or
+planned milestone is not released stable API support. The nine existing compiler-API
+consumers therefore remain behind the pinned TypeScript 6.0.3 compatibility boundary.
+
+TypeScript 7.0.2 publishes 20 native platform packages. This repository's release contract
+continues to approve Linux x64 only; the comparison checks the resolved native binary and
+version and rejects unapproved runners. Package availability for other operating systems
+and architectures is not CI or release evidence for those platforms.
+
+## Published ecosystem metadata
+
+The following is a read-only check of the current lockfile and published npm package
+metadata on 2026-10-14. “Latest” means the registry's stable `latest` tag. A missing
+TypeScript peer range means only that the package does not declare one; it is not an
+upstream TypeScript 7 compatibility statement.
+
+| Tool | Workspace-resolved version | Latest stable published version | Published compatibility relevant to TypeScript 7 |
+| --- | ---: | ---: | --- |
+| `typescript` / `typescript-native` | 6.0.3 / 7.0.2 | 7.0.2 | Root `typescript` package exports version metadata and `unstable/*` API entry points only. Keep the candidate under its explicit alias. |
+| `@typescript/typescript6` | Not used; repository API boundary pins `typescript@6.0.3` | 6.0.2 | Microsoft's side-by-side compatibility package is older than the repository's exact API pin; do not silently replace or downgrade the current boundary. |
+| TypeDoc | 0.28.20 | 0.28.20 | Its published TypeScript peer range ends at `6.0.x`; this remains a direct blocker to making TypeScript 7 the compiler seen by TypeDoc. |
+| `typedoc-plugin-markdown` | 4.13.0 | 4.14.0 | Both declare TypeDoc `0.28.x`; the plugin release notes tie its compatibility to TypeDoc releases. Neither declares a TypeScript 7 support path. |
+| `typedoc-plugin-coverage` | 4.0.3 | 4.0.3 | Declares TypeDoc `0.28.x`; it must be qualified alongside TypeDoc, not treated as independently supporting TypeScript 7. |
+| Orval | 8.40.0 | 8.42.0 | Latest published metadata declares TypeDoc `^0.28.19` and markdown plugin peers, but no direct TypeScript peer. Updating Orval alone does not remove TypeDoc's TypeScript 6 ceiling. |
+| Vite | 8.3.2 | 8.3.4 | No TypeScript peer declaration. Existing config-loader/build smokes remain the meaningful repository evidence. |
+| Vitest | 5.0.3 | 5.0.4 | No TypeScript peer declaration; its Vite peer range includes Vite 8. This does not qualify compiler-API consumers. |
+| `tsx` | 4.23.13 / 4.23.15 | 4.23.15 | No TypeScript peer declaration; it depends on esbuild. Existing script execution does not establish a TypeScript 7 API contract. |
+| Drizzle Kit / Drizzle ORM | 0.31.11 / 0.45.3 | 0.31.11 / 0.45.4 | Neither declares a direct TypeScript compiler peer. Prior declaration output differences remain relevant and still need exact comparison; absence of a peer is not declaration-equivalence evidence. |
+
+The TypeDoc compatibility check remains intentionally strict: `@workspace/api-spec` pins
+TypeScript 6.0.3 for TypeDoc, checks the resolved TypeDoc/plugin versions and peer metadata,
+and runs a disposable documentation smoke. The separate TypeScript 7 codegen bridge keeps
+that toolchain isolated while checking candidate-generated API declarations. The newer
+Orval and markdown-plugin stable releases do not change this boundary.
+
+## Repository state and existing coverage
+
+The active pins remain `typescript: ~6.0.3` and `typescript-native: npm:typescript@7.0.2`.
+The root typecheck and JavaScript API consumers continue to use the explicit TypeScript 6
+binary/package. The editor SDK remains `node_modules/typescript/lib`; its smoke checks the
+live language-server child, an expected diagnostic, and cross-file definition navigation.
+The smoke is invoked by the separate promotion attempt, not by the advisory comparison.
+
+The existing advisory comparison already covers:
+
+- A frozen disposable install and explicit version checks for both compiler binaries.
+- A forced root project-reference build under TypeScript 6 and TypeScript 7, with declarations
+  captured from clean disposable outputs.
+- Cold and warm comparison for the root build and six `--noEmit` projects: scripts, API
+  server, run calculator, mockup sandbox, AI evaluation, and corpus harness.
+- The `recipe-guide-import` prerequisite build under each compiler before the application
+  no-emit checks.
+- Normalized diagnostic comparison, declaration file/path/hash manifests, timing and peak
+  RSS measurements, runner/native package identity, and bounded historical trend checks.
+- A candidate declaration build for the generated API client and Zod packages. The separate
+  CI codegen bridge also performs a strict frozen install, TypeDoc/plugin smoke, generated
+  API freshness check, and TypeScript 7 declaration build in a disposable checkout.
+
+The comparison's fixed resource contract requires cold and warm measurements, at least
+three distinct compatible revisions for promotion, and approved limits of 1.25 for elapsed
+time and peak-RSS ratios, 60,000 ms candidate elapsed time, and 1,048,576 KiB candidate
+peak RSS. Approval of these thresholds is not proof that current revision-bound history
+meets them. Standard and full release modes run the comparison as advisory; a separate
+promotion mode adds the live TypeScript 6 editor proof and requires the comparison's
+diagnostic, declaration, resource, and evidence gates.
+
+Two previously recorded harness defects are resolved in the current source:
+
+- The measurement command now builds `lib/recipe-guide-import` for each compiler before
+  checking the run calculator; the reproduction and focused test assert the prerequisite
+  ordering.
+- Both comparison and reproduction include `.d.ts`, `.d.mts`, and `.d.cts` declarations;
+  the focused test asserts the same extension set.
+
+The focused current harness test passed on 2026-10-14:
+
+```text
+pnpm --filter @workspace/scripts exec tsx --test ./src/compare-typescript-7.test.mts
+23 tests passed
+```
+
+This tests the comparison contracts; it does not run a new compiler comparison or produce
+release evidence. At task start, the worktree already contained edits to
+`release-evidence/typescript-7-comparison.json` and `scripts/src/release-check.mts` as well
+as unrelated application/test edits. The comparison artifact identified its source with a
+`test-sha256:` value rather than a commit revision. It is not fresh, independently
+revision-bound promotion evidence, and it was not used or regenerated for this assessment.
+The checked-in promotion checkpoint remains an incomplete checkpoint for an older revision;
+it is not a current promotion result. The historical 2026-09-16 clean reproduction remains
+useful evidence for that assessed tree only, not for today's worktree.
+
+The prior B3/B4 implementation gaps are therefore marked **resolved in source and focused
+tests**, but the latest reproducible current-revision declaration comparison and clean
+revision-bound evidence are **not established by this research task**. The stable TypeScript
+7 API and TypeDoc peer blockers remain. The editor proof, compatible revision history, and
+full promotion decision also remain separate gates; none is inferred from this report.
+
+## Incremental options considered
+
+| Option | Additional coverage beyond the current lane | Compatibility and trust boundary | CI, editor, declarations, platform, evidence, and rollback |
+| --- | --- | --- | --- |
+| Keep the existing advisory matrix and TypeDoc bridge (**recommended**) | None added; it already compares the root build and six project checks, generated declarations, and toolchain bridge. | Preserves TypeScript 6 as authority and keeps all nine compiler-API consumers on its explicit boundary. TypeDoc continues to use its declared supported compiler. | Retains existing cold/warm, declaration, native-runner, and evidence checks. Editor remains TypeScript 6. Roll back only by removing the isolated candidate lane and alias; production build and editor remain unchanged. |
+| Add another TypeScript 7 CI lane for the same six projects or generated API declarations | No meaningful new checks; it duplicates the current comparison or codegen bridge. | Risks giving a duplicate check a different status or trusting a narrower pass without the TypeScript 6 pair. | Adds CI time and maintenance without reducing declaration/API risk. It creates another result to bind to source revisions and runner identity. Rollback means removing the duplicate job. |
+| Expand the comparison to every standalone package or add another native-only spot check | Some package-specific granularity, but the existing project-reference build already covers the 35-library graph and the no-emit matrix covers the major apps/scripts. No uncovered failure mode was identified in this research. | Could expose package-specific effects, but would not resolve unstable API consumers or TypeDoc's unsupported peer range. | Adds substantial repeated work and new timing/RSS history requirements; expands the native-package runner evidence surface. Any future expansion should name a demonstrated gap first and retain the same containment and report checks. |
+| Use TypeScript 7.1 development builds for compiler APIs or the editor | Potential early feedback only; the current CLI lane does not validate TypeScript 7.1's changed API or language service. | Development-build API stability and downstream support are unproven. Moving compiler-API users or editor SDK would create a separate trust boundary, not an incremental production improvement. | Requires new API consumer tests, editor diagnostics/navigation proof, toolchain compatibility, and candidate output review. Revert the experimental package/SDK together; do not mix it into normal builds. |
+| Promote the TypeScript 7 CLI or editor now | No meaningful coverage beyond the existing matrix. | Unacceptable: stable API guidance and TypeDoc peer support are missing, and current evidence is not a clean current-revision promotion result. | Would cross package, generated declaration, native platform, editor, and release-evidence gates. Not authorized by a successful CLI comparison; rollback would require restoring package and lockfile together and returning the editor to TypeScript 6. |
+
+## Recommendation and next decision point
+
+**Do not add another TypeScript 7 check or change compiler authority now.** The current
+advisory lane already gives the useful incremental CLI coverage, and the CI bridge protects
+the one TypeScript 6-only code-generation toolchain. A second partial check would duplicate
+that coverage without resolving the actual blockers.
+
+Reassess the next adoption step only after both upstream conditions are published:
+
+1. Microsoft releases TypeScript 7.1 stable with stable API documentation and package exports
+   for the operations required by the nine current consumers; and
+2. TypeDoc publishes a TypeScript 7 peer range, with compatible plugin and Orval metadata
+   that permits a frozen strict-peer install without overrides or silenced warnings.
+
+At that point, the bounded next step is a new disposable comparison against the exact stable
+TypeScript 7.1 version. Before any promotion proposal, require: the full existing project and
+generated-code matrices; consumer-by-consumer API tests or explicit TypeScript 6 isolation;
+clean TypeDoc/plugin/Orval installation and smokes; exact declaration manifests and reviewed
+semantic differences; supported-runner native installation; current compatible cold/warm
+history; and the live editor SDK proof. Keep all normal builds and editor settings on
+TypeScript 6 until a separate promotion decision passes the complete repository gates.
+
+If any new candidate diagnostics, unexplained declaration differences, peer/install errors,
+unsupported runner, resource regression, editor failure, stale evidence, or unrelated release
+gate failure appears, keep or restore the isolated advisory state. Do not use this research
+or a single successful CLI run as promotion approval.
+
+## Sources and method
+
+Official TypeScript status:
+
+- [TypeScript releases](https://github.com/microsoft/TypeScript/releases) — stable release
+  list and the 2026-08-20 TypeScript 7.0.2 release.
+- [Announcing TypeScript 7.0](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+  — native compiler, package/API arrangement, and side-by-side TypeScript 6 guidance.
+- [Using the Compiler API](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+  — current API-version warning, edited 2026-08-17.
+- [TypeScript 7.1 iteration plan](https://github.com/microsoft/TypeScript/issues/63703)
+  — API stabilization work and scheduled 2026-11-24 stable release; a plan is not a release.
+- [TypeScript npm metadata](https://www.npmjs.com/package/typescript) — `latest` 7.0.2 and
+  `next` development version at the time of the registry check.
+
+Published package metadata:
+
+- [`typedoc@0.28.20`](https://www.npmjs.com/package/typedoc/v/0.28.20) and
+  [`typedoc-plugin-markdown@4.14.0`](https://www.npmjs.com/package/typedoc-plugin-markdown/v/4.14.0)
+  — TypeScript and TypeDoc peer metadata.
+- [`typedoc-plugin-coverage@4.0.3`](https://www.npmjs.com/package/typedoc-plugin-coverage/v/4.0.3)
+  and [`orval@8.42.0`](https://www.npmjs.com/package/orval/v/8.42.0) — coupled plugin and
+  generator peer metadata.
+- [`@typescript/typescript6`](https://www.npmjs.com/package/@typescript/typescript6) —
+  current compatibility package version.
+- [`vite@8.3.4`](https://www.npmjs.com/package/vite/v/8.3.4),
+  [`vitest@5.0.4`](https://www.npmjs.com/package/vitest/v/5.0.4),
+  [`tsx@4.23.15`](https://www.npmjs.com/package/tsx/v/4.23.15),
+  [`drizzle-kit@0.31.11`](https://www.npmjs.com/package/drizzle-kit/v/0.31.11), and
+  [`drizzle-orm@0.45.4`](https://www.npmjs.com/package/drizzle-orm/v/0.45.4) — published peer
+  and dependency metadata for the materially relevant surrounding toolchain.
+
+Repository evidence reviewed read-only:
+
+- Root compiler pins, lockfile, TypeScript API boundary, TypeDoc toolchain check, and editor
+  SDK setting.
+- `scripts/src/compare-typescript-7.mts`, its resource/native contracts, focused tests,
+  release-check wiring, and CI workflows.
+- `lib/api-spec/check-typescript-7-bridge.sh` and the historical migration report/checkpoint.
+
+No compiler comparison, retained evidence refresh, dependency or lockfile change, CI change,
+editor change, or promotion attempt was made for this reassessment. The only task change is
+this dated report section.
