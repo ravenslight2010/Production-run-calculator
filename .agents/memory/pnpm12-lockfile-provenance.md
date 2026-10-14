@@ -14,3 +14,9 @@ Lockfile-only dependency refreshes can also normalize optional peer bindings and
 **Why:** Optional peer contexts are part of pnpm's lockfile graph, so restoring isolated importer references without their snapshot can create a graph that appears tidy but is not reproducible.
 
 **How to apply:** After a narrow dependency refresh, review lockfile changes for unrelated package-version movement. If only optional peer bindings/snapshots were normalized, preserve the resolver's complete graph and confirm it with `pnpm install --frozen-lockfile`.
+
+An `add` or targeted upgrade can also advance an unrelated compatible transitive package while regenerating the lockfile. For strict single-dependency work, compare package versions and snapshot edges against the starting lockfile, restore unrelated resolutions, and prove the result with a frozen install.
+
+**Why:** A successful install can still introduce unrelated version movement (for example, a previously locked `lru-cache` resolution), even when the package manifest diff is limited to one dependency.
+
+**How to apply:** Inspect the full lockfile diff after every focused package-manager update; do not infer a narrow resolution from the narrow manifest edit.
