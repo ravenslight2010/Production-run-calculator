@@ -1,0 +1,57 @@
+{
+  "format": "workbook-import-audit-stage-counts",
+  "formatVersion": 2,
+  "source": {
+    "manifestSha256": "3f02a637c59555d0c124f1f879a8eb73890d254b2e0a12a4c0678b289ac1730d",
+    "baseRevision": "72003f03922adc7791e1ca9c61ceda1df81da604",
+    "workingTreeFingerprintSha256": "0a0a9ae5103cff0c56c60cf2387a82dc641cbcd060c35d65e4e61f3b3cf2c4fb"
+  },
+  "inputs": {
+    "filenames": 89,
+    "uniqueContents": 55,
+    "importerHashRuns": 56,
+    "uniqueAiContents": 50
+  },
+  "deterministicPreparationByRun": {
+    "NEEDS_AI": 51,
+    "COMPLETE_DETERMINISTIC": 4,
+    "PARTIAL_WITH_ERRORS": 1
+  },
+  "preparationByFilename": {
+    "NEEDS_AI": 84,
+    "COMPLETE_DETERMINISTIC": 4,
+    "PARTIAL_WITH_ERRORS": 1
+  },
+  "realAiByDistinctContent": {
+    "AI_PARSED_REVIEW_REQUIRED": 20,
+    "AI_PARTIAL_REVIEW_REQUIRED": 5,
+    "AI_PROVIDER_FAILURE": 25
+  },
+  "parserEndpointPostsObserved": 53,
+  "providerErrorResponses": {
+    "HTTP_502": 27
+  },
+  "browser": {
+    "chromiumCases": 3,
+    "webkitCases": 3,
+    "viewportSizes": [
+      {
+        "width": 1440,
+        "height": 900
+      },
+      {
+        "width": 390,
+        "height": 844
+      },
+      {
+        "width": 768,
+        "height": 1024
+      },
+      {
+        "width": 1024,
+        "height": 768
+      }
+    ],
+    "realMauroProviderJourney": "Chromium only; canceled without apply"
+  }
+}
