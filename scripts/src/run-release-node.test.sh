@@ -279,6 +279,132 @@ test_release_runner_lock_history_viewer_rejects_broad_history_permissions_withou
   echo "PASS: lock-history viewer rejects broad file permissions without exposing or changing history"
 }
 
+point_history_viewer_at_test_directory() {
+  local workspace="$1"
+  local viewer="${workspace}/scripts/src/show-release-lock-history.sh"
+
+  sed -i "s|^lock_dir=.*\$|lock_dir=\"\${TEST_LOCK_DIR}\"|" "$viewer"
+}
+
+test_release_runner_lock_history_viewer_rejects_symlinked_history_directory_without_reading_or_modifying_target() {
+  local workspace
+  local original_history_file
+  local history_name
+  local history_dir
+  local target_dir
+  local target_file
+  local before_hash
+  local after_hash
+  local before_link
+  local after_link
+  local before_dir_mode
+  local after_dir_mode
+  local before_file_mode
+  local after_file_mode
+  local output
+  local status=0
+  workspace=$(make_workspace lock-history-viewer-symlink-directory)
+  original_history_file=$(lock_history_path "$workspace")
+  history_name=$(basename "$original_history_file")
+  history_dir="${workspace}/lock-history-path"
+  target_dir="${workspace}/lock-history-target"
+  target_file="${target_dir}/${history_name}"
+  mkdir -m 700 -- "$target_dir"
+  printf '%s\n' \
+    '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":8,"outcome":"acquired","owner_pid":"123","owner_started_at":"2026-01-01T00:00:00Z","command":"LOCAL_SYMLINK_DIRECTORY_SENTINEL"}' \
+    >"$target_file"
+  chmod 600 -- "$target_file"
+  before_hash=$(sha256sum "$target_file")
+  before_dir_mode=$(stat -c '%a' -- "$target_dir")
+  before_file_mode=$(stat -c '%a' -- "$target_file")
+  ln -s -- "$target_dir" "$history_dir"
+  before_link=$(readlink -- "$history_dir")
+  point_history_viewer_at_test_directory "$workspace"
+
+  output=$(TEST_LOCK_DIR="$history_dir" \
+    bash "${workspace}/scripts/src/show-release-lock-history.sh" 2>&1) || status=$?
+  [[ "$status" -eq 1 ]] || {
+    printf 'Expected symlinked history directory rejection, got status %s.\n' \
+      "$status" >&2
+    return 1
+  }
+  [[ "$output" == *"its private directory is unavailable."* ]] || {
+    printf 'Symlinked history directory was not rejected with the expected diagnostic.\n' >&2
+    return 1
+  }
+  assert_not_contains "$output" "LOCAL_SYMLINK_DIRECTORY_SENTINEL"
+
+  after_hash=$(sha256sum "$target_file")
+  after_link=$(readlink -- "$history_dir")
+  after_dir_mode=$(stat -c '%a' -- "$target_dir")
+  after_file_mode=$(stat -c '%a' -- "$target_file")
+  [[ -L "$history_dir" && "$before_link" == "$after_link" &&
+    "$before_hash" == "$after_hash" &&
+    "$before_dir_mode" == "$after_dir_mode" &&
+    "$before_file_mode" == "$after_file_mode" ]] || {
+    printf 'Viewer changed the symlinked history directory or its target.\n' >&2
+    return 1
+  }
+  rm -f -- "$history_dir"
+  echo "PASS: lock-history viewer rejects symlinked history directories without exposing or changing their targets"
+}
+
+test_release_runner_lock_history_viewer_rejects_broad_history_directory_permissions_without_reading_or_modifying_contents() {
+  local workspace
+  local original_history_file
+  local history_name
+  local history_file
+  local history_dir
+  local before_hash
+  local after_hash
+  local before_dir_mode
+  local after_dir_mode
+  local before_file_mode
+  local after_file_mode
+  local output
+  local status=0
+  workspace=$(make_workspace lock-history-viewer-broad-directory-permissions)
+  original_history_file=$(lock_history_path "$workspace")
+  history_name=$(basename "$original_history_file")
+  history_dir="${workspace}/private-lock-history"
+  history_file="${history_dir}/${history_name}"
+  mkdir -m 700 -- "$history_dir"
+  printf '%s\n' \
+    '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":8,"outcome":"acquired","owner_pid":"123","owner_started_at":"2026-01-01T00:00:00Z","command":"LOCAL_BROAD_DIRECTORY_PERMISSION_SENTINEL"}' \
+    >"$history_file"
+  chmod 600 -- "$history_file"
+  chmod 755 -- "$history_dir"
+  before_hash=$(sha256sum "$history_file")
+  before_dir_mode=$(stat -c '%a' -- "$history_dir")
+  before_file_mode=$(stat -c '%a' -- "$history_file")
+  point_history_viewer_at_test_directory "$workspace"
+
+  output=$(TEST_LOCK_DIR="$history_dir" \
+    bash "${workspace}/scripts/src/show-release-lock-history.sh" 2>&1) || status=$?
+  [[ "$status" -eq 1 ]] || {
+    printf 'Expected broadly permissioned history directory rejection, got status %s.\n' \
+      "$status" >&2
+    return 1
+  }
+  [[ "$output" == *"its private directory is unavailable."* ]] || {
+    printf 'Broadly permissioned history directory was not rejected with the expected diagnostic.\n' >&2
+    return 1
+  }
+  assert_not_contains "$output" "LOCAL_BROAD_DIRECTORY_PERMISSION_SENTINEL"
+
+  after_hash=$(sha256sum "$history_file")
+  after_dir_mode=$(stat -c '%a' -- "$history_dir")
+  after_file_mode=$(stat -c '%a' -- "$history_file")
+  [[ -d "$history_dir" && ! -L "$history_dir" &&
+    "$before_hash" == "$after_hash" &&
+    "$before_dir_mode" == "$after_dir_mode" &&
+    "$before_file_mode" == "$after_file_mode" ]] || {
+    printf 'Viewer changed the broadly permissioned history directory or its contents.\n' >&2
+    return 1
+  }
+  echo "PASS: lock-history viewer rejects broad directory permissions without exposing or changing history"
+}
+
 write_node() {
   local node_path="$1"
   local node_version="$2"
@@ -2915,6 +3041,8 @@ test_release_runner_lock_history_viewer_handles_missing_and_malformed_history
 test_release_runner_lock_history_viewer_shows_only_recent_safe_fields
 test_release_runner_lock_history_viewer_rejects_symlinked_history_without_reading_or_modifying_target
 test_release_runner_lock_history_viewer_rejects_broad_history_permissions_without_reading_or_modifying_file
+test_release_runner_lock_history_viewer_rejects_symlinked_history_directory_without_reading_or_modifying_target
+test_release_runner_lock_history_viewer_rejects_broad_history_directory_permissions_without_reading_or_modifying_contents
 test_release_runner_lock_wait_interruption_is_recorded
 test_release_runner_nested_invocation_reuses_lock
 test_release_runner_preserves_child_status
