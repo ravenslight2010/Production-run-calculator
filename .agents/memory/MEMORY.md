@@ -126,6 +126,7 @@
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Release proof](production-evidence-revision-binding.md) + [CI](ci-pinned-evidence.md) + [retry](release-finalization-retry.md) + [local toolchains](local-postgres-socket-dir.md) — bind evidence to revision and preserve reliable local verification.
 - [TypeScript source-bundle hashing](typescript-source-bundle-hashing.md) — bind compact comparison evidence to its source-bundle hash and verify again before upload.
+- [ARM64 toolchain](local-arm64-toolchain.md) — preserve native Node and ShellCheck setup for local verification.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
 - [Readiness and DB setup](readiness-evidence.md) + [WebKit lane](webkit-compatibility-lane-boundary.md) + [DB](release-db-readiness.md) + [startup](disposable-database-test-startup.md) + [migrations](replit-custom-migrations.md) — bind readiness, DB initialization, and triggers to the right runtime.

@@ -318,6 +318,19 @@ async function makeStrictAuditFixture({
       },
     },
     {
+      directory: "lib/db",
+      name: "@workspace/db",
+      manifest: {
+        dependencies: { "db-runtime-tool": "1.0.0" },
+        devDependencies: { "db-build-tool": "1.0.0" },
+      },
+    },
+    {
+      directory: "lib/api-zod",
+      name: "@workspace/api-zod",
+      dependencies: { zod: "1.0.0" },
+    },
+    {
       directory: "lib/api-client-react",
       name: "@workspace/api-client-react",
       manifest: {
@@ -466,7 +479,7 @@ test("reports undeclared external imports but excludes declared and workspace-ow
   ]);
 });
 
-test("strict mode catches API imports available only from root or sibling installs", async () => {
+test("strict mode catches root- and sibling-only imports in selected packages and excludes non-dependencies", async () => {
   const rootPath = await makeStrictAuditFixture({
     calculatorDependencies: { react: "1.0.0" },
     mockupDependencies: { vite: "1.0.0" },
@@ -474,19 +487,37 @@ test("strict mode catches API imports available only from root or sibling instal
   const originalWarn = console.warn;
   const warnings = [];
   try {
-    const apiServerPath = join(rootPath, "artifacts/api-server");
-    const apiClientPath = join(rootPath, "lib/api-client-react");
-    await writeFile(
-      join(apiServerPath, "src/main.js"),
-      [
-        sourceImport("root-hoisted-api-package"),
-        sourceImport("sibling-hoisted-api-package"),
-      ].join("\n"),
-    );
-    await writeFile(
-      join(apiClientPath, "src/main.js"),
-      sourceImport("root-hoisted-client-package"),
-    );
+    const selectedPackageImports = [
+      {
+        directory: "artifacts/api-server",
+        imports: ["root-hoisted-api-package", "sibling-hoisted-api-package"],
+      },
+      {
+        directory: "lib/api-client-react",
+        imports: ["root-hoisted-client-package"],
+      },
+      {
+        directory: "lib/db",
+        imports: ["root-hoisted-db-package", "sibling-hoisted-db-package"],
+      },
+      {
+        directory: "lib/api-zod",
+        imports: ["root-hoisted-zod-package"],
+      },
+    ];
+    const excludedImports = [
+      "node:fs",
+      "fs/promises",
+      "@/local-alias",
+      "@workspace/fixture-package",
+    ];
+    for (const { directory, imports } of selectedPackageImports) {
+      const sourcePath = join(rootPath, directory, "src/main.js");
+      const source = [...imports, ...excludedImports]
+        .map(sourceImport)
+        .join("\n");
+      await writeFile(sourcePath, source);
+    }
 
     await writeFile(
       join(rootPath, "package.json"),
@@ -495,6 +526,8 @@ test("strict mode catches API imports available only from root or sibling instal
         dependencies: {
           "root-hoisted-api-package": "1.0.0",
           "root-hoisted-client-package": "1.0.0",
+          "root-hoisted-db-package": "1.0.0",
+          "root-hoisted-zod-package": "1.0.0",
         },
         scripts: {},
       }),
@@ -505,18 +538,27 @@ test("strict mode catches API imports available only from root or sibling instal
       join(siblingPath, "package.json"),
       JSON.stringify({
         name: "@workspace/neighbor-app",
-        dependencies: { "sibling-hoisted-api-package": "1.0.0" },
+        dependencies: {
+          "sibling-hoisted-api-package": "1.0.0",
+          "sibling-hoisted-db-package": "1.0.0",
+        },
         scripts: {},
       }),
     );
     await writeFile(
       join(siblingPath, "src/main.js"),
-      sourceImport("sibling-hoisted-api-package"),
+      [
+        sourceImport("sibling-hoisted-api-package"),
+        sourceImport("sibling-hoisted-db-package"),
+      ].join("\n"),
     );
     for (const packageName of [
       "root-hoisted-api-package",
       "sibling-hoisted-api-package",
       "root-hoisted-client-package",
+      "root-hoisted-db-package",
+      "sibling-hoisted-db-package",
+      "root-hoisted-zod-package",
     ]) {
       const installedPath = join(rootPath, "node_modules", packageName);
       await mkdir(installedPath, { recursive: true });
@@ -526,15 +568,13 @@ test("strict mode catches API imports available only from root or sibling instal
       );
     }
 
-    const apiServerResult = await auditPackage(apiServerPath);
-    assert.deepEqual(apiServerResult.undeclaredImports, [
-      { name: "root-hoisted-api-package", path: "src/main.js" },
-      { name: "sibling-hoisted-api-package", path: "src/main.js" },
-    ]);
-    const apiClientResult = await auditPackage(apiClientPath);
-    assert.deepEqual(apiClientResult.undeclaredImports, [
-      { name: "root-hoisted-client-package", path: "src/main.js" },
-    ]);
+    for (const { directory, imports } of selectedPackageImports) {
+      const result = await auditPackage(join(rootPath, directory));
+      assert.deepEqual(
+        result.undeclaredImports,
+        imports.map((name) => ({ name, path: "src/main.js" })),
+      );
+    }
 
     console.warn = (...args) => warnings.push(args.join(" "));
     assert.equal(await main(rootPath), 0);
@@ -567,4 +607,20 @@ test("strict mode catches API imports available only from root or sibling instal
   assert.ok(
     warnings.some((warning) => warning.includes("root-hoisted-client-package")),
   );
+  for (const packageName of ["@workspace/db", "@workspace/api-zod"]) {
+    assert.ok(
+      warnings.some((warning) =>
+        warning.includes(
+          `${packageName}: external package imports not declared by this package (strict check failed)`,
+        ),
+      ),
+    );
+  }
+  for (const packageName of [
+    "root-hoisted-db-package",
+    "sibling-hoisted-db-package",
+    "root-hoisted-zod-package",
+  ]) {
+    assert.ok(warnings.some((warning) => warning.includes(packageName)));
+  }
 });

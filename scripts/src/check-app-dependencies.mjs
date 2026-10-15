@@ -10,6 +10,8 @@ const WORKSPACE_PACKAGE_ROOTS = ["artifacts", "lib"];
 const STRICT_PACKAGE_NAMES = new Set([
   "@workspace/api-client-react",
   "@workspace/api-server",
+  "@workspace/api-zod",
+  "@workspace/db",
   "@workspace/run-calculator",
   "@workspace/mockup-sandbox",
 ]);
