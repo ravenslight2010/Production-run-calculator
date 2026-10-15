@@ -6,6 +6,7 @@ const FORBIDDEN_EAGER_SOURCE = [
   /(^|\/)src\/(?:utils\/runExcel|specImport|specExport|premixImport|shippingImport|recipeGuideImport|cheeseImport)\.[cm]?[jt]sx?$/,
   /(^|\/)src\/components\/(?:Excel|Spec|Premix|Shipping|RecipeGuide|Cheese)ImportDialog\.[cm]?[jt]sx?$/,
   /(^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?xlsx\//,
+  /(^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?heic2any\//,
 ];
 
 const REQUIRED_DEFERRED_SOURCE = [
@@ -23,6 +24,7 @@ const REQUIRED_DEFERRED_SOURCE = [
   /(^|\/)src\/components\/ShippingImportDialog\.tsx$/,
   /(^|\/)src\/components\/RecipeGuideImportDialog\.tsx$/,
   /(^|\/)src\/components\/CheeseImportDialog\.tsx$/,
+  /(^|\/)node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?heic2any\/.*heic2any\.[cm]?js$/,
 ];
 
 function normalize(value) {
@@ -56,7 +58,7 @@ export function checkWorkbookBoundary(manifest) {
   );
   if (leaked.length > 0) {
     throw new Error(
-      `Workbook feature modules re-entered the opening application graph:\n${leaked
+      `Deferred feature modules re-entered the opening application graph:\n${leaked
         .map((source) => `- ${source}`)
         .join("\n")}`,
     );

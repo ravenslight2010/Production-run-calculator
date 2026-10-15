@@ -7,7 +7,15 @@ import OperationalReportPanel from "./OperationalReportPanel";
 import type { SummaryRunInput } from "../aiSummary";
 import { useMe } from "../useRole";
 
+const { downloadWorkbookMock } = vi.hoisted(() => ({
+  downloadWorkbookMock: vi.fn(),
+}));
+
 vi.mock("../useRole", () => ({ useMe: vi.fn() }));
+vi.mock("../reportShare", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../reportShare")>(),
+  downloadOperationalReportWorkbook: downloadWorkbookMock,
+}));
 const report: OperationalReport = {
   scope: "day",
   date: "2026-09-04",
@@ -54,6 +62,7 @@ const healthyProofKeyHealth = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  downloadWorkbookMock.mockReset();
 });
 
 function renderPanel(runs: SummaryRunInput[] = []) {
@@ -109,6 +118,19 @@ describe("OperationalReportPanel", () => {
     expect(screen.getByText("Stoppages")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toMatch(/authoritative and deterministic/i);
     expect(screen.getByText(/authoritative source values/i)).toBeTruthy();
+
+    downloadWorkbookMock.mockResolvedValue(undefined);
+    await userEvent.click(screen.getByRole("button", { name: "Excel" }));
+    expect(downloadWorkbookMock).toHaveBeenCalledWith(
+      report,
+      "operational-day-2026-09-04.xlsx",
+    );
+
+    downloadWorkbookMock.mockRejectedValueOnce(new Error("workbook chunk unavailable"));
+    await userEvent.click(screen.getByRole("button", { name: "Excel" }));
+    expect(await screen.findByText(
+      "Could not generate the XLSX report. Check your connection and try again.",
+    )).toBeTruthy();
   });
 
   it("renders a clearly labeled local/offline aggregate when the report request fails", async () => {
