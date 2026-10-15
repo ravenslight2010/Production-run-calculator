@@ -5,11 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-
-export const APP_ARTIFACTS = [
-  "artifacts/run-calculator",
-  "artifacts/mockup-sandbox",
-];
+const WORKSPACE_PACKAGE_ROOTS = ["artifacts", "lib"];
 
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
@@ -22,8 +18,13 @@ const SOURCE_EXTENSIONS = new Set([
   ".mjs",
   ".mts",
   ".scss",
+  ".sh",
   ".ts",
   ".tsx",
+  ".toml",
+  ".py",
+  ".yaml",
+  ".yml",
 ]);
 
 const IGNORED_DIRECTORIES = new Set([
@@ -121,6 +122,7 @@ function isConfigurationFile(path) {
   const name = basename(path);
   return (
     name.includes(".config.") ||
+    /(?:^|[-.])toolchain(?:[-.]|$)/i.test(name) ||
     /^(?:vite|vitest|playwright|postcss|tailwind|eslint|prettier|babel|webpack|rollup|jest)\./i.test(
       name,
     )
@@ -150,16 +152,19 @@ function addTypeConfigUsage(path, source, dependencies, used) {
 
 function addScriptUsage(scripts, binPackages, dependencies, used) {
   const scriptText = Object.values(scripts ?? {}).join("\n");
+  collectBinaryUsage(scriptText, binPackages, dependencies, used);
+  collectImports(scriptText, dependencies, used);
+}
+
+function collectBinaryUsage(source, binPackages, dependencies, used) {
   for (const [binName, packages] of binPackages) {
     const escaped = binName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "m").test(scriptText)) {
+    if (new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "m").test(source)) {
       for (const packageName of packages) {
         if (dependencies.has(packageName)) used.add(packageName);
       }
     }
   }
-
-  collectImports(scriptText, dependencies, used);
 }
 
 function collectImports(source, dependencies, used) {
@@ -210,6 +215,28 @@ function collectConfigurationStringReferences(path, source, dependencies, used) 
     if (new RegExp(`(?:^|[^\\w@/-])${escaped}(?=$|[^\\w@/-])`).test(source)) {
       used.add(packageName);
     }
+  }
+}
+
+function collectPackageResolutionReferences(source, dependencies, used) {
+  const resolutionCall =
+    /\b(?:packageInfo|require\.resolve|import\.meta\.resolve|(?:vi|jest)\.mock)\s*\(\s*["']([^"']+)["']/g;
+  for (const match of source.matchAll(resolutionCall)) {
+    const resolvedPackage = packageNameFromSpecifier(match[1]);
+    if (resolvedPackage && dependencies.has(resolvedPackage)) {
+      used.add(resolvedPackage);
+    }
+  }
+}
+
+function collectWorkspaceFilterReferences(source, dependencies, used) {
+  for (const packageName of dependencies) {
+    if (!packageName.startsWith("@workspace/")) continue;
+    const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const filterReference = new RegExp(
+      `(?:--filter\\s+|["']--filter["']\\s*,\\s*["'])${escaped}(?=$|[^\\w.-])`,
+    );
+    if (filterReference.test(source)) used.add(packageName);
   }
 }
 
@@ -284,6 +311,7 @@ export function auditDependencyUsage({
 
   for (const file of files) {
     collectImports(file.content, dependencies, used);
+    collectBinaryUsage(file.content, binPackages, dependencies, used);
     addTypeConfigUsage(file.path, file.content, dependencies, used);
     collectCssPluginReferences(file.path, file.content, dependencies, used);
     collectConfigurationStringReferences(
@@ -292,6 +320,8 @@ export function auditDependencyUsage({
       dependencies,
       used,
     );
+    collectPackageResolutionReferences(file.content, dependencies, used);
+    collectWorkspaceFilterReferences(file.content, dependencies, used);
   }
 
   collectPeerDependencyUsage(used, peerPackages, dependencies);
@@ -301,7 +331,7 @@ export function auditDependencyUsage({
     .sort((left, right) => left.localeCompare(right));
 }
 
-export async function auditArtifact(artifactPath) {
+export async function auditPackage(artifactPath) {
   const manifest = JSON.parse(
     await readFile(join(artifactPath, "package.json"), "utf8"),
   );
@@ -323,7 +353,7 @@ export async function auditArtifact(artifactPath) {
   );
 
   return {
-    artifact: manifest.name,
+    packageName: manifest.name,
     unused: auditDependencyUsage({
       manifest,
       files,
@@ -333,17 +363,63 @@ export async function auditArtifact(artifactPath) {
   };
 }
 
-export async function main(rootPath = ROOT) {
-  const results = await Promise.all(
-    APP_ARTIFACTS.map((artifact) => auditArtifact(join(rootPath, artifact))),
+async function packageDirectoriesUnder(rootPath, parentDirectory) {
+  const parentPath = join(rootPath, parentDirectory);
+  let entries;
+  try {
+    entries = await readdir(parentPath, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+
+  const directories = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const packagePath = join(parentPath, entry.name);
+    try {
+      await readFile(join(packagePath, "package.json"), "utf8");
+      directories.push(packagePath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return directories;
+}
+
+export async function discoverWorkspacePackages(rootPath = ROOT) {
+  const packagePaths = [];
+  for (const packageRoot of WORKSPACE_PACKAGE_ROOTS) {
+    packagePaths.push(...(await packageDirectoriesUnder(rootPath, packageRoot)));
+  }
+  packagePaths.push(
+    ...(await packageDirectoriesUnder(rootPath, "lib/integrations")),
   );
+
+  const scriptsPath = join(rootPath, "scripts");
+  try {
+    await readFile(join(scriptsPath, "package.json"), "utf8");
+    packagePaths.push(scriptsPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  return packagePaths.sort((left, right) => left.localeCompare(right));
+}
+
+export async function main(rootPath = ROOT) {
+  const packagePaths = await discoverWorkspacePackages(rootPath);
+  const results = await Promise.all(
+    packagePaths.map((packagePath) => auditPackage(packagePath)),
+  );
+  console.log(`Audited ${results.length} first-party workspace packages.`);
   for (const result of results) {
     if (result.unused.length === 0) {
-      console.log(`${result.artifact}: all direct dependencies are referenced.`);
+      console.log(`${result.packageName}: all direct dependencies are referenced.`);
       continue;
     }
     console.warn(
-      `${result.artifact}: direct dependencies with no detected source/config/script use (review only):`,
+      `${result.packageName}: direct dependencies with no detected source/config/script use (review only):`,
     );
     for (const dependency of result.unused) console.warn(`  - ${dependency}`);
   }
