@@ -15,14 +15,12 @@
 - [Diagnostic persistence scope](diagnostic-persistence-scope.md) — architecture checks must distinguish diagnostic writes from unrelated transactions in the same module.
 - [src](die-size-source.md) + [heal](die-type-master-heal.md) + [defaults](die-defaults-switch-aware.md) + [pick](die-picker-e2e-names.md) — crust owns die; bought crusts none; picks switch-aware.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
-- [Web-only](web-mobile-parity.md) + [screens](cast-screens.md) + [live sync](live-sync-web-mobile.md) — station displays stay web-only; sync uses non-clobber merges and a 10 MB JSON limit.
+- [Web-only](web-mobile-parity.md) + [screens](cast-screens.md) + [live sync](live-sync-web-mobile.md) + [web fixtures](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [layout](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) — station displays stay web-only; sync uses non-clobber merges and a 10 MB JSON limit; keep offline/dialog checks stable.
 - [edits](autosave-edit-attribution.md) + [forms](open-form-profile-clobber.md) + [pending](scheduled-run-profile-snapshot.md) — attribute edits; refresh forms and pending runs after profile writes.
 - [Auth & sessions](daily-reset-auth-boundary.md) + [revocation](password-change-session-invalidation.md) — server owns reset boundaries; keep roles and tokens scope-fenced.
 - [Inventory merge](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) — serialize stock drawdowns once.
 - [Stock corrections](completed-run-stock-corrections.md) — reconcile saved edits against a durable baseline and ledger.
-- [Old-schema fixtures](isolated-db-may-predate-migrations.md) + [session fixtures](session-boundary-integration-fixtures.md) — databases may predate migrations; create sessions after test DB setup.
-- [Pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve dynamic imports, workflow roles, and writable sockets.
-- [web](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [layout](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) — stable offline and dialog checks.
+- [Old-schema fixtures](isolated-db-may-predate-migrations.md) + [session fixtures](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — create sessions after test DB setup; preserve dynamic imports, workflow roles, and writable sockets.
 - [Phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — isolate inputs and guard missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
@@ -77,19 +75,17 @@
 - [Name-only attachment](recipe-name-only-attachment.md) + [fan narrowing](brand-fan-linked-name-narrowing.md) — attach by name/slot; brand/flavor fan-out is retired.
 - [Correcting-import cleanup](correcting-import-alias-cleanup.md) — corrections remove bad aliases when safe and learn the reverse.
 - [Profile write gating](profile-write-gating.md) — gate saves by capability; defer boot heals and treat queued 403s as terminal.
-- [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
+- [Master-data/source audits](master-data-health-ownership.md) + [master-data boundary](master-data-audit-boundary.md) + [source](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bounded reviews preserve owned legacy rows and bind evidence to its database, report, revision, and provenance.
 - [Browser evidence](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) — use isolated data, stable assertions, and accessible flows.
 - [Fixture IDs](browser-fixture-server-identifiers.md) — use stable server-generated IDs in browser fixtures.
 - [Sync safety](sync-snapshot-identity.md) + [write fences](complete-sync-snapshot-fencing.md) + [offline intents](offline-operational-intents.md) — stable hashes; durable fences; non-OK is never ack.
 - [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve units and fail closed on unsupported layouts.
 - [Apply-source retention](apply-source-evidence-retention.md) — formula and cached-result text stays review-only; do not send formula-cell results with Apply evidence.
 - [Release gates](release-check-shard-budget.md) + [browser](browser-release-case-contract.md) + [evidence](release-evidence.md) — bound gates and bind proof to source revision.
-- [Source](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to its DB, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
-- [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — offline gates; ties fail; use ignored caches for local weights.
-- [Local model memory headroom](local-model-memory-headroom.md) — verify available RAM at the required context on the actual evaluator; a 16-GiB cap did not guarantee Qwen3 8B fit.
+- [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) + [local model memory](local-model-memory-headroom.md) — offline gates; ties fail; use ignored caches and verify actual evaluator RAM because a 16-GiB cap did not guarantee Qwen3 8B fit.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
 - [Finished-case adjustment audit](finished-case-adjustment-audit.md) — keep actor/reason history behind manager authorization without narrowing general stock reads.
@@ -124,7 +120,7 @@
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [PWA cache and reconnect](pwa-offline-eventsource-fixtures.md) + [deferred cache policy](pwa-deferred-cache-policy.md) — close owned SSE streams in outages; lazy loading alone does not justify excluding a feature from precache.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
-- [Release proof](production-evidence-revision-binding.md) + [CI](ci-pinned-evidence.md) + [retry](release-finalization-retry.md) + [local toolchains](local-postgres-socket-dir.md) — bind evidence to revision and preserve reliable local verification.
+- [Release proof](production-evidence-revision-binding.md) + [CI](ci-pinned-evidence.md) + [retry](release-finalization-retry.md) + [local toolchains](local-postgres-socket-dir.md) + [ARM64](local-arm64-toolchain.md) — bind evidence to revision and preserve reliable local verification.
 - [TypeScript source-bundle hashing](typescript-source-bundle-hashing.md) — bind compact comparison evidence to its source-bundle hash and verify again before upload.
 - [ARM64 toolchain](local-arm64-toolchain.md) — preserve native Node and ShellCheck setup for local verification.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.

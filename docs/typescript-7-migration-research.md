@@ -1468,3 +1468,10 @@ The package boundary, consumers, root compiler, lockfile, editor SDK, and releas
 not changed. These checks confirm the existing TypeScript 6 isolation; they do not prove
 compatibility with a future TypeScript 7 API. Reassess only after Microsoft publishes stable
 API documentation and package exports for the operations above.
+
+**Task disposition — 2026-10-15:** At the user's direction, close this reassessment with no
+consumer migrations because Microsoft has not yet published a stable TypeScript 7
+programmatic API. This closes the current evidence-and-retention pass only; it does not claim
+that the planned TypeScript 7 migrations are complete or that future API compatibility has
+been established. Track the actual migrations as a separate follow-up gated on the stable
+documentation and package exports becoming public.
