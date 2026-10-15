@@ -232,6 +232,32 @@ describe("daily-reset session fence", () => {
     expect(res.status).toBe(200);
   });
 
+  it("rejects a session after its account is disabled", async () => {
+    const token = signLegacyTokenForTests(USER);
+    expect((await meWith(token)).status).toBe(200);
+
+    await db.update(usersTable)
+      .set({ disabled: true, disabledAt: new Date() })
+      .where(eq(usersTable.id, USER));
+    clearUserValidityCache();
+
+    expect((await meWith(token)).status).toBe(401);
+  });
+
+  it("rejects a session after its account's sessions are revoked", async () => {
+    const token = signLegacyTokenForTests(USER);
+    expect((await meWith(token)).status).toBe(200);
+
+    // Keep the marker beyond the token's whole-second issuance window so this
+    // assertion tests the revocation fence rather than its same-second grace.
+    await db.update(usersTable)
+      .set({ sessionRevokedAt: new Date(Date.now() + 1_500) })
+      .where(eq(usersTable.id, USER));
+    clearUserValidityCache();
+
+    expect((await meWith(token)).status).toBe(401);
+  });
+
   it("uses today's row only: a future scheduled reset does not invalidate today (200)", async () => {
     // Scheduling a future production day writes resetAt on a FUTURE row. If the
     // boundary read leaked across days, this far-future reset would log everyone

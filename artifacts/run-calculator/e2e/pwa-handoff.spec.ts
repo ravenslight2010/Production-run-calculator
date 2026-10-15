@@ -21,7 +21,8 @@
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
+import { canonicalSyncJson } from "@workspace/sync-contract";
 import {
   mkdtemp,
   cp,
@@ -157,10 +158,20 @@ async function buildTwoVersionFixture() {
 async function startVersionedServer(
   versionDirs: Record<Version, string>,
   staleHomeChunk?: string,
+  options: { sessionRecovery?: boolean } = {},
 ) {
   let currentVersion: Version = "old";
   let staleAssetFailureArmed = false;
   let staleAssetRequestCount = 0;
+  let sessionValid = true;
+  const sessionRecoveryRequests = {
+    me: 0,
+    syncReads: 0,
+    syncWrites: 0,
+    rejected: 0,
+    acceptedWrites: 0,
+  };
+  const sessionEventStreams = new Set<ServerResponse>();
   const oldIndex = await readFile(path.join(versionDirs.old, "index.html"), "utf8");
   const entryScript = oldIndex.match(/<script[^>]+src="\/?([^"]+\.js)"/)?.[1];
   if (!entryScript) throw new Error("The PWA fixture could not find the entry script");
@@ -175,6 +186,106 @@ async function startVersionedServer(
       // Mount the real Home calculator without a database. Unmatched API
       // requests return JSON errors rather than the SPA document, which could
       // otherwise be parsed as JavaScript by callers expecting a JSON response.
+      if (options.sessionRecovery && requestPath === "api/me") {
+        sessionRecoveryRequests.me += 1;
+        if (!sessionValid) {
+          sessionRecoveryRequests.rejected += 1;
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
+          return;
+        }
+        response
+          .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+          .end(JSON.stringify({
+            userId: "pwa-session-user",
+            role: "operator",
+            capabilities: [],
+            email: null,
+            name: "PWA Session",
+            onboardingSeen: true,
+            tourCompleted: true,
+            floorModeEnabled: false,
+            notificationPrefs: {},
+            sandbox: false,
+            sandboxCopiedAt: null,
+            sandboxStale: false,
+          }));
+        return;
+      }
+      if (options.sessionRecovery && requestPath === "api/sync/events") {
+        if (!sessionValid) {
+          sessionRecoveryRequests.rejected += 1;
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
+          return;
+        }
+        response.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        });
+        sessionEventStreams.add(response);
+        response.once("close", () => sessionEventStreams.delete(response));
+        response.write(": pwa session fixture connected\n\n");
+        return;
+      }
+      if (options.sessionRecovery && requestPath === "api/sync/today") {
+        if (!sessionValid) {
+          sessionRecoveryRequests.rejected += 1;
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
+          return;
+        }
+        const method = request.method ?? "GET";
+        if (method === "GET") {
+          sessionRecoveryRequests.syncReads += 1;
+          const url = new URL(request.url ?? "/", "http://pwa-smoke.test");
+          const requestedDate = url.searchParams.get("today");
+          const date = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+            ? requestedDate
+            : new Date().toISOString().slice(0, 10);
+          const run = {
+            id: "pwa-session-reconnect-run",
+            brand: "Offline",
+            flavor: "Session",
+            startedAt: 1_000,
+          };
+          const canonical = {
+            syncVersion: 1,
+            completeness: "complete",
+            dayState: { date, runs: [run], currentIndex: 0 },
+            runValues: { [run.id]: {} },
+          };
+          const snapshotId = createHash("sha256")
+            .update(canonicalSyncJson(canonical))
+            .digest("hex");
+          response.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+            "x-sync-response": "complete",
+            "x-sync-snapshot": snapshotId,
+            "x-sync-canonical-revision": "0",
+            "x-sync-server-time": String(Date.now()),
+          }).end(JSON.stringify({
+            ...canonical,
+            resetEpoch: 0,
+            rollover: false,
+            canonicalRevision: 0,
+            serverTime: Date.now(),
+          }));
+          return;
+        }
+        if (method === "PUT") {
+          sessionRecoveryRequests.syncWrites += 1;
+          sessionRecoveryRequests.acceptedWrites += 1;
+          response.writeHead(200, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ ok: true, data: null }));
+          return;
+        }
+      }
       if (requestPath === "api/me") {
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -280,6 +391,16 @@ async function startVersionedServer(
     },
     staleAssetRequestCount() {
       return staleAssetRequestCount;
+    },
+    setSessionValid(valid: boolean) {
+      sessionValid = valid;
+    },
+    dropSessionEventStreams() {
+      for (const stream of sessionEventStreams) stream.destroy();
+      sessionEventStreams.clear();
+    },
+    sessionRecoveryRequests() {
+      return { ...sessionRecoveryRequests };
     },
     async close() {
       // Browser keep-alive sockets can otherwise keep Node's close callback
@@ -769,6 +890,132 @@ test.describe("PWA update handoff", () => {
         .toBe("1");
       await expect(updateMessage).toHaveCount(0);
     } finally {
+      await server.close();
+    }
+  });
+
+  test("rechecks an open run after reconnect and signs out a revoked session", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+
+    try {
+      await page.addInitScript(() => {
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-session-reconnect-run",
+            brand: "Offline",
+            flavor: "Session",
+            startedAt: 1_000,
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+      await page.context().setOffline(true);
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      server.setSessionValid(false);
+      server.dropSessionEventStreams();
+      await page.context().setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+      await expect.poll(() => server.sessionRecoveryRequests().rejected).toBeGreaterThan(0);
+      await expect(
+        page.getByRole("heading", { name: "Production Run Calculator" }),
+      ).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toHaveCount(0);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await expect(page.getByText(
+        "Your staff session expired. Check your connection and sign in again.",
+      )).toBeVisible();
+      const beforeSettling = server.sessionRecoveryRequests();
+      await page.waitForTimeout(500);
+      const afterSettling = server.sessionRecoveryRequests();
+      expect(afterSettling.acceptedWrites).toBe(0);
+      expect(afterSettling.syncWrites).toBe(beforeSettling.syncWrites);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await server.close();
+    }
+  });
+
+  test("keeps a valid session through normal online run recovery", async ({ page }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+
+    try {
+      await page.addInitScript(() => {
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-session-reconnect-run",
+            brand: "Offline",
+            flavor: "Session",
+            startedAt: 1_000,
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+      await page.context().setOffline(true);
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      server.dropSessionEventStreams();
+      await page.context().setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+      await expect.poll(() => server.sessionRecoveryRequests().syncReads).toBeGreaterThan(0);
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      expect(server.sessionRecoveryRequests().rejected).toBe(0);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
       await server.close();
     }
   });
