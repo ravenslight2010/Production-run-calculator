@@ -55,30 +55,72 @@ describe("stopIsolatedSyncProcess", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("sends SIGKILL after the grace period but waits for process exit", async () => {
+  it.each(["exit", "close"] as const)(
+    "sends SIGKILL after the grace period and cleans up after a terminal %s event",
+    async (terminalEvent) => {
+      vi.useFakeTimers();
+      const child = new FakeSyncProcess();
+      const shutdown = stopIsolatedSyncProcess(child.asChildProcess(), {
+        forceKillTimeoutMs: 25,
+        postKillTimeoutMs: 30,
+      });
+      let completed = false;
+      void shutdown.then(() => {
+        completed = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(25);
+
+      expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+      expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+      expect(completed).toBe(false);
+      expect(child.listenerCount("exit")).toBe(1);
+      expect(child.listenerCount("close")).toBe(1);
+      expect(vi.getTimerCount()).toBe(1);
+
+      child.signalCode = "SIGKILL";
+      if (terminalEvent === "exit") {
+        child.emit("exit", null, "SIGKILL");
+      } else {
+        child.emit("close", null, "SIGKILL");
+      }
+      await expect(shutdown).resolves.toBeUndefined();
+
+      expectShutdownListenersRemoved(child);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("rejects and cleans up if successful SIGKILL has no terminal event", async () => {
     vi.useFakeTimers();
     const child = new FakeSyncProcess();
     const shutdown = stopIsolatedSyncProcess(child.asChildProcess(), {
       forceKillTimeoutMs: 25,
-    });
-    let completed = false;
-    void shutdown.then(() => {
-      completed = true;
-    });
+      postKillTimeoutMs: 30,
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
 
     await vi.advanceTimersByTimeAsync(25);
 
     expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
     expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
-    expect(completed).toBe(false);
+    expect(vi.getTimerCount()).toBe(1);
     expect(child.listenerCount("exit")).toBe(1);
     expect(child.listenerCount("close")).toBe(1);
-    expect(vi.getTimerCount()).toBe(0);
 
-    child.signalCode = "SIGKILL";
-    child.emit("exit", null, "SIGKILL");
-    await expect(shutdown).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(30);
 
+    const failure = await shutdown;
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(
+      "Sent SIGKILL to isolated sync process during teardown",
+    );
+    expect((failure as Error).message).toContain(
+      "did not emit an exit or close event within 30ms",
+    );
+    expect((failure as Error).message).toContain("Check for a stuck child process");
     expectShutdownListenersRemoved(child);
     expect(vi.getTimerCount()).toBe(0);
   });

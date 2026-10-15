@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 
 type StopIsolatedSyncProcessOptions = {
   forceKillTimeoutMs?: number;
+  postKillTimeoutMs?: number;
 };
 
 function signalFailure(
@@ -23,7 +24,10 @@ function summarizeFailures(failures: unknown[], message: string): unknown {
 
 export async function stopIsolatedSyncProcess(
   child: ChildProcess,
-  { forceKillTimeoutMs = 5_000 }: StopIsolatedSyncProcessOptions = {},
+  {
+    forceKillTimeoutMs = 5_000,
+    postKillTimeoutMs = 5_000,
+  }: StopIsolatedSyncProcessOptions = {},
 ): Promise<void> {
   if (child.exitCode != null || child.signalCode != null) return;
 
@@ -31,17 +35,26 @@ export async function stopIsolatedSyncProcess(
     let settled = false;
     let lastSignal: NodeJS.Signals | null = null;
     const failures = new Map<NodeJS.Signals, Error>();
-    let timeout: ReturnType<typeof setTimeout>;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let postKillTimeout: ReturnType<typeof setTimeout> | undefined;
+    let postKillTimeoutFailure: Error | undefined;
     let forceKillAttempted = false;
 
     const finish = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      if (timeout !== undefined) clearTimeout(timeout);
+      if (postKillTimeout !== undefined) clearTimeout(postKillTimeout);
       child.off("exit", finish);
       child.off("close", finish);
       child.off("error", onError);
-      if (failures.size > 0) {
+      if (postKillTimeoutFailure !== undefined) {
+        const allFailures = [...failures.values(), postKillTimeoutFailure];
+        reject(summarizeFailures(
+          allFailures,
+          "One or more errors occurred while stopping an isolated sync process",
+        ));
+      } else if (failures.size > 0) {
         reject(summarizeFailures(
           [...failures.values()],
           "One or more signals failed while stopping an isolated sync process",
@@ -91,6 +104,16 @@ export async function stopIsolatedSyncProcess(
         escalateAfterTermFailure();
       } else if (signal === "SIGKILL" && failures.has(signal)) {
         finish();
+      }
+      if (signal === "SIGKILL" && !failures.has(signal) && !settled) {
+        postKillTimeout = setTimeout(() => {
+          postKillTimeoutFailure = new Error(
+            `Sent SIGKILL to isolated sync process during teardown, but it did not emit `
+              + `an exit or close event within ${postKillTimeoutMs}ms. `
+              + "Check for a stuck child process or a test-runner process-management issue.",
+          );
+          finish();
+        }, postKillTimeoutMs);
       }
     };
 
