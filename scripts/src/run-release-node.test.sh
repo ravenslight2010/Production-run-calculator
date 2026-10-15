@@ -455,12 +455,14 @@ test_release_runner_verifies_local_tls_certificates() {
   local package_tarball="${workspace}/fixture.tgz"
   local altered_package_tarball="${workspace}/altered-fixture.tgz"
   local tarball_mode_file="${workspace}/tarball-mode"
+  local metadata_mode_file="${workspace}/metadata-mode"
   local trusted_output="${workspace}/trusted-output"
   local untrusted_output="${workspace}/untrusted-output"
   local trusted_npx_output="${workspace}/trusted-npx-output"
   local untrusted_npx_output="${workspace}/untrusted-npx-output"
   local integrity_npx_output="${workspace}/integrity-npx-output"
   local redirect_integrity_npx_output="${workspace}/redirect-integrity-npx-output"
+  local shasum_npx_output="${workspace}/shasum-npx-output"
   local registry_requests="${workspace}/registry-requests"
   local tarball_requests="${workspace}/tarball-requests"
   local redirect_mode_file="${workspace}/redirect-mode"
@@ -587,6 +589,7 @@ EOF
   printf 'altered package bytes\n' >>"$altered_package_tarball"
   printf 'matching\n' >"$tarball_mode_file"
   printf 'direct\n' >"$redirect_mode_file"
+  printf 'integrity\n' >"$metadata_mode_file"
   : >"$registry_requests"
   : >"$tarball_requests"
   : >"${workspace}/empty-user.npmrc"
@@ -606,6 +609,7 @@ const [
   alteredPackageTarballPath,
   tarballModePath,
   redirectModePath,
+  metadataModePath,
   requestLogPath,
   tarballRequestLogPath,
 ] = process.argv.slice(2);
@@ -628,6 +632,19 @@ const registryServer = https.createServer(
         "sha512-" +
         crypto.createHash("sha512").update(packageTarball).digest("base64");
       const shasum = crypto.createHash("sha1").update(packageTarball).digest("hex");
+      const metadataMode = fs.readFileSync(metadataModePath, "utf8").trim();
+      const dist = {
+        tarball:
+          fs.readFileSync(redirectModePath, "utf8").trim() === "redirect"
+            ? `https://127.0.0.1:${registryServer.address().port}/redirect.tgz`
+            : `https://127.0.0.1:${registryServer.address().port}/fixture.tgz`,
+        shasum,
+      };
+      if (metadataMode === "integrity") {
+        dist.integrity = integrity;
+      } else if (metadataMode !== "shasum-only") {
+        throw new Error(`Unknown registry metadata mode: ${metadataMode}`);
+      }
       const metadata = {
         name: packageName,
         "dist-tags": { latest: packageVersion },
@@ -636,14 +653,7 @@ const registryServer = https.createServer(
             name: packageName,
             version: packageVersion,
             bin: { "local-npx-tls-fixture": "bin/run.cjs" },
-            dist: {
-              tarball:
-                fs.readFileSync(redirectModePath, "utf8").trim() === "redirect"
-                  ? `https://127.0.0.1:${registryServer.address().port}/redirect.tgz`
-                  : `https://127.0.0.1:${registryServer.address().port}/fixture.tgz`,
-              integrity,
-              shasum,
-            },
+            dist,
           },
         },
       };
@@ -758,7 +768,8 @@ EOF
     "${cert_dir}/server.key" "${cert_dir}/server.pem" \
     "$registry_port_file" "$tarball_port_file" \
     "$package_tarball" "$altered_package_tarball" "$tarball_mode_file" \
-    "$redirect_mode_file" "$registry_requests" "$tarball_requests" \
+    "$redirect_mode_file" "$metadata_mode_file" \
+    "$registry_requests" "$tarball_requests" \
     >"$server_output" 2>&1 &
   TLS_SERVER_PID=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
@@ -973,10 +984,36 @@ EOF
   assert_contains "$(cat "$registry_requests")" "GET /redirect.tgz"
   assert_contains "$(cat "$tarball_requests")" "GET /fixture.tgz"
 
+  printf 'direct\n' >"$redirect_mode_file"
+  printf 'shasum-only\n' >"$metadata_mode_file"
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/shasum-npm-cache" "$shasum_npx_output"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npx accepted altered tarball bytes with only the original shasum metadata.\n' >&2
+    cat "$shasum_npx_output" >&2
+    return 1
+  fi
+  local shasum_npx_result
+  shasum_npx_result=$(cat "$shasum_npx_output")
+  if [[ "$shasum_npx_result" != *"EINTEGRITY"* &&
+    "$shasum_npx_result" != *"checksum failed"* &&
+    "$shasum_npx_result" != *"checksum mismatch"* ]]; then
+    printf 'Altered tarball with shasum-only metadata failed for a reason other than npm checksum validation:\n%s\n' \
+      "$shasum_npx_result" >&2
+    return 1
+  fi
+  assert_not_contains "$shasum_npx_result" \
+    "local npx package resolved over verified TLS"
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
+
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, reject altered package bytes directly and after redirect, and reject a mismatched certificate name"
+  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs and mismatched certificate names, and reject altered package bytes directly, after redirect, and with shasum-only metadata"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
