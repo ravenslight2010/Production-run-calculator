@@ -154,19 +154,73 @@ function addTypeConfigUsage(path, source, dependencies, used) {
   }
 }
 
-function addScriptUsage(scripts, binPackages, dependencies, used) {
+function addScriptUsage(
+  scripts,
+  binPackages,
+  dependencies,
+  used,
+  ambiguousBinaries,
+) {
   const scriptText = Object.values(scripts ?? {}).join("\n");
-  collectBinaryUsage(scriptText, binPackages, dependencies, used);
+  collectBinaryUsage(
+    scriptText,
+    binPackages,
+    dependencies,
+    used,
+    ambiguousBinaries,
+  );
   collectImports(scriptText, dependencies, used);
+  collectPackageResolutionReferences(scriptText, dependencies, used);
 }
 
-function collectBinaryUsage(source, binPackages, dependencies, used) {
+function collectNodeModulesPathRanges(source) {
+  const ranges = [];
+  const nodeModulesPath =
+    /\bnode_modules\/((?:@[^/\\\s"'`]+\/)?[^/\\\s"'`]+)/g;
+  for (const match of source.matchAll(nodeModulesPath)) {
+    const start = match.index;
+    const pathStart = start + match[0].length;
+    const pathRemainder = source.slice(pathStart);
+    const pathEnd = pathRemainder.search(/[\s"'`]/);
+    ranges.push([
+      start,
+      pathEnd === -1 ? source.length : pathStart + pathEnd,
+    ]);
+  }
+  return ranges;
+}
+
+function collectBinaryUsage(
+  source,
+  binPackages,
+  dependencies,
+  used,
+  ambiguousBinaries,
+) {
+  const nodeModulesPathRanges = collectNodeModulesPathRanges(source);
   for (const [binName, packages] of binPackages) {
     const escaped = binName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "m").test(source)) {
-      for (const packageName of packages) {
-        if (dependencies.has(packageName)) used.add(packageName);
-      }
+    const binaryReference = new RegExp(
+      `(^|[^\\w.-])(${escaped})(?=$|[^\\w.-])`,
+      "gm",
+    );
+    const hasBareReference = [...source.matchAll(binaryReference)].some(
+      (match) => {
+        const binaryStart = match.index + match[1].length;
+        return !nodeModulesPathRanges.some(
+          ([start, end]) => binaryStart >= start && binaryStart < end,
+        );
+      },
+    );
+    if (!hasBareReference) continue;
+
+    const providers = [...packages]
+      .filter((packageName) => dependencies.has(packageName))
+      .sort((left, right) => left.localeCompare(right));
+    if (providers.length === 1) {
+      used.add(providers[0]);
+    } else if (providers.length > 1) {
+      ambiguousBinaries.set(binName, providers);
     }
   }
 }
@@ -325,7 +379,7 @@ async function readPackageFiles(packagePath, sourcePaths) {
 
   return {
     packageName: manifest.name,
-    unused: auditDependencyUsage({
+    ...auditDependencyUsage({
       manifest,
       files,
       binPackages,
@@ -346,12 +400,25 @@ export function auditDependencyUsage({
     ...Object.keys(manifest.optionalDependencies ?? {}),
   ]);
   const used = new Set();
+  const ambiguousBinaries = new Map();
 
-  addScriptUsage(manifest.scripts, binPackages, dependencies, used);
+  addScriptUsage(
+    manifest.scripts,
+    binPackages,
+    dependencies,
+    used,
+    ambiguousBinaries,
+  );
 
   for (const file of files) {
     collectImports(file.content, dependencies, used);
-    collectBinaryUsage(file.content, binPackages, dependencies, used);
+    collectBinaryUsage(
+      file.content,
+      binPackages,
+      dependencies,
+      used,
+      ambiguousBinaries,
+    );
     addTypeConfigUsage(file.path, file.content, dependencies, used);
     collectCssPluginReferences(file.path, file.content, dependencies, used);
     collectConfigurationStringReferences(
@@ -366,9 +433,14 @@ export function auditDependencyUsage({
 
   collectPeerDependencyUsage(used, peerPackages, dependencies);
 
-  return [...dependencies]
-    .filter((dependency) => !used.has(dependency))
-    .sort((left, right) => left.localeCompare(right));
+  return {
+    unused: [...dependencies]
+      .filter((dependency) => !used.has(dependency))
+      .sort((left, right) => left.localeCompare(right)),
+    ambiguousBinaries: [...ambiguousBinaries]
+      .map(([name, providers]) => ({ name, providers }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  };
 }
 
 export async function auditPackage(artifactPath) {
@@ -460,6 +532,11 @@ export async function main(rootPath = ROOT, { strict = false } = {}) {
   );
   let exitCode = 0;
   for (const result of results) {
+    for (const { name, providers } of result.ambiguousBinaries) {
+      console.warn(
+        `${result.packageName}: ambiguous binary "${name}" (provided by ${providers.join(", ")}); not counted as dependency use.`,
+      );
+    }
     if (result.unused.length === 0) {
       console.log(`${result.packageName}: all direct dependencies are referenced.`);
       continue;
