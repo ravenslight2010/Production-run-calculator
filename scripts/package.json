@@ -95,12 +95,10 @@
   "dependencies": {
     "@types/pg": "^8.23.1",
     "@workspace/ai-evaluation": "workspace:*",
-    "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/distill-dataset": "workspace:*",
-    "@workspace/name-match": "workspace:*",
-    "@workspace/named-recipes": "workspace:*",
+    "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/premix-import": "workspace:*",
     "@workspace/shipping-import": "workspace:*",
     "@workspace/spec-export": "workspace:*",

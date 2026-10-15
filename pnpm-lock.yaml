@@ -1098,11 +1098,7 @@ importers:
         specifier: 5.0.4
         version: 5.0.4(@types/node@26.6.5)(jsdom@30.0.1)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.0))
 
-  lib/cycle-count:
-    devDependencies:
-      vitest:
-        specifier: 5.0.4
-        version: 5.0.4(@types/node@26.5.1)(jsdom@30.0.1)(vite@8.3.4(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
+  lib/cycle-count: {}
 
   lib/day-summary:
     devDependencies:
@@ -1190,9 +1186,6 @@ importers:
       '@google/genai':
         specifier: ^2.29.1
         version: 2.29.1
-      openai:
-        specifier: ^7.32.0
-        version: 7.32.0(ws@8.21.3)(zod@4.6.2)
       p-limit:
         specifier: ^7.3.3
         version: 7.3.3
@@ -1440,12 +1433,6 @@ importers:
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../lib/integrations-openai-ai-server
-      '@workspace/name-match':
-        specifier: workspace:*
-        version: link:../lib/name-match
-      '@workspace/named-recipes':
-        specifier: workspace:*
-        version: link:../lib/named-recipes
       '@workspace/premix-import':
         specifier: workspace:*
         version: link:../lib/premix-import
@@ -4861,30 +4848,6 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
-  openai@7.32.0:
-    resolution: {integrity: sha512-avqxu/jl1gsVBCBgFNPr9sTh+wZppQphuhhFy1zEvAJxEaJ4t0ery6hZdOT9kws/EcNTARoQcZs2IT3bliE1SA==}
-    engines: {node: '>=22.0.0'}
-    peerDependencies:
-      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
-      '@smithy/hash-node': '>=4.3.0 <5'
-      '@smithy/signature-v4': '>=5.4.0 <6'
-      undici: ^6.27.0
-      ws: ^8.21.0
-      zod: ^3.25 || ^4.0
-    peerDependenciesMeta:
-      '@aws-sdk/credential-provider-node':
-        optional: true
-      '@smithy/hash-node':
-        optional: true
-      '@smithy/signature-v4':
-        optional: true
-      undici:
-        optional: true
-      ws:
-        optional: true
-      zod:
-        optional: true
-
   orval@8.42.0:
     resolution: {integrity: sha512-YzUKonpGnE+c/LsU0RbRwEYH2j9/4Oeh7imXcYiHMO4pX0CvqUgr41Kb8/3EAvtRzlecP1Pe4+b/pau+Gss0CQ==}
     engines: {node: '>=22.18.0'}
@@ -5958,9 +5921,6 @@ packages:
   yoctocolors@2.2.0:
     resolution: {integrity: sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg==}
     engines: {node: '>=18'}
-
-  zod@4.6.2:
-    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
 
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
@@ -9350,11 +9310,6 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@7.32.0(ws@8.21.3)(zod@4.6.2):
-    optionalDependencies:
-      ws: 8.21.3
-      zod: 4.6.2
-
   orval@8.42.0(@tanstack/react-query@5.104.2(react@19.3.0))(prettier@3.9.10)(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3)))(typedoc@0.28.20(typescript@6.0.3))(typescript@6.0.3)(zod@4.6.7):
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
@@ -10672,8 +10627,5 @@ snapshots:
   yocto-queue@1.2.2: {}
 
   yoctocolors@2.2.0: {}
-
-  zod@4.6.2:
-    optional: true
 
   zod@4.6.7: {}
