@@ -86,6 +86,16 @@ EOF
   printf '%s\n' "$workspace"
 }
 
+lock_history_path() {
+  local workspace="$1"
+  local digest
+  local key
+  digest=$(printf '%s' "$workspace" | sha256sum)
+  key=${digest%% *}
+  printf '/tmp/replit-release-runner-%s/%s.wait-history.jsonl\n' \
+    "${UID:-$(id -u)}" "$key"
+}
+
 write_node() {
   local node_path="$1"
   local node_version="$2"
@@ -1704,9 +1714,12 @@ test_release_runner_serializes_same_workspace_commands() {
   local first_status
   local second_status
   local events
+  local history_file
+  local history_line
   local attempt
   local second_waited=false
   workspace=$(make_workspace serialized)
+  history_file=$(lock_history_path "$workspace")
   active_dir="${workspace}/active"
   event_log="${workspace}/serialization-events"
   first_output="${workspace}/first-output"
@@ -1756,8 +1769,10 @@ EOF
 
   SERIAL_ACTIVE_DIR="$active_dir" SERIAL_EVENT_LOG="$event_log" \
     SERIAL_RELEASE_GATE="$release_gate" SERIAL_RUN_ID=second \
+    HISTORY_ENV_SENTINEL="must-not-be-retained" \
     RUN_LOG="${workspace}/runner-events" PATH="${workspace}/bin:${PATH}" \
     bash "${workspace}/scripts/src/run-release-node.sh" serialized-child \
+    "HISTORY_ARGUMENT_SENTINEL" \
     >"$second_output" 2>&1 &
   second_pid=$!
 
@@ -1792,6 +1807,37 @@ EOF
   fi
   assert_contains "$(cat "$second_output")" \
     "Release runner acquired the workspace validation lock after"
+  [[ -f "$history_file" ]] || {
+    printf 'Successful lock wait did not create its local history file.\n' >&2
+    return 1
+  }
+  [[ "$(wc -l <"$history_file")" -eq 1 ]] || {
+    printf 'Expected one successful lock-wait history event.\n' >&2
+    cat "$history_file" >&2
+    return 1
+  }
+  history_line=$(cat "$history_file")
+  grep -Eq \
+    '^\{"timestamp_utc":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","elapsed_wait_seconds":[0-9]+,"outcome":"acquired","owner_pid":"[1-9][0-9]*","owner_started_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"\}$' \
+    <<<"$history_line" || {
+    printf 'Successful lock-wait history has unexpected fields or values:\n%s\n' \
+      "$history_line" >&2
+    return 1
+  }
+  [[ "$(stat -c '%a' -- "$history_file")" == 600 ]] || {
+    printf 'Lock-wait history must have mode 600.\n' >&2
+    return 1
+  }
+  [[ "$(stat -c '%a' -- "$(dirname "$history_file")")" == 700 ]] || {
+    printf 'Per-user release-runner directory must have mode 700.\n' >&2
+    return 1
+  }
+  [[ "$(stat -c '%a' -- "${history_file}.lock")" == 600 ]] || {
+    printf 'Lock-wait history lock file must have mode 600.\n' >&2
+    return 1
+  }
+  assert_not_contains "$history_line" "HISTORY_ARGUMENT_SENTINEL"
+  assert_not_contains "$history_line" "must-not-be-retained"
 
   events=$(cat "$event_log")
   if [[ "$events" == *overlap:* ]] ||
@@ -1815,7 +1861,9 @@ test_release_runner_lock_wait_times_out_with_owner_and_recovers() {
   local attempt
   local waiter_status
   local recovery_output
+  local history_file
   workspace=$(make_workspace lock-timeout)
+  history_file=$(lock_history_path "$workspace")
   holder_started="${workspace}/holder-started"
   holder_release="${workspace}/holder-release"
   holder_pid_file="${workspace}/holder-pid"
@@ -1881,6 +1929,16 @@ EOF
   assert_contains "$(cat "$waiter_output")" "owner_started_at="
   assert_contains "$(cat "$waiter_output")" "timed out after 2 seconds"
   assert_contains "$(cat "$waiter_output")" "Retry after the current validation command finishes"
+  [[ -f "$history_file" ]] || {
+    printf 'Timed-out lock wait did not create its local history file.\n' >&2
+    return 1
+  }
+  assert_contains "$(cat "$history_file")" '"outcome":"timeout"'
+  [[ "$(wc -l <"$history_file")" -eq 1 ]] || {
+    printf 'Expected one timeout history event.\n' >&2
+    cat "$history_file" >&2
+    return 1
+  }
   [[ ! -e "$timeout_child_marker" ]] || {
     printf 'Timed-out runner unexpectedly started its child command.\n' >&2
     return 1
@@ -1924,6 +1982,223 @@ EOF
   assert_contains "$(cat "${workspace}/recovery-events")" \
     "child-node=v${REQUIRED_NODE_VERSION}"
   echo "PASS: lock contention reports its owner, times out within the configured bound, skips the child, and recovers after release"
+}
+
+test_release_runner_lock_history_rotates_and_recovers_malformed_state() {
+  local workspace
+  local history_file
+  local holder_started
+  local holder_release
+  local holder_output
+  local waiter_output
+  local holder_pid
+  local waiter_pid
+  local waiter_status
+  local attempt
+  local first_line
+  workspace=$(make_workspace lock-history-rotation)
+  history_file=$(lock_history_path "$workspace")
+  holder_started="${workspace}/holder-started"
+  holder_release="${workspace}/holder-release"
+  holder_output="${workspace}/holder-output"
+  waiter_output="${workspace}/waiter-output"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+
+  cat >"${workspace}/bin/history-holder" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+touch "$HISTORY_HOLDER_STARTED"
+while [[ ! -e "$HISTORY_HOLDER_RELEASE" ]]; do
+  sleep 0.05
+done
+EOF
+  chmod +x "${workspace}/bin/history-holder"
+  HISTORY_HOLDER_STARTED="$holder_started" \
+    HISTORY_HOLDER_RELEASE="$holder_release" \
+    RUN_LOG="${workspace}/holder-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" history-holder \
+    >"$holder_output" 2>&1 &
+  holder_pid=$!
+  ACTIVE_RUNNER_PIDS+=("$holder_pid")
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [[ -f "$holder_started" ]] && break
+    sleep 0.025
+  done
+  [[ -f "$holder_started" ]] || {
+    printf 'History test lock holder did not start.\n' >&2
+    cat "$holder_output" >&2
+    return 1
+  }
+
+  {
+    printf '%s\n' '{"malformed":"prior-state"}'
+    for ((attempt = 1; attempt <= 20; attempt++)); do
+      printf \
+        '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":%s,"outcome":"acquired","owner_pid":"1","owner_started_at":"2026-01-01T00:00:00Z"}\n' \
+        "$attempt"
+    done
+    printf '%s\n' '{"truncated":'
+  } >"$history_file"
+  chmod 600 -- "$history_file"
+
+  RUN_LOG="${workspace}/waiter-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+    >"$waiter_output" 2>&1 &
+  waiter_pid=$!
+  ACTIVE_RUNNER_PIDS+=("$waiter_pid")
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    grep -q 'Release runner is waiting for the workspace validation lock' \
+      "$waiter_output" && break
+    sleep 0.025
+  done
+  if ! grep -q 'Release runner is waiting for the workspace validation lock' \
+    "$waiter_output"; then
+    printf 'History rotation waiter did not begin waiting.\n' >&2
+    cat "$waiter_output" >&2
+    return 1
+  fi
+  touch "$holder_release"
+  wait "$holder_pid"
+  wait "$waiter_pid" || {
+    printf 'History rotation waiter failed after lock release.\n' >&2
+    cat "$waiter_output" >&2
+    return 1
+  }
+  ACTIVE_RUNNER_PIDS=()
+
+  [[ "$(wc -l <"$history_file")" -eq 20 ]] || {
+    printf 'Lock-wait history did not retain exactly 20 events.\n' >&2
+    cat "$history_file" >&2
+    return 1
+  }
+  first_line=$(head -n 1 "$history_file")
+  assert_contains "$first_line" '"elapsed_wait_seconds":2'
+  assert_not_contains "$(cat "$history_file")" '"malformed"'
+  assert_not_contains "$(cat "$history_file")" '"truncated"'
+  assert_contains "$(tail -n 1 "$history_file")" '"outcome":"acquired"'
+  [[ "$(stat -c '%a' -- "$history_file")" == 600 ]] || {
+    printf 'Rotated lock-wait history must have mode 600.\n' >&2
+    return 1
+  }
+  [[ -z "$(find "$(dirname "$history_file")" -maxdepth 1 \
+    -name "$(basename "$history_file").tmp.*" -print -quit)" ]] || {
+    printf 'Atomic history update left a temporary file behind.\n' >&2
+    return 1
+  }
+  echo "PASS: local lock-wait history rotates atomically and ignores malformed prior records"
+}
+
+test_release_runner_lock_wait_interruption_is_recorded() {
+  local workspace
+  local history_file
+  local holder_started
+  local holder_release
+  local timeout_child_marker
+  local holder_output
+  local waiter_output
+  local holder_pid
+  local waiter_pid
+  local waiter_status
+  local attempt
+  workspace=$(make_workspace lock-interruption)
+  history_file=$(lock_history_path "$workspace")
+  holder_started="${workspace}/holder-started"
+  holder_release="${workspace}/holder-release"
+  timeout_child_marker="${workspace}/interrupted-child-ran"
+  holder_output="${workspace}/holder-output"
+  waiter_output="${workspace}/waiter-output"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+  cat >"${workspace}/bin/interrupt-holder" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+touch "$INTERRUPT_HOLDER_STARTED"
+while [[ ! -e "$INTERRUPT_HOLDER_RELEASE" ]]; do
+  sleep 0.05
+done
+EOF
+  cat >"${workspace}/bin/interrupted-child" <<'EOF'
+#!/usr/bin/env bash
+touch "$INTERRUPTED_CHILD_MARKER"
+EOF
+  chmod +x "${workspace}/bin/interrupt-holder" \
+    "${workspace}/bin/interrupted-child"
+
+  INTERRUPT_HOLDER_STARTED="$holder_started" \
+    INTERRUPT_HOLDER_RELEASE="$holder_release" \
+    RUN_LOG="${workspace}/holder-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" interrupt-holder \
+    >"$holder_output" 2>&1 &
+  holder_pid=$!
+  ACTIVE_RUNNER_PIDS+=("$holder_pid")
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [[ -f "$holder_started" ]] && break
+    sleep 0.025
+  done
+  [[ -f "$holder_started" ]] || {
+    printf 'Interrupt test lock holder did not start.\n' >&2
+    cat "$holder_output" >&2
+    return 1
+  }
+
+  set +e
+  RELEASE_RUNNER_LOCK_WAIT_SECONDS=30 \
+    INTERRUPTED_CHILD_MARKER="$timeout_child_marker" \
+    RUN_LOG="${workspace}/waiter-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" interrupted-child \
+    >"$waiter_output" 2>&1 &
+  waiter_pid=$!
+  ACTIVE_RUNNER_PIDS+=("$waiter_pid")
+  set -e
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    grep -q 'Release runner is waiting for the workspace validation lock' \
+      "$waiter_output" && break
+    sleep 0.025
+  done
+  if ! grep -q 'Release runner is waiting for the workspace validation lock' \
+    "$waiter_output"; then
+    printf 'Interrupt test waiter did not begin waiting.\n' >&2
+    cat "$waiter_output" >&2
+    return 1
+  fi
+
+  kill -TERM "$waiter_pid"
+  set +e
+  wait "$waiter_pid"
+  waiter_status=$?
+  set -e
+  [[ "$waiter_status" -eq 143 ]] || {
+    printf 'Expected interrupted waiter status 143, got %s.\n' \
+      "$waiter_status" >&2
+    cat "$waiter_output" >&2
+    return 1
+  }
+  [[ -f "$history_file" ]] || {
+    printf 'Interrupted lock wait did not create its local history file.\n' >&2
+    return 1
+  }
+  assert_contains "$(cat "$history_file")" '"outcome":"interrupted"'
+  [[ ! -e "$timeout_child_marker" ]] || {
+    printf 'Interrupted lock waiter unexpectedly started its child command.\n' >&2
+    return 1
+  }
+  kill -0 "$holder_pid" 2>/dev/null || {
+    printf 'Interrupting the waiter unexpectedly stopped the lock holder.\n' >&2
+    return 1
+  }
+
+  touch "$holder_release"
+  wait "$holder_pid"
+  ACTIVE_RUNNER_PIDS=()
+  RUN_LOG="${workspace}/recovery-events" PATH="${workspace}/bin:${PATH}" \
+    timeout 5s bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+    >"${workspace}/recovery-output" 2>&1 || {
+      printf 'Release runner did not recover after waiter interruption.\n' >&2
+      cat "${workspace}/recovery-output" >&2
+      return 1
+    }
+  echo "PASS: interrupted lock waits are recorded without stopping the active lock owner"
 }
 
 test_release_runner_nested_invocation_reuses_lock() {
@@ -2000,5 +2275,7 @@ test_isolated_sync_timeout_cleans_descendants_before_database
 test_release_node_fallback_interrupt_stops_process_group
 test_release_runner_serializes_same_workspace_commands
 test_release_runner_lock_wait_times_out_with_owner_and_recovers
+test_release_runner_lock_history_rotates_and_recovers_malformed_state
+test_release_runner_lock_wait_interruption_is_recorded
 test_release_runner_nested_invocation_reuses_lock
 test_release_runner_preserves_child_status

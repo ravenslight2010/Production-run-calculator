@@ -56,6 +56,93 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 NODE_SELECTOR="${REPO_ROOT}/.nvmrc"
 RELEASE_RUNNER_LOCK_WAIT_MAX_SECONDS=7200
 RELEASE_RUNNER_LOCK_WAIT_DEFAULT_SECONDS=7200
+RELEASE_RUNNER_LOCK_HISTORY_LIMIT=20
+lock_wait_started_epoch=""
+lock_wait_flock_pid=""
+
+record_lock_wait_event() {
+  local outcome="$1"
+  local elapsed_seconds="$2"
+  local history_file="${lock_dir}/${lock_key}.wait-history.jsonl"
+  local history_lock_file="${history_file}.lock"
+  local history_lock_fd
+  local history_temp_file
+  local timestamp_utc
+  local event
+  local line
+  local owner_pid="$lock_owner_pid"
+  local owner_started_at="$lock_owner_started_at"
+  local event_pattern='^\{"timestamp_utc":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z","elapsed_wait_seconds":[0-9]+,"outcome":"(acquired|timeout|interrupted)","owner_pid":"(unknown|[1-9][0-9]*)","owner_started_at":"(unknown|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"\}$'
+  local -a recent_events=()
+
+  [[ "$outcome" =~ ^(acquired|timeout|interrupted)$ ]] || return 1
+  [[ "$elapsed_seconds" =~ ^[0-9]+$ ]] || return 1
+  [[ "$owner_pid" =~ ^([1-9][0-9]*|unknown)$ ]] || owner_pid="unknown"
+  [[ "$owner_started_at" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z|unknown)$ ]] ||
+    owner_started_at="unknown"
+  timestamp_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ') || return 1
+  event=$(printf \
+    '{"timestamp_utc":"%s","elapsed_wait_seconds":%s,"outcome":"%s","owner_pid":"%s","owner_started_at":"%s"}' \
+    "$timestamp_utc" "$elapsed_seconds" "$outcome" "$owner_pid" \
+    "$owner_started_at")
+
+  exec {history_lock_fd}>>"$history_lock_file" || return 1
+  if ! chmod 600 -- "$history_lock_file" ||
+    ! flock --exclusive "$history_lock_fd"; then
+    exec {history_lock_fd}>&-
+    return 1
+  fi
+
+  if [[ -f "$history_file" && ! -L "$history_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ $event_pattern ]]; then
+        recent_events+=("$line")
+        if (( ${#recent_events[@]} >= RELEASE_RUNNER_LOCK_HISTORY_LIMIT )); then
+          recent_events=("${recent_events[@]:1}")
+        fi
+      fi
+    done <"$history_file"
+  fi
+
+  history_temp_file=$(mktemp "${lock_dir}/.${lock_key}.wait-history.XXXXXX") || {
+    exec {history_lock_fd}>&-
+    return 1
+  }
+  if ! {
+    for line in "${recent_events[@]}"; do
+      printf '%s\n' "$line"
+    done
+    printf '%s\n' "$event"
+  } >"$history_temp_file" ||
+    ! chmod 600 -- "$history_temp_file" ||
+    ! mv -f -- "$history_temp_file" "$history_file"; then
+    rm -f -- "$history_temp_file"
+    exec {history_lock_fd}>&-
+    return 1
+  fi
+
+  exec {history_lock_fd}>&-
+}
+
+# shellcheck disable=SC2317
+handle_lock_wait_signal() {
+  local signal="$1"
+  local exit_code="$2"
+  local elapsed_seconds
+
+  trap '' HUP INT TERM
+  if [[ -n "$lock_wait_flock_pid" ]]; then
+    kill -s "$signal" "$lock_wait_flock_pid" 2>/dev/null || true
+    wait "$lock_wait_flock_pid" 2>/dev/null || true
+    lock_wait_flock_pid=""
+  fi
+  elapsed_seconds=$(($(date +%s) - lock_wait_started_epoch))
+  if ! record_lock_wait_event interrupted "$elapsed_seconds"; then
+    printf 'Release runner could not update local lock-wait history.\n' >&2
+  fi
+  exec {release_runner_lock_fd}>&-
+  exit "$exit_code"
+}
 
 if (( $# == 0 )); then
   printf 'Usage: %s <command> [args...]\n' "${BASH_SOURCE[0]}" >&2
@@ -124,15 +211,32 @@ if [[ "${RELEASE_RUNNER_LOCK_KEY:-}" != "$lock_key" ]]; then
       "$lock_owner_pid" "$lock_owner_started_at" "$lock_owner_state" \
       "$lock_wait_seconds" >&2
     lock_wait_started_epoch=$(date +%s)
-    if flock --exclusive --timeout "$lock_wait_seconds" \
-      --conflict-exit-code 75 "$release_runner_lock_fd"; then
-      lock_wait_elapsed_seconds=$(($(date +%s) - lock_wait_started_epoch))
+    trap 'handle_lock_wait_signal HUP 129' HUP
+    trap 'handle_lock_wait_signal INT 130' INT
+    trap 'handle_lock_wait_signal TERM 143' TERM
+    flock --exclusive --timeout "$lock_wait_seconds" \
+      --conflict-exit-code 75 "$release_runner_lock_fd" &
+    lock_wait_flock_pid=$!
+    if wait "$lock_wait_flock_pid"; then
+      lock_status=0
+    else
+      lock_status=$?
+    fi
+    lock_wait_flock_pid=""
+    trap - HUP INT TERM
+    lock_wait_elapsed_seconds=$(($(date +%s) - lock_wait_started_epoch))
+    if (( lock_status == 0 )); then
+      if ! record_lock_wait_event acquired "$lock_wait_elapsed_seconds"; then
+        printf 'Release runner could not update local lock-wait history.\n' >&2
+      fi
       printf \
         'Release runner acquired the workspace validation lock after %ss (previous_owner_pid=%s).\n' \
         "$lock_wait_elapsed_seconds" "$lock_owner_pid" >&2
     else
-      lock_status=$?
       if (( lock_status == 75 )); then
+        if ! record_lock_wait_event timeout "$lock_wait_elapsed_seconds"; then
+          printf 'Release runner could not update local lock-wait history.\n' >&2
+        fi
         printf \
           'Release runner timed out after %s seconds waiting for the workspace validation lock (owner_pid=%s owner_started_at=%s owner_state=%s). Retry after the current validation command finishes; inspect the reported PID if it remains active.\n' \
           "$lock_wait_seconds" "$lock_owner_pid" "$lock_owner_started_at" \
