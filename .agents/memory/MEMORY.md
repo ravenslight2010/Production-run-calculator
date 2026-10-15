@@ -155,3 +155,4 @@
 - [Sync listener stop diagnostics](sync-listener-stop-diagnostics.md) — clear lag samples on shutdown and fence metric writes from in-flight drains that resume afterward.
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [Pinned Node in Nix](pinned-node-nix-runner.md) — if the release runner cannot provision its Node pin, check for that exact version under `/nix/store` and prepend its `bin` directory.
+- [WebKit GIO TLS](webkit-gio-tls-runtime.md) — bundled WPE can launch without a TLS provider; expose Nix `glib-networking` via `GIO_EXTRA_MODULES` and keep trust checks enabled.

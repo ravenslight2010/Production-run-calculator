@@ -16,7 +16,7 @@ const chromiumLaunchOptions = {
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "pwa-handoff.spec.ts",
+  testMatch: ["pwa-handoff.spec.ts", "webkit-https.spec.ts"],
   timeout: 120_000,
   retries: 0,
   workers: 1,
