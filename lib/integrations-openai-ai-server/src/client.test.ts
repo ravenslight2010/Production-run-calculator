@@ -30,6 +30,12 @@ const baseParams = {
   messages: [{ role: "user" as const, content: "Hello" }],
 };
 
+function failingStreamBeforeOutput(error: Error) {
+  return (async function* () {
+    throw error;
+  })();
+}
+
 function transientProviderError(): Error & {
   status: number;
   response: { headers: { get: (name: string) => string | null } };
@@ -216,7 +222,7 @@ describe("Gemini-backed chat completions", () => {
       ...baseParams,
       stream: true,
     });
-    const chunks = [];
+    const chunks: Array<{ choices: Array<{ delta: { content: string | null } }> }> = [];
     for await (const chunk of response) chunks.push(chunk);
 
     expect(chunks).toEqual([
@@ -227,4 +233,63 @@ describe("Gemini-backed chat completions", () => {
     expect(sdk.generateContentStream).toHaveBeenCalledTimes(1);
     expect(sdk.generateContent.mock.calls).toHaveLength(0);
   });
+
+  it("tries the configured fallback when the primary stream fails before yielding output", async () => {
+    const providerFailure = Object.assign(new Error("Service unavailable"), { status: 503 });
+    sdk.generateContentStream
+      .mockResolvedValueOnce(failingStreamBeforeOutput(providerFailure))
+      .mockResolvedValueOnce((async function* () {
+        yield { text: "Recovered " };
+        yield { text: "answer" };
+      })());
+
+    const response = await openai.chat.completions.create({
+      ...baseParams,
+      stream: true,
+    });
+    const chunks: Array<{ choices: Array<{ delta: { content: string | null } }> }> = [];
+    for await (const chunk of response) chunks.push(chunk);
+
+    expect(sdk.generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
+      "fixture-model",
+      "gemini-3.5-flash",
+    ]);
+    expect(chunks).toEqual([
+      { choices: [{ delta: { content: "Recovered " } }] },
+      { choices: [{ delta: { content: "answer" } }] },
+    ]);
+    expect(chunks.map((chunk) => chunk.choices[0]?.delta.content).join("")).toBe("Recovered answer");
+  });
+
+  it("propagates a primary stream failure after output without switching models or replaying chunks", async () => {
+    const providerFailure = Object.assign(new Error("Service unavailable"), { status: 503 });
+    sdk.generateContentStream.mockResolvedValueOnce(
+      failingStreamAfterOutput("Partial answer", providerFailure),
+    );
+
+    const response = await openai.chat.completions.create({
+      ...baseParams,
+      stream: true,
+    });
+    const chunks: Array<{ choices: Array<{ delta: { content: string | null } }> }> = [];
+
+    await expect(async () => {
+      for await (const chunk of response) chunks.push(chunk);
+    }).rejects.toMatchObject({ name: "GeminiProviderUnavailableError" });
+
+    expect(sdk.generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
+      "fixture-model",
+    ]);
+    expect(chunks).toEqual([
+      { choices: [{ delta: { content: "Partial answer" } }] },
+    ]);
+    expect(chunks.map((chunk) => chunk.choices[0]?.delta.content).join("")).toBe("Partial answer");
+  });
 });
+
+function failingStreamAfterOutput(text: string, error: Error) {
+  return (async function* () {
+    yield { text };
+    throw error;
+  })();
+}
