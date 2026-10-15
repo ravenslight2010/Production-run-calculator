@@ -64,6 +64,16 @@
       "safety": "unit tests; no live application"
     },
     {
+      "id": "ci-reduced-motion-browser",
+      "surface": "Reduced-motion browser previews",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install", "Chromium and WebKit"],
+      "prerequisites": ["Playwright browser dependencies"],
+      "safety": "local Vite previews only; API requests are unauthenticated stubs; no database or production data"
+    },
+    {
       "id": "ci-library-sweep",
       "surface": "CI client and shared-library unit tests",
       "command": "pnpm -r --filter \"./lib/**\" --if-present test",

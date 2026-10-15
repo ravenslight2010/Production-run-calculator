@@ -163,6 +163,40 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  reduced-motion-browser:
+    name: Reduced-motion browser previews
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-reduced-motion-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.21.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium and WebKit with Linux dependencies
+        run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps chromium webkit
+      - name: Run isolated reduced-motion browser matrix
+        run: node scripts/src/test-results.mjs run --lane ci-reduced-motion-browser -- pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-reduced-motion-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
+          retention-days: 14
+
   test-release-concurrency:
     name: Release concurrency fixture tests
     runs-on: ubuntu-latest
@@ -408,6 +442,7 @@ jobs:
       - typescript-7-codegen-bridge
       - typecheck
       - test
+      - reduced-motion-browser
       - test-release-concurrency
       - test-db
       - schema-safe-rollback
