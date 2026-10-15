@@ -267,19 +267,22 @@ test("release step summaries map structured outcomes into the shared lane contra
   };
   const outcomes = [
     {
-      label: "API unit tests (release shard 1/9)",
+      label: "API unit tests (release shard 1/12)",
       status: "FAIL",
       durationMs: 20,
       counts: apiUnitCounts,
     },
-    { label: "API integration tests (release shard 2/9)", status: "PASS", durationMs: 30 },
-    { label: "API integration tests (release shard 3/9)", status: "PASS", durationMs: 35 },
-    { label: "API integration tests (release shard 4/9)", status: "PASS", durationMs: 25 },
-    { label: "API role/capability tests (release shard 5/9)", status: "NOT REACHED", durationMs: 0 },
-    { label: "API sync tests (release shard 6/9)", status: "PASS", durationMs: 20 },
-    { label: "API sync tests (release shard 7/9)", status: "PASS", durationMs: 22 },
-    { label: "API sync tests (release shard 8/9)", status: "PASS", durationMs: 18 },
-    { label: "API sync SSE tests (release shard 9/9)", status: "PASS", durationMs: 25 },
+    { label: "API integration tests (release shard 2/12)", status: "PASS", durationMs: 30 },
+    { label: "API integration tests (release shard 3/12)", status: "PASS", durationMs: 35 },
+    { label: "API integration tests (release shard 4/12)", status: "PASS", durationMs: 25 },
+    { label: "API integration tests (release shard 5/12)", status: "PASS", durationMs: 27 },
+    { label: "API integration tests (release shard 6/12)", status: "PASS", durationMs: 28 },
+    { label: "API integration tests (release shard 7/12)", status: "PASS", durationMs: 26 },
+    { label: "API role/capability tests (release shard 8/12)", status: "NOT REACHED", durationMs: 0 },
+    { label: "API sync tests (release shard 9/12)", status: "PASS", durationMs: 20 },
+    { label: "API sync tests (release shard 10/12)", status: "PASS", durationMs: 22 },
+    { label: "API sync tests (release shard 11/12)", status: "PASS", durationMs: 18 },
+    { label: "API sync SSE tests (release shard 12/12)", status: "PASS", durationMs: 25 },
     { label: "browser WebKit smoke", status: "INFRASTRUCTURE TIMEOUT", durationMs: 500 },
     { label: "browser phone/tablet WebKit compatibility", status: "PASS", durationMs: 650 },
   ];
@@ -797,7 +800,7 @@ test("API unit release totals require one current summary and persist count-only
     catalog,
     [
       {
-        label: "API unit tests (release shard 1/9)",
+         label: "API unit tests (release shard 1/12)",
         status: "FAIL",
         durationMs: 30,
         counts: expectedCounts,

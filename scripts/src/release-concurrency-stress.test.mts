@@ -353,7 +353,7 @@ async function run(): Promise<void> {
     "the isolated convergence test must be named by its dedicated release script",
   );
 
-  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 9);
+  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 12);
   const nonSseSyncReleaseSteps = RELEASE_CHECK_API_SHARD_STEPS.filter((step) =>
     step.label.startsWith("API sync tests"),
   );
@@ -410,7 +410,7 @@ async function run(): Promise<void> {
   const generalIntegrationSteps = RELEASE_CHECK_API_SHARD_STEPS.filter(
     (step) => step.label.startsWith("API integration tests"),
   );
-  assert.equal(generalIntegrationSteps.length, 3);
+  assert.equal(generalIntegrationSteps.length, 6);
   assert.ok(
     generalIntegrationSteps.every(
       (step) =>

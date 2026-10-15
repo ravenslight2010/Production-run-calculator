@@ -981,6 +981,9 @@ export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
     "test:release:integration:1",
     "test:release:integration:2",
     "test:release:integration:3",
+    "test:release:integration:4",
+    "test:release:integration:5",
+    "test:release:integration:6",
   ],
   dedicated: {
     roles: ["test:release:roles"],
@@ -1211,7 +1214,7 @@ export async function assertApiIntegrationTestShardInventory(
 
 export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
-    label: "API unit tests (release shard 1/9)",
+    label: "API unit tests (release shard 1/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
     env: {
       NODE_ENV: "test",
@@ -1224,7 +1227,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 2/9)",
+    label: "API integration tests (release shard 2/12)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -1237,7 +1240,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 3/9)",
+    label: "API integration tests (release shard 3/12)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -1250,7 +1253,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 4/9)",
+    label: "API integration tests (release shard 4/12)",
     args: [
       "--filter",
       "@workspace/api-server",
@@ -1263,7 +1266,46 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API role/capability tests (release shard 5/9)",
+    label: "API integration tests (release shard 5/12)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:4",
+    ],
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 6/12)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:5",
+    ],
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 7/12)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:6",
+    ],
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API role/capability tests (release shard 8/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:roles"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -1271,7 +1313,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync tests (release shard 6/9)",
+    label: "API sync tests (release shard 9/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync:1"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -1279,7 +1321,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync tests (release shard 7/9)",
+    label: "API sync tests (release shard 10/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync:2"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -1287,7 +1329,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync tests (release shard 8/9)",
+    label: "API sync tests (release shard 11/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync:3"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -1295,7 +1337,7 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync SSE tests (release shard 9/9)",
+    label: "API sync SSE tests (release shard 12/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -4798,7 +4840,7 @@ async function main(): Promise<void> {
           if (step.group === "api-test-shards") apiActive += 1;
           console.log(`[${index + 1}/${steps.length}] ${step.label}`);
           const isApiUnitReleaseStep =
-            step.label === "API unit tests (release shard 1/9)";
+            step.label === "API unit tests (release shard 1/12)";
           const releaseVitestCountsDirectory =
             process.env.TEST_RESULTS_RELEASE_VITEST_COUNTS_DIR?.trim();
           const releaseVitestRunId =

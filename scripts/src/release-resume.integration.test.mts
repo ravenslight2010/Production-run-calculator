@@ -1332,7 +1332,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
       dependsOn: [],
     },
     {
-      label: "API integration tests (release shard 2/9)",
+      label: "API integration tests (release shard 2/12)",
       command: process.execPath,
       args: ["-e", expensiveGateScript, "api-release-shard"],
       env: {
@@ -1404,7 +1404,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
       [
         [sourcePreflightLabel, false, "FAIL", undefined],
         [
-          "API integration tests (release shard 2/9)",
+          "API integration tests (release shard 2/12)",
           false,
           "BLOCKED",
           [sourcePreflightLabel],
@@ -1446,7 +1446,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
     );
     for (const label of [
       sourcePreflightLabel,
-      "API integration tests (release shard 2/9)",
+      "API integration tests (release shard 2/12)",
       "run calculator tests",
       "browser smoke tests",
     ]) {
