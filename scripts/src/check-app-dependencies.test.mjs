@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   auditDependencyUsage,
   discoverWorkspacePackages,
+  main,
 } from "./check-app-dependencies.mjs";
 
 test("reports a direct dependency that has no source, config, or script use", () => {
@@ -147,6 +148,66 @@ test("discovers first-party artifact, library, integration, and scripts packages
     await rm(rootPath, { recursive: true, force: true });
   }
 });
+
+test("strict mode passes when calculator and mockup manifests have no unused dependencies", async () => {
+  const rootPath = await makeStrictAuditFixture({
+    calculatorDependencies: { react: "1.0.0" },
+    mockupDependencies: { vite: "1.0.0" },
+  });
+  try {
+    assert.equal(await main(rootPath, { strict: true }), 0);
+  } finally {
+    await rm(rootPath, { recursive: true, force: true });
+  }
+});
+
+test("strict mode fails on unused calculator or mockup dependencies, while report-only passes", async () => {
+  const rootPath = await makeStrictAuditFixture({
+    calculatorDependencies: { react: "1.0.0" },
+    mockupDependencies: { vite: "1.0.0", "unused-package": "1.0.0" },
+  });
+  try {
+    assert.equal(await main(rootPath), 0);
+    assert.equal(await main(rootPath, { strict: true }), 1);
+  } finally {
+    await rm(rootPath, { recursive: true, force: true });
+  }
+});
+
+async function makeStrictAuditFixture({
+  calculatorDependencies,
+  mockupDependencies,
+}) {
+  const rootPath = await mkdtemp(join(tmpdir(), "strict-dependency-audit-"));
+  const packages = [
+    {
+      directory: "artifacts/run-calculator",
+      name: "@workspace/run-calculator",
+      dependencies: calculatorDependencies,
+    },
+    {
+      directory: "artifacts/mockup-sandbox",
+      name: "@workspace/mockup-sandbox",
+      dependencies: mockupDependencies,
+    },
+  ];
+
+  for (const { directory, name, dependencies } of packages) {
+    const packagePath = join(rootPath, directory);
+    await mkdir(join(packagePath, "src"), { recursive: true });
+    await writeFile(
+      join(packagePath, "package.json"),
+      JSON.stringify({ name, dependencies, scripts: {} }),
+    );
+    const importNames = Object.keys(dependencies)
+      .filter((dependency) => dependency !== "unused-package")
+      .map((dependency) => `import "${dependency}";`)
+      .join("\n");
+    await writeFile(join(packagePath, "src/main.js"), importNames);
+  }
+
+  return rootPath;
+}
 
 test("does not mistake relative, Node built-in, or URL imports for dependencies", () => {
   const unused = auditDependencyUsage({

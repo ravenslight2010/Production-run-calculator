@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const WORKSPACE_PACKAGE_ROOTS = ["artifacts", "lib"];
+const STRICT_PACKAGE_NAMES = new Set([
+  "@workspace/run-calculator",
+  "@workspace/mockup-sandbox",
+]);
 
 const SOURCE_EXTENSIONS = new Set([
   ".cjs",
@@ -407,31 +411,45 @@ export async function discoverWorkspacePackages(rootPath = ROOT) {
   return packagePaths.sort((left, right) => left.localeCompare(right));
 }
 
-export async function main(rootPath = ROOT) {
+export async function main(rootPath = ROOT, { strict = false } = {}) {
   const packagePaths = await discoverWorkspacePackages(rootPath);
   const results = await Promise.all(
     packagePaths.map((packagePath) => auditPackage(packagePath)),
   );
+  let exitCode = 0;
   console.log(`Audited ${results.length} first-party workspace packages.`);
   for (const result of results) {
     if (result.unused.length === 0) {
       console.log(`${result.packageName}: all direct dependencies are referenced.`);
       continue;
     }
+    const enforce = strict && STRICT_PACKAGE_NAMES.has(result.packageName);
     console.warn(
-      `${result.packageName}: direct dependencies with no detected source/config/script use (review only):`,
+      `${result.packageName}: direct dependencies with no detected source/config/script use${enforce ? " (strict check failed)" : " (review only)"}:`,
     );
     for (const dependency of result.unused) console.warn(`  - ${dependency}`);
+    if (enforce) exitCode = 1;
   }
+  return exitCode;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    console.error(
-      `App dependency audit failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+  const args = process.argv.slice(2);
+  if (args.some((argument) => argument !== "--strict")) {
+    console.error("App dependency audit accepts only the optional --strict flag.");
     process.exitCode = 1;
-  });
+  } else {
+    main(ROOT, { strict: args.includes("--strict") })
+      .then((exitCode) => {
+        process.exitCode = exitCode;
+      })
+      .catch((error) => {
+        console.error(
+          `App dependency audit failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        process.exitCode = 1;
+      });
+  }
 }
