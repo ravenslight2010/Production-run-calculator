@@ -186,6 +186,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install Chromium and WebKit with Linux dependencies
         run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps chromium webkit
+      - name: Run direct HTTPS transport smoke in Chromium and WebKit
+        run: node scripts/src/test-results.mjs run --lane ci-browser-https -- pnpm --filter @workspace/run-calculator run test:webkit-https
       - name: Run isolated reduced-motion browser matrix
         run: node scripts/src/test-results.mjs run --lane ci-reduced-motion-browser -- pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion
       - name: Build calculator and mockup preview assets

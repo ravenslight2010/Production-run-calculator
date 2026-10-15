@@ -8,3 +8,9 @@ When `run-release-node.sh` falls back to `npx` and fails to provision the reques
 **Why:** This workspace can have a pinned Node release available in the Nix store while the shell selects an older Node release. The runner only uses an installed version directly when it is already first on `PATH`, so otherwise it may attempt an unnecessary `npx` download.
 
 **How to apply:** After a provisioning failure, inspect `node --version` and locate the required version under `/nix/store`; use the matching binary directory on `PATH` for the unchanged validation command. Do not bypass the release runner's version and evidence checks.
+
+The workspace-global `pnpm` launcher can have an absolute shebang pointing at a different Node build even after the pinned Node is first on `PATH`. Do not infer the runtime used for package-script children solely from the `pnpm` process path; inspect the launcher and verify the release runner's selected Node separately.
+
+**Why:** The launcher is generated with its interpreter path, while child tools resolve `node` through the updated `PATH`; these can report different executable paths during the same check.
+
+**How to apply:** If process listings appear inconsistent after pinning Node, inspect `head -1 "$(command -v pnpm)"` and the release runner preflight result before changing toolchain configuration.

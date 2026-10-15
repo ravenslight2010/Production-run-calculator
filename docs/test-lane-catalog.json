@@ -74,6 +74,16 @@
       "safety": "local Vite previews only; API requests are unauthenticated stubs; no database or production data"
     },
     {
+      "id": "ci-browser-https",
+      "surface": "Direct HTTPS browser transport",
+      "command": "pnpm --filter @workspace/run-calculator run test:webkit-https",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install", "Playwright-managed Chromium and WebKit"],
+      "prerequisites": ["Playwright Chromium and WebKit browsers installed", "public HTTPS image endpoint available"],
+      "safety": "desktop browser requests to a real public image endpoint; no route interception, production app, or application data"
+    },
+    {
       "id": "ci-reduced-motion-built-browser",
       "surface": "Reduced-motion optimized browser previews",
       "command": "pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion:built",

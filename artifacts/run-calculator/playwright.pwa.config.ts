@@ -5,9 +5,12 @@ import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 const webkitOptions = webkitLaunchOptions();
 const appShellInstallSmoke =
   /serves app shell and declared install assets|blocks an offline intent after session revocation|keeps an authentication-blocked offline intent private across account switches|rechecks an open run after reconnect|recovers from a temporary session check failure after offline startup|keeps startup retry available after session checks time out|keeps a valid session through normal online run recovery/;
-const chromiumLaunchOptions = {
-  executablePath: resolveChromiumExecutable(),
-};
+const chromiumLaunchOptions =
+  process.env.CI &&
+  !process.env.REPLIT_DEV_DOMAIN &&
+  !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim()
+    ? undefined
+    : { executablePath: resolveChromiumExecutable() };
 
 /**
  * The PWA handoff test serves its own two-version static site. Keep it out of
@@ -31,7 +34,7 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        launchOptions: chromiumLaunchOptions,
+        ...(chromiumLaunchOptions ? { launchOptions: chromiumLaunchOptions } : {}),
       },
     },
     {
@@ -47,7 +50,7 @@ export default defineConfig({
       use: {
         ...devices["iPhone 13"],
         browserName: "chromium",
-        launchOptions: chromiumLaunchOptions,
+        ...(chromiumLaunchOptions ? { launchOptions: chromiumLaunchOptions } : {}),
       },
     },
     {
@@ -56,7 +59,7 @@ export default defineConfig({
       use: {
         ...devices["iPad (gen 7)"],
         browserName: "chromium",
-        launchOptions: chromiumLaunchOptions,
+        ...(chromiumLaunchOptions ? { launchOptions: chromiumLaunchOptions } : {}),
       },
     },
     {
@@ -65,7 +68,7 @@ export default defineConfig({
       use: {
         ...devices["iPad (gen 7) landscape"],
         browserName: "chromium",
-        launchOptions: chromiumLaunchOptions,
+        ...(chromiumLaunchOptions ? { launchOptions: chromiumLaunchOptions } : {}),
       },
     },
     {
