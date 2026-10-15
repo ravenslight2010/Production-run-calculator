@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  auditRootPackage,
   auditDependencyUsage,
   discoverWorkspacePackages,
   main,
@@ -179,6 +180,10 @@ async function makeStrictAuditFixture({
   mockupDependencies,
 }) {
   const rootPath = await mkdtemp(join(tmpdir(), "strict-dependency-audit-"));
+  await writeFile(
+    join(rootPath, "package.json"),
+    JSON.stringify({ name: "strict-audit-root", scripts: {}, devDependencies: {} }),
+  );
   const packages = [
     {
       directory: "artifacts/run-calculator",
@@ -208,7 +213,55 @@ async function makeStrictAuditFixture({
 
   return rootPath;
 }
+test("audits root scripts and workspace tooling without retaining unused declarations", async () => {
+  const rootPath = await mkdtemp(join(tmpdir(), "root-dependency-audit-"));
+  try {
+    await mkdir(join(rootPath, "scripts"), { recursive: true });
+    await mkdir(join(rootPath, "lib/api-spec"), { recursive: true });
+    await mkdir(join(rootPath, ".vscode"), { recursive: true });
+    await mkdir(join(rootPath, "node_modules/root-script-tool"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(rootPath, "package.json"),
+      JSON.stringify({
+        name: "workspace",
+        scripts: { check: "root-script-tool verify" },
+        devDependencies: {
+          "root-script-tool": "1.0.0",
+          "typescript-native": "7.0.0",
+          prettier: "3.0.0",
+          "unused-root-tool": "1.0.0",
+        },
+      }),
+    );
+    await writeFile(
+      join(rootPath, "node_modules/root-script-tool/package.json"),
+      JSON.stringify({
+        name: "root-script-tool",
+        bin: { "root-script-tool": "cli.js" },
+      }),
+    );
+    await writeFile(
+      join(rootPath, "scripts/check-compiler.mjs"),
+      'const compiler = resolve(root, "node_modules/typescript-native/bin/tsc");',
+    );
+    await writeFile(
+      join(rootPath, ".vscode/settings.json"),
+      JSON.stringify({ "typescript.tsdk": "node_modules/typescript/lib" }),
+    );
+    await writeFile(
+      join(rootPath, "lib/api-spec/orval.config.ts"),
+      "export default { output: { prettier: true } };",
+    );
 
+    const result = await auditRootPackage(rootPath);
+    assert.equal(result.packageName, "workspace");
+    assert.deepEqual(result.unused, ["unused-root-tool"]);
+  } finally {
+    await rm(rootPath, { recursive: true, force: true });
+  }
+});
 test("does not mistake relative, Node built-in, or URL imports for dependencies", () => {
   const unused = auditDependencyUsage({
     manifest: {

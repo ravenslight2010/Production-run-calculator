@@ -231,6 +231,11 @@ function collectPackageResolutionReferences(source, dependencies, used) {
       used.add(resolvedPackage);
     }
   }
+
+  const nodeModulesPath = /\bnode_modules\/((?:@[^/\\\s"'`]+\/)?[^/\\\s"'`]+)/g;
+  for (const match of source.matchAll(nodeModulesPath)) {
+    if (dependencies.has(match[1])) used.add(match[1]);
+  }
 }
 
 function collectWorkspaceFilterReferences(source, dependencies, used) {
@@ -298,6 +303,37 @@ async function readInstalledDependencyFacts(artifactPath, dependencyNames) {
   return { binPackages, peerPackages };
 }
 
+async function readPackageFiles(packagePath, sourcePaths) {
+  const manifest = JSON.parse(
+    await readFile(join(packagePath, "package.json"), "utf8"),
+  );
+  const files = await Promise.all(
+    sourcePaths.map(async (path) => ({
+      path,
+      content: await readFile(path, "utf8"),
+    })),
+  );
+  const dependencyNames = [
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+  ];
+  const { binPackages, peerPackages } = await readInstalledDependencyFacts(
+    packagePath,
+    dependencyNames,
+  );
+
+  return {
+    packageName: manifest.name,
+    unused: auditDependencyUsage({
+      manifest,
+      files,
+      binPackages,
+      peerPackages,
+    }),
+  };
+}
+
 export function auditDependencyUsage({
   manifest,
   files,
@@ -336,35 +372,36 @@ export function auditDependencyUsage({
 }
 
 export async function auditPackage(artifactPath) {
-  const manifest = JSON.parse(
-    await readFile(join(artifactPath, "package.json"), "utf8"),
-  );
   const sourcePaths = await walkSourceFiles(artifactPath);
-  const files = await Promise.all(
-    sourcePaths.map(async (path) => ({
-      path,
-      content: await readFile(path, "utf8"),
-    })),
-  );
-  const dependencyNames = [
-    ...Object.keys(manifest.dependencies ?? {}),
-    ...Object.keys(manifest.devDependencies ?? {}),
-    ...Object.keys(manifest.optionalDependencies ?? {}),
-  ];
-  const { binPackages, peerPackages } = await readInstalledDependencyFacts(
-    artifactPath,
-    dependencyNames,
-  );
+  return readPackageFiles(artifactPath, sourcePaths);
+}
 
-  return {
-    packageName: manifest.name,
-    unused: auditDependencyUsage({
-      manifest,
-      files,
-      binPackages,
-      peerPackages,
-    }),
-  };
+async function rootToolingSourceFiles(rootPath) {
+  const files = [];
+  const rootEntries = await readdir(rootPath, { withFileTypes: true });
+  for (const entry of rootEntries) {
+    if (
+      entry.isFile() &&
+      (entry.name === "pnpm-workspace.yaml" ||
+        /^tsconfig(?:\..+)?\.json$/u.test(entry.name))
+    ) {
+      files.push(join(rootPath, entry.name));
+    }
+  }
+
+  for (const directory of [".vscode", "scripts", "lib/api-spec"]) {
+    const directoryPath = join(rootPath, directory);
+    try {
+      files.push(...(await walkSourceFiles(directoryPath)));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return files;
+}
+
+export async function auditRootPackage(rootPath = ROOT) {
+  return readPackageFiles(rootPath, await rootToolingSourceFiles(rootPath));
 }
 
 async function packageDirectoriesUnder(rootPath, parentDirectory) {
@@ -413,11 +450,15 @@ export async function discoverWorkspacePackages(rootPath = ROOT) {
 
 export async function main(rootPath = ROOT, { strict = false } = {}) {
   const packagePaths = await discoverWorkspacePackages(rootPath);
-  const results = await Promise.all(
-    packagePaths.map((packagePath) => auditPackage(packagePath)),
+  const [rootResult, ...workspaceResults] = await Promise.all([
+    auditRootPackage(rootPath),
+    ...packagePaths.map((packagePath) => auditPackage(packagePath)),
+  ]);
+  const results = [rootResult, ...workspaceResults];
+  console.log(
+    `Audited the root manifest and ${workspaceResults.length} first-party workspace packages.`,
   );
   let exitCode = 0;
-  console.log(`Audited ${results.length} first-party workspace packages.`);
   for (const result of results) {
     if (result.unused.length === 0) {
       console.log(`${result.packageName}: all direct dependencies are referenced.`);
