@@ -9,9 +9,21 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LAUNCHER="${SCRIPT_DIR}/run-release-node.sh"
 REAL_TIMEOUT_BIN=$(command -v timeout)
+REAL_NODE_BIN=$(command -v node)
+REAL_NODE_BIN_DIR=$(dirname "$REAL_NODE_BIN")
+OPENSSL_BIN=$(command -v openssl)
 export SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN"
 TEST_ROOT=$(mktemp -d)
-trap 'rm -rf "$TEST_ROOT"' EXIT
+TLS_SERVER_PID=""
+
+cleanup_test_root() {
+  if [[ -n "$TLS_SERVER_PID" ]]; then
+    kill "$TLS_SERVER_PID" 2>/dev/null || true
+    wait "$TLS_SERVER_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TEST_ROOT"
+}
+trap cleanup_test_root EXIT
 
 REQUIRED_NODE_VERSION="24.20.0"
 
@@ -409,6 +421,188 @@ test_missing_npx_fails_before_release_commands() {
     assert_not_contains "$events" "child-node="
   fi
   echo "PASS: missing npx reports the tooling boundary before preflight or child execution"
+}
+
+test_release_runner_verifies_local_tls_certificates() {
+  local workspace="${TEST_ROOT}/tls-verification"
+  local cert_dir="${TEST_ROOT}/tls-certificates"
+  local server_dir="${TEST_ROOT}/tls-server"
+  local node_version
+  local port_file="${server_dir}/port"
+  local server_output="${server_dir}/output"
+  local client_script="${workspace}/https-client.cjs"
+  local trusted_output="${workspace}/trusted-output"
+  local untrusted_output="${workspace}/untrusted-output"
+  local url
+  local attempt
+  local status
+
+  mkdir -p "${workspace}/scripts/src" "$cert_dir" "$server_dir"
+  cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
+  node_version=$("$REAL_NODE_BIN" --version)
+  printf '%s\n' "${node_version#v}" >"${workspace}/.nvmrc"
+  cat >"${workspace}/scripts/src/check-routine-node-version.mjs" <<'EOF'
+process.exit(0);
+EOF
+
+  "$OPENSSL_BIN" req -x509 -newkey rsa:2048 -nodes \
+    -keyout "${cert_dir}/test-ca.key" \
+    -out "${cert_dir}/test-ca.pem" \
+    -days 2 \
+    -subj "/CN=Release Runner Temporary Test CA" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    >"${cert_dir}/openssl-output" 2>&1 || {
+      printf 'Could not create the temporary TLS test CA.\n' >&2
+      cat "${cert_dir}/openssl-output" >&2
+      return 1
+    }
+  "$OPENSSL_BIN" req -new -newkey rsa:2048 -nodes \
+    -keyout "${cert_dir}/server.key" \
+    -out "${cert_dir}/server.csr" \
+    -subj "/CN=localhost" \
+    >>"${cert_dir}/openssl-output" 2>&1 || {
+      printf 'Could not create the temporary TLS server key and request.\n' >&2
+      cat "${cert_dir}/openssl-output" >&2
+      return 1
+    }
+  cat >"${cert_dir}/server-extensions.cnf" <<'EOF'
+[server_cert]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1
+EOF
+  "$OPENSSL_BIN" x509 -req \
+    -in "${cert_dir}/server.csr" \
+    -CA "${cert_dir}/test-ca.pem" \
+    -CAkey "${cert_dir}/test-ca.key" \
+    -CAcreateserial \
+    -out "${cert_dir}/server.pem" \
+    -days 2 \
+    -extfile "${cert_dir}/server-extensions.cnf" \
+    -extensions server_cert \
+    >>"${cert_dir}/openssl-output" 2>&1 || {
+      printf 'Could not sign the temporary TLS server certificate.\n' >&2
+      cat "${cert_dir}/openssl-output" >&2
+      return 1
+    }
+
+  cat >"${server_dir}/https-server.cjs" <<'EOF'
+const fs = require("node:fs");
+const https = require("node:https");
+
+const [keyPath, certPath, portPath] = process.argv.slice(2);
+const server = https.createServer(
+  { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
+  (_request, response) => {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("verified local TLS fixture");
+  },
+);
+
+server.listen(0, "127.0.0.1", () => {
+  fs.writeFileSync(portPath, String(server.address().port));
+});
+EOF
+  cat >"$client_script" <<'EOF'
+const https = require("node:https");
+
+const request = https.get(process.argv[2], (response) => {
+  let body = "";
+  response.setEncoding("utf8");
+  response.on("data", (chunk) => {
+    body += chunk;
+  });
+  response.on("end", () => {
+    if (response.statusCode !== 200 || body !== "verified local TLS fixture") {
+      console.error(`Unexpected HTTPS response: ${response.statusCode} ${body}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(body);
+  });
+});
+
+request.setTimeout(5000, () => request.destroy(new Error("HTTPS request timed out")));
+request.on("error", (error) => {
+  console.error(`HTTPS request failed: ${error.code ?? error.message}`);
+  process.exitCode = 1;
+});
+EOF
+
+  "$REAL_NODE_BIN" "${server_dir}/https-server.cjs" \
+    "${cert_dir}/server.key" "${cert_dir}/server.pem" "$port_file" \
+    >"$server_output" 2>&1 &
+  TLS_SERVER_PID=$!
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ -s "$port_file" ]] && break
+    if ! kill -0 "$TLS_SERVER_PID" 2>/dev/null; then
+      printf 'Local HTTPS fixture server exited before becoming ready.\n' >&2
+      cat "$server_output" >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+  if [[ ! -s "$port_file" ]]; then
+    printf 'Local HTTPS fixture server did not become ready in time.\n' >&2
+    cat "$server_output" >&2
+    return 1
+  fi
+  url="https://127.0.0.1:$(cat "$port_file")/"
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    PATH="${REAL_NODE_BIN_DIR}:${PATH}" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$url" >"$trusted_output" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ "$(cat "$trusted_output")" != *"verified local TLS fixture"* ]]; then
+    printf 'Pinned runner did not trust the explicitly supplied test CA (status %s):\n' \
+      "$status" >&2
+    cat "$trusted_output" >&2
+    return 1
+  fi
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    PATH="${REAL_NODE_BIN_DIR}:${PATH}" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$url" >"$untrusted_output" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Pinned runner accepted a server certificate signed by the untrusted test CA.\n' >&2
+    cat "$untrusted_output" >&2
+    return 1
+  fi
+  local untrusted_result
+  untrusted_result=$(cat "$untrusted_output")
+  if [[ "$untrusted_result" != *"UNABLE_TO_GET_ISSUER_CERT_LOCALLY"* &&
+    "$untrusted_result" != *"UNABLE_TO_VERIFY_LEAF_SIGNATURE"* &&
+    "$untrusted_result" != *"DEPTH_ZERO_SELF_SIGNED_CERT"* ]]; then
+    printf 'Untrusted TLS failed for a reason other than certificate validation:\n%s\n' \
+      "$untrusted_result" >&2
+    return 1
+  fi
+
+  kill "$TLS_SERVER_PID" 2>/dev/null || true
+  wait "$TLS_SERVER_PID" 2>/dev/null || true
+  TLS_SERVER_PID=""
+  echo "PASS: release runner trusts the explicit test CA and rejects the untrusted CA"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
@@ -1309,6 +1503,7 @@ test_npx_package_resolution_failure_fails_before_release_commands
 test_missing_node_selector_fails_before_release_commands
 test_empty_node_selector_fails_before_release_commands
 test_missing_npx_fails_before_release_commands
+test_release_runner_verifies_local_tls_certificates
 test_isolated_browser_status_and_database_cleanup
 test_isolated_browser_interrupt_cleans_database
 test_isolated_sync_interrupt_cleans_database_and_children
