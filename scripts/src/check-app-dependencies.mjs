@@ -2,7 +2,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -131,14 +131,18 @@ function addScriptUsage(
   used,
   ambiguousBinaries,
 ) {
-  const scriptText = Object.values(scripts ?? {}).join("\n");
-  collectBinaryUsage(
-    scriptText,
-    binPackages,
-    dependencies,
-    used,
-    ambiguousBinaries,
-  );
+  const scriptEntries = Object.entries(scripts ?? {});
+  for (const [scriptName, scriptText] of scriptEntries) {
+    collectBinaryUsage(
+      scriptText,
+      binPackages,
+      dependencies,
+      used,
+      ambiguousBinaries,
+      `package.json#scripts.${scriptName}`,
+    );
+  }
+  const scriptText = scriptEntries.map(([, source]) => source).join("\n");
   collectImports(scriptText, dependencies, used);
   collectPackageResolutionReferences(scriptText, dependencies, used);
 }
@@ -162,6 +166,7 @@ function collectBinaryUsage(
   dependencies,
   used,
   ambiguousBinaries,
+  location,
 ) {
   const nodeModulesPathRanges = collectNodeModulesPathRanges(source);
   for (const [binName, packages] of binPackages) {
@@ -186,7 +191,12 @@ function collectBinaryUsage(
     if (providers.length === 1) {
       used.add(providers[0]);
     } else if (providers.length > 1) {
-      ambiguousBinaries.set(binName, providers);
+      const ambiguous = ambiguousBinaries.get(binName) ?? {
+        providers,
+        locations: new Set(),
+      };
+      if (location) ambiguous.locations.add(location);
+      ambiguousBinaries.set(binName, ambiguous);
     }
   }
 }
@@ -367,7 +377,7 @@ async function readPackageFiles(packagePath, sourcePaths) {
   );
   const files = await Promise.all(
     sourcePaths.map(async (path) => ({
-      path: relative(packagePath, path),
+      path: relative(packagePath, path).split(sep).join("/"),
       content: await readFile(path, "utf8"),
     })),
   );
@@ -433,6 +443,7 @@ export function auditDependencyUsage({
       dependencies,
       used,
       ambiguousBinaries,
+      file.path,
     );
     addTypeConfigUsage(file.path, file.content, dependencies, used);
     collectCssPluginReferences(file.path, file.content, dependencies, used);
@@ -458,7 +469,13 @@ export function auditDependencyUsage({
         left.path.localeCompare(right.path),
     ),
     ambiguousBinaries: [...ambiguousBinaries]
-      .map(([name, providers]) => ({ name, providers }))
+      .map(([name, { providers, locations }]) => ({
+        name,
+        providers,
+        locations: [...locations].sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      }))
       .sort((left, right) => left.name.localeCompare(right.name)),
   };
 }
@@ -555,9 +572,9 @@ export async function main(rootPath = ROOT, { strict = false } = {}) {
   let exitCode = 0;
   for (const result of results) {
     const enforce = strict && STRICT_PACKAGE_NAMES.has(result.packageName);
-    for (const { name, providers } of result.ambiguousBinaries) {
+    for (const { name, providers, locations } of result.ambiguousBinaries) {
       console.warn(
-        `${result.packageName}: ambiguous binary "${name}" (provided by ${providers.join(", ")}); not counted as dependency use.`,
+        `${result.packageName}: ambiguous binary "${name}" (provided by ${providers.join(", ")}; found in ${locations.join(", ")}); not counted as dependency use.`,
       );
     }
     if (

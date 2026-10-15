@@ -159,9 +159,12 @@ test("reports a bare binary with multiple direct providers as ambiguous", () => 
         "typescript-native": "7.0.0",
         typescript: "6.0.0",
       },
-      scripts: { check: "tsc --version" },
+      scripts: { check: "tsc --version && tsc --help" },
     },
-    files: [],
+    files: [
+      { path: "src/z-compiler.mjs", content: "tsc --version" },
+      { path: "src/a-compiler.mjs", content: "tsc --help && tsc --version" },
+    ],
     binPackages: new Map([
       ["tsc", new Set(["typescript-native", "typescript"])],
     ]),
@@ -169,7 +172,15 @@ test("reports a bare binary with multiple direct providers as ambiguous", () => 
 
   assert.deepEqual(result.unused, ["typescript", "typescript-native"]);
   assert.deepEqual(result.ambiguousBinaries, [
-    { name: "tsc", providers: ["typescript", "typescript-native"] },
+    {
+      name: "tsc",
+      providers: ["typescript", "typescript-native"],
+      locations: [
+        "package.json#scripts.check",
+        "src/a-compiler.mjs",
+        "src/z-compiler.mjs",
+      ],
+    },
   ]);
 });
 
@@ -185,6 +196,11 @@ test("prints ambiguous binary providers in the dependency audit report", async (
         scripts: { check: "shared-tool" },
         devDependencies: { "tool-one": "1.0.0", "tool-two": "1.0.0" },
       }),
+    );
+    await mkdir(join(rootPath, "scripts"), { recursive: true });
+    await writeFile(
+      join(rootPath, "scripts/audit.mjs"),
+      "shared-tool --version",
     );
     for (const packageName of ["tool-one", "tool-two"]) {
       const packagePath = join(rootPath, "node_modules", packageName);
@@ -208,7 +224,7 @@ test("prints ambiguous binary providers in the dependency audit report", async (
   assert.ok(
     warnings.some((warning) =>
       warning.includes(
-        'ambiguous binary "shared-tool" (provided by tool-one, tool-two); not counted as dependency use.',
+        'ambiguous binary "shared-tool" (provided by tool-one, tool-two; found in package.json#scripts.check, scripts/audit.mjs); not counted as dependency use.',
       ),
     ),
   );
