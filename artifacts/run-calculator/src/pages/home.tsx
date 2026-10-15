@@ -41,12 +41,8 @@ import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/Ware
 import { InventoryTabCtx, type InventoryTabContextValue } from "../contexts/InventoryTabCtx";
 import { MixesTabCtx, type MixesTabContextValue } from "../contexts/MixesTabCtx";
 import { SetupTabCtx, type SetupTabContextValue } from "../contexts/SetupTabCtx";
-import WarehouseTabContent from "../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
 import InventoryTabContent from "../components/InventoryTabContent";
-import MixesTabContent from "../components/MixesTabContent";
-import SetupContent from "../components/SetupContent";
-import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
 import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
@@ -70,14 +66,7 @@ import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
-import { LiveSauceTabContent } from "../components/live-stations/LiveSauceTabContent";
-import { LiveFrontlineTabContent } from "../components/live-stations/LiveFrontlineTabContent";
-import { LivePackagingTabContent } from "../components/live-stations/LivePackagingTabContent";
-import { LiveDoughTabContent } from "../components/live-stations/LiveDoughTabContent";
 import { LiveRunTabContent } from "../components/live-stations/LiveRunTabContent";
-import { LiveSetupRecipesTabContent } from "../components/live-stations/LiveSetupRecipesTabContent";
-import { LiveStoppagesTabContent } from "../components/live-stations/LiveStoppagesTabContent";
-import { LiveSummaryTabContent } from "../components/live-stations/LiveSummaryTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
@@ -880,6 +869,42 @@ const loadDoughGuideImportDialog = () =>
     default: module.DoughGuideImportDialog,
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
+
+// Keep the initial production view focused on the live Run panel. Other tabs
+// are loaded only when their tab content is selected; DeferredSurface provides
+// a visible loading state and a retry action if a chunk request fails.
+const loadSetupContent = () => import("../components/SetupContent");
+const loadWarehouseTabContent = () => import("../components/WarehouseTabContent");
+const loadMixesTabContent = () => import("../components/MixesTabContent");
+const loadSummaryToolsContent = () => import("../components/SummaryToolsContent");
+const loadLivePackagingTabContent = () =>
+  import("../components/live-stations/LivePackagingTabContent").then((module) => ({
+    default: module.LivePackagingTabContent,
+  }));
+const loadLiveSauceTabContent = () =>
+  import("../components/live-stations/LiveSauceTabContent").then((module) => ({
+    default: module.LiveSauceTabContent,
+  }));
+const loadLiveFrontlineTabContent = () =>
+  import("../components/live-stations/LiveFrontlineTabContent").then((module) => ({
+    default: module.LiveFrontlineTabContent,
+  }));
+const loadLiveDoughTabContent = () =>
+  import("../components/live-stations/LiveDoughTabContent").then((module) => ({
+    default: module.LiveDoughTabContent,
+  }));
+const loadLiveSetupRecipesTabContent = () =>
+  import("../components/live-stations/LiveSetupRecipesTabContent").then((module) => ({
+    default: module.LiveSetupRecipesTabContent,
+  }));
+const loadLiveStoppagesTabContent = () =>
+  import("../components/live-stations/LiveStoppagesTabContent").then((module) => ({
+    default: module.LiveStoppagesTabContent,
+  }));
+const loadLiveSummaryTabContent = () =>
+  import("../components/live-stations/LiveSummaryTabContent").then((module) => ({
+    default: module.LiveSummaryTabContent,
+  }));
 
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
@@ -18248,19 +18273,53 @@ export default function Home() {
 
               {/* ─── SETUP ─── */}
               <SetupTabCtx.Provider value={setupTabCtxValue}>
-                <ManagementDepartment setup={<SetupContent />} />
+                <ManagementDepartment
+                  setup={
+                    <DeferredSurface
+                      label="Setup"
+                      load={loadSetupContent}
+                      componentProps={{}}
+                    />
+                  }
+                />
               </SetupTabCtx.Provider>
 
               {/* ─── PACKAGING ─── */}
               <ProductionLineDepartment
-                packaging={<LivePackagingTabContent />}
-                sauce={<LiveSauceTabContent />}
-                frontline={<LiveFrontlineTabContent />}
+                packaging={
+                  <DeferredSurface
+                    label="Packaging"
+                    load={loadLivePackagingTabContent}
+                    componentProps={{}}
+                  />
+                }
+                sauce={
+                  <DeferredSurface
+                    label="Sauce"
+                    load={loadLiveSauceTabContent}
+                    componentProps={{}}
+                  />
+                }
+                frontline={
+                  <DeferredSurface
+                    label="Frontline"
+                    load={loadLiveFrontlineTabContent}
+                    componentProps={{}}
+                  />
+                }
               />
 
               {/* ─── WAREHOUSE ─── */}
               <WarehouseTabCtx.Provider value={warehouseTabCtxValue}>
-                <WarehouseInventoryDepartment warehouse={<WarehouseTabContent />} />
+                <WarehouseInventoryDepartment
+                  warehouse={
+                    <DeferredSurface
+                      label="Warehouse"
+                      load={loadWarehouseTabContent}
+                      componentProps={{}}
+                    />
+                  }
+                />
               </WarehouseTabCtx.Provider>
 
               <InventoryTabCtx.Provider value={inventoryTabCtxValue}>
@@ -18269,7 +18328,15 @@ export default function Home() {
 
               {/* ─── MIX PLAN ─── */}
               <MixesTabCtx.Provider value={mixesTabCtxValue}>
-                <WarehouseInventoryDepartment mixes={<MixesTabContent />} />
+                <WarehouseInventoryDepartment
+                  mixes={
+                    <DeferredSurface
+                      label="Mix Plan"
+                      load={loadMixesTabContent}
+                      componentProps={{}}
+                    />
+                  }
+                />
               </MixesTabCtx.Provider>
 
               <ManagementDepartment ai={
@@ -18396,17 +18463,49 @@ export default function Home() {
                 </TabsTrigger>
               </TabsList>
 
-              <ProductionLineDepartment dough={<LiveDoughTabContent />} />
+              <ProductionLineDepartment
+                dough={
+                  <DeferredSurface
+                    label="Dough"
+                    load={loadLiveDoughTabContent}
+                    componentProps={{}}
+                  />
+                }
+              />
 
               {/* ─── SETUP (recipe editors) ─── */}
-              <ManagementDepartment setup={<LiveSetupRecipesTabContent />} />
+              <ManagementDepartment
+                setup={
+                  <DeferredSurface
+                    label="Setup recipes"
+                    load={loadLiveSetupRecipesTabContent}
+                    componentProps={{}}
+                  />
+                }
+              />
 
-              <ProductionLineDepartment stoppages={<LiveStoppagesTabContent />} />
+              <ProductionLineDepartment
+                stoppages={
+                  <DeferredSurface
+                    label="Stoppages"
+                    load={loadLiveStoppagesTabContent}
+                    componentProps={{}}
+                  />
+                }
+              />
 
               {/* ─── SUMMARY ─── */}
               <ProductionLineDepartment summary={<>
-                <SummaryToolsContent />
-                <LiveSummaryTabContent />
+                <DeferredSurface
+                  label="Summary tools"
+                  load={loadSummaryToolsContent}
+                  componentProps={{}}
+                />
+                <DeferredSurface
+                  label="Summary"
+                  load={loadLiveSummaryTabContent}
+                  componentProps={{}}
+                />
                 </>} />
 
             </HomeStationTabs>
