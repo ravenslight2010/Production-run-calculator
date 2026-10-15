@@ -19,12 +19,30 @@ vi.mock("@google/genai", () => ({
   },
 }));
 
-import { openai, resetGeminiResilienceForTests } from "./client.js";
+import {
+  GeminiProviderUnavailableError,
+  openai,
+  resetGeminiResilienceForTests,
+} from "./client.js";
 
 const baseParams = {
   model: "fixture-model",
   messages: [{ role: "user" as const, content: "Hello" }],
 };
+
+function transientProviderError(): Error & {
+  status: number;
+  response: { headers: { get: (name: string) => string | null } };
+} {
+  return Object.assign(new Error("provider unavailable"), {
+    status: 503,
+    response: {
+      headers: {
+        get: (name: string) => name === "retry-after" ? "0" : null,
+      },
+    },
+  });
+}
 
 describe("Gemini-backed chat completions", () => {
   beforeEach(() => {
@@ -127,6 +145,64 @@ describe("Gemini-backed chat completions", () => {
       "fixture-model",
       "gemini-3.5-flash",
     ]);
+  });
+
+  it("retries a transient provider failure once before returning a recovered response", async () => {
+    sdk.generateContent
+      .mockRejectedValueOnce(transientProviderError())
+      .mockResolvedValueOnce({ text: "Recovered answer" });
+
+    const response = await openai.chat.completions.create(baseParams);
+
+    expect(response).toEqual({
+      choices: [{ message: { content: "Recovered answer" } }],
+    });
+    expect(sdk.generateContent).toHaveBeenCalledTimes(2);
+    expect(sdk.generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "fixture-model",
+      "fixture-model",
+    ]);
+  });
+
+  it("does not retry a transient failure after the caller cancels", async () => {
+    const controller = new AbortController();
+    sdk.generateContent.mockImplementationOnce(async () => {
+      controller.abort();
+      throw transientProviderError();
+    });
+
+    await expect(
+      openai.chat.completions.create(baseParams, { signal: controller.signal }),
+    ).rejects.toThrow("AI provider request was cancelled");
+
+    expect(sdk.generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces fallback exhaustion and blocks requests after repeated transient outages", async () => {
+    sdk.generateContent.mockRejectedValue(transientProviderError());
+
+    for (let request = 0; request < 3; request += 1) {
+      await expect(
+        openai.chat.completions.create(baseParams),
+      ).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    }
+
+    const expectedModels = [
+      "fixture-model",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+    ].flatMap((model) => [model, model]);
+    expect(sdk.generateContent).toHaveBeenCalledTimes(18);
+    expect(sdk.generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      ...expectedModels,
+      ...expectedModels,
+      ...expectedModels,
+    ]);
+
+    await expect(
+      openai.chat.completions.create(baseParams),
+    ).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    expect(sdk.generateContent).toHaveBeenCalledTimes(18);
   });
 
   it("maps streamed text and empty chunks to OpenAI-style deltas", async () => {
