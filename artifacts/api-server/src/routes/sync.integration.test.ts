@@ -2852,6 +2852,24 @@ describe("POST /sync/auto-track/claim", () => {
     expect(staleBase.values.traysOnLine).toBe(14);
   });
 
+  it("records a conflict under its event ID so clients must rebase with a fresh identity", async () => {
+    const staleBase = event("tab-a", "tab-a:conflict:1");
+    staleBase.claim.baseUpdatedAt = 999;
+    const first = await (await post(staleBase)).json() as { outcome: string };
+    const replay = await (await post(staleBase)).json() as {
+      outcome: string;
+      duplicate: boolean;
+      values: { traysOnLine: number };
+    };
+
+    expect(first.outcome).toBe("conflict");
+    expect(replay).toMatchObject({
+      outcome: "conflict",
+      duplicate: true,
+      values: { traysOnLine: 10 },
+    });
+  });
+
   it("atomically coordinates applicator batches without consuming inventory", async () => {
     const applicatorEvent = (senderId: string, eventId: string) => ({
       senderId,
@@ -3101,7 +3119,11 @@ describe("POST /sync/auto-track/claim", () => {
       data: { runValuesUpdatedAt: Record<string, number> };
     };
     sauceClaim.claim.baseUpdatedAt = retrySeedResponse.data.runValuesUpdatedAt[RUN];
-    expect((await post(sauceClaim)).status).toBe(500);
+    const rejected = await post(sauceClaim);
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toEqual({
+      error: "Sauce inventory is not configured. Check Sauce setup, then retry.",
+    });
     const afterFailure = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       headers: authHeaders(),
     }).then((response) => response.json()) as {
@@ -3125,6 +3147,11 @@ describe("POST /sync/auto-track/claim", () => {
     expect(recovered.status).toBe(200);
     expect((await recovered.json() as { outcome: string }).outcome).toBe("accepted");
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(90);
+    const duplicate = await post(sauceClaim);
+    expect((await duplicate.json() as { outcome: string }).outcome).toBe("duplicate");
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(90);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
 });
 

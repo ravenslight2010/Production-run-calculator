@@ -5566,6 +5566,8 @@ paths:
                 $ref: "#/components/schemas/AutoTrackClaimResponse"
         "400":
           description: Invalid or out-of-bounds event
+        "409":
+          description: Sauce inventory setup conflict; transaction rolled back and the same event may be retried after correction
         "500":
           description: Safe automatic tracking failure
 

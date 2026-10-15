@@ -1,6 +1,7 @@
 export type SauceAutoTrackFailure = {
   barrelId: string;
   dismissed: boolean;
+  kind: "transient" | "permanent";
 };
 
 export function sauceAutoTrackBarrelId(runId: string, eventId: string): string {
@@ -10,10 +11,11 @@ export function sauceAutoTrackBarrelId(runId: string, eventId: string): string {
 export function noteSauceAutoTrackFailure(
   current: SauceAutoTrackFailure | null,
   barrelId: string,
+  kind: "transient" | "permanent" = "transient",
 ): SauceAutoTrackFailure {
   return current?.barrelId === barrelId
-    ? current
-    : { barrelId, dismissed: false };
+    ? { ...current, kind }
+    : { barrelId, dismissed: false, kind };
 }
 
 export function resolveSauceAutoTrackFailure(

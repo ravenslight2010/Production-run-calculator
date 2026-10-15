@@ -272,7 +272,10 @@ interface AutoTrackParams {
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
   /** Reports only automatic claim outcomes; manual corrections use Home's existing error path. */
-  onAutomaticClaimFailure?: (claim: AutoTrackEventClaim) => void;
+  onAutomaticClaimFailure?: (
+    claim: AutoTrackEventClaim,
+    kind?: "transient" | "permanent",
+  ) => void;
   onAutomaticClaimSuccess?: (
     claim: AutoTrackEventClaim,
     outcome: AutoTrackEventResult["outcome"],
@@ -310,6 +313,7 @@ interface AutoTrackResult {
    * counter in the same render as the resume action.
    */
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
+  retryFailedAutomaticClaim: () => void;
   /**
    * Wall-clock ms timestamps of each counter's next tick — read-only refs for
    * countdown displays (0 = not yet armed). The UI derives "next tick in m:ss"
@@ -492,6 +496,7 @@ export function useAutoTrack({
   const resumeRearmPendingRef = useRef(false);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
+  const blockedAutomaticClaimsRef = useRef(new Set<string>());
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   // Claims for different channels can become due in the same render. Keep
   // them FIFO so the later claim is built from the first acknowledgement's
@@ -683,6 +688,7 @@ useEffect(() => {
     previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
+    blockedAutomaticClaimsRef.current.clear();
     coordinationPendingRef.current.clear();
     sauceNextDueNetSecRef.current = 0;
     sauceStockNextDueNetSecRef.current = 0;
@@ -827,6 +833,8 @@ useEffect(() => {
     if (coordinationPendingRef.current.has(channel)) return;
 
     const claimIdentity = coordinationIdentity;
+    const blockedIdentity = `${claimIdentity}:${channel}`;
+    if (blockedAutomaticClaimsRef.current.has(blockedIdentity)) return;
     const correctionMutation = mutations.find((mutation) =>
       mutation.field === "sauceBarrelCorrectionGeneration"
       || mutation.field.endsWith("BatchCorrectionGeneration")
@@ -898,11 +906,25 @@ useEffect(() => {
             coordinationRetryEventRef.current[channel] = undefined;
             return;
           }
-          // A concurrent channel or peer may have advanced the shared run-value
-          // stamp after this claim was queued. Treat that canonical conflict like
-          // a failed claim so the catch path retries from the newly adopted values
-          // instead of accepting the unchanged server value and waiting for the
-          // next production interval.
+          // A conflict/stale response is durably recorded against this event ID
+          // by the server. Replaying it can only return the same rejection, not
+          // recover like a lost transport response. Adopt its canonical values,
+          // retire this event, and wait for an explicit operator retry.
+          if (
+            channel === "sauce-barrel"
+            && (result.outcome === "conflict" || result.outcome === "stale")
+          ) {
+            coordinationSequenceRef.current[channel] = Math.max(
+              coordinationSequenceRef.current[channel] ?? 0,
+              result.state.sequence,
+            );
+            coordinationRetryEventRef.current[channel] = undefined;
+            blockedAutomaticClaimsRef.current.add(blockedIdentity);
+            applyValues(result.values);
+            onAutomaticClaimFailure?.(claim, "permanent");
+            setCoordinationDelayed(false);
+            return;
+          }
           if (result.outcome === "conflict") {
             throw new Error("Automatic tracking claim conflicted with a newer value");
           }
@@ -914,10 +936,12 @@ useEffect(() => {
           dueRef.current = result.state.nextDueAt;
           coordinationRetryEventRef.current[channel] = undefined;
           applyValues(result.values);
-        } catch {
+        } catch (error) {
           if (coordinationIdentityRef.current !== claimIdentity) return;
           if (channel === "sauce-barrel") {
-            onAutomaticClaimFailure?.(claim);
+            const retryable = (error as { retryable?: unknown })?.retryable !== false;
+            if (!retryable) blockedAutomaticClaimsRef.current.add(blockedIdentity);
+            onAutomaticClaimFailure?.(claim, retryable ? "transient" : "permanent");
           }
           const dueRef = dueRefForChannel(channel);
           dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
@@ -952,6 +976,11 @@ useEffect(() => {
     runId,
     runStatus,
   ]);
+
+  const retryFailedAutomaticClaim = useCallback(() => {
+    blockedAutomaticClaimsRef.current.delete(`${coordinationIdentity}:sauce-barrel`);
+    setCoordinationDelayed(false);
+  }, [coordinationIdentity]);
 
   // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
   // Does not affect the cases/skids counter or the global auto-track toggle.
@@ -1987,6 +2016,7 @@ useEffect(() => {
     autoSuppressUntilRef,
     doughAutoSuppressUntilRef,
     fireAutoTrackNow,
+    retryFailedAutomaticClaim,
     tickDueRefs: tickDueRefsRef.current,
     isDoughTimerPaused,
     pauseDoughTimers,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FormProvider, useForm, useWatch } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +27,8 @@ import { LiveDoughTabContent } from "../LiveDoughTabContent";
 import { LiveFrontlineTabContent } from "../LiveFrontlineTabContent";
 import { LivePackagingTabContent } from "../LivePackagingTabContent";
 import { LiveSauceTabContent } from "../LiveSauceTabContent";
+import { HomeStationTabs } from "../../../components/HomeStationTabs";
+import { TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
 
 vi.mock("../../../useRole", () => ({
   useMe: () => ({ hasCapability: () => false }),
@@ -98,6 +100,7 @@ function StationProviders({
   runs,
   switchToRun = vi.fn(() => true),
   packagingManager: packagingManagerOverride,
+  sauceAutoTrackFailure = null,
   children,
 }: {
   status: "pending" | "running" | "paused" | "ended";
@@ -106,6 +109,7 @@ function StationProviders({
   runs?: RunMeta[];
   switchToRun?: (newIndex: number, expectedCurrentRunId?: string) => boolean;
   packagingManager?: PackagingManager;
+  sauceAutoTrackFailure?: { barrelId: string; dismissed: boolean; kind: "transient" | "permanent" } | null;
   children: ReactNode;
 }) {
   const form = useForm<FormValues>({ defaultValues: values });
@@ -138,6 +142,7 @@ function StationProviders({
   const homeValue = {
     autoSuppressUntilRef,
     confirmRunSurplus: vi.fn().mockResolvedValue(undefined),
+    clearSauceAutoTrackFailureNotice: vi.fn(),
     currentRun,
     currentRunId: runId,
     dayState,
@@ -158,6 +163,8 @@ function StationProviders({
     runStatus: status,
     runToTime: "12:00",
     schedulePush: noop,
+    sauceAutoTrackFailure,
+    dismissSauceAutoTrackFailure: noop,
     setDayState: noop,
     setRunToTime: noop,
     setWriteError: noop,
@@ -193,6 +200,45 @@ function StationProviders({
     </HomeCtx.Provider>
   );
 }
+
+function SauceWarningTabFixture() {
+  const [activeTab, setActiveTab] = useState("run");
+  return (
+    <StationProviders
+      status="running"
+      sauceAutoTrackFailure={{
+        barrelId: `${RUN_ID}:event-1`,
+        dismissed: false,
+        kind: "transient",
+      }}
+    >
+      <HomeStationTabs activeTab={activeTab as any} onTabChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="run">Run</TabsTrigger>
+          <TabsTrigger value="sauce">Sauce</TabsTrigger>
+          <TabsTrigger value="dough">Dough</TabsTrigger>
+        </TabsList>
+        <TabsContent value="run"><div>Run screen</div></TabsContent>
+        <TabsContent value="sauce"><LiveSauceTabContent /></TabsContent>
+        <TabsContent value="dough"><div>Dough station</div></TabsContent>
+      </HomeStationTabs>
+    </StationProviders>
+  );
+}
+
+describe("Sauce auto-track warning surface", () => {
+  it("shows the failure only on the selected Sauce station", async () => {
+    render(<SauceWarningTabFixture />);
+    expect(screen.getByText("Run screen").hidden).toBe(false);
+    expect(screen.queryByTestId("sauce-auto-track-failure")).toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Sauce" }), { button: 0 });
+    expect((await screen.findByTestId("sauce-auto-track-failure")).hidden).toBe(false);
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0 });
+    await waitFor(() => expect(screen.queryByTestId("sauce-auto-track-failure")).toBeNull());
+  });
+});
 
 const STATIONS = [
   {

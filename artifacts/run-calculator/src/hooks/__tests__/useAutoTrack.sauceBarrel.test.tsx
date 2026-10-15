@@ -100,8 +100,90 @@ describe("useAutoTrack sauce barrel coordination", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
 
     expect(onFailure.mock.calls[0][0].channel).toBe("sauce-barrel");
+    expect(onFailure.mock.calls[0][1]).toBe("transient");
     expect(onSuccess.mock.calls[0][0].channel).toBe("sauce-barrel");
     expect(onSuccess.mock.calls[0][0].eventId).toBe(onFailure.mock.calls[0][0].eventId);
+  });
+
+  it.each(["accepted", "duplicate"] as const)(
+    "adopts canonical progress exactly once for a %s response",
+    async (outcome) => {
+      const observedForm = { getValues: () => 0, setValue: vi.fn() } as any;
+      const claim = vi.fn(async (request) => ({
+        outcome,
+        state: { generation: request.generation, sequence: request.sequence, nextDueAt: 20 },
+        values: {
+          sauceBarrelsMade: 4,
+          sauceBarrelAnchorNetSec: 10,
+          sauceBarrelCorrectionGeneration: 2,
+        },
+      }));
+      renderHook(() => useAutoTrack(props(10, claim, {}, { form: observedForm })));
+
+      await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(observedForm.setValue).toHaveBeenCalledWith(
+        "sauceBarrelsMade",
+        4,
+        { shouldDirty: true },
+      ));
+      expect(observedForm.setValue.mock.calls.filter(([field]: [string]) => field === "sauceBarrelsMade"))
+        .toHaveLength(1);
+    },
+  );
+
+  it("pauses permanent Sauce failures until an explicit retry, retaining a rolled-back event ID", async () => {
+    const permanentError = Object.assign(new Error("server detail must not be shown"), { retryable: false });
+    const claim = vi.fn()
+      .mockRejectedValueOnce(permanentError)
+      .mockResolvedValueOnce({
+        outcome: "accepted",
+        state: { generation: "sauce-auto:started", sequence: 1, nextDueAt: 20 },
+        values: { sauceBarrelsMade: 1, sauceBarrelAnchorNetSec: 10 },
+      });
+    const onFailure = vi.fn();
+    const { result, rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(10, claim, {}, { onAutomaticClaimFailure: onFailure }),
+    });
+
+    await waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
+    expect(onFailure.mock.calls[0][1]).toBe("permanent");
+    rerender(props(11, claim, {}, { onAutomaticClaimFailure: onFailure }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.retryFailedAutomaticClaim());
+    rerender(props(12, claim, {}, { onAutomaticClaimFailure: onFailure }));
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(2));
+    expect(claim.mock.calls[1][0].eventId).toBe(claim.mock.calls[0][0].eventId);
+  });
+
+  it("retires a recorded conflict ID and retries only after operator action with a fresh event", async () => {
+    const claim = vi.fn()
+      .mockResolvedValueOnce({
+        outcome: "conflict",
+        state: { generation: "sauce-auto:started", sequence: 0, nextDueAt: 20 },
+        values: { sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0 },
+      })
+      .mockResolvedValueOnce({
+        outcome: "accepted",
+        state: { generation: "sauce-auto:started", sequence: 1, nextDueAt: 20 },
+        values: { sauceBarrelsMade: 1, sauceBarrelAnchorNetSec: 10 },
+      });
+    const onFailure = vi.fn();
+    const { result, rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(10, claim, {}, { onAutomaticClaimFailure: onFailure }),
+    });
+
+    await waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
+    expect(onFailure.mock.calls[0][1]).toBe("permanent");
+    rerender(props(11, claim, {}, { onAutomaticClaimFailure: onFailure }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.retryFailedAutomaticClaim());
+    rerender(props(12, claim, {}, { onAutomaticClaimFailure: onFailure }));
+    await waitFor(() => expect(claim).toHaveBeenCalledTimes(2));
+    expect(claim.mock.calls[1][0].eventId).not.toBe(claim.mock.calls[0][0].eventId);
   });
 
   it.each([

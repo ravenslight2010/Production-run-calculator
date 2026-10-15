@@ -26,11 +26,11 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
     form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection,
-    sauceAutoTrackFailure, dismissSauceAutoTrackFailure,
+    sauceAutoTrackFailure, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
-  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
+  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
   const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
   const sauceStockLock = useManualControlLock(currentRunId, "sauce-stock");
 
@@ -250,8 +250,23 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <p className="min-w-0 flex-1">
-            Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.
+            {sauceAutoTrackFailure.kind === "transient"
+              ? "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready."
+              : "Automatic Sauce barrel tracking needs attention. Check sign-in and Sauce inventory/setup; progress was not advanced."}
           </p>
+          {sauceAutoTrackFailure.kind === "permanent" && (
+            <button
+              type="button"
+              data-testid="button-retry-sauce-auto-track"
+              onClick={() => {
+                retryFailedAutomaticClaim();
+                clearSauceAutoTrackFailureNotice();
+              }}
+              className="shrink-0 text-xs font-semibold text-amber-200 hover:text-amber-50"
+            >
+              Retry
+            </button>
+          )}
           <button
             type="button"
             data-testid="button-dismiss-sauce-auto-track-failure"

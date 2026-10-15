@@ -5542,9 +5542,12 @@ export default function Home() {
   const [writeError, setWriteError] = useState<string | null>(null);
   useEffect(() => subscribeToManualSectionErrors(setWriteError), []);
   const [sauceAutoTrackFailure, setSauceAutoTrackFailure] = useState<SauceAutoTrackFailure | null>(null);
-  const reportSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
+  const reportSauceAutoTrackFailure = useCallback((
+    claim: AutoTrackEventClaim,
+    kind: "transient" | "permanent" = "transient",
+  ) => {
     setSauceAutoTrackFailure((current) =>
-      noteSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId)),
+      noteSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId), kind),
     );
   }, []);
   const clearSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
@@ -5554,6 +5557,9 @@ export default function Home() {
   }, []);
   const dismissSauceAutoTrackFailure = useCallback(() => {
     setSauceAutoTrackFailure((current) => dismissSauceAutoTrackFailureState(current));
+  }, []);
+  const clearSauceAutoTrackFailureNotice = useCallback(() => {
+    setSauceAutoTrackFailure(null);
   }, []);
   const syncDate = todayStr();
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate));
@@ -8289,7 +8295,7 @@ export default function Home() {
     );
     if (response.status === 401) {
       reportUnauthorized();
-      throw new Error("Sign in again to continue automatic tracking");
+      throw Object.assign(new Error("Automatic tracking needs authentication"), { retryable: false });
     }
     const body = await response.json().catch(() => null) as {
       error?: string;
@@ -8302,10 +8308,17 @@ export default function Home() {
       snapshotId?: string;
     } | null;
     if (!response.ok || !body?.outcome || !body.state || !body.values) {
-      throw new Error(body?.error ?? "Automatic tracking could not sync");
+      const retryable = response.status === 408
+        || response.status === 425
+        || response.status === 429
+        || response.status >= 500;
+      throw Object.assign(
+        new Error(body?.error ?? "Automatic tracking could not sync"),
+        { retryable },
+      );
     }
     if (body.stale) {
-      throw new Error("Automatic tracking is waiting for today's reset");
+      throw Object.assign(new Error("Automatic tracking is waiting for today's reset"), { retryable: false });
     }
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
@@ -16221,7 +16234,7 @@ export default function Home() {
     setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, setupEditorBrand,
+    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,

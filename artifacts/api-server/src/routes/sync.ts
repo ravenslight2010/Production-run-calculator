@@ -62,6 +62,7 @@ import {
   broadcastInventoryChange,
   consumeRunInTransaction,
   consumeSauceBarrelInTransaction,
+  SauceInventoryConfigurationError,
   reconcileRunConsumptionInTransaction,
 } from "./inventory";
 import { logger } from "../lib/logger";
@@ -2813,6 +2814,10 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       channel: claim.channel,
       durationMs: Date.now() - startedAt,
     }, "Auto-track claim failed");
+    if (error instanceof SauceInventoryConfigurationError) {
+      res.status(409).json({ error: "Sauce inventory is not configured. Check Sauce setup, then retry." });
+      return;
+    }
     res.status(500).json({ error: "Automatic tracking could not sync. Please try again." });
   }
 });

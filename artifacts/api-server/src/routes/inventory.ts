@@ -337,6 +337,13 @@ async function loadItemResponse(itemId: number) {
 // drawDown can run either standalone or inside a transaction.
 export type InventoryExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+export class SauceInventoryConfigurationError extends Error {
+  constructor() {
+    super("Sauce inventory item is not configured");
+    this.name = "SauceInventoryConfigurationError";
+  }
+}
+
 // Draw `qty` out of an item's lots in FIFO/FEFO order. Never goes negative;
 // returns how much was actually consumed (may be less than requested). The
 // ordering and never-negative math live in planDrawDown (pure, unit-tested);
@@ -1809,7 +1816,7 @@ export async function consumeSauceBarrelInTransaction(
     .from(inventoryItemsTable)
     .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, scope)));
   if (!item) {
-    if (requireItem) throw new Error(`No inventory item is linked for ${itemKey}`);
+    if (requireItem) throw new SauceInventoryConfigurationError();
     return { applied: true, consumed: 0 };
   }
 

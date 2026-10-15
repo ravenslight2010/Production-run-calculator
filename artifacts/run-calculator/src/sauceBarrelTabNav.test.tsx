@@ -282,7 +282,11 @@ describe("sauce automatic failure dismissal identity", () => {
     failure = dismissSauceAutoTrackFailure(failure);
     failure = noteSauceAutoTrackFailure(failure, "run-1:event-1");
 
-    expect(failure).toEqual({ barrelId: "run-1:event-1", dismissed: true });
+    expect(failure).toEqual({
+      barrelId: "run-1:event-1",
+      dismissed: true,
+      kind: "transient",
+    });
     expect(resolveSauceAutoTrackFailure(failure, "run-1:event-1")).toBeNull();
   });
 
@@ -292,7 +296,11 @@ describe("sauce automatic failure dismissal identity", () => {
     );
     const newFailure = noteSauceAutoTrackFailure(oldFailure, "run-1:event-2");
 
-    expect(newFailure).toEqual({ barrelId: "run-1:event-2", dismissed: false });
+    expect(newFailure).toEqual({
+      barrelId: "run-1:event-2",
+      dismissed: false,
+      kind: "transient",
+    });
     expect(resolveSauceAutoTrackFailure(newFailure, "run-1:event-1")).toEqual(newFailure);
   });
 });
