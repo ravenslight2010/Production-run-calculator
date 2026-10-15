@@ -9,6 +9,7 @@ const calculatorUrl = `http://127.0.0.1:${calculatorPort}`;
 const mockupUrl = `http://127.0.0.1:${mockupPort}`;
 const calculatorDir = fileURLToPath(new URL(".", import.meta.url));
 const mockupDir = path.resolve(calculatorDir, "../mockup-sandbox");
+const serveBuiltOutput = process.env.REDUCED_MOTION_BUILT_OUTPUT === "1";
 
 const chromiumProjects = [
   {
@@ -67,15 +68,19 @@ export default defineConfig({
   outputDir: "test-results/reduced-motion",
   webServer: [
     {
-      command: "pnpm exec vite --config vite.config.ts --host 127.0.0.1",
+      command: serveBuiltOutput
+        ? "pnpm exec vite preview --config vite.config.ts --host 127.0.0.1"
+        : "pnpm exec vite --config vite.config.ts --host 127.0.0.1",
       cwd: calculatorDir,
       url: calculatorUrl,
-      env: { PORT: String(calculatorPort) },
+      env: { PORT: String(calculatorPort), BASE_PATH: "/" },
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: "pnpm exec vite dev --config vite.config.ts --host 127.0.0.1",
+      command: serveBuiltOutput
+        ? "pnpm exec vite preview --config vite.config.ts --host 127.0.0.1"
+        : "pnpm exec vite dev --config vite.config.ts --host 127.0.0.1",
       cwd: mockupDir,
       url: mockupUrl,
       env: { PORT: String(mockupPort), BASE_PATH: "/" },

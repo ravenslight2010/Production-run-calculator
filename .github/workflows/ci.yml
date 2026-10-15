@@ -188,6 +188,16 @@ jobs:
         run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps chromium webkit
       - name: Run isolated reduced-motion browser matrix
         run: node scripts/src/test-results.mjs run --lane ci-reduced-motion-browser -- pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion
+      - name: Build calculator and mockup preview assets
+        env:
+          BUILD_IDENTITY_MODE: development
+          PORT: "4185"
+          BASE_PATH: /
+        run: |
+          pnpm --filter @workspace/run-calculator run build
+          PORT=4186 BASE_PATH=/ pnpm --filter @workspace/mockup-sandbox run build
+      - name: Run reduced-motion matrix against optimized bundles
+        run: node scripts/src/test-results.mjs run --lane ci-reduced-motion-built-browser -- pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion:built
       - name: Upload machine-readable test report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -74,6 +74,16 @@
       "safety": "local Vite previews only; API requests are unauthenticated stubs; no database or production data"
     },
     {
+      "id": "ci-reduced-motion-built-browser",
+      "surface": "Reduced-motion optimized browser previews",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion:built",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install", "built calculator and mockup assets", "Chromium and WebKit"],
+      "prerequisites": ["calculator and mockup Vite builds", "Playwright browser dependencies"],
+      "safety": "local Vite preview servers only; API requests are unauthenticated stubs; no database or production data"
+    },
+    {
       "id": "ci-library-sweep",
       "surface": "CI client and shared-library unit tests",
       "command": "pnpm -r --filter \"./lib/**\" --if-present test",
