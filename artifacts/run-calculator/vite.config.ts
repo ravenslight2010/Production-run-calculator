@@ -187,6 +187,10 @@ export default defineConfig(async ({ command }) => ({
         // (build hard-fails, not just a warning). Allow up to 4 MiB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // HEIC conversion is optional: inventory photo analysis requires the
+        // online AI endpoint, and inventoryImage.ts already falls back to the
+        // original file if this converter cannot be loaded.
+        globIgnores: ["**/heic2any-*.js"],
       },
       devOptions: {
         enabled: false,

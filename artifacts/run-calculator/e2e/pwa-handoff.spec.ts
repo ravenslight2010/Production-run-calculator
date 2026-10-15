@@ -155,6 +155,42 @@ async function buildTwoVersionFixture() {
   }
 }
 
+async function readPrecacheInventory(buildDir: string) {
+  const worker = await readFile(path.join(buildDir, "service-worker.js"), "utf8");
+  const firstRevision = worker.indexOf('"revision"');
+  const manifestStart = worker.lastIndexOf("[", firstRevision);
+  const manifestEnd = worker.indexOf("]", firstRevision) + 1;
+  if (firstRevision < 0 || manifestStart < 0 || manifestEnd <= manifestStart) {
+    throw new Error("The production worker does not contain an injected precache manifest");
+  }
+
+  const manifest = JSON.parse(worker.slice(manifestStart, manifestEnd)) as Array<{
+    url: string;
+    revision?: string | null;
+  }>;
+  const uniqueEntries = new Map(manifest.map((entry) => [entry.url, entry]));
+  const entries = await Promise.all([...uniqueEntries.values()].map(async (entry) => {
+    const assetPath = path.join(buildDir, entry.url);
+    const assetStat = await stat(assetPath);
+    return { ...entry, bytes: assetStat.size };
+  }));
+  const assetsDir = path.join(buildDir, "assets");
+  const emittedJavaScript = (await readdir(assetsDir))
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => `assets/${name}`);
+  const precachedJavaScript = new Set(
+    entries.filter((entry) => entry.url.endsWith(".js")).map((entry) => entry.url),
+  );
+
+  return {
+    entries,
+    totalBytes: entries.reduce((total, entry) => total + entry.bytes, 0),
+    precachedJavaScript,
+    unprecachedJavaScript: emittedJavaScript.filter((url) => !precachedJavaScript.has(url)),
+    emittedJavaScript,
+  };
+}
+
 async function startVersionedServer(
   versionDirs: Record<Version, string>,
   staleHomeChunk?: string,
@@ -705,6 +741,31 @@ test.describe("PWA update handoff", () => {
     });
 
     try {
+      const precache = await readPrecacheInventory(fixture.oldDir);
+      const excluded = await Promise.all(precache.unprecachedJavaScript.map(async (url) => ({
+        url,
+        bytes: (await stat(path.join(fixture.oldDir, url))).size,
+      })));
+      expect(excluded).toHaveLength(1);
+      expect(excluded[0].url).toMatch(/^assets\/heic2any-[\w-]+\.js$/);
+      expect(excluded[0].bytes).toBeGreaterThan(1_000_000);
+      for (const retainedChunk of ["home-", "runExcel-", "xlsx-", "DeferredManagementSurface-"]) {
+        expect(
+          [...precache.precachedJavaScript].some((url) =>
+            path.posix.basename(url).startsWith(retainedChunk),
+          ),
+          `${retainedChunk} must remain available offline`,
+        ).toBe(true);
+      }
+      const transferReport = {
+        uniquePrecacheEntries: precache.entries.length,
+        currentPrecacheBytes: precache.totalBytes,
+        excludedOptionalChunk: excluded[0],
+        previousBroadGlobBytes: precache.totalBytes + excluded[0].bytes,
+        savedBytes: excluded[0].bytes,
+      };
+      console.info(`PWA precache transfer: ${JSON.stringify(transferReport)}`);
+
       await page.addInitScript(() => {
         const now = new Date();
         const date = [
@@ -837,16 +898,105 @@ test.describe("PWA update handoff", () => {
         const registration = await navigator.serviceWorker.ready;
         return registration.active?.state === "activated";
       });
+      const installedPrecache = await page.evaluate(async () => {
+        const cacheName = (await caches.keys()).find((name) =>
+          name.startsWith("workbox-precache-v2-"),
+        );
+        if (!cacheName) throw new Error("The Workbox precache was not installed");
+        const cache = await caches.open(cacheName);
+        const requests = await cache.keys();
+        return requests.map((request) => new URL(request.url).pathname.replace(/^\/+/, ""));
+      });
+      for (const entry of precache.entries) {
+        expect(installedPrecache, `${entry.url} must be downloaded during service-worker install`)
+          .toContain(entry.url);
+      }
+      expect(installedPrecache.some((url) => /(?:^|\/)heic2any-[\w-]+\.js$/.test(url)))
+        .toBe(false);
+
       await page.goto("about:blank");
       await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
       await page.context().setOffline(true);
       await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await expect(page.getByRole("heading", { name: "Unable to open Run Calculator" })).toBeVisible({
         timeout: 20_000,
       });
+
+      const runExcelChunk = [...precache.precachedJavaScript].find((url) =>
+        path.posix.basename(url).startsWith("runExcel-"),
+      );
+      if (!runExcelChunk) {
+        throw new Error("The production build is missing the cached workbook workflow chunks");
+      }
+      const offlineWorkbook = await page.evaluate(async (runExcelPath) => {
+        const runExcel = await import(new URL(runExcelPath, location.href).href) as Record<string, unknown>;
+        const workbookWorkflow = runExcel as {
+          buildRunWorkbook: (rows: Array<Record<string, string | number>>) => unknown;
+        };
+        const workbook = workbookWorkflow.buildRunWorkbook([{
+          Date: "2026-10-15",
+          Run: "Offline cache check",
+          Brand: "Offline",
+          Flavor: "Workbook",
+          Status: "Upcoming",
+          "Cases Planned": 1,
+          "Cases Made": "",
+          Pizzas: 0,
+          PPM: "",
+          Started: "",
+          Ended: "",
+          "Net Duration": "",
+          Downtime: "0",
+          Stoppages: "",
+          "Dough Batches": 0,
+          "Sauce Batches": 0,
+          Notes: "",
+        }]);
+        const result = workbook as {
+          SheetNames: string[];
+          Sheets: Record<string, Record<string, { v?: unknown }>>;
+        };
+        return {
+          sheetName: result.SheetNames[0],
+          runLabel: result.Sheets["Production Runs"]?.B2?.v ?? null,
+        };
+      }, runExcelChunk);
+      expect(offlineWorkbook).toMatchObject({
+        sheetName: "Production Runs",
+        runLabel: "Offline cache check",
+      });
+
+      const heicChunk = excluded[0].url;
+      const deferredFailure = await page.evaluate(async (assetPath) => {
+        try {
+          await import(new URL(assetPath, location.href).href);
+          return { loaded: true };
+        } catch (error) {
+          return {
+            loaded: false,
+            errorName: error instanceof Error ? error.name : "unknown",
+          };
+        }
+      }, heicChunk);
+      expect(deferredFailure.loaded).toBe(false);
+      await page.context().setOffline(false);
+      // A failed module fetch is retained by the current document's module
+      // loader. Reopening after connectivity returns models the user's recovery
+      // path and gives the browser a fresh module graph for its on-demand retry.
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      const deferredRecovery = await page.evaluate(async (assetPath) => {
+        const module = await import(new URL(assetPath, location.href).href) as {
+          default?: unknown;
+        };
+        return typeof module.default;
+      }, heicChunk);
+      expect(deferredRecovery).toBe("function");
     } finally {
       await page.context().setOffline(false);
       await server.close();
