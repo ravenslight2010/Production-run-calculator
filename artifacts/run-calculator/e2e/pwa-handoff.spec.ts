@@ -1110,10 +1110,48 @@ test.describe("PWA update handoff", () => {
       expect(afterSettling.acceptedWrites).toBe(0);
       expect(afterSettling.syncWrites).toBe(beforeSettling.syncWrites);
 
+      // Reload while the public sign-in entry is visible. The blocked record
+      // must survive the app's fresh startup and storage hydration boundary.
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      const blockedIntentBeforeReload = await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, revokedIntentId);
+      expect(blockedIntentBeforeReload).toMatchObject({
+        id: revokedIntentId,
+        state: "blocked",
+        failure: "authentication",
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Sign in to Run Calculator" })).toBeVisible();
+      await expect(page.getByLabel("Username")).toBeVisible();
+      await expect(page.locator("#password")).toBeVisible();
+      expect(await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, revokedIntentId)).toEqual(blockedIntentBeforeReload);
+      const afterReloadBeforeSignIn = server.sessionRecoveryRequests();
+      expect(afterReloadBeforeSignIn).toMatchObject({
+        intentPosts: 1,
+        intentApplications: 0,
+        intentRequestIds: [revokedIntentId],
+        appliedIntentIds: [],
+      });
+      expect(afterReloadBeforeSignIn.syncWrites).toBe(beforeSettling.syncWrites);
+
       // The disposable sign-in endpoint restores this same fixture identity.
       // A successful sign-in must not automatically replay a blocked command.
-      await page.getByRole("button", { name: "Sign in", exact: true }).click();
-      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      expect(await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, revokedIntentId)).toEqual(blockedIntentBeforeReload);
       await page.getByLabel("Username").fill("pwa-session-user");
       await page.locator("#password").fill("disposable-fixture");
       await page.getByRole("button", { name: "Sign in", exact: true }).click();

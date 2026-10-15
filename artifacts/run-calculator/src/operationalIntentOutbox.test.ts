@@ -405,6 +405,19 @@ describe("operational intent outbox", () => {
       failure: "authentication",
       guidance: "Sign in again, then choose Retry.",
     })]);
+    const terminalKey = `run-calculator:operational-intent-outbox:v1:terminal:${intent.id}`;
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+    });
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+    });
     await flushOperationalIntentOutbox();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(retryOperationalIntent(intent.id)).toBe(true);
