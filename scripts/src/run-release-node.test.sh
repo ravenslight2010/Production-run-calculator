@@ -427,23 +427,63 @@ test_release_runner_verifies_local_tls_certificates() {
   local workspace="${TEST_ROOT}/tls-verification"
   local cert_dir="${TEST_ROOT}/tls-certificates"
   local server_dir="${TEST_ROOT}/tls-server"
+  local wrong_node_dir="${workspace}/wrong-node"
   local node_version
   local port_file="${server_dir}/port"
   local server_output="${server_dir}/output"
   local client_script="${workspace}/https-client.cjs"
   local trusted_output="${workspace}/trusted-output"
   local untrusted_output="${workspace}/untrusted-output"
+  local npx_log="${workspace}/npx-log"
   local url
   local attempt
   local status
 
-  mkdir -p "${workspace}/scripts/src" "$cert_dir" "$server_dir"
+  mkdir -p "${workspace}/scripts/src" "$wrong_node_dir" "$cert_dir" "$server_dir"
   cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
   node_version=$("$REAL_NODE_BIN" --version)
   printf '%s\n' "${node_version#v}" >"${workspace}/.nvmrc"
   cat >"${workspace}/scripts/src/check-routine-node-version.mjs" <<'EOF'
 process.exit(0);
 EOF
+  write_node "${wrong_node_dir}/node" "deliberately-mismatched"
+  cat >"${wrong_node_dir}/npx" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'npx-invoked\\n' >>"\$RUN_LOG"
+args=("\$@")
+separator=-1
+for ((index = 0; index < \${#args[@]}; index++)); do
+  if [[ "\${args[index]}" == "--" ]]; then
+    separator="\$index"
+    break
+  fi
+done
+
+if (( separator < 0 )); then
+  printf 'Expected npx arguments to contain --.\\n' >&2
+  exit 1
+fi
+
+expected_package="--package=node@${node_version#v}"
+package_found=false
+for argument in "\${args[@]}"; do
+  if [[ "\$argument" == "\$expected_package" ]]; then
+    package_found=true
+    break
+  fi
+done
+if [[ "\$package_found" != true ]]; then
+  printf 'Expected npx to select %s.\\n' "\$expected_package" >&2
+  exit 1
+fi
+
+export PATH="${REAL_NODE_BIN_DIR}:\$PATH"
+command_args=("\${args[@]:\$((separator + 1))}")
+exec "\${command_args[@]}"
+EOF
+  chmod +x "${wrong_node_dir}/npx"
 
   "$OPENSSL_BIN" req -x509 -newkey rsa:2048 -nodes \
     -keyout "${cert_dir}/test-ca.key" \
@@ -556,7 +596,8 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
-    PATH="${REAL_NODE_BIN_DIR}:${PATH}" \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
@@ -571,13 +612,15 @@ EOF
     cat "$trusted_output" >&2
     return 1
   fi
+  assert_contains "$(cat "$npx_log")" "npx-invoked"
 
   set +e
   env \
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
-    PATH="${REAL_NODE_BIN_DIR}:${PATH}" \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     bash "${workspace}/scripts/src/run-release-node.sh" \
@@ -598,11 +641,12 @@ EOF
       "$untrusted_result" >&2
     return 1
   fi
+  assert_contains "$(cat "$npx_log")" "npx-invoked"
 
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: release runner trusts the explicit test CA and rejects the untrusted CA"
+  echo "PASS: Node fallback trusts the explicit test CA and rejects the untrusted CA"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
