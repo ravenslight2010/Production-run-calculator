@@ -204,6 +204,7 @@ async function startVersionedServer(
   let staleAssetFailureArmed = false;
   let staleAssetRequestCount = 0;
   let sessionValid = true;
+  let intentPermissionGranted = true;
   let temporarySessionProbeFailuresRemaining = 0;
   let sessionProbesToHold = 0;
   const sessionRecoveryRequests = {
@@ -219,6 +220,7 @@ async function startVersionedServer(
     intentPosts: 0,
     intentApplications: 0,
     signIns: 0,
+    permissionDenied: 0,
   };
   const intentRequestIds: string[] = [];
   const intentRequestUsers: string[] = [];
@@ -299,6 +301,33 @@ async function startVersionedServer(
           .end(JSON.stringify(sessionUsers.get(activeSessionUserId)));
         return;
       }
+      if (
+        options.sessionRecovery
+        && requestPath === "api/factory-data"
+        && request.method === "GET"
+      ) {
+        response
+          .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+          .end(JSON.stringify({ data: {} }));
+        return;
+      }
+      if (
+        options.sessionRecovery
+        && requestPath === "api/incidents"
+        && request.method === "POST"
+      ) {
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+        }).end(JSON.stringify({
+          incidentId: "pwa-fixture-incident",
+          correlationId: "pwa-fixture-correlation",
+          diagnosis: null,
+          workaround: null,
+          recurrence: null,
+          aiGenerated: false,
+        }));
+        return;
+      }
       if (options.sessionRecoveryIntentOutbox && requestPath === "api/auth/sign-in") {
         let rawBody = "";
         for await (const chunk of request) rawBody += chunk;
@@ -350,6 +379,13 @@ async function startVersionedServer(
           response
             .writeHead(401, { "content-type": "application/json; charset=utf-8" })
             .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
+          return;
+        }
+        if (!intentPermissionGranted) {
+          sessionRecoveryRequests.permissionDenied += 1;
+          response
+            .writeHead(403, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Forbidden" }));
           return;
         }
         sessionRecoveryRequests.intentApplications += 1;
@@ -543,6 +579,9 @@ async function startVersionedServer(
     setSessionValid(valid: boolean) {
       sessionValid = valid;
     },
+    setIntentPermissionGranted(granted: boolean) {
+      intentPermissionGranted = granted;
+    },
     failNextSessionProbes(count: number) {
       temporarySessionProbeFailuresRemaining = count;
     },
@@ -573,6 +612,8 @@ async function startVersionedServer(
       // Browser keep-alive sockets can otherwise keep Node's close callback
       // pending after an assertion failure.
       releaseIntentAuthResponse?.();
+      for (const stream of sessionEventStreams) stream.destroy();
+      sessionEventStreams.clear();
       server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -1624,6 +1665,195 @@ test.describe("PWA update handoff", () => {
         appliedIntentIds: [blockedIntentId],
         appliedIntentUsers: ["pwa-session-user"],
       });
+      expect(pageErrors).toEqual([]);
+      expect(server.fixtureErrors()).toEqual([]);
+      expect(expectedExternalFontErrors.every((message) =>
+        message.includes("fonts.googleapis.com/css2?family=Inter"),
+      )).toBe(true);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await server.close();
+    }
+  });
+
+  test("keeps a permission-blocked offline intent until explicit retry", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    const expectedExternalFontErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (error.message.includes("fonts.googleapis.com/css2")) {
+        expectedExternalFontErrors.push(error.message);
+      } else {
+        pageErrors.push(error.message);
+      }
+    });
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true, sessionRecoveryIntentOutbox: true },
+    );
+    server.setIntentPermissionGranted(false);
+
+    try {
+      await page.route("https://fonts.googleapis.com/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/css", body: "" }),
+      );
+      await page.addInitScript(() => {
+        if (location.origin === "null") return;
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-permission-recovery-run",
+            brand: "Offline",
+            flavor: "Permission",
+            startedAt: 1_000,
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+      await page.context().setOffline(true);
+      await page.getByRole("button", { name: /PAUSE RUN/i }).click();
+      await expect.poll(() => page.evaluate(() => {
+        const prefix = "run-calculator:operational-intent-outbox:v1:pending:";
+        for (let index = 0; index < localStorage.length; index++) {
+          const key = localStorage.key(index);
+          if (!key?.startsWith(prefix)) continue;
+          const intent = JSON.parse(localStorage.getItem(key) ?? "null");
+          if (intent?.action === "pause") return intent;
+        }
+        return null;
+      })).toMatchObject({
+        action: "pause",
+        state: "pending",
+        deferredOffline: true,
+        owner: "live:pwa-session-user",
+        runId: "pwa-permission-recovery-run",
+      });
+      await page.context().setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+      await expect.poll(() => server.sessionRecoveryRequests().permissionDenied).toBe(1);
+      const blockedIntentId = server.sessionRecoveryRequests().intentRequestIds[0];
+      expect(blockedIntentId).toBeTruthy();
+      await expect.poll(() => page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId)).toMatchObject({
+        id: blockedIntentId,
+        state: "blocked",
+        failure: "permission",
+        guidance: "You do not have permission. Ask a manager, then Retry if access changes.",
+      });
+      const blockedIntentBeforeReload = await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        intentPosts: 1,
+        intentApplications: 0,
+        permissionDenied: 1,
+        intentRequestIds: [blockedIntentId],
+        appliedIntentIds: [],
+      });
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      expect(await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId)).toEqual(blockedIntentBeforeReload);
+      await page.locator('button[title^="Sync"]').click();
+      await expect(page.getByText("pause · Blocked")).toBeVisible();
+      await expect(page.getByText(
+        "You do not have permission. Ask a manager, then Retry if access changes.",
+      )).toBeVisible();
+      await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+
+      // Restoring access and signing in as the same operator must not replay a
+      // terminalized command. Only its explicit Retry can submit it again.
+      server.setIntentPermissionGranted(true);
+      server.setSessionValid(false);
+      server.dropSessionEventStreams();
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      expect(await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId)).toEqual(blockedIntentBeforeReload);
+      await page.getByLabel("Username").fill("pwa-session-user");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect(page.locator('button[title^="Sync"]')).toBeVisible();
+      await page.waitForTimeout(500);
+      expect(await page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId)).toEqual(blockedIntentBeforeReload);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        signIns: 1,
+        intentPosts: 1,
+        intentApplications: 0,
+        permissionDenied: 1,
+        intentRequestIds: [blockedIntentId],
+        appliedIntentIds: [],
+      });
+
+      await page.locator('button[title^="Sync"]').click();
+      await expect(page.getByText("pause · Blocked")).toBeVisible();
+      await page.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect.poll(() => server.sessionRecoveryRequests().intentApplications).toBe(1);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        signIns: 1,
+        intentPosts: 2,
+        intentApplications: 1,
+        permissionDenied: 1,
+        intentRequestIds: [blockedIntentId, blockedIntentId],
+        appliedIntentIds: [blockedIntentId],
+      });
+      await expect.poll(() => page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId)).toMatchObject({
+        id: blockedIntentId,
+        state: "accepted",
+      });
+      await page.waitForTimeout(500);
+      expect(server.sessionRecoveryRequests().intentPosts).toBe(2);
       expect(pageErrors).toEqual([]);
       expect(server.fixtureErrors()).toEqual([]);
       expect(expectedExternalFontErrors.every((message) =>

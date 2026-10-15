@@ -462,6 +462,52 @@ describe("operational intent outbox", () => {
     expect(operationalIntentSummary().accepted).toBe(1);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+  it("keeps a 403 permission denial durable until the same intent is explicitly retried", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requestIds: string[] = [];
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { intent: { id: string } };
+      requestIds.push(body.intent.id);
+      if (requestIds.length === 1) {
+        return {
+          ok: false, status: 403, headers: { get: () => null }, json: async () => ({}),
+        };
+      }
+      return {
+        ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ outcome: "accepted" }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({
+      runId: "permission", observedGeneration: "permission:1", effectiveAt: 1, action: "pause",
+    });
+
+    await flushOperationalIntentOutbox();
+    const blocked = {
+      id: intent.id,
+      state: "blocked",
+      failure: "permission",
+      guidance: "You do not have permission. Ask a manager, then Retry if access changes.",
+    };
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining(blocked)]);
+    const terminalKey = `run-calculator:operational-intent-outbox:v1:terminal:${intent.id}`;
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject(blocked);
+
+    // Signing out and back into the same account does not send blocked work.
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    await flushOperationalIntentOutbox();
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject(blocked);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(requestIds).toEqual([intent.id]);
+
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(requestIds).toEqual([intent.id, intent.id]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it("keeps a pending action across an offline reload boundary and adopts canonical data only after retry", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const canonical = { runValues: { "run-1": { casesOnCurrentSkid: 12 } } };
