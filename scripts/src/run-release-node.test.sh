@@ -11,6 +11,7 @@ LAUNCHER="${SCRIPT_DIR}/run-release-node.sh"
 REAL_TIMEOUT_BIN=$(command -v timeout)
 REAL_NODE_BIN=$(command -v node)
 REAL_NODE_BIN_DIR=$(dirname "$REAL_NODE_BIN")
+REAL_NPM_BIN=$(command -v npm)
 REAL_NPX_BIN=$(command -v npx)
 OPENSSL_BIN=$(command -v openssl)
 TAR_BIN=$(command -v tar)
@@ -464,6 +465,10 @@ test_release_runner_verifies_local_tls_certificates() {
   local integrity_npx_output="${workspace}/integrity-npx-output"
   local redirect_integrity_npx_output="${workspace}/redirect-integrity-npx-output"
   local shasum_npx_output="${workspace}/shasum-npx-output"
+  local lifecycle_control_npm_output="${workspace}/lifecycle-control-npm-output"
+  local lifecycle_rejected_npm_output="${workspace}/lifecycle-rejected-npm-output"
+  local lifecycle_control_marker="${workspace}/lifecycle-control-marker"
+  local lifecycle_rejected_marker="${workspace}/lifecycle-rejected-marker"
   local registry_requests="${workspace}/registry-requests"
   local tarball_requests="${workspace}/tarball-requests"
   local redirect_mode_file="${workspace}/redirect-mode"
@@ -617,6 +622,9 @@ EOF
 {
   "name": "${package_name}",
   "version": "${package_version}",
+  "scripts": {
+    "preinstall": "node -e \\"if (process.env.PREINSTALL_MARKER) require('node:fs').writeFileSync(process.env.PREINSTALL_MARKER, 'preinstall ran')\\""
+  },
   "bin": {
     "local-npx-tls-fixture": "bin/run.cjs"
   }
@@ -652,6 +660,7 @@ const [
   expiredCertPath,
   packageTarballPath,
   alteredPackageTarballPath,
+  packageManifestPath,
   tarballModePath,
   redirectModePath,
   metadataModePath,
@@ -662,6 +671,7 @@ const packageName = "replit-release-runner-tls-fixture";
 const packageVersion = "1.0.0";
 const packageTarball = fs.readFileSync(packageTarballPath);
 const alteredPackageTarball = fs.readFileSync(alteredPackageTarballPath);
+const packageManifest = JSON.parse(fs.readFileSync(packageManifestPath, "utf8"));
 const tlsOptions = {
   key: fs.readFileSync(keyPath),
   cert: fs.readFileSync(certPath),
@@ -699,9 +709,7 @@ const registryServer = https.createServer(
         "dist-tags": { latest: packageVersion },
         versions: {
           [packageVersion]: {
-            name: packageName,
-            version: packageVersion,
-            bin: { "local-npx-tls-fixture": "bin/run.cjs" },
+            ...packageManifest,
             dist,
           },
         },
@@ -846,7 +854,8 @@ EOF
     "${cert_dir}/server.key" "${cert_dir}/server.pem" \
     "$registry_port_file" "$tarball_port_file" "$expired_port_file" \
     "${cert_dir}/server-expired.pem" \
-    "$package_tarball" "$altered_package_tarball" "$tarball_mode_file" \
+    "$package_tarball" "$altered_package_tarball" \
+    "${package_root}/package.json" "$tarball_mode_file" \
     "$redirect_mode_file" "$metadata_mode_file" \
     "$registry_requests" "$tarball_requests" \
     >"$server_output" 2>&1 &
@@ -1038,6 +1047,7 @@ EOF
       "npm_config_fetch_retries=0"
       "npm_config_fetch_timeout=10000"
       "npm_config_strict_ssl=true"
+      "npm_config_ignore_scripts=false"
       "SSL_CERT_FILE=${workspace}/missing-ca.pem"
       "SSL_CERT_DIR=${workspace}/missing-ca-dir"
     )
@@ -1052,6 +1062,54 @@ EOF
         "$REAL_NPX_BIN" --yes \
         --package="${package_name}@${package_version}" \
         -- local-npx-tls-fixture
+    ) >"$output_path" 2>&1
+  }
+
+  run_local_npm_install() {
+    local project_dir="$1"
+    local cache_dir="$2"
+    local output_path="$3"
+    local preinstall_marker="$4"
+    local -a npm_environment=(
+      "PATH=${REAL_NODE_BIN_DIR}:$(dirname "$REAL_NPM_BIN"):/usr/bin:/bin"
+      "HOME=${workspace}/home"
+      "TMPDIR=${workspace}/tmp"
+      "XDG_CONFIG_HOME=${workspace}/xdg-config"
+      "npm_config_registry=${url}"
+      "npm_config_cache=${cache_dir}"
+      "npm_config_userconfig=${workspace}/empty-user.npmrc"
+      "npm_config_globalconfig=${workspace}/empty-global.npmrc"
+      "npm_config_audit=false"
+      "npm_config_fund=false"
+      "npm_config_update_notifier=false"
+      "npm_config_fetch_retries=0"
+      "npm_config_fetch_timeout=10000"
+      "npm_config_strict_ssl=true"
+      "npm_config_ignore_scripts=false"
+      "npm_config_cafile=${cert_dir}/test-ca.pem"
+      "PREINSTALL_MARKER=${preinstall_marker}"
+      "SSL_CERT_FILE=${workspace}/missing-ca.pem"
+      "SSL_CERT_DIR=${workspace}/missing-ca-dir"
+    )
+
+    mkdir -p "$project_dir"
+    cat >"${project_dir}/package.json" <<'EOF'
+{
+  "name": "lifecycle-hook-check",
+  "version": "1.0.0",
+  "private": true
+}
+EOF
+    (
+      cd "$project_dir"
+      env -i "${npm_environment[@]}" \
+        "$REAL_NPM_BIN" install \
+        --no-save \
+        --package-lock=false \
+        --ignore-scripts=false \
+        --no-audit \
+        --no-fund \
+        "${package_name}@${package_version}"
     ) >"$output_path" 2>&1
   }
 
@@ -1141,6 +1199,55 @@ EOF
 
   printf 'direct\n' >"$redirect_mode_file"
   printf 'shasum-only\n' >"$metadata_mode_file"
+  printf 'matching\n' >"$tarball_mode_file"
+  set +e
+  run_local_npm_install \
+    "${workspace}/lifecycle-control-project" \
+    "${workspace}/lifecycle-control-npm-cache" \
+    "$lifecycle_control_npm_output" "$lifecycle_control_marker"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ ! -f "$lifecycle_control_marker" ]]; then
+    printf 'Installed npm did not run the valid package preinstall hook (status %s):\n' \
+      "$status" >&2
+    cat "$lifecycle_control_npm_output" >&2
+    if [[ -f "$lifecycle_control_marker" ]]; then
+      cat "$lifecycle_control_marker" >&2
+    fi
+    return 1
+  fi
+  assert_contains "$(cat "$lifecycle_control_marker")" "preinstall ran"
+
+  printf 'altered\n' >"$tarball_mode_file"
+  rm -f "$lifecycle_rejected_marker"
+  set +e
+  run_local_npm_install \
+    "${workspace}/lifecycle-rejected-project" \
+    "${workspace}/lifecycle-rejected-npm-cache" \
+    "$lifecycle_rejected_npm_output" "$lifecycle_rejected_marker"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npm accepted altered shasum-only tarball bytes.\n' >&2
+    cat "$lifecycle_rejected_npm_output" >&2
+    return 1
+  fi
+  local lifecycle_rejected_npm_result
+  lifecycle_rejected_npm_result=$(cat "$lifecycle_rejected_npm_output")
+  if [[ "$lifecycle_rejected_npm_result" != *"EINTEGRITY"* &&
+    "$lifecycle_rejected_npm_result" != *"checksum failed"* &&
+    "$lifecycle_rejected_npm_result" != *"checksum mismatch"* ]]; then
+    printf 'Altered shasum-only tarball installation failed for a reason other than npm checksum validation:\n%s\n' \
+      "$lifecycle_rejected_npm_result" >&2
+    return 1
+  fi
+  if [[ -e "$lifecycle_rejected_marker" ]]; then
+    printf 'Installed npm ran the preinstall hook before rejecting the altered shasum-only tarball.\n' >&2
+    cat "$lifecycle_rejected_marker" >&2
+    return 1
+  fi
+
   set +e
   run_local_npx "${cert_dir}/test-ca.pem" \
     "${workspace}/shasum-npm-cache" "$shasum_npx_output"
@@ -1168,7 +1275,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, mismatched DNS/IP certificate names, and expired server certificates, and reject altered package bytes directly, after redirect, and with shasum-only metadata"
+  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, mismatched DNS/IP names, and expired certificates; reject altered bytes directly, after redirect, and with shasum-only metadata; npm install rejects altered shasum-only bytes before preinstall"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
