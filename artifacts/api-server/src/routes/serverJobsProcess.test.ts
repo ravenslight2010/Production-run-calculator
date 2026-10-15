@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  stopIsolatedApiProcess,
   waitForIsolatedApiProcess,
   type IsolatedApiProcess,
 } from "./serverJobsProcess";
@@ -26,8 +27,78 @@ function expectStartupListenersRemoved(child: FakeApiProcess) {
   expect(child.stderr.listenerCount("data")).toBe(0);
 }
 
+function expectShutdownListenersRemoved(child: FakeApiProcess) {
+  expect(child.listenerCount("close")).toBe(0);
+  expect(child.listenerCount("exit")).toBe(0);
+}
+
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("stopIsolatedApiProcess", () => {
+  it("returns immediately for an already exited child without adding listeners or timers", async () => {
+    vi.useFakeTimers();
+    const child = new FakeApiProcess();
+    child.exitCode = 0;
+
+    await expect(
+      stopIsolatedApiProcess(child.asIsolatedApiProcess(), { forceKillTimeoutMs: 25 }),
+    ).resolves.toBeUndefined();
+
+    expect(child.kill).not.toHaveBeenCalled();
+    expectShutdownListenersRemoved(child);
+    expect(vi.getTimerCount()).toBe(0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+  });
+
+  it("waits for a SIGTERM close and removes its timer and listeners", async () => {
+    vi.useFakeTimers();
+    const child = new FakeApiProcess();
+    const shutdown = stopIsolatedApiProcess(child.asIsolatedApiProcess(), {
+      forceKillTimeoutMs: 25,
+    });
+
+    expect(child.kill).toHaveBeenCalledExactlyOnceWith("SIGTERM");
+    expect(vi.getTimerCount()).toBe(1);
+    child.exitCode = 0;
+    child.emit("close", 0, null);
+
+    await expect(shutdown).resolves.toBeUndefined();
+    expectShutdownListenersRemoved(child);
+    expect(vi.getTimerCount()).toBe(0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+  });
+
+  it("escalates to SIGKILL but waits for the child to exit", async () => {
+    vi.useFakeTimers();
+    const child = new FakeApiProcess();
+    const shutdown = stopIsolatedApiProcess(child.asIsolatedApiProcess(), {
+      forceKillTimeoutMs: 25,
+    });
+    let completed = false;
+    void shutdown.then(() => {
+      completed = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+    expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(completed).toBe(false);
+    expect(child.listenerCount("exit")).toBe(1);
+    expect(child.listenerCount("close")).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    child.signalCode = "SIGKILL";
+    child.emit("exit", null, "SIGKILL");
+    await expect(shutdown).resolves.toBeUndefined();
+    expectShutdownListenersRemoved(child);
+    expect(vi.getTimerCount()).toBe(0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+  });
 });
 
 describe("waitForIsolatedApiProcess", () => {

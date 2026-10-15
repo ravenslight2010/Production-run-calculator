@@ -18,7 +18,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { signLegacyTokenForTests } from "../lib/auth";
-import { waitForIsolatedApiProcess, type IsolatedApiProcess } from "./serverJobsProcess";
+import {
+  stopIsolatedApiProcess,
+  waitForIsolatedApiProcess,
+  type IsolatedApiProcess,
+} from "./serverJobsProcess";
 
 type DbModule = typeof import("@workspace/db");
 
@@ -301,21 +305,6 @@ async function startIsolatedApiProcess(): Promise<{
     stdio: ["ignore", "pipe", "pipe"],
   });
   return waitForIsolatedApiProcess(child);
-}
-
-async function stopIsolatedApiProcess(child: IsolatedApiProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve();
-    }, 5_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
 }
 
 describe("server job route idempotency", () => {

@@ -8,6 +8,45 @@ interface StartupTimeouts {
   forceKillTimeoutMs?: number;
 }
 
+interface ShutdownTimeouts {
+  forceKillTimeoutMs?: number;
+}
+
+export function stopIsolatedApiProcess(
+  child: IsolatedApiProcess,
+  { forceKillTimeoutMs = 5_000 }: ShutdownTimeouts = {},
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+
+    const cleanup = () => {
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      child.removeListener("close", onTerminal);
+      child.removeListener("exit", onTerminal);
+    };
+
+    const onTerminal = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+
+    child.once("close", onTerminal);
+    child.once("exit", onTerminal);
+    forceKillTimer = setTimeout(() => {
+      forceKillTimer = undefined;
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+    }, forceKillTimeoutMs);
+    child.kill("SIGTERM");
+  });
+}
+
 export function waitForIsolatedApiProcess(
   child: IsolatedApiProcess,
   { startupTimeoutMs = 60_000, forceKillTimeoutMs = 5_000 }: StartupTimeouts = {},
