@@ -859,8 +859,10 @@ test_release_runner_verifies_local_tls_certificates() {
   local lifecycle_rejected_npm_output="${workspace}/lifecycle-rejected-npm-output"
   local release_install_npm_output="${workspace}/release-install-npm-output"
   local release_downgrade_npm_output="${workspace}/release-downgrade-npm-output"
+  local lifecycle_redirected_npm_output="${workspace}/lifecycle-redirected-npm-output"
   local lifecycle_control_marker="${workspace}/lifecycle-control-marker"
   local lifecycle_rejected_marker="${workspace}/lifecycle-rejected-marker"
+  local lifecycle_redirected_marker="${workspace}/lifecycle-redirected-marker"
   local registry_requests="${workspace}/registry-requests"
   local tarball_requests="${workspace}/tarball-requests"
   local http_tarball_requests="${workspace}/http-tarball-requests"
@@ -1901,6 +1903,38 @@ EOF
     return 1
   fi
 
+  printf 'redirect\n' >"$redirect_mode_file"
+  rm -f "$lifecycle_redirected_marker"
+  set +e
+  run_local_npm_install \
+    "${workspace}/lifecycle-redirected-project" \
+    "${workspace}/lifecycle-redirected-npm-cache" \
+    "$lifecycle_redirected_npm_output" "$lifecycle_redirected_marker"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npm accepted altered shasum-only tarball bytes after following a registry redirect.\n' >&2
+    cat "$lifecycle_redirected_npm_output" >&2
+    return 1
+  fi
+  local lifecycle_redirected_npm_result
+  lifecycle_redirected_npm_result=$(cat "$lifecycle_redirected_npm_output")
+  if [[ "$lifecycle_redirected_npm_result" != *"EINTEGRITY"* &&
+    "$lifecycle_redirected_npm_result" != *"checksum failed"* &&
+    "$lifecycle_redirected_npm_result" != *"checksum mismatch"* ]]; then
+    printf 'Redirected altered shasum-only tarball installation failed for a reason other than npm checksum validation:\n%s\n' \
+      "$lifecycle_redirected_npm_result" >&2
+    return 1
+  fi
+  if [[ -e "$lifecycle_redirected_marker" ]]; then
+    printf 'Installed npm ran the preinstall hook before rejecting the redirected altered shasum-only tarball.\n' >&2
+    cat "$lifecycle_redirected_marker" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$registry_requests")" "GET /redirect.tgz"
+  assert_contains "$(cat "$tarball_requests")" "GET /fixture.tgz"
+
+  printf 'direct\n' >"$redirect_mode_file"
   set +e
   run_local_npx "${cert_dir}/test-ca.pem" \
     "${workspace}/shasum-npm-cache" "$shasum_npx_output"
@@ -1928,7 +1962,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and package managers verify trusted TLS, reject invalid certificates, block HTTPS-to-HTTP tarball downgrades with fresh caches, and reject altered bytes before package lifecycle hooks"
+  echo "PASS: Node and package managers verify trusted TLS, reject invalid certificates, block HTTPS-to-HTTP tarball downgrades with fresh caches, and reject altered bytes before package lifecycle hooks; npm install rejects altered shasum-only bytes before preinstall, both directly and after redirect"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
