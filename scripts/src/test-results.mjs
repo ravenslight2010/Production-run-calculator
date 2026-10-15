@@ -53,6 +53,8 @@ const MAX_AGGREGATION_ENTRIES = 8192;
 const MAX_AGGREGATION_DEPTH = 12;
 const MAX_VITEST_COUNT_SUMMARIES = 128;
 const MAX_VITEST_COUNT_SUMMARY_BYTES = 4096;
+const MAX_HTTPS_IMAGE_DIMENSION = 32_768;
+const HTTPS_EVIDENCE_BROWSERS = Object.freeze(["chromium", "webkit"]);
 const API_RELEASE_VITEST_PACKAGE = "@workspace/api-server";
 const API_RELEASE_VITEST_STEP_LABEL = "API unit tests (release shard 1/12)";
 const VITEST_COUNT_REPORTER_PATH = resolve(
@@ -925,6 +927,7 @@ export function validateReport(report, catalog) {
         "artifactReferences",
         "startedAt",
         "finishedAt",
+        "httpsResponse",
       ]) ||
       seen.has(result.laneId) ||
       !TEST_RESULT_STATUSES.includes(result.status) ||
@@ -960,7 +963,14 @@ export function validateReport(report, catalog) {
           !isIsoDate(result.finishedAt) ||
           Date.parse(result.finishedAt) < Date.parse(result.startedAt))) ||
       (!result.attempted &&
-        (result.startedAt !== undefined || result.finishedAt !== undefined))
+        (result.startedAt !== undefined || result.finishedAt !== undefined)) ||
+      (result.httpsResponse !== undefined &&
+        (lane.id !== "ci-browser-https" ||
+          !result.attempted ||
+          !isValidHttpsResponseEvidence(result.httpsResponse, result.status))) ||
+      (lane.id === "ci-browser-https" &&
+        result.status === "PASS" &&
+        result.httpsResponse === undefined)
     ) {
       throw new Error("The test-results report has a missing, invalid, or mismatched lane.");
     }
@@ -1046,6 +1056,72 @@ function validateFailureMetadata(failure) {
       !/^[A-Z0-9_]{1,32}$/.test(failure.processErrorCode))
   ) {
     throw new Error("The report contains unbounded failure metadata.");
+  }
+}
+
+function isValidHttpsResponseMetadata(metadata) {
+  return (
+    hasOnlyKeys(metadata, [
+      "status",
+      "contentType",
+      "imageWidth",
+      "imageHeight",
+    ]) &&
+    Number.isInteger(metadata.status) &&
+    metadata.status >= 100 &&
+    metadata.status <= 599 &&
+    (metadata.contentType === null ||
+      (typeof metadata.contentType === "string" &&
+        metadata.contentType.length <= 129 &&
+        /^[a-z0-9!#$&^_.+-]{1,64}\/[a-z0-9!#$&^_.+-]{1,64}$/.test(
+          metadata.contentType,
+        ))) &&
+    Number.isInteger(metadata.imageWidth) &&
+    metadata.imageWidth >= 0 &&
+    metadata.imageWidth <= MAX_HTTPS_IMAGE_DIMENSION &&
+    Number.isInteger(metadata.imageHeight) &&
+    metadata.imageHeight >= 0 &&
+    metadata.imageHeight <= MAX_HTTPS_IMAGE_DIMENSION
+  );
+}
+
+function isValidHttpsResponseEvidence(evidence, status) {
+  if (
+    !hasOnlyKeys(evidence, HTTPS_EVIDENCE_BROWSERS) ||
+    Object.keys(evidence).length === 0 ||
+    !Object.entries(evidence).every(([, metadata]) =>
+      isValidHttpsResponseMetadata(metadata),
+    )
+  ) {
+    return false;
+  }
+  if (status !== "PASS") return true;
+  return (
+    HTTPS_EVIDENCE_BROWSERS.every((browser) =>
+      Object.hasOwn(evidence, browser),
+    ) &&
+    HTTPS_EVIDENCE_BROWSERS.every((browser) => {
+      const metadata = evidence[browser];
+      return (
+        metadata.status === 200 &&
+        metadata.contentType === "image/png" &&
+        metadata.imageWidth > 0 &&
+        metadata.imageHeight > 0
+      );
+    })
+  );
+}
+
+async function readHttpsResponseMetadata(path) {
+  try {
+    const metadata = await stat(path);
+    if (!metadata.isFile() || metadata.size < 1 || metadata.size > 1024) {
+      return null;
+    }
+    const parsed = JSON.parse(await readFile(path, "utf8"));
+    return isValidHttpsResponseMetadata(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -1402,6 +1478,7 @@ export async function recordLaneResult({
   durationMs,
   counts,
   failure,
+  httpsResponse,
   artifactName,
   now = new Date().toISOString(),
   env = process.env,
@@ -1420,6 +1497,13 @@ export async function recordLaneResult({
   if (counts !== undefined && counts !== null && !isValidTestCounts(counts)) {
     throw new Error("Structured test counts have an invalid shape.");
   }
+  if (
+    httpsResponse !== undefined &&
+    (laneId !== "ci-browser-https" ||
+      !isValidHttpsResponseEvidence(httpsResponse, status))
+  ) {
+    throw new Error("HTTPS response evidence has an invalid shape.");
+  }
   const report = await readReport(reportPath, catalog);
   assertSameRun(report, env);
   const result = report.lanes.find((item) => item.laneId === laneId);
@@ -1430,6 +1514,8 @@ export async function recordLaneResult({
     Number.isFinite(durationMs) && durationMs >= 0 ? Math.round(durationMs) : null;
   result.counts = counts ?? null;
   result.failure = failure ?? null;
+  delete result.httpsResponse;
+  if (httpsResponse !== undefined) result.httpsResponse = httpsResponse;
   if (artifactName && !report.artifactReferences.some((ref) => ref.name === artifactName)) {
     report.artifactReferences.push({
       kind: "github-actions-artifact",
@@ -1748,7 +1834,58 @@ async function runLane(laneId, command, args) {
           `--reporter=${VITEST_COUNT_REPORTER_PATH}`,
         ]
       : args;
-  const outcome = await runChild(command, childArgs, childEnv);
+  let httpsEvidenceDirectory;
+  if (laneId === "ci-browser-https") {
+    httpsEvidenceDirectory = `${path}.https-evidence-${randomUUID()}`;
+    try {
+      await mkdir(httpsEvidenceDirectory, { recursive: false, mode: 0o700 });
+    } catch {
+      httpsEvidenceDirectory = undefined;
+    }
+  }
+  const outcome = await runChild(
+    command,
+    childArgs,
+    laneId === "ci-browser-https" && httpsEvidenceDirectory
+      ? {
+          ...childEnv,
+          TEST_RESULTS_HTTPS_EVIDENCE_DIR: httpsEvidenceDirectory,
+        }
+      : childEnv,
+  );
+  let httpsResponse;
+  if (laneId === "ci-browser-https") {
+    if (httpsEvidenceDirectory) {
+      const browserMetadata = await Promise.all(
+        HTTPS_EVIDENCE_BROWSERS.map(async (browser) => [
+          browser,
+          await readHttpsResponseMetadata(
+            join(httpsEvidenceDirectory, `${browser}.json`),
+          ),
+        ]),
+      );
+      const availableMetadata = Object.fromEntries(
+        browserMetadata.filter(([, metadata]) => metadata !== null),
+      );
+      if (Object.keys(availableMetadata).length > 0) {
+        httpsResponse = availableMetadata;
+      }
+      try {
+        await rm(httpsEvidenceDirectory, { recursive: true, force: true });
+      } catch {
+        // A temporary evidence cleanup issue must not mask the smoke outcome.
+      }
+    }
+    if (
+      outcome.status === "PASS" &&
+      (!httpsResponse ||
+        !isValidHttpsResponseEvidence(httpsResponse, "PASS"))
+    ) {
+      outcome.status = "INFRASTRUCTURE_ERROR";
+      outcome.reason = "Structured test-step outcomes were unavailable.";
+      outcome.spawnError = "HTTPS_EVIDENCE_UNAVAILABLE";
+    }
+  }
   const end = new Date().toISOString();
   let counts = null;
   if (vitestCountsDirectory) {
@@ -1830,6 +1967,7 @@ async function runLane(laneId, command, args) {
     durationMs: outcome.durationMs,
     counts,
     failure: parseFailure(outcome.status, outcome),
+    httpsResponse,
     artifactName: process.env.TEST_RESULTS_ARTIFACT_NAME,
     now: end,
   });

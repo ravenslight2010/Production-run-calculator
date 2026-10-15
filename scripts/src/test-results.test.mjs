@@ -1026,6 +1026,163 @@ test("run-level aggregation preserves explicit results and leaves missing lanes 
   validateReport(JSON.parse(await readFile(outputPath, "utf8")), catalog);
 });
 
+test("HTTPS response evidence is bounded, private, and preserved by aggregation", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const source = createMergeSourceReport(catalog, "browser-https");
+  const artifactName = source.artifactReferences[0].name;
+  markLanePassed(source, "ci-browser-https");
+  const httpsLane = source.lanes.find(
+    (lane) => lane.laneId === "ci-browser-https",
+  );
+  httpsLane.httpsResponse = {
+    chromium: {
+      status: 200,
+      contentType: "image/png",
+      imageWidth: 32,
+      imageHeight: 32,
+    },
+    webkit: {
+      status: 200,
+      contentType: "image/png",
+      imageWidth: 32,
+      imageHeight: 32,
+    },
+  };
+  validateReport(source, catalog);
+
+  const invalidEvidence = [
+    { ...httpsLane.httpsResponse, endpoint: "https://private.example" },
+    {
+      ...httpsLane.httpsResponse,
+      chromium: { ...httpsLane.httpsResponse.chromium, status: 99 },
+    },
+    {
+      ...httpsLane.httpsResponse,
+      webkit: {
+        ...httpsLane.httpsResponse.webkit,
+        contentType: "image/png; charset=binary",
+      },
+    },
+    {
+      ...httpsLane.httpsResponse,
+      webkit: {
+        ...httpsLane.httpsResponse.webkit,
+        imageWidth: 32_769,
+      },
+    },
+    { chromium: httpsLane.httpsResponse.chromium },
+  ];
+  const missingPassEvidence = structuredClone(source);
+  delete missingPassEvidence.lanes.find(
+    (lane) => lane.laneId === "ci-browser-https",
+  ).httpsResponse;
+  assert.throws(
+    () => validateReport(missingPassEvidence, catalog),
+    /invalid.*lane/u,
+  );
+  for (const evidence of invalidEvidence) {
+    const invalid = structuredClone(source);
+    invalid.lanes.find((lane) => lane.laneId === "ci-browser-https")
+      .httpsResponse = evidence;
+    assert.throws(() => validateReport(invalid, catalog), /invalid.*lane/u);
+  }
+  const wrongLaneEvidence = structuredClone(source);
+  wrongLaneEvidence.lanes.find((lane) => lane.laneId === "ci-typecheck")
+    .httpsResponse = httpsLane.httpsResponse;
+  assert.throws(
+    () => validateReport(wrongLaneEvidence, catalog),
+    /invalid.*lane/u,
+  );
+
+  const failed = structuredClone(source);
+  const failedLane = failed.lanes.find(
+    (lane) => lane.laneId === "ci-browser-https",
+  );
+  failedLane.status = "FAIL";
+  failedLane.reason = "The test command exited unsuccessfully.";
+  failedLane.failure = { kind: "test_process_failure", exitCode: 1 };
+  failedLane.httpsResponse = {
+    chromium: {
+      status: 503,
+      contentType: "text/html",
+      imageWidth: 0,
+      imageHeight: 0,
+    },
+  };
+  assert.equal(validateReport(failed, catalog), true);
+  assert.equal(failedLane.status, "FAIL");
+
+  await saveMergeSource(inputDirectory, source, artifactName);
+  const result = await mergeTestResultsReports({
+    inputDirectory,
+    outputPath,
+    catalog,
+    env: mergeEnvironment(),
+    now: "2026-10-06T12:01:00.000Z",
+  });
+  const mergedLane = result.report.lanes.find(
+    (lane) => lane.laneId === "ci-browser-https",
+  );
+  assert.equal(mergedLane.status, "PASS");
+  assert.deepEqual(mergedLane.httpsResponse, httpsLane.httpsResponse);
+  assert.deepEqual(
+    JSON.parse(await readFile(outputPath, "utf8")).lanes.find(
+      (lane) => lane.laneId === "ci-browser-https",
+    ).httpsResponse,
+    httpsLane.httpsResponse,
+  );
+  const saved = await readFile(outputPath, "utf8");
+  assert.doesNotMatch(saved, /https:\/\/|responseBody|cookie|certificate/u);
+  assert.ok(
+    Object.values(mergedLane.httpsResponse).every(
+      (metadata) =>
+        Object.keys(metadata).sort().join(",") ===
+        "contentType,imageHeight,imageWidth,status",
+    ),
+  );
+
+  const failureDirectory = join(temp, "failed-reports");
+  const failureOutput = join(temp, "failed-merged.json");
+  const failedSource = createMergeSourceReport(
+    catalog,
+    "browser-https-failure",
+  );
+  const failedArtifactName = failedSource.artifactReferences[0].name;
+  const failedSourceLane = failedSource.lanes.find(
+    (lane) => lane.laneId === "ci-browser-https",
+  );
+  failedSourceLane.status = "FAIL";
+  failedSourceLane.reason = "The test command exited unsuccessfully.";
+  failedSourceLane.attempted = true;
+  failedSourceLane.durationMs = 12;
+  failedSourceLane.failure = { kind: "test_process_failure", exitCode: 1 };
+  failedSourceLane.startedAt = "2026-10-06T12:00:00.000Z";
+  failedSourceLane.finishedAt = "2026-10-06T12:00:00.012Z";
+  failedSourceLane.httpsResponse = failed.httpsResponse;
+  validateReport(failedSource, catalog);
+  await saveMergeSource(
+    failureDirectory,
+    failedSource,
+    failedArtifactName,
+  );
+  const failedResult = await mergeTestResultsReports({
+    inputDirectory: failureDirectory,
+    outputPath: failureOutput,
+    catalog,
+    env: mergeEnvironment(),
+    now: "2026-10-06T12:02:00.000Z",
+  });
+  const failedMergedLane = failedResult.report.lanes.find(
+    (lane) => lane.laneId === "ci-browser-https",
+  );
+  assert.equal(failedMergedLane.status, "FAIL");
+  assert.deepEqual(failedMergedLane.httpsResponse, failed.httpsResponse);
+});
+
 test("standard-only release aggregation preserves its release outcome", async (t) => {
   const catalog = await readLaneCatalog();
   const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));

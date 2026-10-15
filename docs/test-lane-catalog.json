@@ -81,7 +81,7 @@
       "runsByDefault": false,
       "environment": ["Node.js 24", "pnpm frozen install", "Playwright-managed Chromium and WebKit"],
       "prerequisites": ["Playwright Chromium and WebKit browsers installed", "public HTTPS image endpoint available"],
-      "safety": "desktop browser requests to a real public image endpoint; no route interception, production app, or application data"
+      "safety": "desktop browser requests to a real public image endpoint; reports retain only HTTP status, normalized content type, and decoded dimensions; no route interception, production app, or application data"
     },
     {
       "id": "ci-reduced-motion-built-browser",
