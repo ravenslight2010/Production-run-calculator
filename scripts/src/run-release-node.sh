@@ -277,6 +277,12 @@ fi
 export RELEASE_NODE_VERSION="$required_node_version"
 export RELEASE_REPO_ROOT="$REPO_ROOT"
 
+# Keep the cleartext-HTTP guard active for release commands as well as the
+# npx fallback. Some release commands (notably post-merge setup) install
+# packages after the pinned Node runtime has been selected.
+guarded_node_options="${NODE_OPTIONS:+${NODE_OPTIONS} }--require=\"${SCRIPT_DIR}/release-node-https-only.cjs\""
+export NODE_OPTIONS="$guarded_node_options"
+
 # If the runner already has the selected Node version, use it directly. This
 # avoids an unnecessary npx package download while still putting the selected
 # executable first on PATH for pnpm and its child scripts.
@@ -292,7 +298,7 @@ if node_bin=$(command -v node 2>/dev/null); then
     # .nvmrc, and explicit CI pins before any release child can write evidence.
     "$node_bin" "$RELEASE_REPO_ROOT/scripts/src/check-routine-node-version.mjs"
 
-    exec "$@"
+    exec python3 "$SCRIPT_DIR/run-release-command.py" "$@"
   fi
 fi
 
@@ -362,14 +368,6 @@ if ! npx_bin=$(command -v npx 2>/dev/null); then
   exit 127
 fi
 
-node_options_restore_set=false
-node_options_restore_value=""
-if [[ ${NODE_OPTIONS+x} ]]; then
-  node_options_restore_set=true
-  node_options_restore_value="$NODE_OPTIONS"
-fi
-guarded_node_options="--require=\"${SCRIPT_DIR}/release-node-https-only.cjs\"${NODE_OPTIONS:+ ${NODE_OPTIONS}}"
-
 # shellcheck disable=SC2016
 NODE_OPTIONS="$guarded_node_options" \
 RELEASE_NODE_NPM_REGISTRY="$release_node_registry" \
@@ -388,10 +386,6 @@ os.execvp(sys.argv[1], sys.argv[1:])
   --yes --package="node@${required_node_version}" -- bash -c '
   set -euo pipefail
 
-  node_options_restore_set="$1"
-  node_options_restore_value="$2"
-  shift 2
-
   : >"$RELEASE_NODE_FALLBACK_MARKER"
   node_bin=$(command -v node)
   actual_node_version=$("$node_bin" --version)
@@ -408,16 +402,10 @@ os.execvp(sys.argv[1], sys.argv[1:])
   # .nvmrc, and explicit CI pins before any release child can write evidence.
   "$node_bin" "$RELEASE_REPO_ROOT/scripts/src/check-routine-node-version.mjs"
 
-  # Restore the original Node options before invoking the release command;
-  # the HTTP transport guard is only for npx and its package acquisition.
-  if [[ "$node_options_restore_set" == true ]]; then
-    export NODE_OPTIONS="$node_options_restore_value"
-  else
-    unset NODE_OPTIONS
-  fi
-
-  exec "$@"
-' release-node-runner "$node_options_restore_set" "$node_options_restore_value" "$@" &
+  # Keep NODE_OPTIONS intact and route package downloads through the local
+  # HTTPS-only proxy for the release command and its child processes.
+  exec python3 "$RELEASE_REPO_ROOT/scripts/src/run-release-command.py" "$@"
+' release-node-runner "$@" &
 active_child_pid=$!
 if wait "$active_child_pid"; then
   npx_status=0

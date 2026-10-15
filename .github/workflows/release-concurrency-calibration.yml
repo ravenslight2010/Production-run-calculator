@@ -62,7 +62,7 @@ jobs:
           node-version: "24"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile
 
       - name: Verify calibration archive validation
         run: node scripts/src/test-results.mjs run --lane ci-release-concurrency-fixtures -- pnpm --filter @workspace/scripts run test:release-concurrency

@@ -14,6 +14,9 @@ REAL_NODE_BIN=$(command -v node)
 REAL_NODE_BIN_DIR=$(dirname "$REAL_NODE_BIN")
 REAL_NPM_BIN=$(command -v npm)
 REAL_NPX_BIN=$(command -v npx)
+REAL_PNPM_BIN=$(command -v pnpm)
+REAL_PNPM_VERSION=$("$REAL_PNPM_BIN" --version)
+REAL_PYTHON_BIN=$(command -v python3)
 OPENSSL_BIN=$(command -v openssl)
 TAR_BIN=$(command -v tar)
 export SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN"
@@ -67,6 +70,8 @@ make_workspace() {
 
   mkdir -p "${workspace}/scripts/src" "${workspace}/bin" "${workspace}/pinned-bin"
   cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
+  cp "${SCRIPT_DIR}/run-release-command.py" \
+    "${workspace}/scripts/src/run-release-command.py"
   cp "${SCRIPT_DIR}/release-node-https-only.cjs" \
     "${workspace}/scripts/src/release-node-https-only.cjs"
   cp "$HISTORY_VIEWER" "${workspace}/scripts/src/show-release-lock-history.sh"
@@ -580,6 +585,8 @@ test_matching_node_skips_npx() {
   events=$(cat "$log_path")
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
+  assert_contains "$events" \
+    "node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
   assert_contains "$events" "node-system-ca=1"
   assert_contains "$events" "ssl-cert-file-readable=yes"
   assert_contains "$events" "ssl-cert-dir-readable=yes"
@@ -609,17 +616,14 @@ test_mismatching_node_uses_npx() {
   events=$(cat "$log_path")
   assert_contains "$events" "npx-invoked"
   assert_contains "$events" \
-    "npx-node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\" --trace-warnings"
+    "npx-node-options=--trace-warnings --require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
   assert_contains "$events" "npx-registry=https://registry.npmjs.org/"
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
-  assert_contains "$events" "node-options=--trace-warnings"
-  if grep -Eq '^node-options=.*--require=' <<<"$events"; then
-    printf 'Release command inherited the bootstrap-only HTTP guard.\n' >&2
-    return 1
-  fi
+  assert_contains "$events" \
+    "node-options=--trace-warnings --require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
-  echo "PASS: mismatching Node path invokes npx, runs preflight, and preserves pinned Node for the child"
+  echo "PASS: mismatching Node path invokes npx, runs preflight, and keeps the HTTPS-only guard for the child"
 }
 
 test_invalid_npx_registry_fails_before_package_acquisition() {
@@ -803,6 +807,28 @@ test_missing_npx_fails_before_release_commands() {
   echo "PASS: missing npx reports the tooling boundary before preflight or child execution"
 }
 
+test_release_dependency_installs_use_https_guard() {
+  local release_check="${SCRIPT_DIR}/../../.github/workflows/release-check.yml"
+  local concurrency_calibration="${SCRIPT_DIR}/../../.github/workflows/release-concurrency-calibration.yml"
+  local guarded_install='run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile'
+  local release_check_count
+  local calibration_count
+
+  release_check_count=$(grep -Fc "$guarded_install" "$release_check" || true)
+  calibration_count=$(grep -Fc "$guarded_install" "$concurrency_calibration" || true)
+  [[ "$release_check_count" -eq 2 ]] || {
+    printf 'Expected both release-check dependency installs to use the HTTPS guard; found %s.\n' \
+      "$release_check_count" >&2
+    return 1
+  }
+  [[ "$calibration_count" -eq 1 ]] || {
+    printf 'Expected release-concurrency calibration install to use the HTTPS guard; found %s.\n' \
+      "$calibration_count" >&2
+    return 1
+  }
+  echo "PASS: release workflow dependency installs use the HTTPS-only release runner"
+}
+
 test_release_runner_verifies_local_tls_certificates() {
   local workspace="${TEST_ROOT}/tls-verification"
   local cert_dir="${TEST_ROOT}/tls-certificates"
@@ -831,6 +857,8 @@ test_release_runner_verifies_local_tls_certificates() {
   local shasum_npx_output="${workspace}/shasum-npx-output"
   local lifecycle_control_npm_output="${workspace}/lifecycle-control-npm-output"
   local lifecycle_rejected_npm_output="${workspace}/lifecycle-rejected-npm-output"
+  local release_install_npm_output="${workspace}/release-install-npm-output"
+  local release_downgrade_npm_output="${workspace}/release-downgrade-npm-output"
   local lifecycle_control_marker="${workspace}/lifecycle-control-marker"
   local lifecycle_rejected_marker="${workspace}/lifecycle-rejected-marker"
   local registry_requests="${workspace}/registry-requests"
@@ -855,6 +883,8 @@ test_release_runner_verifies_local_tls_certificates() {
 
   mkdir -p "${workspace}/scripts/src" "$wrong_node_dir" "$cert_dir" "$server_dir"
   cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
+  cp "${SCRIPT_DIR}/run-release-command.py" \
+    "${workspace}/scripts/src/run-release-command.py"
   cp "${SCRIPT_DIR}/release-node-https-only.cjs" \
     "${workspace}/scripts/src/release-node-https-only.cjs"
   node_version=$("$REAL_NODE_BIN" --version)
@@ -1591,6 +1621,60 @@ EOF
     ) >"$output_path" 2>&1
   }
 
+  run_release_pnpm_install() {
+    local project_dir="$1"
+    local cache_dir="$2"
+    local store_dir="$3"
+    local output_path="$4"
+    local -a npm_environment=(
+      "PATH=${REAL_NODE_BIN_DIR}:$(dirname "$REAL_PNPM_BIN"):$(dirname "$REAL_PYTHON_BIN"):/usr/bin:/bin"
+      "HOME=${workspace}/home"
+      "TMPDIR=${workspace}/tmp"
+      "XDG_CONFIG_HOME=${workspace}/xdg-config"
+      "COREPACK_HOME=${SCRIPT_DIR}/../../.cache/node/corepack"
+      "npm_config_registry=${url}"
+      "npm_config_cache=${cache_dir}"
+      "pnpm_config_store_dir=${store_dir}"
+      "npm_config_userconfig=${workspace}/empty-user.npmrc"
+      "npm_config_globalconfig=${workspace}/empty-global.npmrc"
+      "npm_config_audit=false"
+      "npm_config_fund=false"
+      "npm_config_update_notifier=false"
+      "npm_config_fetch_retries=0"
+      "npm_config_fetch_timeout=10000"
+      "npm_config_strict_ssl=true"
+      "npm_config_ignore_scripts=false"
+      "npm_config_cafile=${cert_dir}/test-ca.pem"
+      "NODE_EXTRA_CA_CERTS=${cert_dir}/test-ca.pem"
+      "CI=true"
+      "SSL_CERT_FILE=${workspace}/missing-ca.pem"
+      "SSL_CERT_DIR=${workspace}/missing-ca-dir"
+    )
+
+    mkdir -p "$project_dir"
+    cat >"${project_dir}/package.json" <<EOF
+{
+  "name": "release-runner-https-policy-check",
+  "version": "1.0.0",
+  "packageManager": "pnpm@${REAL_PNPM_VERSION}",
+  "private": true,
+  "dependencies": {
+    "replit-release-runner-tls-fixture": "1.0.0"
+  }
+}
+EOF
+    (
+      cd "$project_dir"
+      env -i "${npm_environment[@]}" \
+        bash "${workspace}/scripts/src/run-release-node.sh" \
+        "$REAL_PNPM_BIN" install \
+        --no-lockfile \
+        --registry "$url" \
+        --store-dir "$store_dir" \
+        --ignore-scripts
+    ) >"$output_path" 2>&1
+  }
+
   set +e
   run_local_npx "${cert_dir}/test-ca.pem" \
     "${workspace}/trusted-npm-cache" "$trusted_npx_output"
@@ -1705,6 +1789,67 @@ EOF
   assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
   assert_contains "$(cat "$registry_requests")" "GET /downgrade.tgz"
 
+  # The post-merge release path runs pnpm install after Node selection. Keep
+  # both the package cache and pnpm store fresh for each transport case.
+  : >"$registry_requests"
+  : >"$tarball_requests"
+  : >"$http_tarball_requests"
+  printf 'direct\n' >"$redirect_mode_file"
+  printf 'integrity\n' >"$metadata_mode_file"
+  printf 'matching\n' >"$tarball_mode_file"
+  set +e
+  run_release_pnpm_install \
+    "${workspace}/release-install-project" \
+    "${workspace}/release-install-npm-cache" \
+    "${workspace}/release-install-pnpm-store" \
+    "$release_install_npm_output"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ ! -f "${workspace}/release-install-project/node_modules/${package_name}/package.json" ]]; then
+    printf 'Release-command pnpm install could not use verified HTTPS (status %s):\n' \
+      "$status" >&2
+    cat "$release_install_npm_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
+  [[ ! -s "$http_tarball_requests" ]] || {
+    printf 'Successful HTTPS release install unexpectedly reached the HTTP listener:\n' >&2
+    cat "$http_tarball_requests" >&2
+    return 1
+  }
+
+  : >"$registry_requests"
+  : >"$tarball_requests"
+  : >"$http_tarball_requests"
+  printf 'http-downgrade\n' >"$redirect_mode_file"
+  set +e
+  run_release_pnpm_install \
+    "${workspace}/release-downgrade-project" \
+    "${workspace}/release-downgrade-npm-cache" \
+    "${workspace}/release-downgrade-pnpm-store" \
+    "$release_downgrade_npm_output"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Release-command pnpm install followed an HTTPS-to-HTTP tarball redirect.\n' >&2
+    cat "$release_downgrade_npm_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$release_downgrade_npm_output")" \
+    "HTTP 403"
+  assert_contains "$(cat "$release_downgrade_npm_output")" \
+    "Release runner blocked a cleartext HTTP package request."
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /downgrade.tgz"
+  [[ ! -s "$http_tarball_requests" ]] || {
+    printf 'Release-command pnpm install reached the plain HTTP tarball listener:\n' >&2
+    cat "$http_tarball_requests" >&2
+    cat "$release_downgrade_npm_output" >&2
+    return 1
+  }
+
   printf 'direct\n' >"$redirect_mode_file"
   printf 'shasum-only\n' >"$metadata_mode_file"
   printf 'matching\n' >"$tarball_mode_file"
@@ -1783,7 +1928,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, mismatched DNS/IP names, expired and not-yet-valid certificates, block HTTP tarball downgrades, and reject altered bytes directly, after redirect, and with shasum-only metadata; npm install rejects altered shasum-only bytes before preinstall"
+  echo "PASS: Node and package managers verify trusted TLS, reject invalid certificates, block HTTPS-to-HTTP tarball downgrades with fresh caches, and reject altered bytes before package lifecycle hooks"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
@@ -2660,7 +2805,6 @@ test_release_runner_lock_wait_times_out_with_owner_and_recovers() {
   local workspace
   local holder_started
   local holder_release
-  local holder_pid_file
   local timeout_child_marker
   local holder_output
   local waiter_output
@@ -2673,7 +2817,6 @@ test_release_runner_lock_wait_times_out_with_owner_and_recovers() {
   history_file=$(lock_history_path "$workspace")
   holder_started="${workspace}/holder-started"
   holder_release="${workspace}/holder-release"
-  holder_pid_file="${workspace}/holder-pid"
   timeout_child_marker="${workspace}/timeout-child-ran"
   holder_output="${workspace}/holder-output"
   waiter_output="${workspace}/waiter-output"
@@ -2684,7 +2827,6 @@ test_release_runner_lock_wait_times_out_with_owner_and_recovers() {
   cat >"${workspace}/bin/lock-holder" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$$" >"$LOCK_HOLDER_PID_FILE"
 touch "$LOCK_HOLDER_STARTED"
 while [[ ! -e "$LOCK_HOLDER_RELEASE" ]]; do
   sleep 0.05
@@ -2698,7 +2840,6 @@ EOF
 
   LOCK_HOLDER_STARTED="$holder_started" \
     LOCK_HOLDER_RELEASE="$holder_release" \
-    LOCK_HOLDER_PID_FILE="$holder_pid_file" \
     RUN_LOG="${workspace}/holder-events" PATH="${workspace}/bin:${PATH}" \
     bash "${workspace}/scripts/src/run-release-node.sh" lock-holder \
     >"$holder_output" 2>&1 &
@@ -2714,7 +2855,7 @@ EOF
     cat "$holder_output" >&2
     return 1
   fi
-  owner_pid=$(cat "$holder_pid_file")
+  owner_pid="$holder_pid"
 
   set +e
   RELEASE_RUNNER_LOCK_WAIT_SECONDS=2 \
@@ -3075,6 +3216,7 @@ test_npx_package_resolution_failure_fails_before_release_commands
 test_missing_node_selector_fails_before_release_commands
 test_empty_node_selector_fails_before_release_commands
 test_missing_npx_fails_before_release_commands
+test_release_dependency_installs_use_https_guard
 test_release_runner_verifies_local_tls_certificates
 test_isolated_browser_status_and_database_cleanup
 test_isolated_browser_interrupt_cleans_database

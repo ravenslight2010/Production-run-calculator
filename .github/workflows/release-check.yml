@@ -92,7 +92,7 @@ jobs:
           node-version: "24.21.0"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile
 
       - name: Install WebKit and Linux runtime dependencies
         run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit
@@ -302,7 +302,7 @@ jobs:
           node-version: "24.21.0"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile
 
       - name: Install WebKit and Linux runtime dependencies
         run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit
