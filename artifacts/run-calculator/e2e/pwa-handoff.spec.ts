@@ -305,6 +305,131 @@ test.describe("PWA update handoff", () => {
     if (fixture) await rm(fixture.root, { recursive: true, force: true });
   });
 
+  test("decodes HTML-linked Apple touch icon and SVG favicon from the production build", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer({
+      old: fixture.oldDir,
+      new: fixture.newDir,
+    });
+
+    try {
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      const linkedIcons = await page.evaluate(async () => {
+        function requiredLink(selector: string, description: string) {
+          const link = document.querySelector<HTMLLinkElement>(selector);
+          if (!link) throw new Error(`Production HTML is missing its ${description} link`);
+          return link.href;
+        }
+
+        async function decodeImage(blob: Blob) {
+          const objectUrl = URL.createObjectURL(blob);
+          try {
+            const image = new Image();
+            image.src = objectUrl;
+            await image.decode();
+            return {
+              width: image.naturalWidth,
+              height: image.naturalHeight,
+            };
+          } finally {
+            URL.revokeObjectURL(objectUrl);
+          }
+        }
+
+        const appleTouchUrl = requiredLink(
+          'link[rel~="apple-touch-icon"]',
+          "Apple touch icon",
+        );
+        const appleTouchResponse = await fetch(appleTouchUrl);
+        if (!appleTouchResponse.ok) {
+          throw new Error(`Apple touch icon request failed: ${appleTouchResponse.status}`);
+        }
+        const appleTouchContentType = appleTouchResponse.headers.get("content-type");
+        if (!/^image\/png\b/i.test(appleTouchContentType ?? "")) {
+          throw new Error(`Apple touch icon has unexpected content type: ${appleTouchContentType}`);
+        }
+        const appleTouchBytes = new Uint8Array(await appleTouchResponse.arrayBuffer());
+        const pngSignature = [
+          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        ].every((byte, index) => appleTouchBytes[index] === byte);
+        if (!pngSignature || appleTouchBytes.length < 24) {
+          throw new Error("Apple touch icon is not a complete PNG");
+        }
+        const pngHeader = new DataView(
+          appleTouchBytes.buffer,
+          appleTouchBytes.byteOffset,
+          appleTouchBytes.byteLength,
+        );
+        if (pngHeader.getUint32(12) !== 0x49484452) {
+          throw new Error("Apple touch icon PNG is missing its IHDR chunk");
+        }
+        const appleTouchHeaderWidth = pngHeader.getUint32(16);
+        const appleTouchHeaderHeight = pngHeader.getUint32(20);
+        const appleTouchDecoded = await decodeImage(
+          new Blob([appleTouchBytes], { type: appleTouchContentType }),
+        );
+
+        const faviconUrl = requiredLink(
+          'link[rel~="icon"][type="image/svg+xml"]',
+          "SVG favicon",
+        );
+        const faviconResponse = await fetch(faviconUrl);
+        if (!faviconResponse.ok) {
+          throw new Error(`SVG favicon request failed: ${faviconResponse.status}`);
+        }
+        const faviconContentType = faviconResponse.headers.get("content-type");
+        if (!/^image\/svg\+xml\b/i.test(faviconContentType ?? "")) {
+          throw new Error(`SVG favicon has unexpected content type: ${faviconContentType}`);
+        }
+        const faviconMarkup = await faviconResponse.text();
+        const parsedFavicon = new DOMParser().parseFromString(
+          faviconMarkup,
+          "image/svg+xml",
+        );
+        if (
+          parsedFavicon.querySelector("parsererror")
+          || parsedFavicon.documentElement.localName !== "svg"
+          || parsedFavicon.documentElement.namespaceURI !== "http://www.w3.org/2000/svg"
+        ) {
+          throw new Error("SVG favicon is not valid SVG markup");
+        }
+        const faviconDecoded = await decodeImage(
+          new Blob([faviconMarkup], { type: faviconContentType }),
+        );
+
+        return {
+          appleTouch: {
+            pathname: new URL(appleTouchUrl).pathname,
+            status: appleTouchResponse.status,
+            headerWidth: appleTouchHeaderWidth,
+            headerHeight: appleTouchHeaderHeight,
+            decoded: appleTouchDecoded,
+          },
+          favicon: {
+            pathname: new URL(faviconUrl).pathname,
+            status: faviconResponse.status,
+            decoded: faviconDecoded,
+          },
+        };
+      });
+
+      expect(linkedIcons.appleTouch).toEqual({
+        pathname: "/apple-touch-icon-180x180.png",
+        status: 200,
+        headerWidth: 180,
+        headerHeight: 180,
+        decoded: { width: 180, height: 180 },
+      });
+      expect(linkedIcons.favicon.pathname).toBe("/favicon.svg");
+      expect(linkedIcons.favicon.status).toBe(200);
+      expect(linkedIcons.favicon.decoded.width).toBeGreaterThan(0);
+      expect(linkedIcons.favicon.decoded.height).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
+  });
+
   test("serves app shell and declared install assets from the production build", async ({
     page,
   }) => {
