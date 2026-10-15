@@ -271,10 +271,18 @@ bash docs/evidence/reproduce-typescript-7-comparison.sh /tmp/typescript-7-compar
 Each run writes a separate disposable `summary.json` alongside the comparison output. It
 records the capture timestamp, Git revision and SHA-256 of the exact normalized source bundle,
 both compiler versions, declaration totals, per-package changed-file counts, and the
-declaration-contract status. Before reporting success, the reproduction verifies that the
-summary matches the current source bundle, captured declaration trees, diff, and contract
-report, including zero unexplained semantic changes. It does not compare fresh counts with,
-or overwrite, the retained 2026-09-15 JSON or its historical prose.
+declaration-contract status and classification totals. Before reporting success, the
+reproduction verifies that the summary matches the current source bundle, captured
+declaration trees, diff, and contract report, including zero unexplained semantic changes.
+Only after those checks pass, it retains the compact per-file report at
+[`docs/evidence/typescript-7-declaration-contracts-current.json`](evidence/typescript-7-declaration-contracts-current.json).
+That report carries the same source revision and source-bundle SHA-256 as its run summary,
+each changed path's classification and exact baseline/candidate hashes, approval reasons,
+category totals, and a SHA-256 integrity envelope. The checker validates the envelope,
+identity, and classification totals against the fresh summary before retaining the report.
+Compiler build trees stay in the disposable comparison output under `/tmp`; they are not
+copied into the retained report. The reproduction does not compare fresh counts with, or
+overwrite, the historical 2026-09-15 JSON or its prose.
 
 The retained-artifact consistency check compares only that historical JSON with the historical
 counts documented below. It can run without repeating the compiler comparison:
@@ -322,8 +330,8 @@ later output change rather than becoming a broad path allowlist.
 
 ### Semantic declaration review
 
-The nine changes not covered by formatting normalization were reviewed against their source
-contracts:
+For the historical 2026-09-15 comparison, the nine changes not covered by formatting
+normalization were reviewed against their source contracts:
 
 - The generated API client aggregate changes string-literal delimiters in query and mutation
   key tuple types. The literal values and tuple structure are unchanged.
@@ -1299,10 +1307,14 @@ semantic changes.
 
 The full reproduction's final retained-summary check rejected these current totals against
 the older 2026-09-15 retained summary (795 files and 217 changed files). That older
-summary remains historical and was not overwritten. The current comparison outputs and
-contract report remain disposable under `/tmp`; a future TypeScript migration evidence task
-must refresh the revision-bound summary through its normal review path before treating the
-full reproduction as green.
+summary remains historical and was not overwritten. The full comparison output, summary,
+and compiler build trees remain disposable under `/tmp`. The compact
+per-file declaration-contract report for the latest successful fresh comparison is retained
+separately at
+[`docs/evidence/typescript-7-declaration-contracts-current.json`](evidence/typescript-7-declaration-contracts-current.json);
+its revision and source-bundle hash identify the exact comparison inputs. Retaining this
+report does not refresh or replace the historical summary and does not change the TypeScript
+6 authority or the TypeScript 7 adoption decision.
 
 **Decision remains NO-GO for TypeScript 7 adoption.** TypeScript 6.0.3 remains authoritative;
 do not change dependency versions or bypass the release-age policy as part of this task.

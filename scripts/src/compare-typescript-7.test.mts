@@ -22,6 +22,10 @@ import {
   approvedTypescript7Runner,
   typescript7NativePackagesFromLockfile,
 } from "./typescript-7-native-contract.mts";
+import {
+  createRetainedDeclarationContractReport,
+  verifyRetainedDeclarationContractReport,
+} from "./typescript-declaration-contract-evidence.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
   diagnosticsEqualForPairs,
@@ -270,15 +274,114 @@ test("historical summary validation stays separate from the current comparison",
     typescript7RetainedSummaryCheckArgs(reproductionScript),
     [reproductionScript, "--check-retained-summary"],
   );
-  assert.match(reproduction, /--check-current-summary SUMMARY_PATH/);
+  assert.match(reproduction, /--check-current-summary SUMMARY_PATH \[CONTRACT_REPORT_PATH\]/);
   assert.match(reproduction, /capturedAt:/);
   assert.match(reproduction, /sourceIdentity:/);
   assert.match(reproduction, /bundleSha256:/);
   assert.match(reproduction, /contractComparison:/);
-  assert.match(reproduction, /check_current_summary "\$OUT\/summary\.json"/);
+  assert.match(reproduction, /check_current_summary "\$OUT\/summary\.json" "\$OUT\/typescript-7-declaration-contracts-current\.json"/);
+  assert.match(reproduction, /Latest successful declaration contract report retained at/);
   assert.doesNotMatch(
     reproduction,
     /check_documented_declaration_counts "\$OUT\/summary\.json"/,
+  );
+});
+
+test("retained declaration evidence is revision-bound and integrity-checked", () => {
+  const revision = "a".repeat(40);
+  const bundleSha256 = "b".repeat(64);
+  const formattingFile = {
+    path: "lib/db/dist/formatting.d.ts",
+    category: "db" as const,
+    baselineSha256: "c".repeat(64),
+    candidateSha256: "d".repeat(64),
+    classification: "formatting-only" as const,
+  };
+  const approvedFile = {
+    path: "lib/api-zod/dist/approved.d.ts",
+    category: "api-zod" as const,
+    baselineSha256: "e".repeat(64),
+    candidateSha256: "f".repeat(64),
+    classification: "approved-semantic" as const,
+    approvalReason: "Reviewed exact-hash emitter change.",
+  };
+  const files = [formattingFile, approvedFile];
+  const categories = [
+    { category: "api-client-react" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+    { category: "api-zod" as const, changed: 1, formattingOnly: 0, approvedSemantic: 1, unexplainedSemantic: 0 },
+    { category: "db" as const, changed: 1, formattingOnly: 1, approvedSemantic: 0, unexplainedSemantic: 0 },
+    { category: "other" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+  ];
+  const summary = {
+    capturedAt: "2026-10-15T09:00:00.000Z",
+    sourceIdentity: { revision, bundleSha256 },
+    declarations: {
+      textuallyChangedFileCount: 2,
+      contractComparison: {
+        status: "pass",
+        changedFiles: 2,
+        formattingOnlyChanges: 1,
+        approvedSemanticChanges: 1,
+        unexplainedSemanticChanges: 0,
+      },
+    },
+  };
+  const comparison = {
+    schemaVersion: 1,
+    baselineFileCount: 10,
+    candidateFileCount: 10,
+    status: "pass",
+    categories,
+    files,
+  };
+  const retained = createRetainedDeclarationContractReport(summary, comparison);
+
+  assert.equal(retained.sourceIdentity.revision, revision);
+  assert.equal(retained.sourceIdentity.bundleSha256, bundleSha256);
+  assert.deepEqual(retained.declarationContract.classificationTotals, {
+    changedFiles: 2,
+    formattingOnly: 1,
+    approvedSemantic: 1,
+    unexplainedSemantic: 0,
+  });
+  assert.equal(retained.declarationContract.files[1].approvalReason, approvedFile.approvalReason);
+  assert.equal(retained.integrity.algorithm, "sha256");
+  verifyRetainedDeclarationContractReport(summary, retained);
+
+  const tampered = structuredClone(retained);
+  tampered.declarationContract.files[1].approvalReason = "Changed after comparison.";
+  assert.throws(
+    () => verifyRetainedDeclarationContractReport(summary, tampered),
+    /integrity check failed/,
+  );
+
+  assert.throws(
+    () =>
+      verifyRetainedDeclarationContractReport(
+        {
+          ...summary,
+          sourceIdentity: { revision, bundleSha256: "9".repeat(64) },
+        },
+        retained,
+      ),
+    /identity does not match/,
+  );
+  assert.throws(
+    () =>
+      createRetainedDeclarationContractReport(
+        {
+          ...summary,
+          declarations: {
+            ...summary.declarations,
+            contractComparison: {
+              ...summary.declarations.contractComparison,
+              formattingOnlyChanges: 0,
+            },
+          },
+        },
+        comparison,
+      ),
+    /classification totals do not match/,
   );
 });
 

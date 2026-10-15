@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 REPO="$(realpath -e "$REPO")"
+RETAINED_CONTRACT_REPORT="$REPO/docs/evidence/typescript-7-declaration-contracts-current.json"
 
 comparison_source_tar() {
   local source_root="$1"
@@ -129,11 +130,16 @@ NODE
 
 check_current_summary() {
   local summary_path="$1"
+  local contract_report_path="${2:-$RETAINED_CONTRACT_REPORT}"
   local output_dir
   output_dir="$(dirname "$summary_path")"
+  "$REPO/scripts/node_modules/.bin/tsx" \
+    "$REPO/scripts/src/typescript-declaration-contract-evidence.mts" \
+    verify "$summary_path" "$contract_report_path"
   node - \
     "$summary_path" \
     "$output_dir" \
+    "$contract_report_path" \
     "$(git -C "$REPO" rev-parse HEAD)" \
     "$(comparison_source_sha256 "$REPO")" <<'NODE'
 const fs = require("node:fs");
@@ -141,8 +147,9 @@ const path = require("node:path");
 
 const summaryPath = process.argv[2];
 const output = process.argv[3];
-const currentRevision = process.argv[4];
-const currentSourceSha256 = process.argv[5];
+const reportPath = process.argv[4];
+const currentRevision = process.argv[5];
+const currentSourceSha256 = process.argv[6];
 const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
 const readJson = (name) =>
   JSON.parse(fs.readFileSync(path.join(output, name), "utf8"));
@@ -163,24 +170,18 @@ const changedPaths = fs
   .map((line) => line.split(" ")[2]);
 const categoryCount = (segment) =>
   changedPaths.filter((file) => file.includes(`/lib/${segment}/`)).length;
-const reportPath = path.join(
-  output,
-  "declaration-contract-report",
-  "declaration-contracts.json",
-);
-const contractReport = fs.existsSync(reportPath)
+const retained = fs.existsSync(reportPath)
   ? JSON.parse(fs.readFileSync(reportPath, "utf8"))
   : null;
+const contractReport = retained?.declarationContract ?? null;
 const unexplainedSemanticChanges = contractReport
-  ? contractReport.categories.reduce(
-      (total, category) => total + category.unexplainedSemantic,
-      0,
-    )
+  ? contractReport.classificationTotals.unexplainedSemantic
   : null;
 const approvedSemanticChanges = contractReport
-  ? contractReport.files.filter(
-      (file) => file.classification === "approved-semantic",
-    ).length
+  ? contractReport.classificationTotals.approvedSemantic
+  : null;
+const formattingOnlyChanges = contractReport
+  ? contractReport.classificationTotals.formattingOnly
   : null;
 
 const errors = [];
@@ -240,6 +241,8 @@ if (
   !contractReport ||
   declarations?.contractComparison?.status !== contractReport.status ||
   declarations.contractComparison?.approvedSemanticChanges !== approvedSemanticChanges ||
+  declarations.contractComparison?.formattingOnlyChanges !== formattingOnlyChanges ||
+  declarations.contractComparison?.changedFiles !== contractReport.classificationTotals.changedFiles ||
   declarations.contractComparison?.unexplainedSemanticChanges !==
     unexplainedSemanticChanges ||
   contractReport.status !== "pass" ||
@@ -272,10 +275,14 @@ if [[ "${1:-}" == "--check-retained-summary" ]]; then
 fi
 if [[ "${1:-}" == "--check-current-summary" ]]; then
   if [[ -z "${2:-}" ]]; then
-    printf 'Usage: %s --check-current-summary SUMMARY_PATH\n' "$0" >&2
+    printf 'Usage: %s --check-current-summary SUMMARY_PATH [CONTRACT_REPORT_PATH]\n' "$0" >&2
     exit 2
   fi
-  check_current_summary "$(realpath -e "$2")"
+  if [[ -n "${3:-}" ]]; then
+    check_current_summary "$(realpath -e "$2")" "$(realpath -e "$3")"
+  else
+    check_current_summary "$(realpath -e "$2")"
+  fi
   exit 0
 fi
 
@@ -577,6 +584,11 @@ const summary = {
     },
     contractComparison: {
       status: contractReport?.status ?? "not-generated",
+      changedFiles: contractReport?.files.length ?? null,
+      formattingOnlyChanges: contractReport?.categories.reduce(
+        (total, category) => total + category.formattingOnly,
+        0,
+      ) ?? null,
       approvedSemanticChanges,
       unexplainedSemanticChanges,
     },
@@ -587,7 +599,19 @@ const summary = {
 fs.writeFileSync(path.join(output, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 NODE
 
-check_current_summary "$OUT/summary.json"
+"$REPO/scripts/node_modules/.bin/tsx" \
+  "$REPO/scripts/src/typescript-declaration-contract-evidence.mts" \
+  create "$OUT/summary.json" \
+  "$CONTRACT_REPORT/declaration-contracts.json" \
+  "$OUT/typescript-7-declaration-contracts-current.json"
+
+check_current_summary "$OUT/summary.json" "$OUT/typescript-7-declaration-contracts-current.json"
+
+retained_report_tmp="$(mktemp "${RETAINED_CONTRACT_REPORT}.XXXXXX")"
+cp "$OUT/typescript-7-declaration-contracts-current.json" "$retained_report_tmp"
+mv -f "$retained_report_tmp" "$RETAINED_CONTRACT_REPORT"
+check_current_summary "$OUT/summary.json" "$RETAINED_CONTRACT_REPORT"
 
 printf 'Comparison evidence written to %s\n' "$OUT"
+printf 'Latest successful declaration contract report retained at %s\n' "$RETAINED_CONTRACT_REPORT"
 exit "$contract_comparison_status"
