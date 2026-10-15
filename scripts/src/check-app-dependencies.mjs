@@ -1,0 +1,361 @@
+#!/usr/bin/env node
+
+import { readdir, readFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+
+export const APP_ARTIFACTS = [
+  "artifacts/run-calculator",
+  "artifacts/mockup-sandbox",
+];
+
+const SOURCE_EXTENSIONS = new Set([
+  ".cjs",
+  ".css",
+  ".cts",
+  ".html",
+  ".js",
+  ".jsx",
+  ".json",
+  ".mjs",
+  ".mts",
+  ".scss",
+  ".ts",
+  ".tsx",
+]);
+
+const IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".turbo",
+  ".vite",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "playwright-report",
+  "test-results",
+]);
+
+const NODE_BUILTINS = new Set([
+  "assert",
+  "async_hooks",
+  "buffer",
+  "child_process",
+  "cluster",
+  "console",
+  "constants",
+  "crypto",
+  "dgram",
+  "diagnostics_channel",
+  "dns",
+  "domain",
+  "events",
+  "fs",
+  "http",
+  "http2",
+  "https",
+  "module",
+  "net",
+  "os",
+  "path",
+  "perf_hooks",
+  "process",
+  "punycode",
+  "querystring",
+  "readline",
+  "repl",
+  "stream",
+  "string_decoder",
+  "sys",
+  "timers",
+  "tls",
+  "trace_events",
+  "tty",
+  "url",
+  "util",
+  "v8",
+  "vm",
+  "wasi",
+  "worker_threads",
+  "zlib",
+]);
+
+const IMPORT_PATTERNS = [
+  /\b(?:import|export)\s+(?:type\s+)?(?:[^"'`;]*?\s+from\s*)?["']([^"']+)["']/g,
+  /\bimport\s*\(\s*["']([^"']+)["']/g,
+  /\brequire\s*\(\s*["']([^"']+)["']/g,
+];
+
+function packageNameFromSpecifier(specifier) {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("#") ||
+    specifier.startsWith("node:") ||
+    /^[a-z][a-z\d+.-]*:/i.test(specifier)
+  ) {
+    return null;
+  }
+
+  const parts = specifier.split("/");
+  const name = specifier.startsWith("@")
+    ? parts.slice(0, 2).join("/")
+    : parts[0];
+
+  return NODE_BUILTINS.has(name) ? null : name;
+}
+
+function typePackageNamesForImport(importName) {
+  if (importName.startsWith("@types/")) return [];
+  if (importName.startsWith("@")) {
+    const [scope, name] = importName.slice(1).split("/");
+    return name ? [`@types/${scope}__${name}`] : [];
+  }
+  return [`@types/${importName}`];
+}
+
+function isConfigurationFile(path) {
+  const name = basename(path);
+  return (
+    name.includes(".config.") ||
+    /^(?:vite|vitest|playwright|postcss|tailwind|eslint|prettier|babel|webpack|rollup|jest)\./i.test(
+      name,
+    )
+  );
+}
+
+function addTypeConfigUsage(path, source, dependencies, used) {
+  if (!path.endsWith(".json")) return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return;
+  }
+
+  const types = parsed?.compilerOptions?.types;
+  if (!Array.isArray(types)) return;
+
+  for (const typeName of types) {
+    const candidate = typeName.startsWith("@types/")
+      ? typeName
+      : `@types/${typeName.split("/")[0]}`;
+    if (dependencies.has(candidate)) used.add(candidate);
+  }
+}
+
+function addScriptUsage(scripts, binPackages, dependencies, used) {
+  const scriptText = Object.values(scripts ?? {}).join("\n");
+  for (const [binName, packages] of binPackages) {
+    const escaped = binName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "m").test(scriptText)) {
+      for (const packageName of packages) {
+        if (dependencies.has(packageName)) used.add(packageName);
+      }
+    }
+  }
+
+  collectImports(scriptText, dependencies, used);
+}
+
+function collectImports(source, dependencies, used) {
+  for (const pattern of IMPORT_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      const imported = packageNameFromSpecifier(match[1]);
+      if (imported && dependencies.has(imported)) used.add(imported);
+
+      if (imported) {
+        for (const typesPackage of typePackageNamesForImport(imported)) {
+          if (dependencies.has(typesPackage)) used.add(typesPackage);
+        }
+      }
+    }
+  }
+}
+
+function collectCssPluginReferences(path, source, dependencies, used) {
+  if (!/\.(?:css|scss)$/.test(path)) return;
+
+  const pluginReference =
+    /@(?:plugin|import|source|config|reference)\s+(?:url\()?\s*["']([^"']+)["']/g;
+  for (const match of source.matchAll(pluginReference)) {
+    const imported = packageNameFromSpecifier(match[1]);
+    if (imported && dependencies.has(imported)) used.add(imported);
+  }
+}
+
+function collectPeerDependencyUsage(used, peerPackages, dependencies) {
+  const queue = [...used];
+  while (queue.length > 0) {
+    const packageName = queue.pop();
+    for (const peer of peerPackages.get(packageName) ?? []) {
+      if (dependencies.has(peer) && !used.has(peer)) {
+        used.add(peer);
+        queue.push(peer);
+      }
+    }
+  }
+}
+
+function collectConfigurationStringReferences(path, source, dependencies, used) {
+  if (!isConfigurationFile(path)) return;
+
+  for (const packageName of dependencies) {
+    const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(?:^|[^\\w@/-])${escaped}(?=$|[^\\w@/-])`).test(source)) {
+      used.add(packageName);
+    }
+  }
+}
+
+async function walkSourceFiles(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (!IGNORED_DIRECTORIES.has(entry.name)) {
+        files.push(...(await walkSourceFiles(join(directory, entry.name))));
+      }
+      continue;
+    }
+
+    const extension = entry.name.slice(entry.name.lastIndexOf("."));
+    if (SOURCE_EXTENSIONS.has(extension) && entry.name !== "package.json") {
+      files.push(join(directory, entry.name));
+    }
+  }
+  return files;
+}
+
+async function readInstalledDependencyFacts(artifactPath, dependencyNames) {
+  const binPackages = new Map();
+  const peerPackages = new Map();
+  for (const dependencyName of dependencyNames) {
+    const packagePath = join(
+      artifactPath,
+      "node_modules",
+      dependencyName,
+      "package.json",
+    );
+    let packageInfo;
+    try {
+      packageInfo = JSON.parse(await readFile(packagePath, "utf8"));
+    } catch {
+      continue;
+    }
+
+    const directPeers = Object.keys(packageInfo.peerDependencies ?? {}).filter(
+      (peer) => dependencyNames.includes(peer),
+    );
+    peerPackages.set(dependencyName, new Set(directPeers));
+
+    const entries =
+      typeof packageInfo.bin === "string"
+        ? [[packageInfo.name?.split("/").at(-1), packageInfo.bin]]
+        : Object.entries(packageInfo.bin ?? {});
+    for (const [binName] of entries) {
+      if (!binName) continue;
+      const packages = binPackages.get(binName) ?? new Set();
+      packages.add(dependencyName);
+      binPackages.set(binName, packages);
+    }
+  }
+  return { binPackages, peerPackages };
+}
+
+export function auditDependencyUsage({
+  manifest,
+  files,
+  binPackages = new Map(),
+  peerPackages = new Map(),
+}) {
+  const dependencies = new Set([
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+  ]);
+  const used = new Set();
+
+  addScriptUsage(manifest.scripts, binPackages, dependencies, used);
+
+  for (const file of files) {
+    collectImports(file.content, dependencies, used);
+    addTypeConfigUsage(file.path, file.content, dependencies, used);
+    collectCssPluginReferences(file.path, file.content, dependencies, used);
+    collectConfigurationStringReferences(
+      file.path,
+      file.content,
+      dependencies,
+      used,
+    );
+  }
+
+  collectPeerDependencyUsage(used, peerPackages, dependencies);
+
+  return [...dependencies]
+    .filter((dependency) => !used.has(dependency))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export async function auditArtifact(artifactPath) {
+  const manifest = JSON.parse(
+    await readFile(join(artifactPath, "package.json"), "utf8"),
+  );
+  const sourcePaths = await walkSourceFiles(artifactPath);
+  const files = await Promise.all(
+    sourcePaths.map(async (path) => ({
+      path,
+      content: await readFile(path, "utf8"),
+    })),
+  );
+  const dependencyNames = [
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+  ];
+  const { binPackages, peerPackages } = await readInstalledDependencyFacts(
+    artifactPath,
+    dependencyNames,
+  );
+
+  return {
+    artifact: manifest.name,
+    unused: auditDependencyUsage({
+      manifest,
+      files,
+      binPackages,
+      peerPackages,
+    }),
+  };
+}
+
+export async function main(rootPath = ROOT) {
+  const results = await Promise.all(
+    APP_ARTIFACTS.map((artifact) => auditArtifact(join(rootPath, artifact))),
+  );
+  for (const result of results) {
+    if (result.unused.length === 0) {
+      console.log(`${result.artifact}: all direct dependencies are referenced.`);
+      continue;
+    }
+    console.warn(
+      `${result.artifact}: direct dependencies with no detected source/config/script use (review only):`,
+    );
+    for (const dependency of result.unused) console.warn(`  - ${dependency}`);
+  }
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(
+      `App dependency audit failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exitCode = 1;
+  });
+}
