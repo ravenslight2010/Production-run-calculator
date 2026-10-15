@@ -66,7 +66,20 @@ The browser tests verify installation metadata and icon delivery, not the browse
 | Phone WebKit emulation | PASS for both plugin versions |
 | Tablet portrait WebKit emulation | PASS for both plugin versions |
 | Tablet landscape WebKit emulation | PASS for both plugin versions |
-| Physical Android Chrome | NOT RUN — no physical-device browser session was configured; emulation is not a substitute |
-| Physical iOS Safari/PWA | NOT RUN — no physical-device browser session was configured; desktop WebKit is not a substitute |
+| Physical Android Chrome | BLOCKED — checked 2026-10-15; physical-device endpoint is not configured. Emulation is not a substitute. |
+| Physical iOS Safari/PWA | BLOCKED — checked 2026-10-15; physical-device endpoint is not configured. Desktop WebKit is not a substitute. |
+
+## Physical-device follow-up (2026-10-15)
+
+The device-service availability check found no configured physical browser service. The workspace Integrations view had no connected integrations, and a capability search found no matching physical mobile browser-testing integration.
+
+| Device lane | Result | Evidence |
+| --- | --- | --- |
+| Android Chrome on physical hardware | **BLOCKED** — test not started | `pnpm --filter @workspace/run-calculator run test:e2e:phone:device` stopped at its preflight with “Set `PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT` to a Playwright/CDP endpoint connected to physical Android Chrome.” Playwright did not start. |
+| iOS Safari or installed PWA on physical iPhone/iPad | **BLOCKED** — test not started | `pnpm --filter @workspace/run-calculator run check:e2e:ios:pwa:device` reported `iOS Safari/PWA device readiness: BLOCKED` and exited with status 2 because `PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT` is not configured. Playwright did not start. |
+
+Manifest contents, icon delivery, service-worker activation, update handoff, and the browser/OS install flow were **not verified on either physical device** in this follow-up. The 14 passing Chromium/WebKit desktop and device-emulation checks above remain emulation evidence only; they are not upgraded to physical-device passes.
+
+**Next action:** the workspace operator must configure an approved Android Chrome and/or iOS Safari/PWA device-service endpoint, then rerun the corresponding device lane and retain its evidence. Until then, both physical-device rows remain blocked.
 
 Focused verification also passed `pnpm --filter @workspace/run-calculator run check:e2e:syntax` and `git diff --check`. The app build emits the same existing large-chunk and ineffective-dynamic-import warnings for both plugin versions.
