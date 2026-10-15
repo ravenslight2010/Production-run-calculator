@@ -11,7 +11,9 @@ LAUNCHER="${SCRIPT_DIR}/run-release-node.sh"
 REAL_TIMEOUT_BIN=$(command -v timeout)
 REAL_NODE_BIN=$(command -v node)
 REAL_NODE_BIN_DIR=$(dirname "$REAL_NODE_BIN")
+REAL_NPX_BIN=$(command -v npx)
 OPENSSL_BIN=$(command -v openssl)
+TAR_BIN=$(command -v tar)
 export SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN"
 TEST_ROOT=$(mktemp -d)
 TLS_SERVER_PID=""
@@ -432,9 +434,16 @@ test_release_runner_verifies_local_tls_certificates() {
   local port_file="${server_dir}/port"
   local server_output="${server_dir}/output"
   local client_script="${workspace}/https-client.cjs"
+  local package_root="${workspace}/package"
+  local package_tarball="${workspace}/fixture.tgz"
   local trusted_output="${workspace}/trusted-output"
   local untrusted_output="${workspace}/untrusted-output"
+  local trusted_npx_output="${workspace}/trusted-npx-output"
+  local untrusted_npx_output="${workspace}/untrusted-npx-output"
+  local registry_requests="${workspace}/registry-requests"
   local npx_log="${workspace}/npx-log"
+  local package_name="replit-release-runner-tls-fixture"
+  local package_version="1.0.0"
   local url
   local attempt
   local status
@@ -528,16 +537,88 @@ EOF
       return 1
     }
 
+  mkdir -p \
+    "${package_root}/bin" \
+    "${workspace}/home" \
+    "${workspace}/tmp" \
+    "${workspace}/xdg-config"
+  cat >"${package_root}/package.json" <<EOF
+{
+  "name": "${package_name}",
+  "version": "${package_version}",
+  "bin": {
+    "local-npx-tls-fixture": "bin/run.cjs"
+  }
+}
+EOF
+  cat >"${package_root}/bin/run.cjs" <<'EOF'
+#!/usr/bin/env node
+console.log("local npx package resolved over verified TLS");
+EOF
+  chmod +x "${package_root}/bin/run.cjs"
+  "$TAR_BIN" -czf "$package_tarball" -C "$workspace" package
+  : >"$registry_requests"
+  : >"${workspace}/empty-user.npmrc"
+  : >"${workspace}/empty-global.npmrc"
+
   cat >"${server_dir}/https-server.cjs" <<'EOF'
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const https = require("node:https");
 
-const [keyPath, certPath, portPath] = process.argv.slice(2);
+const [keyPath, certPath, portPath, packageTarballPath, requestLogPath] =
+  process.argv.slice(2);
+const packageName = "replit-release-runner-tls-fixture";
+const packageVersion = "1.0.0";
+const tarball = fs.readFileSync(packageTarballPath);
 const server = https.createServer(
   { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
-  (_request, response) => {
-    response.writeHead(200, { "content-type": "text/plain" });
-    response.end("verified local TLS fixture");
+  (request, response) => {
+    fs.appendFileSync(requestLogPath, `${request.method} ${request.url}\n`);
+    const requestUrl = new URL(request.url, "https://127.0.0.1");
+
+    if (request.method === "GET" && requestUrl.pathname === `/${packageName}`) {
+      const integrity =
+        "sha512-" + crypto.createHash("sha512").update(tarball).digest("base64");
+      const shasum = crypto.createHash("sha1").update(tarball).digest("hex");
+      const metadata = {
+        name: packageName,
+        "dist-tags": { latest: packageVersion },
+        versions: {
+          [packageVersion]: {
+            name: packageName,
+            version: packageVersion,
+            bin: { "local-npx-tls-fixture": "bin/run.cjs" },
+            dist: {
+              tarball: `https://127.0.0.1:${server.address().port}/fixture.tgz`,
+              integrity,
+              shasum,
+            },
+          },
+        },
+      };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(metadata));
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/fixture.tgz") {
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": tarball.length,
+      });
+      response.end(tarball);
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/") {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("verified local TLS fixture");
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "text/plain" });
+    response.end("not found");
   },
 );
 
@@ -573,6 +654,7 @@ EOF
 
   "$REAL_NODE_BIN" "${server_dir}/https-server.cjs" \
     "${cert_dir}/server.key" "${cert_dir}/server.pem" "$port_file" \
+    "$package_tarball" "$registry_requests" \
     >"$server_output" 2>&1 &
   TLS_SERVER_PID=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
@@ -643,10 +725,82 @@ EOF
   fi
   assert_contains "$(cat "$npx_log")" "npx-invoked"
 
+  run_local_npx() {
+    local cafile="$1"
+    local cache_dir="$2"
+    local output_path="$3"
+    local -a npm_environment=(
+      "PATH=${REAL_NODE_BIN_DIR}:$(dirname "$REAL_NPX_BIN"):/usr/bin:/bin"
+      "HOME=${workspace}/home"
+      "TMPDIR=${workspace}/tmp"
+      "XDG_CONFIG_HOME=${workspace}/xdg-config"
+      "npm_config_registry=${url}"
+      "npm_config_cache=${cache_dir}"
+      "npm_config_userconfig=${workspace}/empty-user.npmrc"
+      "npm_config_globalconfig=${workspace}/empty-global.npmrc"
+      "npm_config_audit=false"
+      "npm_config_fund=false"
+      "npm_config_update_notifier=false"
+      "npm_config_fetch_retries=0"
+      "npm_config_fetch_timeout=10000"
+      "npm_config_strict_ssl=true"
+      "SSL_CERT_FILE=${workspace}/missing-ca.pem"
+      "SSL_CERT_DIR=${workspace}/missing-ca-dir"
+    )
+
+    if [[ -n "$cafile" ]]; then
+      npm_environment+=("npm_config_cafile=${cafile}")
+    fi
+
+    (
+      cd "$workspace"
+      env -i "${npm_environment[@]}" \
+        "$REAL_NPX_BIN" --yes \
+        --package="${package_name}@${package_version}" \
+        -- local-npx-tls-fixture
+    ) >"$output_path" 2>&1
+  }
+
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/trusted-npm-cache" "$trusted_npx_output"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ "$(cat "$trusted_npx_output")" != *"local npx package resolved over verified TLS"* ]]; then
+    printf 'Installed npx did not resolve the fixture with its temporary CA (status %s):\n' \
+      "$status" >&2
+    cat "$trusted_npx_output" >&2
+    return 1
+  fi
+
+  set +e
+  run_local_npx "" \
+    "${workspace}/untrusted-npm-cache" "$untrusted_npx_output"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npx accepted the registry certificate without the temporary CA.\n' >&2
+    cat "$untrusted_npx_output" >&2
+    return 1
+  fi
+  local untrusted_npx_result
+  untrusted_npx_result=$(cat "$untrusted_npx_output")
+  if [[ "$untrusted_npx_result" != *"UNABLE_TO_GET_ISSUER_CERT_LOCALLY"* &&
+    "$untrusted_npx_result" != *"UNABLE_TO_VERIFY_LEAF_SIGNATURE"* &&
+    "$untrusted_npx_result" != *"SELF_SIGNED_CERT_IN_CHAIN"* &&
+    "$untrusted_npx_result" != *"DEPTH_ZERO_SELF_SIGNED_CERT"* ]]; then
+    printf 'Untrusted npx registry request failed for a reason other than certificate validation:\n%s\n' \
+      "$untrusted_npx_result" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
+
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node fallback trusts the explicit test CA and rejects the untrusted CA"
+  echo "PASS: Node and installed npx trust the explicit test CA and reject the untrusted CA"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
