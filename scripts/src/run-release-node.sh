@@ -54,6 +54,8 @@ export SSL_CERT_DIR="$system_ca_dir"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 NODE_SELECTOR="${REPO_ROOT}/.nvmrc"
+RELEASE_RUNNER_LOCK_WAIT_MAX_SECONDS=7200
+RELEASE_RUNNER_LOCK_WAIT_DEFAULT_SECONDS=7200
 
 if (( $# == 0 )); then
   printf 'Usage: %s <command> [args...]\n' "${BASH_SOURCE[0]}" >&2
@@ -90,13 +92,69 @@ if [[ "${RELEASE_RUNNER_LOCK_KEY:-}" != "$lock_key" ]]; then
   fi
 
   lock_file="${lock_dir}/${lock_key}.lock"
+  lock_owner_file="${lock_dir}/${lock_key}.owner"
   exec {release_runner_lock_fd}>>"$lock_file"
   if ! flock --nonblock "$release_runner_lock_fd"; then
-    printf 'Release runner is waiting for another command in this workspace.\n' >&2
-    if ! flock --exclusive "$release_runner_lock_fd"; then
-      printf 'Release runner could not acquire the workspace validation lock.\n' >&2
-      exit 1
+    lock_wait_seconds="${RELEASE_RUNNER_LOCK_WAIT_SECONDS:-$RELEASE_RUNNER_LOCK_WAIT_DEFAULT_SECONDS}"
+    if [[ ! "$lock_wait_seconds" =~ ^[1-9][0-9]{0,3}$ ]] ||
+      (( lock_wait_seconds > RELEASE_RUNNER_LOCK_WAIT_MAX_SECONDS )); then
+      printf \
+        'Release runner lock wait must be between 1 and %s seconds; received an invalid limit.\n' \
+        "$RELEASE_RUNNER_LOCK_WAIT_MAX_SECONDS" >&2
+      exit 2
     fi
+
+    lock_owner_pid="unknown"
+    lock_owner_started_at="unknown"
+    lock_owner_state="unknown"
+    if [[ -r "$lock_owner_file" ]]; then
+      read -r recorded_owner_pid _recorded_owner_epoch lock_owner_started_at \
+        <"$lock_owner_file" || true
+      if [[ "${recorded_owner_pid:-}" =~ ^[1-9][0-9]*$ ]]; then
+        lock_owner_pid="$recorded_owner_pid"
+        lock_owner_state=$(ps -p "$lock_owner_pid" -o stat= 2>/dev/null | tr -d '[:space:]' || true)
+        [[ -n "$lock_owner_state" ]] || lock_owner_state="not-running"
+      fi
+      [[ "${lock_owner_started_at:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] ||
+        lock_owner_started_at="unknown"
+    fi
+
+    printf \
+      'Release runner is waiting for the workspace validation lock (owner_pid=%s owner_started_at=%s owner_state=%s wait_limit=%ss).\n' \
+      "$lock_owner_pid" "$lock_owner_started_at" "$lock_owner_state" \
+      "$lock_wait_seconds" >&2
+    lock_wait_started_epoch=$(date +%s)
+    if flock --exclusive --timeout "$lock_wait_seconds" \
+      --conflict-exit-code 75 "$release_runner_lock_fd"; then
+      lock_wait_elapsed_seconds=$(($(date +%s) - lock_wait_started_epoch))
+      printf \
+        'Release runner acquired the workspace validation lock after %ss (previous_owner_pid=%s).\n' \
+        "$lock_wait_elapsed_seconds" "$lock_owner_pid" >&2
+    else
+      lock_status=$?
+      if (( lock_status == 75 )); then
+        printf \
+          'Release runner timed out after %s seconds waiting for the workspace validation lock (owner_pid=%s owner_started_at=%s owner_state=%s). Retry after the current validation command finishes; inspect the reported PID if it remains active.\n' \
+          "$lock_wait_seconds" "$lock_owner_pid" "$lock_owner_started_at" \
+          "$lock_owner_state" >&2
+        exec {release_runner_lock_fd}>&-
+        exit 75
+      fi
+      printf \
+        'Release runner could not acquire the workspace validation lock (flock_status=%s).\n' \
+        "$lock_status" >&2
+      exec {release_runner_lock_fd}>&-
+      exit "$lock_status"
+    fi
+  fi
+
+  lock_owner_started_epoch=$(date +%s)
+  lock_owner_started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+  if ! printf '%s %s %s\n' "$$" "$lock_owner_started_epoch" \
+    "$lock_owner_started_at" >"$lock_owner_file"; then
+    printf 'Release runner could not record workspace lock ownership.\n' >&2
+    exec {release_runner_lock_fd}>&-
+    exit 1
   fi
   export RELEASE_RUNNER_LOCK_KEY="$lock_key"
 fi

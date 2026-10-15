@@ -7,6 +7,8 @@ Task creation paths do not necessarily share dependency controls. The manual tas
 
 Assignment and mode are also separate evidence questions. A read-only task record may expose state without exposing the assignee, execution mode, or transition cause. Public task-board documentation may describe acceptance as starting background work while a workspace-specific task API uses different state names and transitions.
 
+A task record's `updatedAt` is not a task-run transition timestamp, and a state label alone cannot establish why a run waited. Attribute a platform-managed wait only from task-run logs or other platform-owned diagnostics; keep repository filesystem-lock evidence separate. If the authorized session exposes records but not run logs, state that exact evidence gap and ask Replit to inspect the task-run history rather than inferring causality.
+
 A client-side queue read followed by creation is not an atomic acceptance snapshot. Retrofitting dependencies after submission can race with acceptance and launch. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
 
 ## Genuine dependencies, not global sequencing

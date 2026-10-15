@@ -17,8 +17,14 @@ TAR_BIN=$(command -v tar)
 export SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN"
 TEST_ROOT=$(mktemp -d)
 TLS_SERVER_PID=""
+ACTIVE_RUNNER_PIDS=()
 
 cleanup_test_root() {
+  local pid
+  for pid in "${ACTIVE_RUNNER_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
   if [[ -n "$TLS_SERVER_PID" ]]; then
     kill "$TLS_SERVER_PID" 2>/dev/null || true
     wait "$TLS_SERVER_PID" 2>/dev/null || true
@@ -1596,7 +1602,7 @@ EOF
   second_pid=$!
 
   for ((attempt = 0; attempt < 200; attempt += 1)); do
-    if grep -q 'Release runner is waiting for another command in this workspace' \
+    if grep -q 'Release runner is waiting for the workspace validation lock' \
       "$second_output"; then
       second_waited=true
       break
@@ -1624,6 +1630,8 @@ EOF
     cat "$second_output" >&2
     return 1
   fi
+  assert_contains "$(cat "$second_output")" \
+    "Release runner acquired the workspace validation lock after"
 
   events=$(cat "$event_log")
   if [[ "$events" == *overlap:* ]] ||
@@ -1633,6 +1641,129 @@ EOF
     return 1
   fi
   echo "PASS: concurrent release-runner commands in one workspace execute serially"
+}
+
+test_release_runner_lock_wait_times_out_with_owner_and_recovers() {
+  local workspace
+  local holder_started
+  local holder_release
+  local holder_pid_file
+  local timeout_child_marker
+  local holder_output
+  local waiter_output
+  local owner_pid
+  local attempt
+  local waiter_status
+  local recovery_output
+  workspace=$(make_workspace lock-timeout)
+  holder_started="${workspace}/holder-started"
+  holder_release="${workspace}/holder-release"
+  holder_pid_file="${workspace}/holder-pid"
+  timeout_child_marker="${workspace}/timeout-child-ran"
+  holder_output="${workspace}/holder-output"
+  waiter_output="${workspace}/waiter-output"
+  recovery_output="${workspace}/recovery-output"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+
+  cat >"${workspace}/bin/lock-holder" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" >"$LOCK_HOLDER_PID_FILE"
+touch "$LOCK_HOLDER_STARTED"
+while [[ ! -e "$LOCK_HOLDER_RELEASE" ]]; do
+  sleep 0.05
+done
+EOF
+  cat >"${workspace}/bin/timeout-child" <<'EOF'
+#!/usr/bin/env bash
+touch "$TIMEOUT_CHILD_MARKER"
+EOF
+  chmod +x "${workspace}/bin/lock-holder" "${workspace}/bin/timeout-child"
+
+  LOCK_HOLDER_STARTED="$holder_started" \
+    LOCK_HOLDER_RELEASE="$holder_release" \
+    LOCK_HOLDER_PID_FILE="$holder_pid_file" \
+    RUN_LOG="${workspace}/holder-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" lock-holder \
+    >"$holder_output" 2>&1 &
+  local holder_pid=$!
+  ACTIVE_RUNNER_PIDS+=("$holder_pid")
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [[ -f "$holder_started" ]] && break
+    sleep 0.025
+  done
+  if [[ ! -f "$holder_started" ]]; then
+    printf 'Lock holder did not start.\n' >&2
+    cat "$holder_output" >&2
+    return 1
+  fi
+  owner_pid=$(cat "$holder_pid_file")
+
+  set +e
+  RELEASE_RUNNER_LOCK_WAIT_SECONDS=2 \
+    TIMEOUT_CHILD_MARKER="$timeout_child_marker" \
+    RUN_LOG="${workspace}/waiter-events" PATH="${workspace}/bin:${PATH}" \
+    timeout 8s bash "${workspace}/scripts/src/run-release-node.sh" timeout-child \
+    >"$waiter_output" 2>&1
+  waiter_status=$?
+  set -e
+
+  if [[ "$waiter_status" -ne 75 ]]; then
+    printf 'Expected bounded lock wait status 75, got %s. Output:\n' \
+      "$waiter_status" >&2
+    cat "$waiter_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$waiter_output")" "owner_pid=${owner_pid}"
+  assert_contains "$(cat "$waiter_output")" "wait_limit=2s"
+  assert_contains "$(cat "$waiter_output")" "owner_started_at="
+  assert_contains "$(cat "$waiter_output")" "timed out after 2 seconds"
+  assert_contains "$(cat "$waiter_output")" "Retry after the current validation command finishes"
+  [[ ! -e "$timeout_child_marker" ]] || {
+    printf 'Timed-out runner unexpectedly started its child command.\n' >&2
+    return 1
+  }
+  kill -0 "$holder_pid" 2>/dev/null || {
+    printf 'Timed-out waiter unexpectedly stopped the lock holder.\n' >&2
+    return 1
+  }
+
+  set +e
+  RELEASE_RUNNER_LOCK_WAIT_SECONDS=7201 \
+    RUN_LOG="${workspace}/over-limit-events" PATH="${workspace}/bin:${PATH}" \
+    timeout 5s bash "${workspace}/scripts/src/run-release-node.sh" timeout-child \
+    >"${workspace}/over-limit-output" 2>&1
+  waiter_status=$?
+  set -e
+  [[ "$waiter_status" -eq 2 ]] || {
+    printf 'Expected over-limit lock wait configuration to fail with status 2, got %s.\n' \
+      "$waiter_status" >&2
+    cat "${workspace}/over-limit-output" >&2
+    return 1
+  }
+  assert_contains "$(cat "${workspace}/over-limit-output")" \
+    "Release runner lock wait must be between 1 and 7200 seconds"
+  [[ ! -e "$timeout_child_marker" ]] || {
+    printf 'Over-limit lock wait configuration unexpectedly started its child command.\n' >&2
+    return 1
+  }
+
+  touch "$holder_release"
+  wait "$holder_pid"
+  ACTIVE_RUNNER_PIDS=()
+
+  RUN_LOG="${workspace}/recovery-events" PATH="${workspace}/bin:${PATH}" \
+    timeout 5s bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+    >"$recovery_output" 2>&1 || {
+      printf 'Release runner did not recover after the holder released the lock.\n' >&2
+      cat "$recovery_output" >&2
+      return 1
+    }
+  assert_contains "$(cat "${workspace}/recovery-events")" \
+    "child-node=v${REQUIRED_NODE_VERSION}"
+  echo "PASS: lock contention reports its owner, times out within the configured bound, skips the child, and recovers after release"
 }
 
 test_release_runner_nested_invocation_reuses_lock() {
@@ -1708,5 +1839,6 @@ test_isolated_sync_interrupt_cleans_database_and_children
 test_isolated_sync_timeout_cleans_descendants_before_database
 test_release_node_fallback_interrupt_stops_process_group
 test_release_runner_serializes_same_workspace_commands
+test_release_runner_lock_wait_times_out_with_owner_and_recovers
 test_release_runner_nested_invocation_reuses_lock
 test_release_runner_preserves_child_status
