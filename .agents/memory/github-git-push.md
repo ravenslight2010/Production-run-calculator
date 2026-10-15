@@ -99,7 +99,7 @@ A workspace Git credential may be a token-only value rather than an authenticate
 
 **Why:** A valid token-only credential was skipped while an expired authenticated URL was retried.
 
-**How to apply:** Detect the format only inside the credential-consuming process, never print it, and build any temporary authenticated URL for the independently verified destination repository. Never pass the credential itself as a Git remote or shell argument: Git error output may echo it. Use the guarded push helper or the authorized GitHub API, and keep credentials in process-local configuration rather than persistent remotes.
+**How to apply:** Detect the format only inside the credential-consuming process, never print it, and select an authentication path that explicitly supports that format for the independently verified destination repository. Do not assume a guarded helper accepts both token-only and authenticated-URL inputs merely because it reads the same secret name. Never pass a raw token as a Git remote or shell argument: Git error output may echo it. Keep credentials in process-local authentication rather than persistent remotes.
 
 ## Linked worktrees with optional LFS assets
 
