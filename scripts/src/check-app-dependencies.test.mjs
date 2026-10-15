@@ -255,7 +255,7 @@ test("discovers first-party artifact, library, integration, and scripts packages
   }
 });
 
-test("strict mode passes when calculator and mockup manifests have no unused dependencies", async () => {
+test("strict mode passes when selected packages declare their imports", async () => {
   const rootPath = await makeStrictAuditFixture({
     calculatorDependencies: { react: "1.0.0" },
     mockupDependencies: { vite: "1.0.0" },
@@ -267,7 +267,7 @@ test("strict mode passes when calculator and mockup manifests have no unused dep
   }
 });
 
-test("strict mode fails on unused calculator or mockup dependencies, while report-only passes", async () => {
+test("strict mode fails on unused selected-package dependencies, while report-only passes", async () => {
   const rootPath = await makeStrictAuditFixture({
     calculatorDependencies: { react: "1.0.0" },
     mockupDependencies: { vite: "1.0.0", "unused-package": "1.0.0" },
@@ -304,16 +304,44 @@ async function makeStrictAuditFixture({
       name: "@workspace/mockup-sandbox",
       dependencies: mockupDependencies,
     },
+    {
+      directory: "artifacts/api-server",
+      name: "@workspace/api-server",
+      manifest: {
+        dependencies: { "api-server-runtime": "1.0.0" },
+        devDependencies: { "api-server-test-tool": "1.0.0" },
+        optionalDependencies: { "api-server-optional-tool": "1.0.0" },
+      },
+    },
+    {
+      directory: "lib/api-client-react",
+      name: "@workspace/api-client-react",
+      manifest: {
+        dependencies: { "api-client-runtime": "1.0.0" },
+        peerDependencies: { "api-client-peer": "1.0.0" },
+      },
+    },
   ];
 
-  for (const { directory, name, dependencies } of packages) {
+  for (const { directory, name, dependencies, manifest = {} } of packages) {
     const packagePath = join(rootPath, directory);
     await mkdir(join(packagePath, "src"), { recursive: true });
+    const packageManifest = {
+      ...manifest,
+      name,
+      ...(dependencies ? { dependencies } : {}),
+    };
     await writeFile(
       join(packagePath, "package.json"),
-      JSON.stringify({ name, dependencies, scripts: {} }),
+      JSON.stringify({ ...packageManifest, scripts: {} }),
     );
-    const importNames = Object.keys(dependencies)
+    const declaredNames = [
+      ...Object.keys(packageManifest.dependencies ?? {}),
+      ...Object.keys(packageManifest.devDependencies ?? {}),
+      ...Object.keys(packageManifest.optionalDependencies ?? {}),
+      ...Object.keys(packageManifest.peerDependencies ?? {}),
+    ];
+    const importNames = declaredNames
       .filter((dependency) => dependency !== "unused-package")
       .map(sourceImport)
       .join("\n");
@@ -380,8 +408,10 @@ test("does not mistake relative, Node built-in, or URL imports for dependencies"
     files: [
       {
         path: "src/main.ts",
-        content:
+        content: [
           'import "./local.js"; import fs from "node:fs"; import "https://example.com/mod.js";',
+          'import "@/local-alias.js";',
+        ].join("\n"),
       },
     ],
   });
@@ -432,7 +462,7 @@ test("reports undeclared external imports but excludes declared and workspace-ow
   ]);
 });
 
-test("strict mode catches imports available only from root or sibling workspace installs", async () => {
+test("strict mode catches API imports available only from root or sibling installs", async () => {
   const rootPath = await makeStrictAuditFixture({
     calculatorDependencies: { react: "1.0.0" },
     mockupDependencies: { vite: "1.0.0" },
@@ -440,21 +470,28 @@ test("strict mode catches imports available only from root or sibling workspace 
   const originalWarn = console.warn;
   const warnings = [];
   try {
-    const calculatorPath = join(rootPath, "artifacts/run-calculator");
+    const apiServerPath = join(rootPath, "artifacts/api-server");
+    const apiClientPath = join(rootPath, "lib/api-client-react");
     await writeFile(
-      join(calculatorPath, "src/main.js"),
+      join(apiServerPath, "src/main.js"),
       [
-        sourceImport("react"),
-        sourceImport("root-hoisted-package"),
-        sourceImport("sibling-hoisted-package"),
+        sourceImport("root-hoisted-api-package"),
+        sourceImport("sibling-hoisted-api-package"),
       ].join("\n"),
+    );
+    await writeFile(
+      join(apiClientPath, "src/main.js"),
+      sourceImport("root-hoisted-client-package"),
     );
 
     await writeFile(
       join(rootPath, "package.json"),
       JSON.stringify({
         name: "strict-audit-root",
-        dependencies: { "root-hoisted-package": "1.0.0" },
+        dependencies: {
+          "root-hoisted-api-package": "1.0.0",
+          "root-hoisted-client-package": "1.0.0",
+        },
         scripts: {},
       }),
     );
@@ -464,17 +501,18 @@ test("strict mode catches imports available only from root or sibling workspace 
       join(siblingPath, "package.json"),
       JSON.stringify({
         name: "@workspace/neighbor-app",
-        dependencies: { "sibling-hoisted-package": "1.0.0" },
+        dependencies: { "sibling-hoisted-api-package": "1.0.0" },
         scripts: {},
       }),
     );
     await writeFile(
       join(siblingPath, "src/main.js"),
-      sourceImport("sibling-hoisted-package"),
+      sourceImport("sibling-hoisted-api-package"),
     );
     for (const packageName of [
-      "root-hoisted-package",
-      "sibling-hoisted-package",
+      "root-hoisted-api-package",
+      "sibling-hoisted-api-package",
+      "root-hoisted-client-package",
     ]) {
       const installedPath = join(rootPath, "node_modules", packageName);
       await mkdir(installedPath, { recursive: true });
@@ -484,10 +522,14 @@ test("strict mode catches imports available only from root or sibling workspace 
       );
     }
 
-    const result = await auditPackage(calculatorPath);
-    assert.deepEqual(result.undeclaredImports, [
-      { name: "root-hoisted-package", path: "src/main.js" },
-      { name: "sibling-hoisted-package", path: "src/main.js" },
+    const apiServerResult = await auditPackage(apiServerPath);
+    assert.deepEqual(apiServerResult.undeclaredImports, [
+      { name: "root-hoisted-api-package", path: "src/main.js" },
+      { name: "sibling-hoisted-api-package", path: "src/main.js" },
+    ]);
+    const apiClientResult = await auditPackage(apiClientPath);
+    assert.deepEqual(apiClientResult.undeclaredImports, [
+      { name: "root-hoisted-client-package", path: "src/main.js" },
     ]);
 
     console.warn = (...args) => warnings.push(args.join(" "));
@@ -501,14 +543,24 @@ test("strict mode catches imports available only from root or sibling workspace 
   assert.ok(
     warnings.some((warning) =>
       warning.includes(
-        "external package imports not declared by this package (strict check failed)",
+        "@workspace/api-server: external package imports not declared by this package (strict check failed)",
       ),
     ),
   );
   assert.ok(
-    warnings.some((warning) => warning.includes("root-hoisted-package")),
+    warnings.some((warning) => warning.includes("root-hoisted-api-package")),
   );
   assert.ok(
-    warnings.some((warning) => warning.includes("sibling-hoisted-package")),
+    warnings.some((warning) => warning.includes("sibling-hoisted-api-package")),
+  );
+  assert.ok(
+    warnings.some((warning) =>
+      warning.includes(
+        "@workspace/api-client-react: external package imports not declared by this package (strict check failed)",
+      ),
+    ),
+  );
+  assert.ok(
+    warnings.some((warning) => warning.includes("root-hoisted-client-package")),
   );
 });

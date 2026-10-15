@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const WORKSPACE_PACKAGE_ROOTS = ["artifacts", "lib"];
 const STRICT_PACKAGE_NAMES = new Set([
+  "@workspace/api-client-react",
+  "@workspace/api-server",
   "@workspace/run-calculator",
   "@workspace/mockup-sandbox",
 ]);
