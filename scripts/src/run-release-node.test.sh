@@ -457,7 +457,10 @@ test_release_runner_verifies_local_tls_certificates() {
   local npx_log="${workspace}/npx-log"
   local package_name="replit-release-runner-tls-fixture"
   local package_version="1.0.0"
+  local hostname_mismatch_output="${workspace}/hostname-mismatch-output"
   local url
+  local trusted_name_url
+  local mismatched_url
   local attempt
   local status
 
@@ -698,21 +701,41 @@ EOF
   cat >"$client_script" <<'EOF'
 const https = require("node:https");
 
-const request = https.get(process.argv[2], (response) => {
-  let body = "";
-  response.setEncoding("utf8");
-  response.on("data", (chunk) => {
-    body += chunk;
-  });
-  response.on("end", () => {
-    if (response.statusCode !== 200 || body !== "verified local TLS fixture") {
-      console.error(`Unexpected HTTPS response: ${response.statusCode} ${body}`);
-      process.exitCode = 1;
-      return;
-    }
-    console.log(body);
-  });
-});
+const request = https.get(
+  process.argv[2],
+  {
+    lookup: (hostname, options, callback) => {
+      if (typeof options === "function") {
+        callback = options;
+        options = {};
+      }
+      if (hostname !== "localhost" && hostname !== "mismatched-name.invalid") {
+        callback(new Error(`Unexpected TLS fixture hostname: ${hostname}`));
+        return;
+      }
+      if (options.all) {
+        callback(null, [{ address: "127.0.0.1", family: 4 }]);
+        return;
+      }
+      callback(null, "127.0.0.1", 4);
+    },
+  },
+  (response) => {
+    let body = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => {
+      body += chunk;
+    });
+    response.on("end", () => {
+      if (response.statusCode !== 200 || body !== "verified local TLS fixture") {
+        console.error(`Unexpected HTTPS response: ${response.statusCode} ${body}`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(body);
+    });
+  },
+);
 
 request.setTimeout(5000, () => request.destroy(new Error("HTTPS request timed out")));
 request.on("error", (error) => {
@@ -743,6 +766,8 @@ EOF
     return 1
   fi
   url="https://127.0.0.1:$(cat "$registry_port_file")/"
+  trusted_name_url="https://localhost:$(cat "$registry_port_file")/"
+  mismatched_url="https://mismatched-name.invalid:$(cat "$registry_port_file")/"
 
   set +e
   env \
@@ -755,7 +780,7 @@ EOF
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
     bash "${workspace}/scripts/src/run-release-node.sh" \
-    node "$client_script" "$url" >"$trusted_output" 2>&1
+    node "$client_script" "$trusted_name_url" >"$trusted_output" 2>&1
   status=$?
   set -e
   if [[ "$status" -ne 0 ]] ||
@@ -774,6 +799,28 @@ EOF
     -u NODE_TLS_REJECT_UNAUTHORIZED \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$mismatched_url" >"$hostname_mismatch_output" 2>&1
+  status=$?
+  set -e
+  local hostname_mismatch_result
+  hostname_mismatch_result=$(cat "$hostname_mismatch_output")
+  if [[ "$status" -eq 0 ]] ||
+    [[ "$hostname_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
+    printf 'Trusted TLS with a mismatched hostname did not fail certificate-name validation (status %s):\n%s\n' \
+      "$status" "$hostname_mismatch_result" >&2
+    return 1
+  fi
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    PATH="${REAL_NODE_BIN_DIR}:${PATH}" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     bash "${workspace}/scripts/src/run-release-node.sh" \
@@ -919,7 +966,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject an untrusted CA, and reject altered package bytes directly and after redirect"
+  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, reject altered package bytes directly and after redirect, and reject a mismatched certificate name"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
