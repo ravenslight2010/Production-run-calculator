@@ -3,7 +3,7 @@
 - [Drizzle generator evaluation](drizzle-generator-evaluation.md) — compare SQL while ignoring run-specific snapshot IDs and timestamps; pass schema and dialect explicitly.
 - [Drizzle raw timestamps](drizzle-raw-timestamp-decoding.md) — raw SQL timestamp aggregates may need explicit runtime normalization despite `sql<Date>` annotations.
 - [Orval Zod declaration order](orval-zod-declaration-order.md) — normalize generated scalars before validators; declare smoke-tested toolchain packages directly, not via Orval peers.
-- [pnpm lockfile safety](post-merge-setup.md) + [provenance](pnpm12-lockfile-provenance.md) — repair stale peers safely; prove frozen installs; preserve historical evidence.
+- [pnpm lockfile safety](post-merge-setup.md) + [provenance](pnpm12-lockfile-provenance.md) — repair stale peers safely; audit peers after frozen installs; preserve historical evidence.
 - [pnpm outdated scope limits](pnpm-outdated-scope-limits.md) — cross-check workspace declarations against lockfile importers; recursive output can omit direct importers.
 - [Security override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to the affected parent when a global major replacement could disrupt other consumers.
 - [Safe observability](observability-safe-events.md) + [event-loop histogram](event-loop-delay-monitor-warmup.md) — bounded payload-free events; wait one interval before a stall test.

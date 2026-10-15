@@ -1219,3 +1219,70 @@ operations and TypeDoc, its plugins, and Orval publish a compatible graph. At th
 open a separate bounded adoption task covering API-consumer migration/isolation, strict
 frozen install, TypeDoc/plugin and Orval generation/runtime smokes, declaration comparison,
 editor proof, and approved-runner evidence. This reassessment does not authorize that work.
+
+### Independent qualification rerun — 2026-10-15
+
+At 2026-10-15 09:50 UTC, npm `latest` metadata still resolved to TypeDoc 0.28.20,
+`typedoc-plugin-markdown` 4.14.0, `typedoc-plugin-coverage` 4.0.3, and Orval 8.43.0.
+TypeDoc's peer range still ends at TypeScript 6.0.x. The TypeDoc 0.28.20 release notes
+describe API and rendering additions/fixes but no TypeScript 7 support. Markdown 4.14.0
+release notes describe rendering fixes and explicitly report no public option or type
+changes. Coverage 4.0.3's changelog covers the TypeDoc 0.28 update and coverage-output
+fixes, not TypeScript 7 support. Orval 8.43.0 release notes list generator fixes/features
+but do not change the TypeDoc peer boundary.
+
+The latest overall Orval release, 8.43.0, was published at 2026-10-14 17:57 UTC, less
+than the workspace's 24-hour minimum release age at the time of this rerun. It was not
+installed or tested again; the safety hold was not bypassed. Orval 8.42.0 was the newest
+release older than the 24-hour hold and was used for the fresh smoke.
+
+Fresh disposable qualification results:
+
+- A fresh `pnpm install --lockfile-only --strict-peer-dependencies` with TypeScript 7.0.2
+  and the latest TypeDoc/plugin graph failed because TypeDoc 0.28.20 rejects TypeScript 7.
+- On the same graph, a lockfile first created without strict resolution was accepted by
+  `pnpm install --frozen-lockfile --strict-peer-dependencies`, but the independent
+  `pnpm peers` audit failed on TypeDoc's TypeScript peer. A frozen install's exit status
+  alone therefore does not prove its package graph is peer-clean. The TypeScript 7 codegen
+  bridge now runs `pnpm peers` immediately after frozen installation to enforce that
+  independent check.
+- A peer-clean disposable install of TypeDoc 0.28.20, Markdown plugin 4.14.0, coverage
+  plugin 4.0.3, TypeScript 6.0.3, and Orval 8.42.0 passed `pnpm peers`. TypeDoc and both
+  plugins generated Markdown and a coverage SVG under TypeScript 6.0.3.
+- In that disposable install only, redirecting TypeDoc's peer link to the separately
+  installed TypeScript 7.0.2 candidate reproduced a runtime failure before documentation
+  generation: `TypeError: Cannot read properties of undefined (reading
+  'PropertyDeclaration')`. No workspace package link, manifest, lockfile, or compiler
+  authority was changed.
+- Orval 8.42.0 ran against the project's OpenAPI config and generated 797 TypeScript files;
+  its generated client and Zod directories matched the checked-in API declarations. Orval
+  8.43.0 remains untested in this rerun because of the 24-hour release-age restriction.
+- The checked-in `check:api-generated` gate passed, as did the disposable TypeScript 7
+  codegen bridge (including generated API declaration builds), declaration-contract tests,
+  and the TypeScript 6 API-boundary check. These passes validate the current isolated
+  arrangement, not TypeDoc compatibility with TypeScript 7.
+
+
+### Current declaration comparison
+
+The disposable comparison ran both full shared-library builds, all six no-emit project
+checks, and generated API declaration builds successfully under TypeScript 6.0.3 and
+TypeScript 7.0.2. It captured 983 declaration files per compiler and 282 textually changed
+files (2 API client, 212 API Zod, and 68 database declarations).
+
+Three existing exact-hash approvals no longer matched the current generated output. After
+reviewing the changed TypeScript representations and confirming bidirectional compatibility
+under both compilers, the approval file was updated for those same three paths; no new
+approval paths were added. The current declaration-contract comparison then passed:
+273 formatting-only files, 9 exact-hash-approved semantic files, and 0 unexplained
+semantic changes.
+
+The full reproduction's final retained-summary check rejected these current totals against
+the older 2026-09-15 retained summary (795 files and 217 changed files). That older
+summary remains historical and was not overwritten. The current comparison outputs and
+contract report remain disposable under `/tmp`; a future TypeScript migration evidence task
+must refresh the revision-bound summary through its normal review path before treating the
+full reproduction as green.
+
+**Decision remains NO-GO for TypeScript 7 adoption.** TypeScript 6.0.3 remains authoritative;
+do not change dependency versions or bypass the release-age policy as part of this task.

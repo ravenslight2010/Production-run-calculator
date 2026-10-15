@@ -15,6 +15,12 @@ Lockfile-only dependency refreshes can also normalize optional peer bindings and
 
 **How to apply:** After a narrow dependency refresh, review lockfile changes for unrelated package-version movement. If only optional peer bindings/snapshots were normalized, preserve the resolver's complete graph and confirm it with `pnpm install --frozen-lockfile`.
 
+A frozen install with `--strict-peer-dependencies` is not by itself proof that an existing lockfile's installed graph has no peer mismatch. When pnpm skips lockfile resolution, that install can succeed despite an unsupported peer; run `pnpm peers` independently to audit the installed graph.
+
+**Why:** A disposable pnpm 12.8.1 probe accepted a frozen strict-peer install from a lockfile containing TypeScript 7 with TypeDoc's TypeScript 6-only peer, while `pnpm peers` rejected the same installed graph.
+
+**How to apply:** In toolchain checks where peer compatibility is a gate, run `pnpm peers` after the frozen install. Do not weaken peer metadata or treat a successful frozen install as a substitute for the audit.
+
 An `add` or targeted upgrade can also advance an unrelated compatible transitive package while regenerating the lockfile. For strict single-dependency work, compare package versions and snapshot edges against the starting lockfile, restore unrelated resolutions, and prove the result with a frozen install.
 
 **Why:** A successful install can still introduce unrelated version movement (for example, a previously locked `lru-cache` resolution), even when the package manifest diff is limited to one dependency.

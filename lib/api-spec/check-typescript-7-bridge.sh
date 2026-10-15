@@ -47,6 +47,9 @@ mkdir -p "$checkout"
 (
   cd "$checkout"
   pnpm install --frozen-lockfile --strict-peer-dependencies
+  # Frozen installs can skip peer re-resolution for an existing lockfile.
+  # Audit the installed graph independently so stale peer bindings cannot pass.
+  pnpm peers
 )
 
 typescript_6="$checkout/lib/api-spec/node_modules/typescript/bin/tsc"
