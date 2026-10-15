@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# Regression tests for the release Node launcher. These tests use only
-# temporary fake executables, so neither branch downloads a package or runs a
-# real release command.
+# Regression tests for the release Node launcher. Most cases use temporary
+# fake executables; the TLS case uses real npx with a loopback-only fixture
+# registry and temporary package data.
 
 set -euo pipefail
 
@@ -442,10 +442,13 @@ test_release_runner_verifies_local_tls_certificates() {
   local client_script="${workspace}/https-client.cjs"
   local package_root="${workspace}/package"
   local package_tarball="${workspace}/fixture.tgz"
+  local altered_package_tarball="${workspace}/altered-fixture.tgz"
+  local tarball_mode_file="${workspace}/tarball-mode"
   local trusted_output="${workspace}/trusted-output"
   local untrusted_output="${workspace}/untrusted-output"
   local trusted_npx_output="${workspace}/trusted-npx-output"
   local untrusted_npx_output="${workspace}/untrusted-npx-output"
+  local integrity_npx_output="${workspace}/integrity-npx-output"
   local registry_requests="${workspace}/registry-requests"
   local npx_log="${workspace}/npx-log"
   local package_name="replit-release-runner-tls-fixture"
@@ -563,6 +566,9 @@ console.log("local npx package resolved over verified TLS");
 EOF
   chmod +x "${package_root}/bin/run.cjs"
   "$TAR_BIN" -czf "$package_tarball" -C "$workspace" package
+  cp "$package_tarball" "$altered_package_tarball"
+  printf 'altered package bytes\n' >>"$altered_package_tarball"
+  printf 'matching\n' >"$tarball_mode_file"
   : >"$registry_requests"
   : >"${workspace}/empty-user.npmrc"
   : >"${workspace}/empty-global.npmrc"
@@ -572,11 +578,19 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const https = require("node:https");
 
-const [keyPath, certPath, portPath, packageTarballPath, requestLogPath] =
-  process.argv.slice(2);
+const [
+  keyPath,
+  certPath,
+  portPath,
+  packageTarballPath,
+  alteredPackageTarballPath,
+  tarballModePath,
+  requestLogPath,
+] = process.argv.slice(2);
 const packageName = "replit-release-runner-tls-fixture";
 const packageVersion = "1.0.0";
-const tarball = fs.readFileSync(packageTarballPath);
+const packageTarball = fs.readFileSync(packageTarballPath);
+const alteredPackageTarball = fs.readFileSync(alteredPackageTarballPath);
 const server = https.createServer(
   { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
   (request, response) => {
@@ -585,8 +599,9 @@ const server = https.createServer(
 
     if (request.method === "GET" && requestUrl.pathname === `/${packageName}`) {
       const integrity =
-        "sha512-" + crypto.createHash("sha512").update(tarball).digest("base64");
-      const shasum = crypto.createHash("sha1").update(tarball).digest("hex");
+        "sha512-" +
+        crypto.createHash("sha512").update(packageTarball).digest("base64");
+      const shasum = crypto.createHash("sha1").update(packageTarball).digest("hex");
       const metadata = {
         name: packageName,
         "dist-tags": { latest: packageVersion },
@@ -609,6 +624,10 @@ const server = https.createServer(
     }
 
     if (request.method === "GET" && requestUrl.pathname === "/fixture.tgz") {
+      const tarball =
+        fs.readFileSync(tarballModePath, "utf8").trim() === "altered"
+          ? alteredPackageTarball
+          : packageTarball;
       response.writeHead(200, {
         "content-type": "application/octet-stream",
         "content-length": tarball.length,
@@ -660,7 +679,8 @@ EOF
 
   "$REAL_NODE_BIN" "${server_dir}/https-server.cjs" \
     "${cert_dir}/server.key" "${cert_dir}/server.pem" "$port_file" \
-    "$package_tarball" "$registry_requests" \
+    "$package_tarball" "$altered_package_tarball" "$tarball_mode_file" \
+    "$registry_requests" \
     >"$server_output" 2>&1 &
   TLS_SERVER_PID=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
@@ -803,10 +823,34 @@ EOF
   assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
   assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
 
+  printf 'altered\n' >"$tarball_mode_file"
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/integrity-npm-cache" "$integrity_npx_output"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npx accepted altered tarball bytes with the original integrity metadata.\n' >&2
+    cat "$integrity_npx_output" >&2
+    return 1
+  fi
+  local integrity_npx_result
+  integrity_npx_result=$(cat "$integrity_npx_output")
+  if [[ "$integrity_npx_result" != *"EINTEGRITY"* &&
+    "$integrity_npx_result" != *"integrity checksum failed"* ]]; then
+    printf 'Altered tarball failed for a reason other than npm integrity validation:\n%s\n' \
+      "$integrity_npx_result" >&2
+    return 1
+  fi
+  assert_not_contains "$integrity_npx_result" \
+    "local npx package resolved over verified TLS"
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
+
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx trust the explicit test CA and reject the untrusted CA"
+  echo "PASS: Node and installed npx verify the test CA, reject an untrusted CA, and reject altered package bytes"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
