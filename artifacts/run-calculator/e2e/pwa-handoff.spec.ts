@@ -353,12 +353,51 @@ test.describe("PWA update handoff", () => {
         const icons = await Promise.all((manifest.icons ?? []).map(async (icon) => {
           const iconUrl = new URL(icon.src, link.href);
           const iconResponse = await fetch(iconUrl);
+          const contentType = iconResponse.headers.get("content-type");
+          const bytes = new Uint8Array(await iconResponse.arrayBuffer());
+          const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          const pngSignature = [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ].every((byte, index) => bytes[index] === byte);
+          const hasPngHeader = pngSignature
+            && bytes.length >= 24
+            && view.getUint32(12) === 0x49484452;
+          const declaredDimensions = icon.sizes?.match(/^(\d+)x(\d+)$/);
+          let decodedWidth: number | null = null;
+          let decodedHeight: number | null = null;
+          let decodeError: string | null = null;
+
+          if (iconResponse.ok && pngSignature && bytes.length > 0) {
+            const objectUrl = URL.createObjectURL(
+              new Blob([bytes], { type: contentType ?? "" }),
+            );
+            try {
+              const image = new Image();
+              image.src = objectUrl;
+              await image.decode();
+              decodedWidth = image.naturalWidth;
+              decodedHeight = image.naturalHeight;
+            } catch (error) {
+              decodeError = error instanceof Error ? error.message : String(error);
+            } finally {
+              URL.revokeObjectURL(objectUrl);
+            }
+          }
+
           return {
             src: icon.src,
             sizes: icon.sizes ?? null,
             purpose: icon.purpose ?? null,
             status: iconResponse.status,
-            contentType: iconResponse.headers.get("content-type"),
+            contentType,
+            pngSignature,
+            pngWidth: hasPngHeader ? view.getUint32(16) : null,
+            pngHeight: hasPngHeader ? view.getUint32(20) : null,
+            declaredWidth: declaredDimensions ? Number(declaredDimensions[1]) : null,
+            declaredHeight: declaredDimensions ? Number(declaredDimensions[2]) : null,
+            decodedWidth,
+            decodedHeight,
+            decodeError,
           };
         }));
         return {
@@ -387,6 +426,21 @@ test.describe("PWA update handoff", () => {
           status: 200,
         }),
       ]);
+      for (const icon of installContract.icons) {
+        expect(icon.contentType, `${icon.src} must be served as a PNG`).toMatch(
+          /^image\/png\b/i,
+        );
+        expect(icon.pngSignature, `${icon.src} must have a valid PNG signature`).toBe(true);
+        expect(icon.pngWidth, `${icon.src} PNG header width must match manifest sizes`)
+          .toBe(icon.declaredWidth);
+        expect(icon.pngHeight, `${icon.src} PNG header height must match manifest sizes`)
+          .toBe(icon.declaredHeight);
+        expect(icon.decodeError, `${icon.src} must decode as an image`).toBeNull();
+        expect(icon.decodedWidth, `${icon.src} decoded width must match its PNG header`)
+          .toBe(icon.pngWidth);
+        expect(icon.decodedHeight, `${icon.src} decoded height must match its PNG header`)
+          .toBe(icon.pngHeight);
+      }
 
       await page.waitForFunction(async () => {
         const registration = await navigator.serviceWorker.ready;
