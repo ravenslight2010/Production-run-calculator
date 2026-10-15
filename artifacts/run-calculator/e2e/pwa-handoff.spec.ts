@@ -19,6 +19,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+import * as XLSX from "xlsx";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
@@ -768,20 +769,60 @@ test.describe("PWA update handoff", () => {
       expect(excluded).toHaveLength(1);
       expect(excluded[0].url).toMatch(/^assets\/heic2any-[\w-]+\.js$/);
       expect(excluded[0].bytes).toBeGreaterThan(1_000_000);
-      for (const retainedChunk of ["home-", "runExcel-", "xlsx-", "DeferredManagementSurface-"]) {
-        expect(
-          [...precache.precachedJavaScript].some((url) =>
-            path.posix.basename(url).startsWith(retainedChunk),
-          ),
-          `${retainedChunk} must remain available offline`,
-        ).toBe(true);
-      }
+      const offlineFeatureChunkGroups = {
+        "live run and app shell": ["home-"],
+        "manager and setup tools": [
+          "DeferredManagementSurface-",
+          "StaffManagementSurface-",
+          "MixesManager-",
+          "ProductionRulesManager-",
+          "FreezerPullItemsManager-",
+          "CycleCountManager-",
+          "CheeseRecipesManager-",
+          "DieLineDefaultsManager-",
+          "NamedRecipesManager-",
+        ],
+        "warehouse and inventory": ["WarehouseTabContent-", "InventoryTab-"],
+        "quality, incidents, and downtime": [
+          "QcWorkflowTab-",
+          "IncidentsTab-",
+          "DowntimeTrendsTab-",
+        ],
+        "workbook export": ["runExcel-", "xlsx-"],
+        "workbook and recipe imports": [
+          "ExcelImportDialog-",
+          "SpecImportDialog-",
+          "PremixImportDialog-",
+          "ShippingImportDialog-",
+          "RecipeGuideImportDialog-",
+          "CheeseImportDialog-",
+          "specImport-",
+          "premixImport-",
+          "shippingImport-",
+          "recipeGuideImport-",
+          "cheeseImport-",
+        ],
+      } satisfies Record<string, string[]>;
+      const precachedJavaScriptFiles = [...precache.precachedJavaScript];
+      const retainedOfflineFeatureChunks = Object.fromEntries(
+        Object.entries(offlineFeatureChunkGroups).map(([feature, prefixes]) => {
+          const matched = prefixes.map((prefix) => {
+            const file = precachedJavaScriptFiles.find((url) =>
+              path.posix.basename(url).startsWith(prefix),
+            );
+            expect(file, `${feature}: ${prefix} must remain available offline`).toBeDefined();
+            return file;
+          });
+          return [feature, matched];
+        }),
+      );
       const transferReport = {
         uniquePrecacheEntries: precache.entries.length,
         currentPrecacheBytes: precache.totalBytes,
         excludedOptionalChunk: excluded[0],
         previousBroadGlobBytes: precache.totalBytes + excluded[0].bytes,
         savedBytes: excluded[0].bytes,
+        retainedOfflineFeatureChunks,
       };
       console.info(`PWA precache transfer: ${JSON.stringify(transferReport)}`);
 
@@ -948,15 +989,40 @@ test.describe("PWA update handoff", () => {
       const runExcelChunk = [...precache.precachedJavaScript].find((url) =>
         path.posix.basename(url).startsWith("runExcel-"),
       );
-      if (!runExcelChunk) {
+      const xlsxChunk = [...precache.precachedJavaScript].find((url) =>
+        path.posix.basename(url).startsWith("xlsx-"),
+      );
+      if (!runExcelChunk || !xlsxChunk) {
         throw new Error("The production build is missing the cached workbook workflow chunks");
       }
-      const offlineWorkbook = await page.evaluate(async (runExcelPath) => {
+      const inputWorkbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        inputWorkbook,
+        XLSX.utils.aoa_to_sheet([
+          ["Brand", "Flavor", "Cases Planned"],
+          ["Offline", "Workbook", 1],
+        ]),
+        "Runs",
+      );
+      const serializedWorkbook = XLSX.write(inputWorkbook, {
+        bookType: "xlsx",
+        type: "array",
+      });
+      const workbookBytes = Array.from(
+        serializedWorkbook instanceof ArrayBuffer
+          ? new Uint8Array(serializedWorkbook)
+          : serializedWorkbook,
+      );
+      const offlineWorkbook = await page.evaluate(async ({ runExcelPath, workbookBytes }) => {
         const runExcel = await import(new URL(runExcelPath, location.href).href) as Record<string, unknown>;
         const workbookWorkflow = runExcel as {
           buildRunWorkbook: (rows: Array<Record<string, string | number>>) => unknown;
+          parseRunWorkbook: (
+            data: ArrayBuffer | Uint8Array,
+            sourceFile?: string,
+          ) => { rows: Array<{ brand: string; flavor: string; casesPlanned: number }>; errors: unknown[] };
         };
-        const workbook = workbookWorkflow.buildRunWorkbook([{
+        const exportedWorkbook = workbookWorkflow.buildRunWorkbook([{
           Date: "2026-10-15",
           Run: "Offline cache check",
           Brand: "Offline",
@@ -975,18 +1041,30 @@ test.describe("PWA update handoff", () => {
           "Sauce Batches": 0,
           Notes: "",
         }]);
-        const result = workbook as {
+        const parsedWorkbook = workbookWorkflow.parseRunWorkbook(
+          new Uint8Array(workbookBytes),
+          "offline-cache-check.xlsx",
+        );
+        const result = exportedWorkbook as {
           SheetNames: string[];
           Sheets: Record<string, Record<string, { v?: unknown }>>;
         };
         return {
           sheetName: result.SheetNames[0],
           runLabel: result.Sheets["Production Runs"]?.B2?.v ?? null,
+          parsedRows: parsedWorkbook.rows,
+          parseErrors: parsedWorkbook.errors,
         };
-      }, runExcelChunk);
+      }, { runExcelPath: runExcelChunk, workbookBytes });
       expect(offlineWorkbook).toMatchObject({
         sheetName: "Production Runs",
         runLabel: "Offline cache check",
+        parsedRows: [{
+          brand: "Offline",
+          flavor: "Workbook",
+          casesPlanned: 1,
+        }],
+        parseErrors: [],
       });
 
       const heicChunk = excluded[0].url;

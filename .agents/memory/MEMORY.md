@@ -121,7 +121,7 @@
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — recipe saves must refresh pending runs; cache effects alone can look like bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
-- [PWA reconnect fixtures](pwa-offline-eventsource-fixtures.md) — close fixture-owned SSE streams during simulated outages so reconnect behavior is actually exercised.
+- [PWA cache and reconnect](pwa-offline-eventsource-fixtures.md) + [deferred cache policy](pwa-deferred-cache-policy.md) — close owned SSE streams in outages; lazy loading alone does not justify excluding a feature from precache.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Release evidence](production-evidence-revision-binding.md) + [CI](ci-pinned-evidence.md) + [retry/cancel](release-finalization-retry.md) — bind proof to revision; preserve structured outcomes.
 - [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
