@@ -49,6 +49,10 @@ set -euo pipefail
 
 printf 'child-node=%s\n' "$(node --version)" >>"$RUN_LOG"
 printf 'node-system-ca=%s\n' "${NODE_USE_SYSTEM_CA:-unset}" >>"$RUN_LOG"
+printf 'ssl-cert-file-readable=%s\n' \
+  "$([[ -r "${SSL_CERT_FILE:-}" && -s "${SSL_CERT_FILE:-}" ]] && echo yes || echo no)" >>"$RUN_LOG"
+printf 'ssl-cert-dir-readable=%s\n' \
+  "$([[ -d "${SSL_CERT_DIR:-}" && -r "${SSL_CERT_DIR:-}" ]] && echo yes || echo no)" >>"$RUN_LOG"
 pnpm --filter @workspace/scripts exec node --version
 EOF
   cat >"${workspace}/bin/pnpm" <<'EOF'
@@ -182,7 +186,9 @@ run_launcher() {
   local output_path="${workspace}/output"
 
   set +e
-  RUN_LOG="$log_path" PATH="$path_value" \
+  SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    RUN_LOG="$log_path" PATH="$path_value" \
     bash "${workspace}/scripts/src/run-release-node.sh" release-child \
     >"$output_path" 2>&1
   RUN_STATUS=$?
@@ -228,6 +234,8 @@ test_matching_node_skips_npx() {
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "node-system-ca=1"
+  assert_contains "$events" "ssl-cert-file-readable=yes"
+  assert_contains "$events" "ssl-cert-dir-readable=yes"
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   assert_not_contains "$events" "npx-invoked"
   echo "PASS: matching Node path runs preflight, skips npx, and preserves Node for the child"

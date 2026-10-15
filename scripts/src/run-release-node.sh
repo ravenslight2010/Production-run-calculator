@@ -11,6 +11,46 @@ set -euo pipefail
 # do not replace this with NODE_TLS_REJECT_UNAUTHORIZED=0.
 export NODE_USE_SYSTEM_CA=1
 
+# The pinned Node/OpenSSL build can have a default CA directory inside an
+# immutable Nix store path that is not present in this workspace. Point OpenSSL
+# at readable host trust-store paths before starting Node, npm, or npx. Prefer
+# the Nix-provided bundle when available, then a valid inherited bundle, then
+# common Linux system bundles. Keep both CA file and directory lookup enabled.
+system_ca_file=""
+for candidate in \
+  "${NIX_SSL_CERT_FILE:-}" \
+  "${SSL_CERT_FILE:-}" \
+  /etc/ssl/certs/ca-certificates.crt \
+  /etc/ssl/cert.pem \
+  /etc/pki/tls/certs/ca-bundle.crt; do
+  if [[ -n "$candidate" && -r "$candidate" && -s "$candidate" ]]; then
+    system_ca_file="$candidate"
+    break
+  fi
+done
+if [[ -z "$system_ca_file" ]]; then
+  printf 'Release runner could not find a readable system CA certificate bundle.\n' >&2
+  exit 1
+fi
+export SSL_CERT_FILE="$system_ca_file"
+
+system_ca_dir=""
+for candidate in \
+  "${NIX_SSL_CERT_DIR:-}" \
+  "${SSL_CERT_DIR:-}" \
+  /etc/ssl/certs \
+  /etc/pki/tls/certs; do
+  if [[ -n "$candidate" && -d "$candidate" && -r "$candidate" ]]; then
+    system_ca_dir="$candidate"
+    break
+  fi
+done
+if [[ -z "$system_ca_dir" ]]; then
+  printf 'Release runner could not find a readable system CA certificate directory.\n' >&2
+  exit 1
+fi
+export SSL_CERT_DIR="$system_ca_dir"
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 NODE_SELECTOR="${REPO_ROOT}/.nvmrc"
