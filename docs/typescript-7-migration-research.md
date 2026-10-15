@@ -166,7 +166,7 @@ passed without diagnostics in the isolated copy.
 
 As reassessed on 2026-10-15, TypeScript 7.0.2's root module cannot replace any consumer
 that currently calls the TypeScript 6 compiler API. The npm `latest` tag remains 7.0.2;
-`next` points to `7.1.0-dev.20261013.1`. The 7.0 package exposes `typescript/unstable/*`
+`next` points to `7.1.0-dev.20261015.1`. The 7.0 package exposes `typescript/unstable/*`
 entry points, but Microsoft labels the API unstable and describes a different API for
 TypeScript 7.1. Rewriting against unstable or development APIs is not an acceptable
 production migration path.
@@ -198,7 +198,7 @@ The exact TypeScript 7 version assessed here is **7.0.2**, the latest stable Typ
 release in Microsoft's release metadata and npm's `latest` tag as of 2026-10-15. Its package
 root exports only version metadata; the parser, AST, scanner, visitor, and related
 programmatic surfaces are under `typescript/unstable/*`. npm's `next` tag is
-`7.1.0-dev.20261013.1`, not a stable API release. Microsoft's 7.1 iteration plan lists API
+`7.1.0-dev.20261015.1`, not a stable API release. Microsoft's 7.1 iteration plan lists API
 stabilization work and 2026-11-24 as the planned stable release date. Therefore no stable
 TypeScript 7 programmatic API version is available yet, and the eleven current consumers
 remain on the exact TypeScript 6.0.3 boundary below. The official compiler API wiki also
@@ -1427,7 +1427,7 @@ build or `typescript/unstable/*` entry point was used.
 The current Microsoft [release list](https://github.com/microsoft/TypeScript/releases)
 still identifies TypeScript 7.0.2 as the latest stable 7.x release. The npm
 [dist-tags](https://registry.npmjs.org/-/package/typescript/dist-tags) report `latest` as
-7.0.2 and `next` as `7.1.0-dev.20261013.1`. Microsoft's
+7.0.2 and `next` as `7.1.0-dev.20261015.1`. Microsoft's
 [7.0 announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
 explicitly says 7.0 does not ship with an API. The official
 [Compiler API guide](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
@@ -1443,6 +1443,16 @@ The existing eleven-consumer inventory above therefore remains unchanged: no con
 a supported stable replacement, including the `preProcessFile` use in Vite config import
 discovery.
 
+This reassessment was refreshed on 2026-10-15 against Microsoft's live release list,
+the 7.0 announcement, the Compiler API guide, the 7.1 iteration plan, npm dist-tags, and
+the published 7.0.2 package metadata. The live dist-tags report
+`next=7.1.0-dev.20261015.1`; the iteration plan still schedules the stable release for
+2026-11-24 and lists API stabilization as planned work. The Compiler API guide still says
+its content describes TypeScript 6.0 and earlier and that 7.1 will have a different API.
+The package metadata confirms the 7.0.2 export map still exposes only version metadata at
+the root and programmatic paths under `unstable/*`. No stable TypeScript 7 API candidate
+exists for a disposable-tree migration test, so none was attempted.
+
 Verification on the unchanged boundary:
 
 - `pnpm run check:typescript-api-v6` passed all 12 boundary tests and reported API version
@@ -1451,7 +1461,7 @@ Verification on the unchanged boundary:
   the declaration-contract comparison tests passed.
 - All six calculator AST test files passed (56 tests total); the Vite config import tests
   passed (3 tests), the config-loading check passed, and browser-spec syntax validation
-  passed for 39 files.
+  passed for 40 files.
 - The API-server shared-diagnostic persistence architecture test passed (12 tests).
 
 The package boundary, consumers, root compiler, lockfile, editor SDK, and release gates were
