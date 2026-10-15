@@ -1,24 +1,47 @@
 # TypeScript 7 Migration Research
 
-**Background comparison date:** 2026-09-16; latest reassessment: 2026-10-15 (see final section)
+**Background comparison date:** unresolved; latest reassessment: 2026-10-15 (see final section)
 **Current compiler:** TypeScript 6.0.3  
 **Compared compiler:** TypeScript 7.0.2  
 **Recommendation:** **Keep TypeScript 6 authoritative; retain TypeScript 7 only as the parallel CLI pilot.**
 
+## Comparison evidence identities
+
+Run-specific claims in this report must be read against the exact evidence identity below.
+The filename date, report prose date, and a matching aggregate count do not establish that
+two artifacts came from the same run.
+
+| ID | Retained artifact and source identity | Evidence it supports | Limits |
+| --- | --- | --- | --- |
+| **H-72383** | [`docs/evidence/typescript-7-comparison-2026-09-15.json`](evidence/typescript-7-comparison-2026-09-15.json), SHA-256 `9b26918612dff8f0f8d8d0b7629ac0524a3f195a9b45258a17be10894d275739`; source revision `72383c601448d234b7813451618c293ebdca7ac8`; artifact capture date `2026-09-21`; Node `24.20.0`; TypeScript `6.0.3` vs `7.0.2`. | Its named command exit codes, diagnostic counts, elapsed times, declaration totals, and package totals. | The filename says 2026-09-15, but that is not the capture date. It does not identify the report's claimed 2026-09-16 run or Node `24.13.0`; no source-bundle hash, raw diff, or per-file contract report is retained for this identity. |
+| **A-63cfd** | [`release-evidence-archive/stale-full-2026-09-14/evidence/typescript-7-comparison.json`](../release-evidence-archive/stale-full-2026-09-14/evidence/typescript-7-comparison.json), SHA-256 `1858af0cf86c6dfa25fc6a8da696f6de9e3016bb4ba54fe7725d73f9bf0b5de4`; source revision `63cfd77eef883cba583636e6fc4c72fa37cc24a6`; TypeScript `6.0.3` vs `7.0.2`; runner image `unknown`. | This separate artifact's command outcomes, runner details, 795 declarations per compiler, and 217 changed paths. | It is not H-72383. It has no capture date or Node version and cannot establish H-72383's environment or contract classifications. |
+| **R-testsha** | [`release-evidence/typescript-7-comparison.json`](../release-evidence/typescript-7-comparison.json), SHA-256 `28da2c9be10f711d9eef805dafd698bc92a5a3c0bd3d0a57cd67853b2f80caeb`; source identity `test-sha256:6c3f05086161635b2e9c417090a3c06291abb692760dd6c251c905b3d068ee43`; TypeScript `6.0.3` vs `7.0.2`. | This artifact's command outcomes, runner identity, 983 declarations per compiler, and 282 changed paths. | The source identity is not a Git revision and this JSON has no capture timestamp or Node version. |
+| **C-858078** | [`docs/evidence/typescript-7-declaration-contracts-current.json`](evidence/typescript-7-declaration-contracts-current.json), SHA-256 `251574261e7752208d67a47b927c06156c8e3da2e4488ab7c4fddd3b379d3b48`; captured `2026-10-15T11:26:57Z`; source revision `858078ed44c8838cedfa80b40c4950ac42b668e2`; source-bundle SHA-256 `3468d08570540775d10b5df16eb43ea0318545ded502e1ebfac822f47fb722a7`. | Its retained per-file classifications: 983 files per compiler, 282 changed, 273 formatting-only, 9 approved semantic, 0 unexplained. | Its source identity differs from R-testsha. It does not prove that R-testsha's command results and this report's classifications came from one comparison. |
+| **AP-8d043** | [`docs/evidence/typescript-7-declaration-approvals.json`](evidence/typescript-7-declaration-approvals.json), SHA-256 `8d043fd34bc52104a73ab2964ef1bedbcd5dc0fe9b18a38d37b1bfb39d35e02c`. | The retained exact-output-hash approval entries and their recorded reasons. | This file alone does not establish which comparison produced either side's declaration; use it only with the matching source identity in a comparison report. |
+| **RA-RESOURCE** | [`docs/typescript-7-resource-approval-evidence.json`](typescript-7-resource-approval-evidence.json), SHA-256 `7697f0789ce5097f6e7e8d95beade78116de1eb25fad345226064b403b73ae0b`. | Its three resource-measurement summaries, source revisions, workflow run IDs, report hashes, and reviewed limits. | It is resource-threshold evidence, not compiler compatibility or declaration-classification evidence for H-72383. |
+| **AUD-7ad2** | The report describes a 2026-09-16 audit at revision `7ad2e471a5fc5a9b08348f9743244696f44b68a1`, but its detailed comparison output was under `/tmp` and is not retained. That commit is not available in the local Git object database. | None of its unretained run-specific outcomes can be independently verified here. | Mark its compiler results, declaration totals, environment, and run recommendation **unresolved**. Neither A-63cfd nor H-72383 is a substitute. |
+
+The retained-summary command checks count agreement only. It is not proof of compiler
+execution, source identity, runtime metadata, or contract classification.
+
 ## Executive summary
 
-The isolated comparison dated 2026-09-16 found that the native TypeScript 7 command-line
-compiler was compatible with the repository's projects and substantially faster in that
-comparison:
+The compact historical comparison H-72383 (filename dated 2026-09-15; artifact capture
+dated 2026-09-21) records successful TypeScript 6.0.3 and TypeScript 7.0.2 checks and lower
+candidate elapsed times for its named commands. This is a report of that artifact's results,
+not a general compatibility or performance claim:
 
-- The 35-project shared-library build completed without diagnostics under both compilers.
-- The API server, web client, mockup sandbox, and scripts typechecked without diagnostics
-  under both compilers.
-- TypeScript 7 accepted the repository's project-reference, declaration-only, bundler
-  resolution, and `allowImportingTsExtensions` configurations.
-- Representative elapsed times improved from 11.82s to 2.97s for a forced shared-library
-  build and from 50.76s to 3.73s for the web-client typecheck. These are single local runs,
-  not a benchmark suitable for capacity planning.
+- Its forced shared-library project build and six named `--noEmit` checks reported exit code
+  0 and zero diagnostics under both compilers. The 35-project scope claim is not recorded
+  in this compact artifact.
+- Its API server, run calculator, mockup sandbox, scripts, AI evaluation, and corpus harness
+  checks reported exit code 0 and zero diagnostics under both compilers.
+- Its generated API client/Zod forced build reported exit code 0 and zero diagnostics under
+  both compilers. The broader claim about acceptance of specific TypeScript configuration
+  options is not established by this summary.
+- For the named run-calculator `--noEmit` check, H-72383 records 43.998 seconds under
+  TypeScript 6 and 2.710 seconds under TypeScript 7. The earlier 50.76/3.73-second
+  web-client figures are **unresolved**: no retained comparison artifact here supports them.
 
 The production toolchain should not switch yet for three reasons:
 
@@ -31,13 +54,19 @@ The production toolchain should not switch yet for three reasons:
 3. TypeScript 7 produces textual declaration differences concentrated in generated API/Zod
    declarations and database declarations. The fail-closed contract comparison now
    classifies equivalent formatting changes and pins every reviewed non-formatting change
-   to the exact TypeScript 6 and TypeScript 7 output hashes. Any new or changed semantic
-   output still blocks promotion.
+   to the exact TypeScript 6 and TypeScript 7 output hashes in retained report C-858078.
+   That classification is for C-858078's source identity only; H-72383's historical
+   classifications remain unresolved. Any new or changed semantic output still blocks
+   promotion.
 
 Microsoft explicitly recommends running TypeScript 7 side-by-side with the
 `@typescript/typescript6` compatibility package for tools that still need the old API.
 This repository should first add a non-gating TypeScript 7 lane while retaining 6.0.3 as
-the authoritative compiler and API package.
+the authoritative compiler and API package. This recommendation is a conservative tooling
+decision, not a conclusion from one comparison run: historical command evidence is H-72383,
+the retained resource thresholds are RA-RESOURCE, and the later API/TypeDoc assessments are
+separately dated in the reassessment sections below. The historical declaration-contract
+claim remains unresolved as described under H-72383.
 
 ### Editor language-service gate
 
@@ -89,8 +118,10 @@ commands must not rely on pnpm's shared `.bin/tsc` link. They invoke
 - `-p ... --noEmit` for the API server, web client, mockup sandbox, scripts, and two
   standalone library checks.
 
-The root `tsconfig.json` references 35 shared libraries. The comparison build reported 36
-projects in scope and 35 built projects after transitive references were included.
+The root `tsconfig.json` references 35 shared libraries. The earlier report says the
+comparison build had 36 projects in scope and built 35 after transitive references; those
+run-specific project totals are **unresolved** because H-72383 does not record them and the
+run report that was said to contain them is not retained.
 
 Shared libraries use `composite: true`, `declarationMap: true`,
 `emitDeclarationOnly: true`, and an explicit `rootDir`/`outDir`. The repository contains 39
@@ -244,6 +275,10 @@ path, and complete lockfile package inventory under its runner evidence.
 
 ### Method
 
+The bullets below describe the currently retained reproduction procedure. They do not by
+themselves establish that historical comparison H-72383 used the same exact inputs or
+sequence; the historical run has no retained source-bundle hash or command log.
+
 - Installed `typescript@7.0.2` under `/tmp`, outside the workspace.
 - Copied tracked working files to `/tmp` without `.git`, build output, or the pnpm store.
 - Linked the existing dependency installation read-only for module resolution.
@@ -252,10 +287,12 @@ path, and complete lockfile package inventory under its runner evidence.
 - Did not modify `package.json`, `pnpm-lock.yaml`, tracked declarations, or the production
   compiler installation.
 
-The comparison ran on Linux x86-64 with Node 24.13.0, pnpm 11.5.2, 8 reported processors,
-an Intel Xeon Platinum 8581C host CPU, and 16,400,840 KiB reported memory. The compact
-machine-readable record is
-[`docs/evidence/typescript-7-comparison-2026-09-15.json`](evidence/typescript-7-comparison-2026-09-15.json).
+The retained compact record is H-72383. It identifies Linux x86-64, Node 24.20.0,
+pnpm 11.5.2, 8 reported processors, an Intel Xeon Platinum 8581C host CPU, and
+16,400,840 KiB reported memory. Its `capturedAt` is 2026-09-21 even though the filename
+contains 2026-09-15. The report's earlier description of a 2026-09-16 run on Node 24.13.0
+is **unresolved**: no retained run identifier or source bundle links those details to H-72383.
+The exact artifact identity and integrity hash are recorded above.
 
 The exact executable comparison sequence is retained in
 [`reproduce-typescript-7-comparison.sh`](evidence/reproduce-typescript-7-comparison.sh).
@@ -328,9 +365,9 @@ absent for an approved addition or removal. Approvals are therefore invalidated 
 later output change rather than becoming a broad path allowlist.
 
 
-### Semantic declaration review
+### Semantic declaration review — historical claims unresolved
 
-For the historical 2026-09-15 comparison, the nine changes not covered by formatting
+The report's historical prose says that nine changes not covered by formatting
 normalization were reviewed against their source contracts:
 
 - The generated API client aggregate changes string-literal delimiters in query and mutation
@@ -340,21 +377,23 @@ normalization were reviewed against their source contracts:
 - Seven database schema declarations change a quote delimiter and reorder members in
   structural Zod object types.
 
-For each complete module, both the TypeScript 6 declaration namespace extends the
-TypeScript 7 namespace and the TypeScript 7 namespace extends the TypeScript 6 namespace.
-That bidirectional check was reported as passing when consumed by both compilers. These were
-treated as intentional emitter differences, with exact baseline/candidate SHA-256 approvals
-and file-specific reasons. The raw declaration-contract report for that comparison is not
-retained here, so its classifications cannot be independently verified from this repository.
+Those per-file descriptions, the claimed bidirectional checks, and the asserted approval
+reasons are **unresolved for H-72383**. Its raw declaration-contract report and exact source
+inputs are not retained. The separately retained A-63cfd run has a different source revision;
+the newer C-858078 classification report has a different source revision and source bundle.
+Neither can validate or replace H-72383's historical contract-owner conclusions.
 
-### Results
+### Results — H-72383
+
+The outcomes and timing below are the values in H-72383; elapsed times are single-run
+observations, not general performance claims.
 
 | Check | TypeScript 6.0.3 | TypeScript 7.0.2 |
 | --- | ---: | ---: |
 | Forced shared-library project build | Pass, 11.82s | Pass, 2.97s |
 | Scripts `--noEmit` | Pass, 3.31s | Pass, 0.69s |
 | API server `--noEmit` | Pass, 8.97s | Pass, 1.63s |
-| Web client `--noEmit` | Pass, 44.00s | Pass, 2.71s |
+| Run calculator `--noEmit` | Pass, 44.00s | Pass, 2.71s |
 | Mockup sandbox `--noEmit` | Pass, 4.16s | Pass, 0.77s |
 | AI evaluation library `--noEmit` | Pass, 0.40s | Pass, 0.10s |
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
@@ -362,7 +401,7 @@ retained here, so its classifications cannot be independently verified from this
 | Diagnostic count in checks above | 0 | 0 |
 | Declaration file count | 795 | 795 |
 | Declaration files with textual differences | baseline | 217 |
-| Declaration contract comparison | baseline | Historical report: 196 formatting-only, 9 approved semantic, 0 unexplained; raw report not retained |
+| Declaration contract comparison | — | **Unresolved:** prose claims 196 formatting-only, 9 approved semantic, 0 unexplained; raw report not retained |
 
 The declaration differences break down as:
 
@@ -370,17 +409,17 @@ The declaration differences break down as:
 - 150 `api-zod` generated declarations, and
 - 65 database schema declarations.
 
-There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
-double-quote to single-quote changes in string literal types. Generated API declarations
-also changed some quoted literal renderings to template-literal or single-quoted forms.
-The earlier notes list 217 textual differences, while the historical contract-comparison
-counts list 196 formatting-only and 9 approved semantic changes (205 combined). Those
-figures do not reconcile. A separate archived comparison at
+H-72383 records 2,664 removed and 2,664 added diff lines. The prose's descriptions of
+inspected database and generated API differences, and its claim that 196 formatting-only plus
+9 approved semantic changes were classified, remain **unresolved** because no per-file
+contract report for H-72383 is retained. The 12-file gap between those claimed 205
+classifications and the artifact's 217 textual changes is not reconciled. A separate archived comparison at
 `release-evidence-archive/stale-full-2026-09-14/evidence/typescript-7-comparison.json` reports
-217 changed paths with an unknown runner image, but it names source revision
+217 changed paths with an unknown runner image in A-63cfd, but it names source revision
 `63cfd77eef883cba583636e6fc4c72fa37cc24a6`, not the historical JSON's
-`72383c601448d234b7813451618c293ebdca7ac8`. Its counts and partial approval-hash overlap do
-not resolve the missing per-file classification report. Do not describe these counts as
+`72383c601448d234b7813451618c293ebdca7ac8`. The correction note records that only six of
+the nine approval entries match both sides of A-63cfd; this partial overlap does not resolve
+the missing H-72383 per-file classification report. Do not describe these counts as
 non-additive or claim that all changed declarations have zero unexplained semantic drift from
 the available evidence. Re-run the comparison on an identifiable approved runner and retain
 its revision-bound summary and per-file classification before relying on those claims. A
@@ -401,7 +440,8 @@ revision-bound evidence and approval.
 
 The advisory release lane captures one cold and one warm measurement for every TypeScript
 6/7 comparison check and aggregates up to five prior successful, revision-bound CI
-artifacts. Promotion requires at least three distinct revisions.
+artifacts. The approved budgets and three reviewed measurement summaries below are
+RA-RESOURCE, not H-72383 evidence. Promotion requires at least three distinct revisions.
 
 
 ### Resource-limit approval
@@ -411,6 +451,11 @@ sets from successful GitHub Actions resource-capture jobs. All three used the su
 Linux x64 `ubuntu24@20260907.300.1` image with 4 logical CPUs and 16 GiB of memory. The
 exact reports are cryptographically referenced, and their resource summaries are retained,
 in [`docs/typescript-7-resource-approval-evidence.json`](typescript-7-resource-approval-evidence.json).
+The retained summaries identify source revisions `305fafc03977cb3cbe1082b6b526dfefcadbd4ac`,
+`f76eb757dd18112eac8a616e66bfd08c09fd6261`, and
+`7b0fe2d72de5f51d812e3e3b348bbc9b01c48831`, along with workflow run IDs and report SHA-256
+values. The table and approved budgets below are from RA-RESOURCE, not from the historical
+comparison H-72383.
 The comparison command verifies that file's exact compact schema and SHA-256 integrity
 envelope before doing any compiler work. The schema permits only provenance, runner details,
 approved budgets, and cold/warm maxima; it rejects command output, source payloads, and other
@@ -663,7 +708,7 @@ Official and package evidence:
 
 ---
 
-# Fresh revision-bound blocker audit
+# Fresh revision-bound blocker audit — run findings unresolved
 
 **Audit date:** 2026-09-16
 **Assessed revision:** `7ad2e471a5fc5a9b08348f9743244696f44b68a1`
@@ -671,13 +716,23 @@ Official and package evidence:
 **Candidate compiler:** TypeScript 7.0.2
 **Decision:** **NO-GO for replacing the root compiler.** Keep TypeScript 6.0.3 authoritative, keep TypeScript 7.0.2 in its explicit native alias, and continue the advisory lane.
 
+**Run-evidence status:** The full comparison output and command report cited in this section
+were kept only under `/tmp` and are not retained. The assessed commit is also absent from the
+local Git object database. Therefore the 2026-09-16 compiler outcomes, declaration totals,
+runtime details, and run-specific recommendation below are **unresolved**, despite the
+original report's wording. They are not verified by H-72383, A-63cfd, R-testsha, or
+C-858078; these artifacts have different source identities. The NO-GO remains the safe
+decision because the missing run evidence cannot establish promotion readiness; it does not
+revise any historical contract-owner conclusion.
+
 This section supersedes older status, count, and revision statements in this document where
 they conflict with the assessed revision. It is an audit and remediation plan, not approval to
 change `package.json`, `pnpm-lock.yaml`, or the editor SDK.
 
 ## Decision summary
 
-The CLI language-checking result is encouraging but is not a promotion result:
+The original audit described an encouraging CLI language-checking result, but that result is
+**unresolved** without its retained source-bound report and is not a promotion result:
 
 - The safe disposable reproduction at the assessed revision completed both compiler builds,
   both no-emit matrices, generated API builds, and declaration contract comparison without
@@ -720,27 +775,28 @@ missing.
 
 ### Safe reproduction
 
-The audit ran the existing isolated reproduction with output under
+The audit report says it ran the existing isolated reproduction with output under
 `/tmp/typescript-7-audit-repro-7ad2e471`. It copied the tracked source into a disposable
 checkout, installed/used the candidate outside the authoritative workspace, emitted into the
 disposable tree, and checked the working-tree boundary. No candidate declaration or build
 metadata was written to the repository. The comparison's current report was also generated
 outside the repository at `/tmp/ts7-audit-7ad2e471.json`; its final retained-summary check
-correctly rejected the stale 2026-09-15 retained count.
+was reported to reject the stale retained count. These execution and result details are
+**unresolved** because neither the output nor the comparison report was retained.
 
-The lower-level reproduction's current result was:
+The lower-level reproduction's reported result was:
 
 | Check | TypeScript 6.0.3 | TypeScript 7.0.2 | Audit interpretation |
 | --- | --- | --- | --- |
-| Root shared-library build | Pass | Pass | CLI compatibility evidence |
-| Scripts, API server, run calculator, mockup, AI evaluation, corpus no-emit matrix | Pass | Pass | Full reproduction builds required library references first |
-| Generated API client/Zod forced build | Pass | Pass | No generated-build blocker |
-| Normalized diagnostics | Matching | Matching | No compiler-specific diagnostic drift |
-| Declaration files | 729 | 729 | Includes `.d.ts`, `.d.mts`, and `.d.cts` |
-| Textually changed declarations | — | 205 | 2 API client, 142 API Zod, 61 database |
-| Declaration contract | — | Pass | 196 formatting-only, 9 exact-hash-approved semantic, 0 unexplained |
+| Root shared-library build | **Unresolved** (reported pass) | **Unresolved** (reported pass) | Source output not retained |
+| Scripts, API server, run calculator, mockup, AI evaluation, corpus no-emit matrix | **Unresolved** (reported pass) | **Unresolved** (reported pass) | Source output not retained |
+| Generated API client/Zod forced build | **Unresolved** (reported pass) | **Unresolved** (reported pass) | Source output not retained |
+| Normalized diagnostics | **Unresolved** (reported matching) | **Unresolved** (reported matching) | Source output not retained |
+| Declaration files | **Unresolved** (reported 729) | **Unresolved** (reported 729) | `.d.ts`, `.d.mts`, and `.d.cts` scope was reported, not independently verified |
+| Textually changed declarations | — | **Unresolved** (reported 205) | Package counts were also reported, not retained |
+| Declaration contract | — | **Unresolved** (reported pass) | 196 formatting-only, 9 exact-hash-approved semantic, 0 unexplained were reported; report not retained |
 
-The separate `scripts/src/compare-typescript-7.mts` measurement report uses a narrower
+The audit says the separate `scripts/src/compare-typescript-7.mts` measurement report used a narrower
 declaration manifest that filters only `.d.ts`. It therefore reports 718 on each side and
 fails the run-calculator no-emit pair before the prerequisite library is built. The extra
 file in the full reproduction is:
@@ -749,9 +805,12 @@ file in the full reproduction is:
 lib/corpus-harness/dist/verify-chunk-split.d.mts
 ```
 
-The two tools must agree on the extension set and project prerequisites before any report can
-be used as promotion evidence. The 2026-09-15 retained JSON remains historical evidence for
-revision `4a42e35e`; it is not a current result for this audit.
+These 718/719 and prerequisite details are **unresolved** for AUD-7ad2 because the
+measurement report and reproduction output are unavailable. The two tools must agree on the
+extension set and project prerequisites before any report can be used as promotion evidence.
+The 2026-09-15 retained JSON H-72383 identifies source revision
+`72383c601448d234b7813451618c293ebdca7ac8`, not `4a42e35e`; it is historical evidence for
+that recorded revision only, not a result for AUD-7ad2.
 
 ### Compiler coupling inventory
 
@@ -762,8 +821,9 @@ The root package and lockfile currently preserve the intended isolation:
 - Authoritative scripts invoke `node_modules/typescript/bin/tsc` explicitly.
 - The TypeScript 6 API package resolves `typescript-api-v6: npm:typescript@6.0.3` and
   asserts both package metadata and runtime version.
-- The workspace requires Node `>=24` and pnpm `>=11`; the assessed environment was Node
-  24.13.0 and pnpm 11.5.2.
+- The workspace requires Node `>=24` and pnpm `>=11`; the audit prose reports Node 24.13.0
+  and pnpm 11.5.2 for AUD-7ad2. The run's actual runtime metadata is **unresolved** because
+  its environment report was not retained. H-72383 instead records Node 24.20.0.
 - The TypeScript 7 lockfile entry retains native optional packages for all listed platforms.
   The supported release runner contract currently admits Linux x64 only, and the assessed
   Linux x64 runner was supported.
@@ -888,11 +948,11 @@ not promise future TypeScript, TypeDoc, Orval, editor, or runner behavior.
 
 ## Audit verification record
 
-The following checks were run while preparing this audit:
+The following checks were reported as run while preparing this audit:
 
-- The isolated full reproduction completed successfully at the assessed revision and produced
-  the declaration-contract result recorded above. Its output remains under `/tmp` and is not
-  release evidence.
+- The isolated full reproduction was reported as successful at the assessed revision and as
+  producing the declaration-contract result above. Its output remains under `/tmp` and is
+  not retained; the compiler results and classification are **unresolved** as stated above.
 - The comparison harness's native runner contract enumerated all 20 TypeScript 7 optional
   packages, selected `@typescript/typescript-linux-x64@7.0.2`, rejected a simulated Linux
   arm64 runner, and passed its focused contract tests.
@@ -922,6 +982,13 @@ diagnostics instead of collapsing them into a TypeScript compatibility result.
 **Authoritative compiler:** TypeScript 6.0.3
 **Installed candidate:** TypeScript 7.0.2 (`typescript-native`)
 **Recommendation:** **Keep the existing advisory comparison and TypeScript 6 authority. No additional TypeScript 7 adoption step is justified yet.**
+
+**Comparison attribution:** This is a dated research assessment, not a retained comparison
+run. No 2026-10-14 compiler-comparison report is identified for its run-specific statements.
+R-testsha is explicitly described below as not used or regenerated for this assessment, and
+its source identity differs from C-858078. Treat any compiler-comparison outcomes attributed
+to this assessment as **unresolved**. The ecosystem and repository-boundary observations are
+separate from comparison-run evidence.
 
 This section supersedes earlier statements in this document about the latest published
 versions, the current comparison harness, and unresolved B3/B4 findings. It is a research
@@ -1020,7 +1087,7 @@ The existing advisory comparison already covers:
 The comparison's fixed resource contract requires cold and warm measurements, at least
 three distinct compatible revisions for promotion, and approved limits of 1.25 for elapsed
 time and peak-RSS ratios, 60,000 ms candidate elapsed time, and 1,048,576 KiB candidate
-peak RSS. Approval of these thresholds is not proof that current revision-bound history
+peak RSS. These approved thresholds are retained in RA-RESOURCE. Approval of these thresholds is not proof that current revision-bound history
 meets them. Standard and full release modes run the comparison as advisory; a separate
 promotion mode adds the live TypeScript 6 editor proof and requires the comparison's
 diagnostic, declaration, resource, and evidence gates.
@@ -1043,18 +1110,23 @@ pnpm --filter @workspace/scripts exec tsx --test ./src/compare-typescript-7.test
 This tests the comparison contracts; it does not run a new compiler comparison or produce
 release evidence. At task start, the worktree already contained edits to
 `release-evidence/typescript-7-comparison.json` and `scripts/src/release-check.mts` as well
-as unrelated application/test edits. The comparison artifact identified its source with a
-`test-sha256:` value rather than a commit revision. It is not fresh, independently
-revision-bound promotion evidence, and it was not used or regenerated for this assessment.
+as unrelated application/test edits. The retained comparison artifact R-testsha identifies
+its source with a `test-sha256:` value rather than a commit revision and has no capture
+timestamp. It is not fresh, independently revision-bound promotion evidence, and it was not
+used or regenerated for this assessment. Its identity must not be joined to C-858078's
+declaration classifications.
 The checked-in promotion checkpoint remains an incomplete checkpoint for an older revision;
 it is not a current promotion result. The historical 2026-09-16 clean reproduction remains
-useful evidence for that assessed tree only, not for today's worktree.
+**unresolved** as comparison evidence because its detailed output is not retained; it cannot
+be used to support results for that assessed tree or today's worktree.
 
 The prior B3/B4 implementation gaps are therefore marked **resolved in source and focused
-tests**, but the latest reproducible current-revision declaration comparison and clean
-revision-bound evidence are **not established by this research task**. The stable TypeScript
-7 API and TypeDoc peer blockers remain. The editor proof, compatible revision history, and
-full promotion decision also remain separate gates; none is inferred from this report.
+tests**. C-858078 provides revision-bound per-file classifications for its recorded source
+identity, but its identity does not match R-testsha. A complete current comparison tying
+compiler command results and classifications to one source identity is **not established**.
+The stable TypeScript 7 API and TypeDoc peer blockers remain. The editor proof, compatible
+revision history, and full promotion decision also remain separate gates; none is inferred
+from an unrelated comparison artifact.
 
 ## Incremental options considered
 
@@ -1250,6 +1322,12 @@ editor proof, and approved-runner evidence. This reassessment does not authorize
 
 ### Independent qualification rerun — 2026-10-15
 
+This qualification subsection records reported disposable-install and tool-smoke results,
+not a TypeScript comparison run. The transcript/logs for the individual install and runtime
+outcomes are not retained here; the assertions below remain reported findings rather than
+independently verified run evidence. Do not use them to fill missing compiler-comparison
+metadata for H-72383, AUD-7ad2, R-testsha, or C-858078.
+
 At 2026-10-15 09:50 UTC, npm `latest` metadata still resolved to TypeDoc 0.28.20,
 `typedoc-plugin-markdown` 4.14.0, `typedoc-plugin-coverage` 4.0.3, and Orval 8.43.0.
 TypeDoc's peer range still ends at TypeScript 6.0.x. The TypeDoc 0.28.20 release notes
@@ -1293,33 +1371,53 @@ Fresh disposable qualification results:
 
 ### Current declaration comparison
 
-The disposable comparison ran both full shared-library builds, all six no-emit project
-checks, and generated API declaration builds successfully under TypeScript 6.0.3 and
-TypeScript 7.0.2. It captured 983 declaration files per compiler and 282 textually changed
-files (2 API client, 212 API Zod, and 68 database declarations).
+The report describes a disposable comparison that ran both full shared-library builds, all
+six no-emit project checks, and generated API declaration builds under TypeScript 6.0.3 and
+TypeScript 7.0.2. The matching retained compiler-results artifact R-testsha records command
+successes, 983 declaration files per compiler, and 282 changed paths. It does not record a
+capture timestamp or Git revision, and the report says it was not used or regenerated for
+the 2026-10-14 assessment. Do not attribute it to that date.
 
 Three existing exact-hash approvals no longer matched the current generated output. After
 reviewing the changed TypeScript representations and confirming bidirectional compatibility
 under both compilers, the approval file was updated for those same three paths; no new
-approval paths were added. The current declaration-contract comparison then passed:
-273 formatting-only files, 9 exact-hash-approved semantic files, and 0 unexplained
-semantic changes.
+approval paths were added. The retained per-file report C-858078 records 273
+formatting-only files, 9 approved semantic files, and 0 unexplained semantic changes for
+source revision `858078ed44c8838cedfa80b40c4950ac42b668e2` and source-bundle SHA-256
+`3468d08570540775d10b5df16eb43ea0318545ded502e1ebfac822f47fb722a7`. However, C-858078's
+source identity differs from R-testsha's `test-sha256:` identity. Therefore, the claim that
+the 983/282 compiler run and the 273/9/0 classification are one comparison is **unresolved**;
+the retained artifacts support each result only under its own recorded identity.
 
-The full reproduction's final retained-summary check rejected these current totals against
-the older 2026-09-15 retained summary (795 files and 217 changed files). That older
-summary remains historical and was not overwritten. The full comparison output, summary,
-and compiler build trees remain disposable under `/tmp`. The compact
+The report says the full reproduction's final retained-summary check rejected its current
+totals against H-72383 (795 files and 217 changed files). This check's outcome for the
+unretained reproduction is **unresolved**; running the retained-summary check now can only
+verify H-72383's internal count agreement and cannot prove the reported rejection or the
+classification. H-72383 remains historical and was not overwritten. The full comparison
+output, summary, and compiler build trees for the reported run were disposable under `/tmp`.
+The compact
 per-file declaration-contract report for the latest successful fresh comparison is retained
 separately at
 [`docs/evidence/typescript-7-declaration-contracts-current.json`](evidence/typescript-7-declaration-contracts-current.json);
-its revision and source-bundle hash identify the exact comparison inputs. Retaining this
-report does not refresh or replace the historical summary and does not change the TypeScript
-6 authority or the TypeScript 7 adoption decision.
+its revision and source-bundle hash identify C-858078's exact classification inputs. Its
+source identity does not match R-testsha; therefore it cannot establish the compiler
+commands or aggregate comparison results attributed to R-testsha. Retaining this report
+does not refresh or replace the historical summary and does not change the TypeScript 6
+authority or the TypeScript 7 adoption decision.
 
-**Decision remains NO-GO for TypeScript 7 adoption.** TypeScript 6.0.3 remains authoritative;
-do not change dependency versions or bypass the release-age policy as part of this task.
+**Decision remains NO-GO for TypeScript 7 adoption.** This is a conservative decision based
+on the separately dated stable-API and TypeDoc compatibility assessments, the TypeScript 6
+boundary checks reported below, and the unresolved comparison-run linkage above—not a
+conclusion that C-858078 proves R-testsha's compiler results. TypeScript 6.0.3 remains
+authoritative; do not change dependency versions or bypass the release-age policy as part of
+this task.
 
 ### Stable compiler API reassessment — 2026-10-15
+
+This is an upstream/API assessment, not a compiler-comparison run. Its no-adoption
+recommendation is based on the published TypeScript release/export metadata linked below
+and the current repository consumer inventory; it does not infer API compatibility from
+H-72383, A-63cfd, R-testsha, or C-858078.
 
 **Decision:** No stable TypeScript 7 programmatic API is published for the operations used
 by this repository's eleven consumers. Keep every consumer behind the TypeScript 6.0.3
