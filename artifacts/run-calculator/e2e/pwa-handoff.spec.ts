@@ -221,7 +221,10 @@ async function startVersionedServer(
     signIns: 0,
   };
   const intentRequestIds: string[] = [];
+  const intentRequestUsers: string[] = [];
   const appliedIntentIds: string[] = [];
+  const appliedIntentUsers: string[] = [];
+  const signedInUsers: string[] = [];
   const fixtureErrors: string[] = [];
   let releaseIntentAuthResponse: (() => void) | undefined;
   const intentAuthResponseGate = new Promise<void>((resolve) => {
@@ -243,6 +246,11 @@ async function startVersionedServer(
     sandboxStale: false,
     disabled: false,
   };
+  let activeSessionUserId = sessionUser.userId;
+  const sessionUsers = new Map([
+    [sessionUser.userId, sessionUser],
+    ["pwa-session-user-b", { ...sessionUser, userId: "pwa-session-user-b", name: "PWA Session B" }],
+  ]);
   const oldIndex = await readFile(path.join(versionDirs.old, "index.html"), "utf8");
   const entryScript = oldIndex.match(/<script[^>]+src="\/?([^"]+\.js)"/)?.[1];
   if (!entryScript) throw new Error("The PWA fixture could not find the entry script");
@@ -288,7 +296,7 @@ async function startVersionedServer(
         sessionRecoveryRequests.acceptedMeResponses += 1;
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
-          .end(JSON.stringify(sessionUser));
+          .end(JSON.stringify(sessionUsers.get(activeSessionUserId)));
         return;
       }
       if (options.sessionRecoveryIntentOutbox && requestPath === "api/auth/sign-in") {
@@ -299,7 +307,8 @@ async function startVersionedServer(
           password?: string;
         };
         if (
-          credentials.username !== "pwa-session-user"
+          !credentials.username
+          || !sessionUsers.has(credentials.username)
           || credentials.password !== "disposable-fixture"
         ) {
           response
@@ -308,11 +317,16 @@ async function startVersionedServer(
           return;
         }
         sessionValid = true;
+        activeSessionUserId = credentials.username;
         sessionRecoveryRequests.signIns += 1;
+        signedInUsers.push(activeSessionUserId);
         response.writeHead(200, {
           "content-type": "application/json; charset=utf-8",
           "set-cookie": "rc_auth=disposable-fixture-session; Path=/; HttpOnly; SameSite=Lax",
-        }).end(JSON.stringify({ token: "disposable-fixture-token", user: sessionUser }));
+        }).end(JSON.stringify({
+          token: "disposable-fixture-token",
+          user: sessionUsers.get(activeSessionUserId),
+        }));
         return;
       }
       if (
@@ -326,6 +340,7 @@ async function startVersionedServer(
           intent?: { id?: string };
         };
         sessionRecoveryRequests.intentPosts += 1;
+        intentRequestUsers.push(activeSessionUserId);
         if (payload.intent?.id) intentRequestIds.push(payload.intent.id);
         if (!sessionValid) {
           // Hold the command's auth failure until the independent /me probe
@@ -338,6 +353,7 @@ async function startVersionedServer(
           return;
         }
         sessionRecoveryRequests.intentApplications += 1;
+        appliedIntentUsers.push(activeSessionUserId);
         if (payload.intent?.id) appliedIntentIds.push(payload.intent.id);
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -541,7 +557,10 @@ async function startVersionedServer(
       return {
         ...sessionRecoveryRequests,
         intentRequestIds: [...intentRequestIds],
+        intentRequestUsers: [...intentRequestUsers],
         appliedIntentIds: [...appliedIntentIds],
+        appliedIntentUsers: [...appliedIntentUsers],
+        signedInUsers: [...signedInUsers],
       };
     },
     fixtureErrors() {
@@ -1426,6 +1445,184 @@ test.describe("PWA update handoff", () => {
         intentApplications: 1,
         intentRequestIds: [revokedIntentId, revokedIntentId],
         appliedIntentIds: [revokedIntentId],
+      });
+      expect(pageErrors).toEqual([]);
+      expect(server.fixtureErrors()).toEqual([]);
+      expect(expectedExternalFontErrors.every((message) =>
+        message.includes("fonts.googleapis.com/css2?family=Inter"),
+      )).toBe(true);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await server.close();
+    }
+  });
+
+  test("keeps an authentication-blocked offline intent private across account switches", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    const expectedExternalFontErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (error.message.includes("fonts.googleapis.com/css2")) {
+        expectedExternalFontErrors.push(error.message);
+      } else {
+        pageErrors.push(error.message);
+      }
+    });
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true, sessionRecoveryIntentOutbox: true },
+    );
+
+    try {
+      await page.route("https://fonts.googleapis.com/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/css", body: "" }),
+      );
+      await page.addInitScript(() => {
+        if (location.origin === "null") return;
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-account-switch-run",
+            brand: "Offline",
+            flavor: "Account switch",
+            startedAt: 1_000,
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+      // Account A saves a real PWA action while offline. Its session expires
+      // before reconnection, so the existing fixture holds the 401 until /me
+      // has signed the user out and the outbox can retain the blocked record.
+      await page.context().setOffline(true);
+      await page.getByRole("button", { name: /PAUSE RUN/i }).click();
+      await expect.poll(() => page.evaluate(() => {
+        const prefix = "run-calculator:operational-intent-outbox:v1:pending:";
+        for (let index = 0; index < localStorage.length; index++) {
+          const key = localStorage.key(index);
+          if (!key?.startsWith(prefix)) continue;
+          const intent = JSON.parse(localStorage.getItem(key) ?? "null");
+          if (intent?.action === "pause") return intent;
+        }
+        return null;
+      })).toMatchObject({
+        action: "pause",
+        state: "pending",
+        deferredOffline: true,
+        owner: "live:pwa-session-user",
+        runId: "pwa-account-switch-run",
+      });
+      server.setSessionValid(false);
+      server.dropSessionEventStreams();
+      const meRequestsBeforeReconnect = server.sessionRecoveryRequests().me;
+      await page.context().setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+      await expect.poll(() => server.sessionRecoveryRequests().intentPosts).toBe(1);
+      const blockedIntentId = server.sessionRecoveryRequests().intentRequestIds[0];
+      await expect.poll(() => server.sessionRecoveryRequests().me)
+        .toBeGreaterThan(meRequestsBeforeReconnect);
+      expect(blockedIntentId).toBeTruthy();
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        intentRequestIds: [blockedIntentId],
+        intentRequestUsers: ["pwa-session-user"],
+        intentApplications: 0,
+        appliedIntentIds: [],
+      });
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      server.releaseIntentAuthResponse();
+      await expect.poll(() => page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, blockedIntentId)).toMatchObject({
+        id: blockedIntentId,
+        owner: "live:pwa-session-user",
+        state: "blocked",
+        failure: "authentication",
+      });
+
+      // Signing in as B must not expose, retry, send, or apply A's blocked ID.
+      await page.getByLabel("Username").fill("pwa-session-user-b");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect(page.locator('button[title^="Sync"]')).toBeVisible();
+      await page.locator('button[title^="Sync"]').click();
+      await expect(page.getByText("Offline action queue")).toHaveCount(0);
+      await page.waitForTimeout(500);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        signIns: 1,
+        signedInUsers: ["pwa-session-user-b"],
+        intentPosts: 1,
+        intentRequestIds: [blockedIntentId],
+        intentRequestUsers: ["pwa-session-user"],
+        intentApplications: 0,
+        appliedIntentIds: [],
+      });
+
+      // Expire B's disposable session to return to the same sign-in screen,
+      // then sign A back in. The exact blocked record must reappear without
+      // automatically sending it.
+      server.setSessionValid(false);
+      server.dropSessionEventStreams();
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await page.getByLabel("Username").fill("pwa-session-user");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect(page.locator('button[title^="Sync"]')).toBeVisible();
+      await page.locator('button[title^="Sync"]').click();
+      await expect(page.getByText("pause · Blocked")).toBeVisible();
+      await expect(page.getByText("Sign in again, then choose Retry.")).toBeVisible();
+      await expect(page.getByText(`#${blockedIntentId.slice(-6)}`)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+      await page.waitForTimeout(500);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        signIns: 2,
+        signedInUsers: ["pwa-session-user-b", "pwa-session-user"],
+        intentPosts: 1,
+        intentRequestIds: [blockedIntentId],
+        intentRequestUsers: ["pwa-session-user"],
+        intentApplications: 0,
+        appliedIntentIds: [],
+      });
+
+      // A's explicit Retry is the only allowed replay and applies the same ID
+      // exactly once under A's authenticated fixture identity.
+      await page.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect.poll(() => server.sessionRecoveryRequests().intentApplications).toBe(1);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        intentPosts: 2,
+        intentRequestIds: [blockedIntentId, blockedIntentId],
+        intentRequestUsers: ["pwa-session-user", "pwa-session-user"],
+        intentApplications: 1,
+        appliedIntentIds: [blockedIntentId],
+        appliedIntentUsers: ["pwa-session-user"],
       });
       expect(pageErrors).toEqual([]);
       expect(server.fixtureErrors()).toEqual([]);

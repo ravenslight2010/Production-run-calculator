@@ -357,6 +357,43 @@ describe("operational intent outbox", () => {
     expect(readOperationalIntentOutbox()).toEqual([]);
     expect(retryOperationalIntent(intent.id)).toBe(false);
   });
+  it("keeps an authentication-blocked intent private until its owner explicitly retries it", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false, status: 401, headers: { get: () => null }, json: async () => ({}),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }),
+      });
+    vi.stubGlobal("fetch", fetch);
+
+    const intent = queueOperationalIntent({
+      runId: "account-switch", observedGeneration: "account-switch:1", effectiveAt: 1, action: "pause",
+    });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id, owner: "live:operator-1", state: "blocked", failure: "authentication",
+    })]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-2" });
+    expect(readOperationalIntentOutbox()).toEqual([]);
+    expect(retryOperationalIntent(intent.id)).toBe(false);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id, owner: "live:operator-1", state: "blocked", failure: "authentication",
+    })]);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id, owner: "live:operator-1", state: "accepted",
+    })]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it("does not discard an in-flight action or apply its response after identity changes", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     let release!: (value: unknown) => void;

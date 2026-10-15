@@ -9,6 +9,12 @@ Offline master-data snapshots, migration markers, and outboxes must be partition
 
 **How to apply:** Key every durable client record by scope, keep single-flight state per scope, clean up reconnect listeners on identity changes, and check the captured scope after each network await before touching cache or queue state.
 
+Browser coverage for account switches must verify delivery effects as well as rendered queue visibility: a UI filter can hide another account's record while an asynchronous flush still sends it.
+
+**Why:** Visual absence alone cannot prove that retained work was not replayed or applied under the newly signed-in identity.
+
+**How to apply:** In disposable multi-identity browser fixtures, assert the queued ID, request count, request identity, and application count before and after switching accounts; never use real accounts or credentials.
+
 Legacy local records with no conflict timestamp use reserved revision zero. They may seed an absent server row, but an existing server row at revision zero or higher wins; normal user edits start above zero.
 
 **Why:** Existing server rows can predate the revision column and therefore carry its zero default. Giving unstamped local data a current timestamp would silently overwrite legitimate server state during migration.
