@@ -8,17 +8,17 @@
 // This suite creates and drops its own PostgreSQL database. It never points the
 // application pool at the configured database until after the throwaway schema
 // has been created, and it uses only synthetic users and job input.
-import { spawn, spawnSync, type ChildProcessByStdio } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import type { Readable } from "node:stream";
 import express, { type Express, type Response as ExpressResponse } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { signLegacyTokenForTests } from "../lib/auth";
+import { waitForIsolatedApiProcess, type IsolatedApiProcess } from "./serverJobsProcess";
 
 type DbModule = typeof import("@workspace/db");
 
@@ -50,8 +50,6 @@ const apiProcessEntrypoint = path.resolve(repoRoot, "scripts/node_modules/.bin/t
 const apiProcessFixture = fileURLToPath(new URL("./serverJobs.process.fixture.ts", import.meta.url));
 let confirmationLoss: Promise<number> | undefined;
 let loseFirstConfirmation = false;
-type IsolatedApiProcess = ChildProcessByStdio<null, Readable, Readable>;
-
 const ACTOR = "route-job-actor";
 const OTHER_LIVE_ACTOR = "route-job-other-live-actor";
 const SANDBOX_ACTOR = "route-job-sandbox-actor";
@@ -302,61 +300,7 @@ async function startIsolatedApiProcess(): Promise<{
     env: { ...process.env, DATABASE_URL: testDatabaseUrl, DATABASE_POOL_MAX: "2" },
     stdio: ["ignore", "pipe", "pipe"],
   });
-
-  return new Promise((resolve, reject) => {
-    let output = "";
-    let settled = false;
-    let childClosed = false;
-    let startupTimer: NodeJS.Timeout | undefined;
-    let forceKillTimer: NodeJS.Timeout | undefined;
-    child.once("close", () => {
-      childClosed = true;
-    });
-    const fail = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      if (startupTimer) clearTimeout(startupTimer);
-      if (childClosed || child.exitCode !== null || child.signalCode !== null) {
-        reject(error);
-        return;
-      }
-      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
-      child.once("close", () => {
-        if (forceKillTimer) clearTimeout(forceKillTimer);
-        reject(error);
-      });
-      child.kill("SIGTERM");
-    };
-    startupTimer = setTimeout(
-      () => fail(new Error("Isolated API process did not become ready within 60 seconds")),
-      60_000,
-    );
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      if (settled) return;
-      output += chunk.toString();
-      for (const line of output.split("\n").slice(0, -1)) {
-        try {
-          const message = JSON.parse(line) as { port?: number };
-          if (Number.isInteger(message.port) && message.port! > 0) {
-            settled = true;
-            if (startupTimer) clearTimeout(startupTimer);
-            resolve({ child, url: `http://127.0.0.1:${message.port}` });
-            return;
-          }
-        } catch {
-          // Startup diagnostics are allowed; only the JSON ready marker matters.
-        }
-      }
-      output = output.slice(output.lastIndexOf("\n") + 1);
-    });
-    child.stderr.on("data", () => {});
-    child.once("error", (error) => fail(error));
-    child.once("exit", (code, signal) => {
-      if (!settled) {
-        fail(new Error(`Isolated API process exited before ready (${code ?? signal})`));
-      }
-    });
-  });
+  return waitForIsolatedApiProcess(child);
 }
 
 async function stopIsolatedApiProcess(child: IsolatedApiProcess): Promise<void> {
