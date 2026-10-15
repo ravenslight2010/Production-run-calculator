@@ -1098,3 +1098,91 @@ Repository evidence reviewed read-only:
 No compiler comparison, retained evidence refresh, dependency or lockfile change, CI change,
 editor change, or promotion attempt was made for this reassessment. The only task change is
 this dated report section.
+
+## Fresh reassessment on 2026-10-15
+
+**Assessed base revision:** `5ae27910553ff568f77d0d71c50fc89ac102ccf8`
+
+**Decision:** **Keep TypeScript 6.0.3 authoritative.** Neither upstream blocker is cleared.
+No adoption plan or promotion attempt is authorized by this reassessment.
+
+### Official API and registry status
+
+- Microsoft's [TypeScript releases](https://github.com/microsoft/TypeScript/releases)
+  identifies **7.0.2** as the latest stable TypeScript 7 release. The npm `latest` tag
+  and `typescript@7.0.2` package metadata also report 7.0.2.
+- Microsoft's [TypeScript 7.0 announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+  states that 7.0 does not ship a programmatic API. Its
+  [Compiler API guide](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API),
+  last edited 2026-08-17, warns that the guide describes TypeScript 6.0 and earlier and
+  that TypeScript 7.1 will have a different API.
+- The published `typescript@7.0.2` export map exposes its root version metadata and API
+  subpaths under `typescript/unstable/*`; it does not publish stable replacements for the
+  parser, AST, scanner, traversal, diagnostics, preprocessing, and transpilation operations
+  required by the nine inventoried consumers. The API blocker remains.
+- Registry metadata for the current latest toolchain is:
+
+  | Package | Published version | Relevant peer metadata |
+  | --- | --- | --- |
+  | `typedoc` | 0.28.20 | `typescript` peer range ends at `6.0.x` |
+  | `typedoc-plugin-markdown` | 4.14.0 | `typedoc: 0.28.x` |
+  | `typedoc-plugin-coverage` | 4.0.3 | `typedoc: 0.28.x` |
+  | `orval` | 8.43.0 | `typedoc: ^0.28.19`, `typedoc-plugin-markdown: ^4.10.0`; no direct TypeScript peer |
+
+  Sources: [TypeDoc registry metadata](https://registry.npmjs.org/typedoc),
+  [Markdown plugin metadata](https://registry.npmjs.org/typedoc-plugin-markdown),
+  [coverage plugin metadata](https://registry.npmjs.org/typedoc-plugin-coverage), and
+  [Orval metadata](https://registry.npmjs.org/orval), checked 2026-10-15. The TypeDoc
+  [TypeScript 7 tracking issue](https://github.com/TypeStrong/typedoc/issues/3098) remains
+  relevant; package metadata and runtime checks, rather than issue discussion alone, decide
+  compatibility.
+
+### Disposable install and smoke results
+
+All candidate dependency installation, generated files, and smoke output were confined to
+temporary directories outside the workspace. No peer override or ignored-warning setting was
+used. The sandbox allowed only the required `esbuild` build script so pnpm could install the
+packages; that allowance was not added to the repository.
+
+- A fresh lockfile resolution with the latest TypeScript 7 / TypeDoc / plugin / Orval graph
+  and `--strict-peer-dependencies` failed with `ERR_PNPM_PEER_DEP_ISSUES`: TypeDoc 0.28.20
+  requires a TypeScript peer from 5.0.x through 6.0.x, but the selected TypeScript is 7.0.2.
+- For clarity, a frozen install against a lockfile previously generated without strict peer
+  resolution did exit successfully. It is **not** peer-clean evidence: `pnpm peers check`
+  on that installed graph failed with the same unmet TypeDoc peer. Do not treat the frozen
+  install's exit status alone as satisfying the strict-peer gate.
+- Running TypeDoc 0.28.20 and both plugins against TypeScript 7.0.2 failed before document
+  generation with `TypeError: Cannot read properties of undefined (reading
+  'PropertyDeclaration')`. This is a direct runtime incompatibility, not merely a peer-range
+  warning. The same TypeDoc/plugin smoke under the retained TypeScript 6.0.3 toolchain passed
+  in the existing bridge check.
+- Orval 8.43.0's CLI runtime smoke passed, and it generated 797 TypeScript files from the
+  project OpenAPI configuration into a disposable output directory. The initial isolated
+  generation attempt lacked the config's `custom-fetch.ts` fixture; copying that input into
+  the disposable output and following `check-generated.sh`'s setup made the smoke pass.
+- `pnpm run check:typescript-7-codegen-bridge` passed in its disposable repository copy:
+  the frozen strict-peer install kept TypeScript 6.0.3 with TypeDoc/plugins and TypeScript
+  7.0.2 as the separate candidate CLI; the TypeDoc/plugin smoke, Orval 8.42.0 generation
+  freshness check, API Zod test, and TypeScript 7 generated declaration builds passed.
+  This validates the current isolated arrangement; it does not show TypeDoc compatibility
+  with TypeScript 7.
+
+### Repository boundary checks and decision
+
+- `pnpm run check:typescript-api-v6` passed all 12 tests and reported API version 6.0.3
+  with zero direct-import bypasses. The nine current consumers remain behind the same
+  TypeScript 6 boundary.
+- `pnpm --filter @workspace/scripts run test:declaration-contracts` passed. The disposable
+  TypeScript 7 generated API declaration builds also passed through the existing bridge.
+- **Not reached:** live editor diagnostics/navigation and approved-runner promotion evidence.
+  Those are later adoption gates; the API and TypeDoc blockers already prevent an adoption
+  recommendation, and no promotion command was run.
+- Root compiler authority, editor SDK, package manifests, lockfile, and release gates were
+  not changed. TypeScript 6.0.3 remains authoritative; TypeScript 7.0.2 remains only the
+  separately named advisory candidate.
+
+Reassess only after Microsoft publishes a stable TypeScript 7 API for all nine consumer
+operations and TypeDoc, its plugins, and Orval publish a compatible graph. At that point,
+open a separate bounded adoption task covering API-consumer migration/isolation, strict
+frozen install, TypeDoc/plugin and Orval generation/runtime smokes, declaration comparison,
+editor proof, and approved-runner evidence. This reassessment does not authorize that work.
