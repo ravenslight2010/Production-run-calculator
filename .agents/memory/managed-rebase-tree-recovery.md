@@ -40,3 +40,15 @@ If managed finalization fails during Git LFS fetch and the designated base remot
 **Why:** A task could not complete its managed rebase because the LFS fetch had no usable SSH authentication, even though the code validation passed and the worktree was clean.
 
 **How to apply:** Confirm the branch and worktree remain intact, report the remote-access blocker, and retry managed finalization only after that access is restored.
+
+Diagnose the exact configured task route, not a guessed `git@` login to the SSH
+proxy. The main workspace and a task checkout need not expose the same managed
+remote or authentication context. Distinguish host-key verification failures
+from authentication failures before drawing conclusions about token permissions.
+
+**Why:** A generic proxy login and a configured task route produced different
+failure stages; neither established that the existing GitHub credential was bad.
+
+**How to apply:** Use bounded, noninteractive read-only checks against existing
+routes. Preserve host-key verification, never accept an unverified key to unblock
+completion, and never send a GitHub token to an unrelated Replit SSH endpoint.
