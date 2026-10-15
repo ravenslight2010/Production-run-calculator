@@ -469,9 +469,11 @@ test_release_runner_verifies_local_tls_certificates() {
   local npx_log="${workspace}/npx-log"
   local package_name="replit-release-runner-tls-fixture"
   local package_version="1.0.0"
+  local ip_mismatch_output="${workspace}/ip-mismatch-output"
   local hostname_mismatch_output="${workspace}/hostname-mismatch-output"
   local url
   local trusted_name_url
+  local mismatched_ip_url
   local mismatched_url
   local attempt
   local status
@@ -720,26 +722,43 @@ tarballServer.listen(0, "127.0.0.1", () => {
 EOF
   cat >"$client_script" <<'EOF'
 const https = require("node:https");
+const net = require("node:net");
+const tls = require("node:tls");
+
+const url = new URL(process.argv[2]);
+const requestOptions = {
+  lookup: (hostname, options, callback) => {
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    }
+    if (hostname !== "localhost" && hostname !== "mismatched-name.invalid") {
+      callback(new Error(`Unexpected TLS fixture hostname: ${hostname}`));
+      return;
+    }
+    if (options.all) {
+      callback(null, [{ address: "127.0.0.1", family: 4 }]);
+      return;
+    }
+    callback(null, "127.0.0.1", 4);
+  },
+};
+
+if (url.hostname === "127.0.0.2") {
+  // Keep the HTTPS listener bound only to loopback while testing a different
+  // IP-literal URL. TLS still checks the URL host against the certificate SAN.
+  const agent = new https.Agent();
+  agent.createConnection = (options) =>
+    tls.connect({
+      ...options,
+      socket: net.connect({ host: "127.0.0.1", port: options.port }),
+    });
+  requestOptions.agent = agent;
+}
 
 const request = https.get(
-  process.argv[2],
-  {
-    lookup: (hostname, options, callback) => {
-      if (typeof options === "function") {
-        callback = options;
-        options = {};
-      }
-      if (hostname !== "localhost" && hostname !== "mismatched-name.invalid") {
-        callback(new Error(`Unexpected TLS fixture hostname: ${hostname}`));
-        return;
-      }
-      if (options.all) {
-        callback(null, [{ address: "127.0.0.1", family: 4 }]);
-        return;
-      }
-      callback(null, "127.0.0.1", 4);
-    },
-  },
+  url,
+  requestOptions,
   (response) => {
     let body = "";
     response.setEncoding("utf8");
@@ -788,7 +807,31 @@ EOF
   fi
   url="https://127.0.0.1:$(cat "$registry_port_file")/"
   trusted_name_url="https://localhost:$(cat "$registry_port_file")/"
+  mismatched_ip_url="https://127.0.0.2:$(cat "$registry_port_file")/"
   mismatched_url="https://mismatched-name.invalid:$(cat "$registry_port_file")/"
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$url" >"$trusted_output" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ "$(cat "$trusted_output")" != *"verified local TLS fixture"* ]]; then
+    printf 'Pinned runner did not accept the matching IP certificate SAN (status %s):\n' \
+      "$status" >&2
+    cat "$trusted_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$npx_log")" "npx-invoked"
 
   set +e
   env \
@@ -812,6 +855,29 @@ EOF
     return 1
   fi
   assert_contains "$(cat "$npx_log")" "npx-invoked"
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$mismatched_ip_url" >"$ip_mismatch_output" 2>&1
+  status=$?
+  set -e
+  local ip_mismatch_result
+  ip_mismatch_result=$(cat "$ip_mismatch_output")
+  if [[ "$status" -eq 0 ]] ||
+    [[ "$ip_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
+    printf 'Trusted TLS with a mismatched IP address did not fail certificate-name validation (status %s):\n%s\n' \
+      "$status" "$ip_mismatch_result" >&2
+    return 1
+  fi
 
   set +e
   env \
@@ -1013,7 +1079,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs and mismatched certificate names, and reject altered package bytes directly, after redirect, and with shasum-only metadata"
+  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs and mismatched DNS/IP certificate names, and reject altered package bytes directly, after redirect, and with shasum-only metadata"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
