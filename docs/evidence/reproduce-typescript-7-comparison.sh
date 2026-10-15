@@ -268,6 +268,11 @@ console.log(
 NODE
 }
 
+if [[ "${1:-}" == "--source-bundle-sha256" ]]; then
+  comparison_source_sha256 "$REPO"
+  exit 0
+fi
+
 if [[ "${1:-}" == "--check-retained-summary" ]]; then
   SUMMARY_PATH="${2:-$REPO/docs/evidence/typescript-7-comparison-2026-09-15.json}"
   check_documented_declaration_counts "$(realpath -e "$SUMMARY_PATH")"

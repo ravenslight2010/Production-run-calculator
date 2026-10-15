@@ -1,7 +1,7 @@
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { captureReleaseIdentity, isEvidenceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   cp,
   mkdir,
@@ -9,6 +9,7 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { cpus, release as kernelRelease, totalmem, tmpdir } from "node:os";
@@ -34,6 +35,10 @@ import {
   TYPESCRIPT_7_SUPPORTED_RUNNERS,
   typescript7NativePackagesFromLockfile,
 } from "./typescript-7-native-contract.mts";
+import {
+  resetTypescript7ContractArtifactDirectory,
+  writeTypescript7ContractArtifact,
+} from "./typescript-7-contract-artifact.mts";
 
 export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.mts";
 export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
@@ -517,6 +522,79 @@ export async function declarationManifest(checkout: string) {
   );
 }
 
+async function copyDeclarationSnapshot(
+  checkout: string,
+  snapshotRoot: string,
+  declarations: Awaited<ReturnType<typeof declarationManifest>>,
+): Promise<void> {
+  await mkdir(snapshotRoot, { recursive: true });
+  for (const declaration of declarations) {
+    const destination = resolve(snapshotRoot, declaration.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(resolve(checkout, declaration.path), destination);
+  }
+  await symlink(resolve(checkout, "node_modules"), resolve(snapshotRoot, "node_modules"), "dir");
+}
+
+function exactSourceBundleSha256(): string {
+  const script = resolve(
+    rootDir,
+    "docs/evidence/reproduce-typescript-7-comparison.sh",
+  );
+  const result = spawnSync("bash", [script, "--source-bundle-sha256"], {
+    cwd: rootDir,
+    encoding: "utf8",
+  });
+  const hash = result.stdout.trim();
+  if (result.status !== 0 || !/^[a-f0-9]{64}$/u.test(hash)) {
+    throw new Error(
+      `Could not verify the exact TypeScript comparison source bundle: ${result.stderr.trim()}`,
+    );
+  }
+  return hash;
+}
+
+function comparisonReportMatchesDeclarationManifests(
+  comparison: {
+    baselineFileCount: number;
+    candidateFileCount: number;
+    files: Array<{
+      path: string;
+      baselineSha256: string | null;
+      candidateSha256: string | null;
+    }>;
+  },
+  baseline: Awaited<ReturnType<typeof declarationManifest>>,
+  candidate: Awaited<ReturnType<typeof declarationManifest>>,
+): boolean {
+  const baselineByPath = new Map(
+    baseline.map(({ path, sha256 }) => [path, sha256]),
+  );
+  const candidateByPath = new Map(
+    candidate.map(({ path, sha256 }) => [path, sha256]),
+  );
+  const changedPaths = [...new Set([
+    ...baselineByPath.keys(),
+    ...candidateByPath.keys(),
+  ])]
+    .filter((path) => baselineByPath.get(path) !== candidateByPath.get(path))
+    .sort();
+  const reported = [...comparison.files].sort((left, right) =>
+    left.path.localeCompare(right.path),
+  );
+  return (
+    comparison.baselineFileCount === baseline.length &&
+    comparison.candidateFileCount === candidate.length &&
+    reported.length === changedPaths.length &&
+    reported.every(
+      (file, index) =>
+        file.path === changedPaths[index] &&
+        file.baselineSha256 === (baselineByPath.get(file.path) ?? null) &&
+        file.candidateSha256 === (candidateByPath.get(file.path) ?? null),
+    )
+  );
+}
+
 async function processTreeRssKiB(rootPid: number): Promise<number | null> {
   try {
     const procEntries = (await readdir("/proc")).filter((entry) => /^\d+$/.test(entry));
@@ -621,6 +699,22 @@ async function main(): Promise<void> {
   measuredRevision = beforeStatus;
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "typescript-7-release-"));
   const checkout = resolve(temporaryRoot, "repository");
+  const baselineDeclarationSnapshot = resolve(
+    temporaryRoot,
+    "typescript-6-declarations",
+  );
+  const candidateDeclarationSnapshot = resolve(
+    temporaryRoot,
+    "typescript-7-declarations",
+  );
+  const contractArtifactDirectory =
+    process.env.TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR;
+  if (contractArtifactDirectory) {
+    resetTypescript7ContractArtifactDirectory(
+      contractArtifactDirectory,
+      process.env.RUNNER_TEMP ?? "",
+    );
+  }
   const commands: CommandEvidence[] = [];
   let report: Record<string, unknown>;
   let editorService: EditorServiceEvidence | null = null;
@@ -735,6 +829,15 @@ async function main(): Promise<void> {
     const buildArgs = ["--build", "--force", "--pretty", "false"];
     commands.push(await run("typescript-6-build-cold", process.execPath, [ts6, ...buildArgs], checkout));
     const baselineDeclarations = await declarationManifest(checkout);
+    if (contractArtifactDirectory) {
+      // Retain only declarations from this existing compiler pass; do not rerun
+      // the TypeScript matrix to produce the compact contract classification.
+      await copyDeclarationSnapshot(
+        checkout,
+        baselineDeclarationSnapshot,
+        baselineDeclarations,
+      );
+    }
     const clean = await run(
       "typescript-6-clean",
       process.execPath,
@@ -749,6 +852,13 @@ async function main(): Promise<void> {
     }
     commands.push(await run("typescript-7-build-cold", process.execPath, [ts7, ...buildArgs], checkout));
     const candidateDeclarations = await declarationManifest(checkout);
+    if (contractArtifactDirectory) {
+      await copyDeclarationSnapshot(
+        checkout,
+        candidateDeclarationSnapshot,
+        candidateDeclarations,
+      );
+    }
 
     const preparedCompilers = new Set<6 | 7>();
     for (const mode of TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes) {
@@ -975,6 +1085,137 @@ async function main(): Promise<void> {
       acceptanceGatesMet: advisoryPassed && promotionGatesMet,
       advisory: !promotionAttempt,
     };
+
+    if (
+      contractArtifactDirectory &&
+      commands.every((command) => command.exitCode === 0) &&
+      diagnosticsEqual &&
+      (report.status === "PASS" || report.status === "ADVISORY_DRIFT")
+    ) {
+      const declarationComparisonDirectory = resolve(
+        temporaryRoot,
+        "declaration-contract-comparison",
+      );
+      const declarationComparisonPath = resolve(
+        declarationComparisonDirectory,
+        "declaration-contracts.json",
+      );
+      const contractCheck = spawnSync(
+        resolve(rootDir, "scripts/node_modules/.bin/tsx"),
+        [
+          resolve(rootDir, "scripts/src/compare-declaration-contracts.mts"),
+          baselineDeclarationSnapshot,
+          candidateDeclarationSnapshot,
+          declarationComparisonDirectory,
+          "--approvals",
+          resolve(rootDir, "docs/evidence/typescript-7-declaration-approvals.json"),
+          "--compatibility-compiler",
+          "typescript-6",
+          ts6,
+          "--compatibility-compiler",
+          "typescript-7",
+          ts7,
+        ],
+        { cwd: rootDir, encoding: "utf8" },
+      );
+      if (
+        contractCheck.status === 0 &&
+        !contractCheck.error &&
+        existsSync(declarationComparisonPath)
+      ) {
+        const declarationComparison = JSON.parse(
+          await readFile(declarationComparisonPath, "utf8"),
+        ) as {
+          schemaVersion: number;
+          baselineFileCount: number;
+          candidateFileCount: number;
+          status: string;
+          categories: Array<{
+            category: "api-client-react" | "api-zod" | "db" | "other";
+            changed: number;
+            formattingOnly: number;
+            approvedSemantic: number;
+            unexplainedSemantic: number;
+          }>;
+          files: Array<{
+            path: string;
+            category: "api-client-react" | "api-zod" | "db" | "other";
+            baselineSha256: string | null;
+            candidateSha256: string | null;
+            classification:
+              | "added"
+              | "removed"
+              | "formatting-only"
+              | "approved-semantic"
+              | "semantic";
+            approvalReason?: string;
+          }>;
+        };
+        if (
+          declarationComparison.status === "pass" &&
+          comparisonReportMatchesDeclarationManifests(
+            declarationComparison,
+            baselineDeclarations,
+            candidateDeclarations,
+          )
+        ) {
+          const sourceRevision = execFileSync(
+            "git",
+            ["rev-parse", "HEAD"],
+            { cwd: rootDir, encoding: "utf8" },
+          ).trim();
+          const bundleSha256 = exactSourceBundleSha256();
+          const changedFiles = declarationComparison.files;
+          const classificationTotals = {
+            changedFiles: changedFiles.length,
+            formattingOnly: changedFiles.filter(
+              (file) => file.classification === "formatting-only",
+            ).length,
+            approvedSemantic: changedFiles.filter(
+              (file) => file.classification === "approved-semantic",
+            ).length,
+            unexplainedSemantic: changedFiles.filter((file) =>
+              ["added", "removed", "semantic"].includes(file.classification),
+            ).length,
+          };
+          const summary = {
+            capturedAt: new Date().toISOString(),
+            sourceIdentity: { revision: sourceRevision, bundleSha256 },
+            declarations: {
+              textuallyChangedFileCount: changedFiles.length,
+              contractComparison: {
+                status: declarationComparison.status,
+                changedFiles: classificationTotals.changedFiles,
+                formattingOnlyChanges: classificationTotals.formattingOnly,
+                approvedSemanticChanges: classificationTotals.approvedSemantic,
+                unexplainedSemanticChanges:
+                  classificationTotals.unexplainedSemantic,
+              },
+            },
+          };
+          await writeTypescript7ContractArtifact({
+            directory: contractArtifactDirectory,
+            runnerTemp: process.env.RUNNER_TEMP ?? "",
+            summary,
+            declarationComparison,
+            comparison: {
+              status: report.status,
+              commandsSucceeded: true,
+              diagnosticsEqual: true,
+              advisory: report.advisory === true,
+              acceptanceGatesMet: report.acceptanceGatesMet === true,
+            },
+            workflow: {
+              runId: process.env.GITHUB_RUN_ID ?? "",
+              runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "",
+              repository: process.env.GITHUB_REPOSITORY ?? "",
+              eventName: process.env.GITHUB_EVENT_NAME ?? "",
+              sha: process.env.GITHUB_SHA ?? "",
+            },
+          });
+        }
+      }
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
@@ -982,6 +1223,12 @@ async function main(): Promise<void> {
   const afterStatus = await sourceInputIdentity();
   const authoritativeOutputsChanged = afterStatus !== beforeStatus;
   if (authoritativeOutputsChanged) {
+    if (contractArtifactDirectory) {
+      resetTypescript7ContractArtifactDirectory(
+        contractArtifactDirectory,
+        process.env.RUNNER_TEMP ?? "",
+      );
+    }
     throw new Error(
       "TypeScript 7 comparison changed the authoritative working tree.",
     );

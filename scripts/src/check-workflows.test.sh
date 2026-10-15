@@ -1043,6 +1043,29 @@ test_release_workflow_preserves_stopped_summary_contract() {
     "pnpm run release:check:full"
 }
 
+test_release_workflow_retains_successful_typescript_contract_artifacts() {
+  local workflow_content
+  workflow_content=$(<"$RELEASE_WORKFLOW")
+  assert_contains "$workflow_content" \
+    "TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR: \${{ runner.temp }}/typescript-7-contract-standard-\${{ github.run_id }}-\${{ github.run_attempt }}"
+  assert_contains "$workflow_content" \
+    "TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR: \${{ runner.temp }}/typescript-7-contract-full-\${{ github.run_id }}-\${{ github.run_attempt }}"
+  assert_contains "$workflow_content" \
+    "./src/typescript-7-contract-artifact.mts verify"
+  assert_contains "$workflow_content" \
+    "if: \${{ always() && steps.verify-standard-typescript-contract-artifact.outputs.available == 'true' }}"
+  assert_contains "$workflow_content" \
+    "if: \${{ always() && steps.verify-full-typescript-contract-artifact.outputs.available == 'true' }}"
+  assert_contains "$workflow_content" \
+    "typescript-7-declaration-contracts-standard-\${{ github.run_id }}-\${{ github.run_attempt }}"
+  assert_contains "$workflow_content" \
+    "typescript-7-declaration-contracts-full-\${{ github.run_id }}-\${{ github.run_attempt }}"
+  assert_contains "$workflow_content" "retention-days: 14"
+  assert_contains "$workflow_content" "permissions:"
+  assert_contains "$workflow_content" "contents: read"
+  echo "PASS: retains only verified run-specific TypeScript contract artifacts"
+}
+
 test_accepts_matching_versions() {
   local workspace
   workspace=$(make_workspace matching 1.7.12 1.7.12)
@@ -1712,6 +1735,7 @@ test_rejects_production_image_promotion_workflow
 test_rejects_production_image_handoff_workflow
 test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract
+test_release_workflow_retains_successful_typescript_contract_artifacts
 test_stable_branch_protection_workflow_contract
 test_stable_branch_protection_alert_fixture
 test_rejects_floating_workflow_dependencies

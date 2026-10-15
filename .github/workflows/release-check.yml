@@ -112,7 +112,27 @@ jobs:
         id: run-standard-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
+          TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR: ${{ runner.temp }}/typescript-7-contract-standard-${{ github.run_id }}-${{ github.run_attempt }}
         run: node scripts/src/test-results.mjs run --lane release-standard -- pnpm run release:check
+
+      - name: Verify compact TypeScript declaration artifact
+        if: always()
+        id: verify-standard-typescript-contract-artifact
+        env:
+          TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR: ${{ runner.temp }}/typescript-7-contract-standard-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          pnpm --filter @workspace/scripts exec tsx
+          ./src/typescript-7-contract-artifact.mts verify
+          "$TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR"
+
+      - name: Upload compact TypeScript declaration artifact
+        if: ${{ always() && steps.verify-standard-typescript-contract-artifact.outputs.available == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: typescript-7-declaration-contracts-standard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/typescript-7-contract-standard-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Mark standard release lane blocked when setup failed
         if: ${{ always() && steps.run-standard-release-check.outcome == 'skipped' }}
@@ -312,8 +332,28 @@ jobs:
         id: run-full-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
+          TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR: ${{ runner.temp }}/typescript-7-contract-full-${{ github.run_id }}-${{ github.run_attempt }}
           PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
         run: node scripts/src/test-results.mjs run --lane release-full -- pnpm run release:check:full
+
+      - name: Verify compact TypeScript declaration artifact
+        if: always()
+        id: verify-full-typescript-contract-artifact
+        env:
+          TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR: ${{ runner.temp }}/typescript-7-contract-full-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          pnpm --filter @workspace/scripts exec tsx
+          ./src/typescript-7-contract-artifact.mts verify
+          "$TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR"
+
+      - name: Upload compact TypeScript declaration artifact
+        if: ${{ always() && steps.verify-full-typescript-contract-artifact.outputs.available == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: typescript-7-declaration-contracts-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/typescript-7-contract-full-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Mark full release lane blocked when setup failed
         if: ${{ always() && steps.run-full-release-check.outcome == 'skipped' }}

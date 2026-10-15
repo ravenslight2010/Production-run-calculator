@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -26,6 +26,12 @@ import {
   createRetainedDeclarationContractReport,
   verifyRetainedDeclarationContractReport,
 } from "./typescript-declaration-contract-evidence.mts";
+import {
+  TYPESCRIPT_7_CONTRACT_MANIFEST_FILE,
+  TYPESCRIPT_7_CONTRACT_REPORT_FILE,
+  verifyTypescript7ContractArtifact,
+  writeTypescript7ContractArtifact,
+} from "./typescript-7-contract-artifact.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
   diagnosticsEqualForPairs,
@@ -287,6 +293,47 @@ test("historical summary validation stays separate from the current comparison",
   );
 });
 
+test("compact contract evidence reuses the existing TypeScript 6 and 7 builds", async () => {
+  const comparisonSource = await readFile(
+    resolve(import.meta.dirname, "./compare-typescript-7.mts"),
+    "utf8",
+  );
+  const baselineBuild = comparisonSource.indexOf(
+    'run("typescript-6-build-cold"',
+  );
+  const baselineSnapshot = comparisonSource.indexOf(
+    "copyDeclarationSnapshot(\n        checkout,\n        baselineDeclarationSnapshot",
+    baselineBuild,
+  );
+  const baselineClean = comparisonSource.indexOf(
+    '"typescript-6-clean"',
+    baselineBuild,
+  );
+  const candidateBuild = comparisonSource.indexOf(
+    'run("typescript-7-build-cold"',
+    baselineBuild,
+  );
+  const candidateSnapshot = comparisonSource.indexOf(
+    "copyDeclarationSnapshot(\n        checkout,\n        candidateDeclarationSnapshot",
+    candidateBuild,
+  );
+  assert.ok(baselineBuild >= 0 && baselineBuild < baselineSnapshot);
+  assert.ok(baselineSnapshot < baselineClean);
+  assert.ok(candidateBuild >= 0 && candidateBuild < candidateSnapshot);
+  assert.match(comparisonSource, /compare-declaration-contracts\.mts/u);
+  assert.match(comparisonSource, /comparisonReportMatchesDeclarationManifests/u);
+  assert.match(comparisonSource, /TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR/u);
+
+  const workflow = await readFile(
+    resolve(import.meta.dirname, "../../.github/workflows/release-check.yml"),
+    "utf8",
+  );
+  assert.equal((workflow.match(/run: node scripts\/src\/test-results\.mjs run --lane release-/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/uses: actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4/gu) ?? []).length >= 2, true);
+  assert.match(workflow, /typescript-7-declaration-contracts-standard-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+  assert.match(workflow, /typescript-7-declaration-contracts-full-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+});
+
 test("retained declaration evidence is revision-bound and integrity-checked", () => {
   const revision = "a".repeat(40);
   const bundleSha256 = "b".repeat(64);
@@ -383,6 +430,131 @@ test("retained declaration evidence is revision-bound and integrity-checked", ()
       ),
     /classification totals do not match/,
   );
+});
+
+test("run-specific declaration artifacts are minimal, revision-bound, and success-only", async () => {
+  const runnerTemp = await mkdtemp(resolve(tmpdir(), "ts7-contract-artifact-"));
+  const directory = resolve(runnerTemp, "artifact");
+  const revision = "a".repeat(40);
+  const bundleSha256 = "b".repeat(64);
+  const workflow = {
+    runId: "12345",
+    runAttempt: "2",
+    repository: "example/repository",
+    eventName: "pull_request",
+    sha: revision,
+  };
+  const summary = {
+    capturedAt: "2026-10-15T09:00:00.000Z",
+    sourceIdentity: { revision, bundleSha256 },
+    declarations: {
+      textuallyChangedFileCount: 1,
+      contractComparison: {
+        status: "pass",
+        changedFiles: 1,
+        formattingOnlyChanges: 1,
+        approvedSemanticChanges: 0,
+        unexplainedSemanticChanges: 0,
+      },
+    },
+  };
+  const comparison = {
+    schemaVersion: 1,
+    baselineFileCount: 10,
+    candidateFileCount: 10,
+    status: "pass",
+    categories: [
+      { category: "api-client-react" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+      { category: "api-zod" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+      { category: "db" as const, changed: 1, formattingOnly: 1, approvedSemantic: 0, unexplainedSemantic: 0 },
+      { category: "other" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+    ],
+    files: [
+      {
+        path: "lib/db/dist/formatting.d.ts",
+        category: "db" as const,
+        baselineSha256: "c".repeat(64),
+        candidateSha256: "d".repeat(64),
+        classification: "formatting-only" as const,
+      },
+    ],
+  };
+  const comparisonOutcome = {
+    status: "ADVISORY_DRIFT" as const,
+    commandsSucceeded: true,
+    diagnosticsEqual: true,
+    advisory: true,
+    acceptanceGatesMet: false,
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        writeTypescript7ContractArtifact({
+          directory,
+          runnerTemp,
+          summary,
+          declarationComparison: comparison,
+          comparison: {
+            ...comparisonOutcome,
+            status: "PROMOTION_BLOCKED",
+          },
+          workflow,
+        }),
+      /failed or incomplete TypeScript comparison/,
+    );
+    assert.equal(
+      await readdir(runnerTemp).then((entries) => entries.includes("artifact")),
+      false,
+    );
+    await writeTypescript7ContractArtifact({
+      directory,
+      runnerTemp,
+      summary,
+      declarationComparison: comparison,
+      comparison: comparisonOutcome,
+      workflow,
+    });
+    assert.deepEqual(
+      (await readdir(directory)).sort(),
+      [
+        TYPESCRIPT_7_CONTRACT_MANIFEST_FILE,
+        TYPESCRIPT_7_CONTRACT_REPORT_FILE,
+      ].sort(),
+    );
+    assert.equal(
+      verifyTypescript7ContractArtifact({
+        directory,
+        runnerTemp,
+        workflow,
+        sourceBundleSha256: bundleSha256,
+      }),
+      true,
+    );
+    assert.throws(
+      () =>
+        verifyTypescript7ContractArtifact({
+          directory,
+          runnerTemp,
+          workflow: { ...workflow, sha: "e".repeat(40) },
+          sourceBundleSha256: bundleSha256,
+        }),
+      /identity or comparison outcome is invalid/,
+    );
+    await writeFile(resolve(directory, "compiler-output.log"), "not compact");
+    assert.throws(
+      () =>
+        verifyTypescript7ContractArtifact({
+          directory,
+          runnerTemp,
+          workflow,
+          sourceBundleSha256: bundleSha256,
+        }),
+      /unexpected files or directories/,
+    );
+  } finally {
+    await rm(runnerTemp, { recursive: true, force: true });
+  }
 });
 
 test("retained resource approval evidence is compact and integrity-checked", async () => {
