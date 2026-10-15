@@ -449,6 +449,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local node_version
   local registry_port_file="${server_dir}/registry-port"
   local tarball_port_file="${server_dir}/tarball-port"
+  local expired_port_file="${server_dir}/expired-port"
   local server_output="${server_dir}/output"
   local client_script="${workspace}/https-client.cjs"
   local package_root="${workspace}/package"
@@ -471,10 +472,12 @@ test_release_runner_verifies_local_tls_certificates() {
   local package_version="1.0.0"
   local ip_mismatch_output="${workspace}/ip-mismatch-output"
   local hostname_mismatch_output="${workspace}/hostname-mismatch-output"
+  local expired_certificate_output="${workspace}/expired-certificate-output"
   local url
   local trusted_name_url
   local mismatched_ip_url
   local mismatched_url
+  local expired_certificate_url
   local attempt
   local status
 
@@ -566,6 +569,44 @@ EOF
       cat "${cert_dir}/openssl-output" >&2
       return 1
     }
+  mkdir -p "${cert_dir}/newcerts"
+  : >"${cert_dir}/index.txt"
+  printf '1000\n' >"${cert_dir}/serial"
+  cat >"${cert_dir}/ca.cnf" <<EOF
+[ ca ]
+default_ca = test_ca
+
+[ test_ca ]
+database = ${cert_dir}/index.txt
+new_certs_dir = ${cert_dir}/newcerts
+certificate = ${cert_dir}/test-ca.pem
+private_key = ${cert_dir}/test-ca.key
+serial = ${cert_dir}/serial
+default_md = sha256
+policy = policy_any
+x509_extensions = server_cert
+
+[ policy_any ]
+commonName = supplied
+
+[ server_cert ]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:localhost,IP:127.0.0.1,DNS:expired-name.invalid
+EOF
+  "$OPENSSL_BIN" ca -batch \
+    -config "${cert_dir}/ca.cnf" \
+    -in "${cert_dir}/server.csr" \
+    -out "${cert_dir}/server-expired.pem" \
+    -startdate 20200101000000Z \
+    -enddate 20210101000000Z \
+    -extensions server_cert \
+    >>"${cert_dir}/openssl-output" 2>&1 || {
+      printf 'Could not create the deterministically expired TLS server certificate.\n' >&2
+      cat "${cert_dir}/openssl-output" >&2
+      return 1
+    }
 
   mkdir -p \
     "${package_root}/bin" \
@@ -607,6 +648,8 @@ const [
   certPath,
   registryPortPath,
   tarballPortPath,
+  expiredPortPath,
+  expiredCertPath,
   packageTarballPath,
   alteredPackageTarballPath,
   tarballModePath,
@@ -622,6 +665,10 @@ const alteredPackageTarball = fs.readFileSync(alteredPackageTarballPath);
 const tlsOptions = {
   key: fs.readFileSync(keyPath),
   cert: fs.readFileSync(certPath),
+};
+const expiredTlsOptions = {
+  key: fs.readFileSync(keyPath),
+  cert: fs.readFileSync(expiredCertPath),
 };
 const registryServer = https.createServer(
   tlsOptions,
@@ -713,10 +760,18 @@ const tarballServer = https.createServer(tlsOptions, (request, response) => {
   response.end("not found");
 });
 
+const expiredServer = https.createServer(expiredTlsOptions, (_request, response) => {
+  response.writeHead(200, { "content-type": "text/plain" });
+  response.end("expired TLS fixture");
+});
+
 tarballServer.listen(0, "127.0.0.1", () => {
   fs.writeFileSync(tarballPortPath, String(tarballServer.address().port));
   registryServer.listen(0, "127.0.0.1", () => {
     fs.writeFileSync(registryPortPath, String(registryServer.address().port));
+    expiredServer.listen(0, "127.0.0.1", () => {
+      fs.writeFileSync(expiredPortPath, String(expiredServer.address().port));
+    });
   });
 });
 EOF
@@ -732,7 +787,11 @@ const requestOptions = {
       callback = options;
       options = {};
     }
-    if (hostname !== "localhost" && hostname !== "mismatched-name.invalid") {
+    if (
+      hostname !== "localhost" &&
+      hostname !== "mismatched-name.invalid" &&
+      hostname !== "expired-name.invalid"
+    ) {
       callback(new Error(`Unexpected TLS fixture hostname: ${hostname}`));
       return;
     }
@@ -785,14 +844,16 @@ EOF
 
   "$REAL_NODE_BIN" "${server_dir}/https-server.cjs" \
     "${cert_dir}/server.key" "${cert_dir}/server.pem" \
-    "$registry_port_file" "$tarball_port_file" \
+    "$registry_port_file" "$tarball_port_file" "$expired_port_file" \
+    "${cert_dir}/server-expired.pem" \
     "$package_tarball" "$altered_package_tarball" "$tarball_mode_file" \
     "$redirect_mode_file" "$metadata_mode_file" \
     "$registry_requests" "$tarball_requests" \
     >"$server_output" 2>&1 &
   TLS_SERVER_PID=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
-    [[ -s "$registry_port_file" && -s "$tarball_port_file" ]] && break
+    [[ -s "$registry_port_file" && -s "$tarball_port_file" &&
+      -s "$expired_port_file" ]] && break
     if ! kill -0 "$TLS_SERVER_PID" 2>/dev/null; then
       printf 'Local HTTPS fixture server exited before becoming ready.\n' >&2
       cat "$server_output" >&2
@@ -800,7 +861,8 @@ EOF
     fi
     sleep 0.05
   done
-  if [[ ! -s "$registry_port_file" || ! -s "$tarball_port_file" ]]; then
+  if [[ ! -s "$registry_port_file" || ! -s "$tarball_port_file" ||
+    ! -s "$expired_port_file" ]]; then
     printf 'Local HTTPS fixture server did not become ready in time.\n' >&2
     cat "$server_output" >&2
     return 1
@@ -809,6 +871,7 @@ EOF
   trusted_name_url="https://localhost:$(cat "$registry_port_file")/"
   mismatched_ip_url="https://127.0.0.2:$(cat "$registry_port_file")/"
   mismatched_url="https://mismatched-name.invalid:$(cat "$registry_port_file")/"
+  expired_certificate_url="https://expired-name.invalid:$(cat "$expired_port_file")/"
 
   set +e
   env \
@@ -901,6 +964,32 @@ EOF
       "$status" "$hostname_mismatch_result" >&2
     return 1
   fi
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$expired_certificate_url" \
+    >"$expired_certificate_output" 2>&1
+  status=$?
+  set -e
+  local expired_certificate_result
+  expired_certificate_result=$(cat "$expired_certificate_output")
+  if [[ "$status" -eq 0 ]] ||
+    [[ "$expired_certificate_result" != *"CERT_HAS_EXPIRED"* ]]; then
+    printf 'Trusted TLS with an expired server certificate did not fail certificate-validity validation (status %s):\n%s\n' \
+      "$status" "$expired_certificate_result" >&2
+    return 1
+  fi
+  assert_not_contains "$expired_certificate_result" "ECONNREFUSED"
+  assert_not_contains "$expired_certificate_result" "ECONNRESET"
 
   set +e
   env \
@@ -1079,7 +1168,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs and mismatched DNS/IP certificate names, and reject altered package bytes directly, after redirect, and with shasum-only metadata"
+  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, mismatched DNS/IP certificate names, and expired server certificates, and reject altered package bytes directly, after redirect, and with shasum-only metadata"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
