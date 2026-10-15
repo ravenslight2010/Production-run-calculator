@@ -22,7 +22,10 @@ import { fileURLToPath } from "node:url";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { rebaseStaleSyncIntent } from "@workspace/sync-contract/stale-base-recovery";
-import { stopIsolatedSyncProcess } from "./syncConvergenceProcess";
+import {
+  stopIsolatedSyncProcess,
+  stopIsolatedSyncProcesses,
+} from "./syncConvergenceProcess";
 
 type DbModule = typeof import("@workspace/db");
 type SyncPayload = Record<string, unknown>;
@@ -264,7 +267,15 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
     });
     return { child, baseUrl: `http://127.0.0.1:${port}` };
   } catch (error) {
-    await stopIsolatedSyncProcess(child);
+    try {
+      await stopIsolatedSyncProcess(child);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Isolated sync process startup failed and cleanup also failed",
+        { cause: error },
+      );
+    }
     throw error;
   }
 }
@@ -932,6 +943,8 @@ describe("multi-client sync convergence soak", () => {
     const processA = await startIsolatedSyncProcess();
     let processB: Awaited<ReturnType<typeof startIsolatedSyncProcess>> | undefined;
     const streams: OpenSyncStream[] = [];
+    let primaryFailure: unknown;
+    let hasPrimaryFailure = false;
     try {
       await waitForSyncOutboxListeners(1);
       const processAPids = await syncOutboxListenerPids();
@@ -1215,11 +1228,39 @@ describe("multi-client sync convergence soak", () => {
         canonicalReconnectRecovery: true,
         coreReadinessUnaffectedByStoppedOptionalListener: true,
       }));
+    } catch (error) {
+      primaryFailure = error;
+      hasPrimaryFailure = true;
+      throw error;
     } finally {
       await Promise.all(streams.map((stream) => stream.close().catch(() => {})));
-      if (processB) await stopIsolatedSyncProcess(processB.child);
-      await stopIsolatedSyncProcess(processA.child);
-      await waitForSyncOutboxListeners(0, 5_000);
+      const cleanupFailures: unknown[] = [];
+      try {
+        await stopIsolatedSyncProcesses([processB?.child, processA.child]);
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+      try {
+        await waitForSyncOutboxListeners(0, 5_000);
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+      if (cleanupFailures.length > 0) {
+        if (hasPrimaryFailure) {
+          throw new AggregateError(
+            [primaryFailure, ...cleanupFailures],
+            "Sync convergence test failed and isolated-process cleanup also failed",
+            { cause: primaryFailure },
+          );
+        }
+        throw cleanupFailures.length === 1
+          ? cleanupFailures[0]
+          : new AggregateError(
+            cleanupFailures,
+            "Isolated-process cleanup encountered multiple failures",
+            { cause: cleanupFailures[0] },
+          );
+      }
     }
   }, 30_000);
 
