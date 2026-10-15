@@ -267,8 +267,8 @@ function pruneTerminals(): void {
     .sort((a, b) => (a.resolvedAt ?? a.effectiveAt) - (b.resolvedAt ?? b.effectiveAt));
   for (const item of terminals.slice(0, Math.max(0, terminals.length - MAX_TERMINAL))) localStorage.removeItem(`${TERMINAL_PREFIX}${item.id}`);
 }
-function currentDeliveryMatches(item: OperationalIntent): boolean {
-  if (!activeOwner || item.owner !== activeOwner || !item.deliveryToken) return false;
+function storedDeliveryMatches(item: OperationalIntent): boolean {
+  if (!item.owner || !item.deliveryToken) return false;
   try {
     const current = JSON.parse(localStorage.getItem(`${PENDING_PREFIX}${item.id}`) ?? "null");
     return valid(current)
@@ -279,8 +279,16 @@ function currentDeliveryMatches(item: OperationalIntent): boolean {
     return false;
   }
 }
-function terminalize(item: OperationalIntent, state: Extract<OperationalIntentState, "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected">, fields: Partial<OperationalIntent> = {}): boolean {
-  if (!currentDeliveryMatches(item)) return false;
+function currentDeliveryMatches(item: OperationalIntent): boolean {
+  return !!activeOwner && item.owner === activeOwner && storedDeliveryMatches(item);
+}
+function terminalize(
+  item: OperationalIntent,
+  state: Extract<OperationalIntentState, "accepted" | "superseded" | "rebased" | "conflicted" | "review-required" | "blocked" | "permanently-rejected">,
+  fields: Partial<OperationalIntent> = {},
+  allowInactiveOwner = false,
+): boolean {
+  if (!(allowInactiveOwner ? storedDeliveryMatches(item) : currentDeliveryMatches(item))) return false;
   const record = { ...item, ...fields, state, resolvedAt: Date.now() };
   try {
     // Adopt the terminal receipt before removing the pending record. If the
@@ -872,7 +880,19 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
              intent: (({ state: _state, owner: _owner, deliveryToken: _token, deviceId: _deviceId, preLifecycle: _preLifecycle, preEndLifecycle: _local, attempts: _a, nextRetryAt: _n, lastAttemptAt: _l, failure: _f, guidance: _g, resolvedAt: _r, deferredOffline: _offline, canonicalCursor: _cursor, canonicalRevision: _revision, serverTime: _serverTime, snapshotId: _snapshotId, canonicalAdoptedAt: _adoptedAt, serverTimeOffsetMs: _offset, ...wire }) => wire)(item),
            }) });
            let body: { outcome?: string; data?: unknown; cursor?: number; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {}; try { body = await res.json(); } catch { /* status classification still applies */ }
-          if (activeOwner !== ownerAtStart || !currentDeliveryMatches(item)) continue;
+           if (activeOwner !== ownerAtStart || !currentDeliveryMatches(item)) {
+             // A revoked session can sign the user out while this request is
+             // still in flight. Preserve that command's explicit auth failure
+             // under its captured owner, but never adopt results after an
+             // identity change.
+             if (res.status === 401 && storedDeliveryMatches(item)) {
+               terminalize(item, "blocked", {
+                 failure: "authentication",
+                 guidance: "Sign in again, then choose Retry.",
+               }, true);
+             }
+             continue;
+           }
            // A 409 is the one documented non-OK response that carries
            // authoritative canonical data: it represents a conflict, not a
            // transient server failure.  Every other non-OK response must be

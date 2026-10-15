@@ -38,3 +38,9 @@ Reset cleanup must preserve the operational-intent namespace, and a cross-tab le
 **Why:** Broad legacy browser-key prefixes can erase still-reviewable commands during a reset, while deriving lease cleanup from the current identity strands a valid lock after sign-out and blocks the next authenticated session.
 
 **How to apply:** Exclude durable operational keys explicitly from reset wipes, and release/renew leases using the captured owner key rather than live auth state.
+
+An in-flight operational intent that receives 401 after its authenticated owner has been cleared must still become a durable authentication-blocked record, but only if the stored record still matches the request's captured owner and delivery token. Do not adopt response data after the identity change.
+
+**Why:** The session probe can sign the operator out before the separate command response arrives. Ignoring that late 401 leaves the command in `sending`, where a later sign-in may replay it automatically instead of requiring deliberate recovery.
+
+**How to apply:** On late 401 only, validate the persisted owner/state/token and terminalize the record as blocked; keep normal identity fences for every canonical or non-auth response, then require explicit retry after sign-in.

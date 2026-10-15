@@ -158,7 +158,10 @@ async function buildTwoVersionFixture() {
 async function startVersionedServer(
   versionDirs: Record<Version, string>,
   staleHomeChunk?: string,
-  options: { sessionRecovery?: boolean } = {},
+  options: {
+    sessionRecovery?: boolean;
+    sessionRecoveryIntentOutbox?: boolean;
+  } = {},
 ) {
   let currentVersion: Version = "old";
   let staleAssetFailureArmed = false;
@@ -172,8 +175,33 @@ async function startVersionedServer(
     syncWrites: 0,
     rejected: 0,
     acceptedWrites: 0,
+    intentPosts: 0,
+    intentApplications: 0,
+    signIns: 0,
   };
+  const intentRequestIds: string[] = [];
+  const appliedIntentIds: string[] = [];
+  const fixtureErrors: string[] = [];
+  let releaseIntentAuthResponse: (() => void) | undefined;
+  const intentAuthResponseGate = new Promise<void>((resolve) => {
+    releaseIntentAuthResponse = resolve;
+  });
   const sessionEventStreams = new Set<ServerResponse>();
+  const sessionUser = {
+    userId: "pwa-session-user",
+    role: "operator",
+    capabilities: [],
+    email: null,
+    name: "PWA Session",
+    onboardingSeen: true,
+    tourCompleted: true,
+    floorModeEnabled: false,
+    notificationPrefs: {},
+    sandbox: false,
+    sandboxCopiedAt: null,
+    sandboxStale: false,
+    disabled: false,
+  };
   const oldIndex = await readFile(path.join(versionDirs.old, "index.html"), "utf8");
   const entryScript = oldIndex.match(/<script[^>]+src="\/?([^"]+\.js)"/)?.[1];
   if (!entryScript) throw new Error("The PWA fixture could not find the entry script");
@@ -207,20 +235,60 @@ async function startVersionedServer(
         }
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
-          .end(JSON.stringify({
-            userId: "pwa-session-user",
-            role: "operator",
-            capabilities: [],
-            email: null,
-            name: "PWA Session",
-            onboardingSeen: true,
-            tourCompleted: true,
-            floorModeEnabled: false,
-            notificationPrefs: {},
-            sandbox: false,
-            sandboxCopiedAt: null,
-            sandboxStale: false,
-          }));
+          .end(JSON.stringify(sessionUser));
+        return;
+      }
+      if (options.sessionRecoveryIntentOutbox && requestPath === "api/auth/sign-in") {
+        let rawBody = "";
+        for await (const chunk of request) rawBody += chunk;
+        const credentials = JSON.parse(rawBody || "{}") as {
+          username?: string;
+          password?: string;
+        };
+        if (
+          credentials.username !== "pwa-session-user"
+          || credentials.password !== "disposable-fixture"
+        ) {
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Invalid username or password" }));
+          return;
+        }
+        sessionValid = true;
+        sessionRecoveryRequests.signIns += 1;
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "set-cookie": "rc_auth=disposable-fixture-session; Path=/; HttpOnly; SameSite=Lax",
+        }).end(JSON.stringify({ token: "disposable-fixture-token", user: sessionUser }));
+        return;
+      }
+      if (
+        options.sessionRecovery
+        && requestPath === "api/sync/operational-intents"
+        && request.method === "POST"
+      ) {
+        let rawBody = "";
+        for await (const chunk of request) rawBody += chunk;
+        const payload = JSON.parse(rawBody || "{}") as {
+          intent?: { id?: string };
+        };
+        sessionRecoveryRequests.intentPosts += 1;
+        if (payload.intent?.id) intentRequestIds.push(payload.intent.id);
+        if (!sessionValid) {
+          // Hold the command's auth failure until the independent /me probe
+          // signs the operator out. This exercises the late-response fence.
+          if (options.sessionRecoveryIntentOutbox) await intentAuthResponseGate;
+          sessionRecoveryRequests.rejected += 1;
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
+          return;
+        }
+        sessionRecoveryRequests.intentApplications += 1;
+        if (payload.intent?.id) appliedIntentIds.push(payload.intent.id);
+        response
+          .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+          .end(JSON.stringify({ outcome: "accepted" }));
         return;
       }
       if (options.sessionRecovery && requestPath === "api/sync/events") {
@@ -376,6 +444,7 @@ async function startVersionedServer(
       if (target.endsWith("service-worker.js")) headers["service-worker-allowed"] = "/";
       response.writeHead(200, headers).end(bodyContent);
     } catch (error) {
+      fixtureErrors.push(error instanceof Error ? error.message : String(error));
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       response.end(error instanceof Error ? error.message : "Fixture server failed");
     }
@@ -413,11 +482,22 @@ async function startVersionedServer(
       sessionEventStreams.clear();
     },
     sessionRecoveryRequests() {
-      return { ...sessionRecoveryRequests };
+      return {
+        ...sessionRecoveryRequests,
+        intentRequestIds: [...intentRequestIds],
+        appliedIntentIds: [...appliedIntentIds],
+      };
+    },
+    fixtureErrors() {
+      return [...fixtureErrors];
+    },
+    releaseIntentAuthResponse() {
+      releaseIntentAuthResponse?.();
     },
     async close() {
       // Browser keep-alive sockets can otherwise keep Node's close callback
       // pending after an assertion failure.
+      releaseIntentAuthResponse?.();
       server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -907,17 +987,30 @@ test.describe("PWA update handoff", () => {
     }
   });
 
-  test("rechecks an open run after reconnect and signs out a revoked session", async ({
+  test("blocks an offline intent after session revocation and retries only after sign-in", async ({
     page,
   }) => {
+    const pageErrors: string[] = [];
+    const expectedExternalFontErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (error.message.includes("fonts.googleapis.com/css2")) {
+        expectedExternalFontErrors.push(error.message);
+      } else {
+        pageErrors.push(error.message);
+      }
+    });
     const server = await startVersionedServer(
       { old: fixture.oldDir, new: fixture.newDir },
       undefined,
-      { sessionRecovery: true },
+      { sessionRecovery: true, sessionRecoveryIntentOutbox: true },
     );
 
     try {
+      await page.route("https://fonts.googleapis.com/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/css", body: "" }),
+      );
       await page.addInitScript(() => {
+        if (location.origin === "null") return;
         const now = new Date();
         const date = [
           now.getFullYear(),
@@ -951,12 +1044,37 @@ test.describe("PWA update handoff", () => {
 
       await page.context().setOffline(true);
       await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.getByRole("button", { name: /PAUSE RUN/i }).click();
+      await expect.poll(() => page.evaluate(() => {
+        const prefix = "run-calculator:operational-intent-outbox:v1:pending:";
+        for (let index = 0; index < localStorage.length; index++) {
+          const key = localStorage.key(index);
+          if (!key?.startsWith(prefix)) continue;
+          const intent = JSON.parse(localStorage.getItem(key) ?? "null");
+          if (intent?.action === "pause") return intent;
+        }
+        return null;
+      })).toMatchObject({
+        action: "pause",
+        state: "pending",
+        deferredOffline: true,
+        owner: "live:pwa-session-user",
+        runId: "pwa-session-reconnect-run",
+      });
       server.setSessionValid(false);
       server.dropSessionEventStreams();
+      const meRequestsBeforeReconnect = server.sessionRecoveryRequests().me;
       await page.context().setOffline(false);
       await page.evaluate(() => window.dispatchEvent(new Event("online")));
 
-      await expect.poll(() => server.sessionRecoveryRequests().rejected).toBeGreaterThan(0);
+      await expect.poll(() => server.sessionRecoveryRequests().intentPosts).toBe(1);
+      await expect.poll(() => server.sessionRecoveryRequests().intentRequestIds).toHaveLength(1);
+      await expect.poll(() => server.sessionRecoveryRequests().me).toBeGreaterThan(meRequestsBeforeReconnect);
+      const revokedIntentId = server.sessionRecoveryRequests().intentRequestIds[0];
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        intentApplications: 0,
+        appliedIntentIds: [],
+      });
       await expect(
         page.getByRole("heading", { name: "Production Run Calculator" }),
       ).toBeVisible({ timeout: 20_000 });
@@ -966,11 +1084,69 @@ test.describe("PWA update handoff", () => {
       await expect(page.getByText(
         "Your staff session expired. Check your connection and sign in again.",
       )).toBeVisible();
+      await expect.poll(() => page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:pending:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, revokedIntentId)).toMatchObject({
+        id: revokedIntentId,
+        state: "sending",
+      });
+      server.releaseIntentAuthResponse();
+      await expect.poll(() => page.evaluate((id) => {
+        const raw = localStorage.getItem(
+          `run-calculator:operational-intent-outbox:v1:terminal:${id}`,
+        );
+        return raw ? JSON.parse(raw) : null;
+      }, revokedIntentId)).toMatchObject({
+        id: revokedIntentId,
+        state: "blocked",
+        failure: "authentication",
+      });
       const beforeSettling = server.sessionRecoveryRequests();
       await page.waitForTimeout(500);
       const afterSettling = server.sessionRecoveryRequests();
       expect(afterSettling.acceptedWrites).toBe(0);
       expect(afterSettling.syncWrites).toBe(beforeSettling.syncWrites);
+
+      // The disposable sign-in endpoint restores this same fixture identity.
+      // A successful sign-in must not automatically replay a blocked command.
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await page.getByLabel("Username").fill("pwa-session-user");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect(page.locator('button[title^="Sync"]')).toBeVisible();
+      await page.locator('button[title^="Sync"]').click();
+      await expect(page.getByText("pause · Blocked")).toBeVisible();
+      await expect(page.getByText("Sign in again, then choose Retry.")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+      await page.waitForTimeout(500);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        signIns: 1,
+        intentPosts: 1,
+        intentApplications: 0,
+        intentRequestIds: [revokedIntentId],
+        appliedIntentIds: [],
+      });
+
+      // Retry is an explicit, post-sign-in action; it reuses the retained
+      // command once under the newly authenticated session.
+      await page.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect.poll(() => server.sessionRecoveryRequests().intentApplications).toBe(1);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        intentPosts: 2,
+        intentApplications: 1,
+        intentRequestIds: [revokedIntentId, revokedIntentId],
+        appliedIntentIds: [revokedIntentId],
+      });
+      expect(pageErrors).toEqual([]);
+      expect(server.fixtureErrors()).toEqual([]);
+      expect(expectedExternalFontErrors.every((message) =>
+        message.includes("fonts.googleapis.com/css2?family=Inter"),
+      )).toBe(true);
     } finally {
       if (!page.isClosed()) await page.context().setOffline(false);
       await server.close();

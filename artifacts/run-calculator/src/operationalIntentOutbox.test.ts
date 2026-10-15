@@ -373,6 +373,45 @@ describe("operational intent outbox", () => {
     setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
     expect(readOperationalIntentOutbox()[0]).toMatchObject({ id: intent.id, state: "sending" });
   });
+  it("retains a late 401 as blocked after sign-out and requires an explicit retry", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    let release!: (value: unknown) => void;
+    const pendingResponse = new Promise((resolve) => { release = resolve; });
+    const fetch = vi.fn()
+      .mockReturnValueOnce(pendingResponse)
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ outcome: "accepted" }),
+      });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({
+      runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause",
+    });
+    const flushing = flushOperationalIntentOutbox();
+    await vi.waitFor(() => expect(readOperationalIntentOutbox()[0]?.state).toBe("sending"));
+
+    // Model /me rejecting the session before the operational-intent request
+    // returns its own 401.
+    setOperationalIntentIdentity(null);
+    release({
+      ok: false, status: 401, headers: { get: () => null }, json: async () => ({}),
+    });
+    await flushing;
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+      guidance: "Sign in again, then choose Retry.",
+    })]);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it("keeps a pending action across an offline reload boundary and adopts canonical data only after retry", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const canonical = { runValues: { "run-1": { casesOnCurrentSkid: 12 } } };
