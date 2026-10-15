@@ -67,6 +67,8 @@ make_workspace() {
 
   mkdir -p "${workspace}/scripts/src" "${workspace}/bin" "${workspace}/pinned-bin"
   cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
+  cp "${SCRIPT_DIR}/release-node-https-only.cjs" \
+    "${workspace}/scripts/src/release-node-https-only.cjs"
   cp "$HISTORY_VIEWER" "${workspace}/scripts/src/show-release-lock-history.sh"
   printf '%s\n' "$REQUIRED_NODE_VERSION" >"${workspace}/.nvmrc"
 
@@ -75,6 +77,7 @@ make_workspace() {
 set -euo pipefail
 
 printf 'child-node=%s\n' "$(node --version)" >>"$RUN_LOG"
+printf 'node-options=%s\n' "${NODE_OPTIONS:-unset}" >>"$RUN_LOG"
 printf 'node-system-ca=%s\n' "${NODE_USE_SYSTEM_CA:-unset}" >>"$RUN_LOG"
 printf 'ssl-cert-file-readable=%s\n' \
   "$([[ -r "${SSL_CERT_FILE:-}" && -s "${SSL_CERT_FILE:-}" ]] && echo yes || echo no)" >>"$RUN_LOG"
@@ -336,6 +339,7 @@ write_pinned_npx() {
 set -euo pipefail
 
 printf 'npx-invoked\n' >>"\$RUN_LOG"
+printf 'npx-node-options=%s\n' "\${NODE_OPTIONS:-unset}" >>"\$RUN_LOG"
 
 args=("\$@")
   separator=-1
@@ -394,9 +398,14 @@ run_launcher() {
   local log_path="$2"
   local path_value="$3"
   local output_path="${workspace}/output"
+  local -a node_options_env=(-u NODE_OPTIONS)
+  if (( $# >= 4 )); then
+    node_options_env=("NODE_OPTIONS=$4")
+  fi
 
   set +e
-  SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+  env "${node_options_env[@]}" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     RUN_LOG="$log_path" PATH="$path_value" \
     bash "${workspace}/scripts/src/run-release-node.sh" release-child \
@@ -462,7 +471,7 @@ test_mismatching_node_uses_npx() {
   write_pinned_npx "${workspace}/bin/npx" "${workspace}/pinned-bin"
 
   run_launcher "$workspace" "$log_path" \
-    "${workspace}/bin:${PATH}"
+    "${workspace}/bin:${PATH}" "--trace-warnings"
 
   [[ "$RUN_STATUS" -eq 0 ]] || {
     printf 'Mismatching Node path failed. Output:\n%s\n' "$RUN_OUTPUT" >&2
@@ -471,8 +480,15 @@ test_mismatching_node_uses_npx() {
   local events
   events=$(cat "$log_path")
   assert_contains "$events" "npx-invoked"
+  assert_contains "$events" \
+    "npx-node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\" --trace-warnings"
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
+  assert_contains "$events" "node-options=--trace-warnings"
+  if grep -Eq '^node-options=.*--require=' <<<"$events"; then
+    printf 'Release command inherited the bootstrap-only HTTP guard.\n' >&2
+    return 1
+  fi
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   echo "PASS: mismatching Node path invokes npx, runs preflight, and preserves pinned Node for the child"
 }
@@ -631,6 +647,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local tarball_port_file="${server_dir}/tarball-port"
   local expired_port_file="${server_dir}/expired-port"
   local future_port_file="${server_dir}/future-port"
+  local http_tarball_port_file="${server_dir}/http-tarball-port"
   local server_output="${server_dir}/output"
   local client_script="${workspace}/https-client.cjs"
   local package_root="${workspace}/package"
@@ -644,6 +661,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local untrusted_npx_output="${workspace}/untrusted-npx-output"
   local integrity_npx_output="${workspace}/integrity-npx-output"
   local redirect_integrity_npx_output="${workspace}/redirect-integrity-npx-output"
+  local downgrade_npx_output="${workspace}/downgrade-npx-output"
   local shasum_npx_output="${workspace}/shasum-npx-output"
   local lifecycle_control_npm_output="${workspace}/lifecycle-control-npm-output"
   local lifecycle_rejected_npm_output="${workspace}/lifecycle-rejected-npm-output"
@@ -651,6 +669,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local lifecycle_rejected_marker="${workspace}/lifecycle-rejected-marker"
   local registry_requests="${workspace}/registry-requests"
   local tarball_requests="${workspace}/tarball-requests"
+  local http_tarball_requests="${workspace}/http-tarball-requests"
   local redirect_mode_file="${workspace}/redirect-mode"
   local npx_log="${workspace}/npx-log"
   local package_name="replit-release-runner-tls-fixture"
@@ -670,6 +689,8 @@ test_release_runner_verifies_local_tls_certificates() {
 
   mkdir -p "${workspace}/scripts/src" "$wrong_node_dir" "$cert_dir" "$server_dir"
   cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
+  cp "${SCRIPT_DIR}/release-node-https-only.cjs" \
+    "${workspace}/scripts/src/release-node-https-only.cjs"
   node_version=$("$REAL_NODE_BIN" --version)
   printf '%s\n' "${node_version#v}" >"${workspace}/.nvmrc"
   cat >"${workspace}/scripts/src/check-routine-node-version.mjs" <<'EOF'
@@ -846,6 +867,7 @@ EOF
   printf 'integrity\n' >"$metadata_mode_file"
   : >"$registry_requests"
   : >"$tarball_requests"
+  : >"$http_tarball_requests"
   : >"${workspace}/empty-user.npmrc"
   : >"${workspace}/empty-global.npmrc"
 
@@ -864,6 +886,7 @@ const [
   futurePortPath,
   futureCertPath,
   futureKeyPath,
+  httpTarballPortPath,
   packageTarballPath,
   alteredPackageTarballPath,
   packageManifestPath,
@@ -872,6 +895,7 @@ const [
   metadataModePath,
   requestLogPath,
   tarballRequestLogPath,
+  httpTarballRequestLogPath,
 ] = process.argv.slice(2);
 const packageName = "replit-release-runner-tls-fixture";
 const packageVersion = "1.0.0";
@@ -902,11 +926,14 @@ const registryServer = https.createServer(
         crypto.createHash("sha512").update(packageTarball).digest("base64");
       const shasum = crypto.createHash("sha1").update(packageTarball).digest("hex");
       const metadataMode = fs.readFileSync(metadataModePath, "utf8").trim();
+      const redirectMode = fs.readFileSync(redirectModePath, "utf8").trim();
       const dist = {
         tarball:
-          fs.readFileSync(redirectModePath, "utf8").trim() === "redirect"
+          redirectMode === "redirect"
             ? `https://127.0.0.1:${registryServer.address().port}/redirect.tgz`
-            : `https://127.0.0.1:${registryServer.address().port}/fixture.tgz`,
+            : redirectMode === "http-downgrade"
+              ? `https://127.0.0.1:${registryServer.address().port}/downgrade.tgz`
+              : `https://127.0.0.1:${registryServer.address().port}/fixture.tgz`,
         shasum,
       };
       if (metadataMode === "integrity") {
@@ -932,6 +959,14 @@ const registryServer = https.createServer(
     if (request.method === "GET" && requestUrl.pathname === "/redirect.tgz") {
       response.writeHead(302, {
         location: `https://127.0.0.1:${tarballServer.address().port}/fixture.tgz`,
+      });
+      response.end();
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/downgrade.tgz") {
+      response.writeHead(302, {
+        location: `http://127.0.0.1:${httpTarballServer.address().port}/fixture.tgz`,
       });
       response.end();
       return;
@@ -987,14 +1022,34 @@ const futureServer = https.createServer(futureTlsOptions, (_request, response) =
   response.end("future-dated TLS fixture");
 });
 
-tarballServer.listen(0, "127.0.0.1", () => {
-  fs.writeFileSync(tarballPortPath, String(tarballServer.address().port));
-  registryServer.listen(0, "127.0.0.1", () => {
-    fs.writeFileSync(registryPortPath, String(registryServer.address().port));
-    expiredServer.listen(0, "127.0.0.1", () => {
-      fs.writeFileSync(expiredPortPath, String(expiredServer.address().port));
-      futureServer.listen(0, "127.0.0.1", () => {
-        fs.writeFileSync(futurePortPath, String(futureServer.address().port));
+const httpTarballServer = require("node:http").createServer((request, response) => {
+  fs.appendFileSync(httpTarballRequestLogPath, `${request.method} ${request.url}\n`);
+  if (
+    request.method === "GET" &&
+    new URL(request.url, "http://127.0.0.1").pathname === "/fixture.tgz"
+  ) {
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-length": packageTarball.length,
+    });
+    response.end(packageTarball);
+    return;
+  }
+  response.writeHead(404, { "content-type": "text/plain" });
+  response.end("not found");
+});
+
+httpTarballServer.listen(0, "127.0.0.1", () => {
+  fs.writeFileSync(httpTarballPortPath, String(httpTarballServer.address().port));
+  tarballServer.listen(0, "127.0.0.1", () => {
+    fs.writeFileSync(tarballPortPath, String(tarballServer.address().port));
+    registryServer.listen(0, "127.0.0.1", () => {
+      fs.writeFileSync(registryPortPath, String(registryServer.address().port));
+      expiredServer.listen(0, "127.0.0.1", () => {
+        fs.writeFileSync(expiredPortPath, String(expiredServer.address().port));
+        futureServer.listen(0, "127.0.0.1", () => {
+          fs.writeFileSync(futurePortPath, String(futureServer.address().port));
+        });
       });
     });
   });
@@ -1073,15 +1128,17 @@ EOF
     "$registry_port_file" "$tarball_port_file" "$expired_port_file" \
     "${cert_dir}/server-expired.pem" "$future_port_file" \
     "${cert_dir}/server-future.pem" "${cert_dir}/server-future.key" \
+    "$http_tarball_port_file" \
     "$package_tarball" "$altered_package_tarball" \
     "${package_root}/package.json" "$tarball_mode_file" \
     "$redirect_mode_file" "$metadata_mode_file" \
-    "$registry_requests" "$tarball_requests" \
+    "$registry_requests" "$tarball_requests" "$http_tarball_requests" \
     >"$server_output" 2>&1 &
   TLS_SERVER_PID=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
     [[ -s "$registry_port_file" && -s "$tarball_port_file" &&
-      -s "$expired_port_file" && -s "$future_port_file" ]] && break
+      -s "$expired_port_file" && -s "$future_port_file" &&
+      -s "$http_tarball_port_file" ]] && break
     if ! kill -0 "$TLS_SERVER_PID" 2>/dev/null; then
       printf 'Local HTTPS fixture server exited before becoming ready.\n' >&2
       cat "$server_output" >&2
@@ -1090,7 +1147,8 @@ EOF
     sleep 0.05
   done
   if [[ ! -s "$registry_port_file" || ! -s "$tarball_port_file" ||
-    ! -s "$expired_port_file" || ! -s "$future_port_file" ]]; then
+    ! -s "$expired_port_file" || ! -s "$future_port_file" ||
+    ! -s "$http_tarball_port_file" ]]; then
     printf 'Local HTTPS fixture server did not become ready in time.\n' >&2
     cat "$server_output" >&2
     return 1
@@ -1294,6 +1352,7 @@ EOF
       "npm_config_fetch_retries=0"
       "npm_config_fetch_timeout=10000"
       "npm_config_strict_ssl=true"
+      "NODE_OPTIONS=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
       "npm_config_ignore_scripts=false"
       "SSL_CERT_FILE=${workspace}/missing-ca.pem"
       "SSL_CERT_DIR=${workspace}/missing-ca-dir"
@@ -1444,6 +1503,36 @@ EOF
   assert_contains "$(cat "$registry_requests")" "GET /redirect.tgz"
   assert_contains "$(cat "$tarball_requests")" "GET /fixture.tgz"
 
+  printf 'http-downgrade\n' >"$redirect_mode_file"
+  printf 'integrity\n' >"$metadata_mode_file"
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/http-downgrade-npm-cache" "$downgrade_npx_output"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npx followed an HTTPS-to-HTTP tarball redirect:\n' >&2
+    cat "$downgrade_npx_output" >&2
+    if [[ -s "$http_tarball_requests" ]]; then
+      printf 'Plain HTTP tarball requests observed:\n' >&2
+      cat "$http_tarball_requests" >&2
+    fi
+    return 1
+  fi
+  local downgrade_npx_result
+  downgrade_npx_result=$(cat "$downgrade_npx_output")
+  assert_contains "$downgrade_npx_result" "ERR_RELEASE_RUNNER_HTTP_BLOCKED"
+  assert_not_contains "$downgrade_npx_result" \
+    "local npx package resolved over verified TLS"
+  if [[ -s "$http_tarball_requests" ]]; then
+    printf 'Installed npx requested the tarball over plain HTTP after an HTTPS redirect:\n' >&2
+    cat "$http_tarball_requests" >&2
+    cat "$downgrade_npx_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /downgrade.tgz"
+
   printf 'direct\n' >"$redirect_mode_file"
   printf 'shasum-only\n' >"$metadata_mode_file"
   printf 'matching\n' >"$tarball_mode_file"
@@ -1522,7 +1611,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, mismatched DNS/IP names, expired and not-yet-valid certificates; reject altered bytes directly, after redirect, and with shasum-only metadata; npm install rejects altered shasum-only bytes before preinstall"
+  echo "PASS: Node and installed npx verify the test CA, reject untrusted CAs, mismatched DNS/IP names, expired and not-yet-valid certificates, block HTTP tarball downgrades, and reject altered bytes directly, after redirect, and with shasum-only metadata; npm install rejects altered shasum-only bytes before preinstall"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"

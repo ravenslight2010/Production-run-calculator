@@ -3,6 +3,7 @@
 - [Drizzle evaluation](drizzle-generator-evaluation.md) + [timestamps](drizzle-raw-timestamp-decoding.md) — ignore volatile SQL metadata; normalize raw aggregates despite `sql<Date>`.
 - [Orval Zod declaration order](orval-zod-declaration-order.md) — normalize generated scalars before validators; declare smoke-tested toolchain packages directly, not via Orval peers.
 - [npm registry script metadata](npm-registry-script-metadata.md) — local registry lifecycle tests must advertise package scripts in version metadata as well as the tarball.
+- [npm tarball transport](npm-tarball-transport.md) — strict TLS verification does not guarantee HTTPS-only tarball redirects; exercise and observe downgrade behavior directly.
 - [pnpm lockfile](post-merge-setup.md) + [provenance](pnpm12-lockfile-provenance.md) + [outdated scope](pnpm-outdated-scope-limits.md) — repair peers; verify direct importers and preserve provenance.
 - [Security override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to the affected parent when a global major replacement could disrupt other consumers.
 - [Safe observability](observability-safe-events.md) + [event-loop histogram](event-loop-delay-monitor-warmup.md) — bounded payload-free events; wait one interval before a stall test.
