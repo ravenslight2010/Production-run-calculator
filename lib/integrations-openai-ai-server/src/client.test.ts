@@ -23,6 +23,8 @@ import {
   GeminiProviderUnavailableError,
   openai,
   resetGeminiResilienceForTests,
+  setGeminiMetricsObserver,
+  type GeminiRequestMetrics,
 } from "./client.js";
 
 const baseParams = {
@@ -154,6 +156,8 @@ describe("Gemini-backed chat completions", () => {
   });
 
   it("retries a transient provider failure once before returning a recovered response", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     sdk.generateContent
       .mockRejectedValueOnce(transientProviderError())
       .mockResolvedValueOnce({ text: "Recovered answer" });
@@ -168,9 +172,67 @@ describe("Gemini-backed chat completions", () => {
       "fixture-model",
       "fixture-model",
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger, retryCount, outcome }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+      retryCount,
+      outcome,
+    }))).toEqual([{
+      modelRung: 0,
+      requestResult: "primary_success",
+      fallbackTrigger: null,
+      retryCount: 1,
+      outcome: "success",
+    }]);
+  });
+
+  it("reports a retried primary followed by fallback recovery against the SDK calls", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
+    sdk.generateContent
+      .mockRejectedValueOnce(transientProviderError())
+      .mockRejectedValueOnce(transientProviderError())
+      .mockResolvedValueOnce({ text: "Recovered from fallback" });
+
+    const response = await openai.chat.completions.create(baseParams);
+
+    expect(response).toEqual({
+      choices: [{ message: { content: "Recovered from fallback" } }],
+      model: "gemini-3.5-flash",
+    });
+    expect(sdk.generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "fixture-model",
+      "fixture-model",
+      "gemini-3.5-flash",
+    ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger, retryCount, outcome }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+      retryCount,
+      outcome,
+    }))).toEqual([
+      {
+        modelRung: 0,
+        requestResult: "fallback_triggered",
+        fallbackTrigger: null,
+        retryCount: 1,
+        outcome: "provider_error",
+      },
+      {
+        modelRung: 1,
+        requestResult: "fallback_success",
+        fallbackTrigger: "service_unavailable",
+        retryCount: 0,
+        outcome: "success",
+      },
+    ]);
   });
 
   it("does not retry a transient failure after the caller cancels", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     const controller = new AbortController();
     sdk.generateContent.mockImplementationOnce(async () => {
       controller.abort();
@@ -182,9 +244,24 @@ describe("Gemini-backed chat completions", () => {
     ).rejects.toThrow("AI provider request was cancelled");
 
     expect(sdk.generateContent).toHaveBeenCalledTimes(1);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger, retryCount, outcome }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+      retryCount,
+      outcome,
+    }))).toEqual([{
+      modelRung: 0,
+      requestResult: "attempt_failed",
+      fallbackTrigger: null,
+      retryCount: 0,
+      outcome: "cancelled",
+    }]);
   });
 
   it("surfaces fallback exhaustion and blocks requests after repeated transient outages", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     sdk.generateContent.mockRejectedValue(transientProviderError());
 
     for (let request = 0; request < 3; request += 1) {
@@ -204,11 +281,48 @@ describe("Gemini-backed chat completions", () => {
       ...expectedModels,
       ...expectedModels,
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger, retryCount, outcome }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+      retryCount,
+      outcome,
+    }))).toEqual(Array.from({ length: 3 }, () => [
+      {
+        modelRung: 0,
+        requestResult: "fallback_triggered",
+        fallbackTrigger: null,
+        retryCount: 1,
+        outcome: "provider_error",
+      },
+      {
+        modelRung: 1,
+        requestResult: "fallback_triggered",
+        fallbackTrigger: "service_unavailable",
+        retryCount: 1,
+        outcome: "provider_error",
+      },
+      {
+        modelRung: 2,
+        requestResult: "fallback_exhausted",
+        fallbackTrigger: "service_unavailable",
+        retryCount: 1,
+        outcome: "provider_error",
+      },
+    ]).flat());
 
     await expect(
       openai.chat.completions.create(baseParams),
     ).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
     expect(sdk.generateContent).toHaveBeenCalledTimes(18);
+    expect(metrics.at(-1)).toMatchObject({
+      modelRung: 0,
+      requestResult: "attempt_failed",
+      fallbackTrigger: null,
+      retryCount: 0,
+      outcome: "circuit_open",
+    });
+    expect(metrics).toHaveLength(10);
   });
 
   it("maps streamed text and empty chunks to OpenAI-style deltas", async () => {
