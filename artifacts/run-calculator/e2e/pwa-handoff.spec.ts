@@ -164,8 +164,10 @@ async function startVersionedServer(
   let staleAssetFailureArmed = false;
   let staleAssetRequestCount = 0;
   let sessionValid = true;
+  let temporarySessionProbeFailuresRemaining = 0;
   const sessionRecoveryRequests = {
     me: 0,
+    temporaryMeFailures: 0,
     syncReads: 0,
     syncWrites: 0,
     rejected: 0,
@@ -193,6 +195,14 @@ async function startVersionedServer(
           response
             .writeHead(401, { "content-type": "application/json; charset=utf-8" })
             .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
+          return;
+        }
+        if (temporarySessionProbeFailuresRemaining > 0) {
+          temporarySessionProbeFailuresRemaining -= 1;
+          sessionRecoveryRequests.temporaryMeFailures += 1;
+          response
+            .writeHead(503, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Temporarily unavailable" }));
           return;
         }
         response
@@ -394,6 +404,9 @@ async function startVersionedServer(
     },
     setSessionValid(valid: boolean) {
       sessionValid = valid;
+    },
+    failNextSessionProbes(count: number) {
+      temporarySessionProbeFailuresRemaining = count;
     },
     dropSessionEventStreams() {
       for (const stream of sessionEventStreams) stream.destroy();
@@ -958,6 +971,102 @@ test.describe("PWA update handoff", () => {
       const afterSettling = server.sessionRecoveryRequests();
       expect(afterSettling.acceptedWrites).toBe(0);
       expect(afterSettling.syncWrites).toBe(beforeSettling.syncWrites);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await server.close();
+    }
+  });
+
+  test("recovers from a temporary session check failure after offline startup", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+
+    try {
+      await page.addInitScript(() => {
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-offline-session-startup-run",
+            brand: "Offline",
+            flavor: "Session",
+            startedAt: 1_000,
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+      // A full document reload discards the in-memory /me query. The service
+      // worker can still provide the app shell and local run data while offline,
+      // but that cached production state must not pass the fresh session gate.
+      await page.context().setOffline(true);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const startupError = page.getByRole("heading", {
+        name: "Unable to open Run Calculator",
+      });
+      const retry = page.getByTestId("auth-startup-retry");
+      await expect(startupError).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText(
+        "We couldn't confirm your staff session. Check the connection and try again.",
+      )).toBeVisible();
+      await expect(retry).toBeVisible();
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toHaveCount(0);
+      await expect(page.getByTestId("button-start-run")).toHaveCount(0);
+
+      // Both bounded automatic probe attempts receive a synthetic 503. The
+      // startup fallback must remain visible until the user retries and gets
+      // a fresh synthetic 200 from /api/me.
+      server.failNextSessionProbes(2);
+      await page.context().setOffline(false);
+      await expect.poll(async () => {
+        if (server.sessionRecoveryRequests().temporaryMeFailures >= 2) return true;
+        return retry.isVisible();
+      }).toBe(true);
+      if (server.sessionRecoveryRequests().temporaryMeFailures < 2) {
+        await retry.click();
+      }
+      await expect.poll(
+        () => server.sessionRecoveryRequests().temporaryMeFailures,
+      ).toBe(2);
+      await expect(startupError).toBeVisible();
+      await expect(retry).toBeVisible();
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toHaveCount(0);
+      await expect(page.getByTestId("button-start-run")).toHaveCount(0);
+
+      const successfulChecksBeforeRetry = server.sessionRecoveryRequests().me;
+      await retry.click();
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible({
+        timeout: 20_000,
+      });
+      expect(server.sessionRecoveryRequests().me).toBeGreaterThan(
+        successfulChecksBeforeRetry,
+      );
+      expect(server.sessionRecoveryRequests().temporaryMeFailures).toBe(2);
+      await expect(startupError).toHaveCount(0);
+      await expect(page.getByTestId("auth-startup-retry")).toHaveCount(0);
     } finally {
       if (!page.isClosed()) await page.context().setOffline(false);
       await server.close();
