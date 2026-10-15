@@ -139,6 +139,7 @@ async function buildTwoVersionFixture() {
     await Promise.all([
       stat(path.join(builtSite, "index.html")),
       stat(path.join(builtSite, "service-worker.js")),
+      stat(path.join(builtSite, "favicon.ico")),
     ]);
     const oldDir = path.join(root, "old");
     const newDir = path.join(root, "new");
@@ -425,6 +426,57 @@ test.describe("PWA update handoff", () => {
       expect(linkedIcons.favicon.status).toBe(200);
       expect(linkedIcons.favicon.decoded.width).toBeGreaterThan(0);
       expect(linkedIcons.favicon.decoded.height).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("decodes the packaged favicon.ico fallback from the production build", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer({
+      old: fixture.oldDir,
+      new: fixture.newDir,
+    });
+
+    try {
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      const fallbackIcon = await page.evaluate(async () => {
+        const iconUrl = new URL("/favicon.ico", location.href);
+        const response = await fetch(iconUrl);
+        if (!response.ok) {
+          throw new Error(`ICO fallback request failed: ${response.status}`);
+        }
+
+        const contentType = response.headers.get("content-type");
+        if (!/^image\/(?:x-icon|vnd\.microsoft\.icon|ico)\b/i.test(contentType ?? "")) {
+          throw new Error(`ICO fallback has unexpected content type: ${contentType}`);
+        }
+
+        const objectUrl = URL.createObjectURL(await response.blob());
+        try {
+          const image = new Image();
+          image.src = objectUrl;
+          await image.decode();
+          return {
+            pathname: iconUrl.pathname,
+            status: response.status,
+            contentType,
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+          };
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      });
+
+      expect(fallbackIcon.pathname).toBe("/favicon.ico");
+      expect(fallbackIcon.status).toBe(200);
+      expect(fallbackIcon.contentType).toMatch(
+        /^image\/(?:x-icon|vnd\.microsoft\.icon|ico)\b/i,
+      );
+      expect(fallbackIcon.width).toBeGreaterThan(0);
+      expect(fallbackIcon.height).toBeGreaterThan(0);
     } finally {
       await server.close();
     }
