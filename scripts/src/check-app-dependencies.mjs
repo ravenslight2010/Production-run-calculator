@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { readdir, readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { builtinModules } from "node:module";
+import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -44,49 +45,9 @@ const IGNORED_DIRECTORIES = new Set([
   "test-results",
 ]);
 
-const NODE_BUILTINS = new Set([
-  "assert",
-  "async_hooks",
-  "buffer",
-  "child_process",
-  "cluster",
-  "console",
-  "constants",
-  "crypto",
-  "dgram",
-  "diagnostics_channel",
-  "dns",
-  "domain",
-  "events",
-  "fs",
-  "http",
-  "http2",
-  "https",
-  "module",
-  "net",
-  "os",
-  "path",
-  "perf_hooks",
-  "process",
-  "punycode",
-  "querystring",
-  "readline",
-  "repl",
-  "stream",
-  "string_decoder",
-  "sys",
-  "timers",
-  "tls",
-  "trace_events",
-  "tty",
-  "url",
-  "util",
-  "v8",
-  "vm",
-  "wasi",
-  "worker_threads",
-  "zlib",
-]);
+const NODE_BUILTINS = new Set(
+  builtinModules.map((name) => name.replace(/^node:/, "").split("/")[0]),
+);
 
 const IMPORT_PATTERNS = [
   /\b(?:import|export)\s+(?:type\s+)?(?:[^"'`;]*?\s+from\s*)?["']([^"']+)["']/g,
@@ -99,6 +60,7 @@ function packageNameFromSpecifier(specifier) {
     specifier.startsWith(".") ||
     specifier.startsWith("/") ||
     specifier.startsWith("#") ||
+    specifier.startsWith("@/") ||
     specifier.startsWith("node:") ||
     /^[a-z][a-z\d+.-]*:/i.test(specifier)
   ) {
@@ -109,6 +71,14 @@ function packageNameFromSpecifier(specifier) {
   const name = specifier.startsWith("@")
     ? parts.slice(0, 2).join("/")
     : parts[0];
+
+  if (
+    !/^@[a-z\d][a-z\d._~-]*\/[a-z\d][a-z\d._~-]*$|^[a-z\d][a-z\d._~-]*$/i.test(
+      name,
+    )
+  ) {
+    return null;
+  }
 
   return NODE_BUILTINS.has(name) ? null : name;
 }
@@ -175,17 +145,13 @@ function addScriptUsage(
 
 function collectNodeModulesPathRanges(source) {
   const ranges = [];
-  const nodeModulesPath =
-    /\bnode_modules\/((?:@[^/\\\s"'`]+\/)?[^/\\\s"'`]+)/g;
+  const nodeModulesPath = /\bnode_modules\/((?:@[^/\\\s"'`]+\/)?[^/\\\s"'`]+)/g;
   for (const match of source.matchAll(nodeModulesPath)) {
     const start = match.index;
     const pathStart = start + match[0].length;
     const pathRemainder = source.slice(pathStart);
     const pathEnd = pathRemainder.search(/[\s"'`]/);
-    ranges.push([
-      start,
-      pathEnd === -1 ? source.length : pathStart + pathEnd,
-    ]);
+    ranges.push([start, pathEnd === -1 ? source.length : pathStart + pathEnd]);
   }
   return ranges;
 }
@@ -241,6 +207,39 @@ function collectImports(source, dependencies, used) {
   }
 }
 
+function collectUndeclaredImports(source, declaredDependencies, path, found) {
+  for (const pattern of IMPORT_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      const imported = packageNameFromSpecifier(match[1]);
+      if (
+        !imported ||
+        imported.startsWith("@workspace/") ||
+        declaredDependencies.has(imported)
+      ) {
+        continue;
+      }
+      found.set(`${path}\0${imported}`, { name: imported, path });
+    }
+  }
+
+  if (!/\.(?:css|scss)$/.test(path)) return;
+
+  const pluginReference =
+    /@(?:plugin|import|source|config|reference)\s+(?:url\()?\s*["']([^"']+)["']/g;
+  for (const match of source.matchAll(pluginReference)) {
+    const imported = packageNameFromSpecifier(match[1]);
+    if (
+      !imported ||
+      imported.startsWith("@workspace/") ||
+      declaredDependencies.has(imported)
+    ) {
+      continue;
+    }
+    found.set(`${path}\0${imported}`, { name: imported, path });
+  }
+}
+
 function collectCssPluginReferences(path, source, dependencies, used) {
   if (!/\.(?:css|scss)$/.test(path)) return;
 
@@ -265,7 +264,12 @@ function collectPeerDependencyUsage(used, peerPackages, dependencies) {
   }
 }
 
-function collectConfigurationStringReferences(path, source, dependencies, used) {
+function collectConfigurationStringReferences(
+  path,
+  source,
+  dependencies,
+  used,
+) {
   if (!isConfigurationFile(path)) return;
 
   for (const packageName of dependencies) {
@@ -363,7 +367,7 @@ async function readPackageFiles(packagePath, sourcePaths) {
   );
   const files = await Promise.all(
     sourcePaths.map(async (path) => ({
-      path,
+      path: relative(packagePath, path),
       content: await readFile(path, "utf8"),
     })),
   );
@@ -399,8 +403,13 @@ export function auditDependencyUsage({
     ...Object.keys(manifest.devDependencies ?? {}),
     ...Object.keys(manifest.optionalDependencies ?? {}),
   ]);
+  const declaredDependencies = new Set([
+    ...dependencies,
+    ...Object.keys(manifest.peerDependencies ?? {}),
+  ]);
   const used = new Set();
   const ambiguousBinaries = new Map();
+  const undeclaredImports = new Map();
 
   addScriptUsage(
     manifest.scripts,
@@ -412,6 +421,12 @@ export function auditDependencyUsage({
 
   for (const file of files) {
     collectImports(file.content, dependencies, used);
+    collectUndeclaredImports(
+      file.content,
+      declaredDependencies,
+      file.path,
+      undeclaredImports,
+    );
     collectBinaryUsage(
       file.content,
       binPackages,
@@ -437,6 +452,11 @@ export function auditDependencyUsage({
     unused: [...dependencies]
       .filter((dependency) => !used.has(dependency))
       .sort((left, right) => left.localeCompare(right)),
+    undeclaredImports: [...undeclaredImports.values()].sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.path.localeCompare(right.path),
+    ),
     ambiguousBinaries: [...ambiguousBinaries]
       .map(([name, providers]) => ({ name, providers }))
       .sort((left, right) => left.name.localeCompare(right.name)),
@@ -503,7 +523,9 @@ async function packageDirectoriesUnder(rootPath, parentDirectory) {
 export async function discoverWorkspacePackages(rootPath = ROOT) {
   const packagePaths = [];
   for (const packageRoot of WORKSPACE_PACKAGE_ROOTS) {
-    packagePaths.push(...(await packageDirectoriesUnder(rootPath, packageRoot)));
+    packagePaths.push(
+      ...(await packageDirectoriesUnder(rootPath, packageRoot)),
+    );
   }
   packagePaths.push(
     ...(await packageDirectoriesUnder(rootPath, "lib/integrations")),
@@ -532,16 +554,30 @@ export async function main(rootPath = ROOT, { strict = false } = {}) {
   );
   let exitCode = 0;
   for (const result of results) {
+    const enforce = strict && STRICT_PACKAGE_NAMES.has(result.packageName);
     for (const { name, providers } of result.ambiguousBinaries) {
       console.warn(
         `${result.packageName}: ambiguous binary "${name}" (provided by ${providers.join(", ")}); not counted as dependency use.`,
       );
     }
+    if (
+      STRICT_PACKAGE_NAMES.has(result.packageName) &&
+      result.undeclaredImports.length > 0
+    ) {
+      console.warn(
+        `${result.packageName}: external package imports not declared by this package${enforce ? " (strict check failed)" : " (review only)"}:`,
+      );
+      for (const { name, path } of result.undeclaredImports) {
+        console.warn(`  - ${path}: ${name}`);
+      }
+      if (enforce) exitCode = 1;
+    }
     if (result.unused.length === 0) {
-      console.log(`${result.packageName}: all direct dependencies are referenced.`);
+      console.log(
+        `${result.packageName}: all direct dependencies are referenced.`,
+      );
       continue;
     }
-    const enforce = strict && STRICT_PACKAGE_NAMES.has(result.packageName);
     console.warn(
       `${result.packageName}: direct dependencies with no detected source/config/script use${enforce ? " (strict check failed)" : " (review only)"}:`,
     );
@@ -554,7 +590,9 @@ export async function main(rootPath = ROOT, { strict = false } = {}) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args.some((argument) => argument !== "--strict")) {
-    console.error("App dependency audit accepts only the optional --strict flag.");
+    console.error(
+      "App dependency audit accepts only the optional --strict flag.",
+    );
     process.exitCode = 1;
   } else {
     main(ROOT, { strict: args.includes("--strict") })

@@ -6,9 +6,14 @@ import test from "node:test";
 import {
   auditRootPackage,
   auditDependencyUsage,
+  auditPackage,
   discoverWorkspacePackages,
   main,
 } from "./check-app-dependencies.mjs";
+
+function sourceImport(specifier) {
+  return ["import", JSON.stringify(specifier), ";"].join(" ");
+}
 
 test("reports a direct dependency that has no source, config, or script use", () => {
   const result = auditDependencyUsage({
@@ -37,7 +42,8 @@ test("recognizes imports, plugin config references, type packages, and CLI scrip
     files: [
       {
         path: "vite.config.ts",
-        content: 'import { defineConfig } from "vite";\nplugins: ["@vitejs/plugin-react"];',
+        content:
+          'import { defineConfig } from "vite";\nplugins: ["@vitejs/plugin-react"];',
       },
       {
         path: "tsconfig.json",
@@ -73,9 +79,7 @@ test("recognizes CSS plugins and the peer dependencies of used packages", () => 
         content: '@plugin "@tailwindcss/typography";',
       },
     ],
-    peerPackages: new Map([
-      ["@axe-core/playwright", new Set(["axe-core"])],
-    ]),
+    peerPackages: new Map([["@axe-core/playwright", new Set(["axe-core"])]]),
   });
 
   assert.deepEqual(result.unused, []);
@@ -228,12 +232,7 @@ test("discovers first-party artifact, library, integration, and scripts packages
     const packagePaths = await discoverWorkspacePackages(rootPath);
     assert.deepEqual(
       packagePaths.map((path) => path.slice(rootPath.length + 1)),
-      [
-        "artifacts/api",
-        "lib/core",
-        "lib/integrations/adapter",
-        "scripts",
-      ],
+      ["artifacts/api", "lib/core", "lib/integrations/adapter", "scripts"],
     );
   } finally {
     await rm(rootPath, { recursive: true, force: true });
@@ -272,7 +271,11 @@ async function makeStrictAuditFixture({
   const rootPath = await mkdtemp(join(tmpdir(), "strict-dependency-audit-"));
   await writeFile(
     join(rootPath, "package.json"),
-    JSON.stringify({ name: "strict-audit-root", scripts: {}, devDependencies: {} }),
+    JSON.stringify({
+      name: "strict-audit-root",
+      scripts: {},
+      devDependencies: {},
+    }),
   );
   const packages = [
     {
@@ -296,7 +299,7 @@ async function makeStrictAuditFixture({
     );
     const importNames = Object.keys(dependencies)
       .filter((dependency) => dependency !== "unused-package")
-      .map((dependency) => `import "${dependency}";`)
+      .map(sourceImport)
       .join("\n");
     await writeFile(join(packagePath, "src/main.js"), importNames);
   }
@@ -369,4 +372,127 @@ test("does not mistake relative, Node built-in, or URL imports for dependencies"
 
   assert.deepEqual(result.unused, ["unused-package"]);
   assert.deepEqual(result.ambiguousBinaries, []);
+});
+
+test("reports undeclared external imports but excludes declared and workspace-owned packages", () => {
+  const result = auditDependencyUsage({
+    manifest: {
+      dependencies: {
+        "declared-package": "1.0.0",
+        "@scope/declared-plugin": "1.0.0",
+      },
+      peerDependencies: { "peer-package": "1.0.0" },
+      scripts: {},
+    },
+    files: [
+      {
+        path: "src/main.ts",
+        content: [
+          sourceImport("declared-package/subpath"),
+          sourceImport("peer-package"),
+          sourceImport("missing-package/subpath"),
+          sourceImport("@scope/missing-package/subpath"),
+          sourceImport("node:test"),
+          sourceImport("fs/promises"),
+          sourceImport("./local.js"),
+          sourceImport("@workspace/internal-package"),
+          sourceImport("https://example.com/module.js"),
+          sourceImport("reuse existing recipe"),
+          sourceImport("${importedFile}"),
+        ].join("\n"),
+      },
+      {
+        path: "src/theme.css",
+        content:
+          '@plugin "@scope/declared-plugin"; @plugin "@scope/missing-plugin";',
+      },
+    ],
+  });
+
+  assert.deepEqual(result.undeclaredImports, [
+    { name: "@scope/missing-package", path: "src/main.ts" },
+    { name: "@scope/missing-plugin", path: "src/theme.css" },
+    { name: "missing-package", path: "src/main.ts" },
+  ]);
+});
+
+test("strict mode catches imports available only from root or sibling workspace installs", async () => {
+  const rootPath = await makeStrictAuditFixture({
+    calculatorDependencies: { react: "1.0.0" },
+    mockupDependencies: { vite: "1.0.0" },
+  });
+  const originalWarn = console.warn;
+  const warnings = [];
+  try {
+    const calculatorPath = join(rootPath, "artifacts/run-calculator");
+    await writeFile(
+      join(calculatorPath, "src/main.js"),
+      [
+        sourceImport("react"),
+        sourceImport("root-hoisted-package"),
+        sourceImport("sibling-hoisted-package"),
+      ].join("\n"),
+    );
+
+    await writeFile(
+      join(rootPath, "package.json"),
+      JSON.stringify({
+        name: "strict-audit-root",
+        dependencies: { "root-hoisted-package": "1.0.0" },
+        scripts: {},
+      }),
+    );
+    const siblingPath = join(rootPath, "artifacts/neighbor-app");
+    await mkdir(join(siblingPath, "src"), { recursive: true });
+    await writeFile(
+      join(siblingPath, "package.json"),
+      JSON.stringify({
+        name: "@workspace/neighbor-app",
+        dependencies: { "sibling-hoisted-package": "1.0.0" },
+        scripts: {},
+      }),
+    );
+    await writeFile(
+      join(siblingPath, "src/main.js"),
+      sourceImport("sibling-hoisted-package"),
+    );
+    for (const packageName of [
+      "root-hoisted-package",
+      "sibling-hoisted-package",
+    ]) {
+      const installedPath = join(rootPath, "node_modules", packageName);
+      await mkdir(installedPath, { recursive: true });
+      await writeFile(
+        join(installedPath, "package.json"),
+        JSON.stringify({ name: packageName }),
+      );
+    }
+
+    const result = await auditPackage(calculatorPath);
+    assert.deepEqual(result.undeclaredImports, [
+      { name: "root-hoisted-package", path: "src/main.js" },
+      { name: "sibling-hoisted-package", path: "src/main.js" },
+    ]);
+
+    console.warn = (...args) => warnings.push(args.join(" "));
+    assert.equal(await main(rootPath), 0);
+    assert.equal(await main(rootPath, { strict: true }), 1);
+  } finally {
+    console.warn = originalWarn;
+    await rm(rootPath, { recursive: true, force: true });
+  }
+
+  assert.ok(
+    warnings.some((warning) =>
+      warning.includes(
+        "external package imports not declared by this package (strict check failed)",
+      ),
+    ),
+  );
+  assert.ok(
+    warnings.some((warning) => warning.includes("root-hoisted-package")),
+  );
+  assert.ok(
+    warnings.some((warning) => warning.includes("sibling-hoisted-package")),
+  );
 });
