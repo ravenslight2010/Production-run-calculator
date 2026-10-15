@@ -437,7 +437,8 @@ test_release_runner_verifies_local_tls_certificates() {
   local server_dir="${TEST_ROOT}/tls-server"
   local wrong_node_dir="${workspace}/wrong-node"
   local node_version
-  local port_file="${server_dir}/port"
+  local registry_port_file="${server_dir}/registry-port"
+  local tarball_port_file="${server_dir}/tarball-port"
   local server_output="${server_dir}/output"
   local client_script="${workspace}/https-client.cjs"
   local package_root="${workspace}/package"
@@ -449,7 +450,10 @@ test_release_runner_verifies_local_tls_certificates() {
   local trusted_npx_output="${workspace}/trusted-npx-output"
   local untrusted_npx_output="${workspace}/untrusted-npx-output"
   local integrity_npx_output="${workspace}/integrity-npx-output"
+  local redirect_integrity_npx_output="${workspace}/redirect-integrity-npx-output"
   local registry_requests="${workspace}/registry-requests"
+  local tarball_requests="${workspace}/tarball-requests"
+  local redirect_mode_file="${workspace}/redirect-mode"
   local npx_log="${workspace}/npx-log"
   local package_name="replit-release-runner-tls-fixture"
   local package_version="1.0.0"
@@ -569,7 +573,9 @@ EOF
   cp "$package_tarball" "$altered_package_tarball"
   printf 'altered package bytes\n' >>"$altered_package_tarball"
   printf 'matching\n' >"$tarball_mode_file"
+  printf 'direct\n' >"$redirect_mode_file"
   : >"$registry_requests"
+  : >"$tarball_requests"
   : >"${workspace}/empty-user.npmrc"
   : >"${workspace}/empty-global.npmrc"
 
@@ -581,18 +587,25 @@ const https = require("node:https");
 const [
   keyPath,
   certPath,
-  portPath,
+  registryPortPath,
+  tarballPortPath,
   packageTarballPath,
   alteredPackageTarballPath,
   tarballModePath,
+  redirectModePath,
   requestLogPath,
+  tarballRequestLogPath,
 ] = process.argv.slice(2);
 const packageName = "replit-release-runner-tls-fixture";
 const packageVersion = "1.0.0";
 const packageTarball = fs.readFileSync(packageTarballPath);
 const alteredPackageTarball = fs.readFileSync(alteredPackageTarballPath);
-const server = https.createServer(
-  { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) },
+const tlsOptions = {
+  key: fs.readFileSync(keyPath),
+  cert: fs.readFileSync(certPath),
+};
+const registryServer = https.createServer(
+  tlsOptions,
   (request, response) => {
     fs.appendFileSync(requestLogPath, `${request.method} ${request.url}\n`);
     const requestUrl = new URL(request.url, "https://127.0.0.1");
@@ -611,7 +624,10 @@ const server = https.createServer(
             version: packageVersion,
             bin: { "local-npx-tls-fixture": "bin/run.cjs" },
             dist: {
-              tarball: `https://127.0.0.1:${server.address().port}/fixture.tgz`,
+              tarball:
+                fs.readFileSync(redirectModePath, "utf8").trim() === "redirect"
+                  ? `https://127.0.0.1:${registryServer.address().port}/redirect.tgz`
+                  : `https://127.0.0.1:${registryServer.address().port}/fixture.tgz`,
               integrity,
               shasum,
             },
@@ -620,6 +636,14 @@ const server = https.createServer(
       };
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(metadata));
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/redirect.tgz") {
+      response.writeHead(302, {
+        location: `https://127.0.0.1:${tarballServer.address().port}/fixture.tgz`,
+      });
+      response.end();
       return;
     }
 
@@ -647,8 +671,28 @@ const server = https.createServer(
   },
 );
 
-server.listen(0, "127.0.0.1", () => {
-  fs.writeFileSync(portPath, String(server.address().port));
+const tarballServer = https.createServer(tlsOptions, (request, response) => {
+  fs.appendFileSync(tarballRequestLogPath, `${request.method} ${request.url}\n`);
+  const requestUrl = new URL(request.url, "https://127.0.0.1");
+
+  if (request.method === "GET" && requestUrl.pathname === "/fixture.tgz") {
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-length": alteredPackageTarball.length,
+    });
+    response.end(alteredPackageTarball);
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "text/plain" });
+  response.end("not found");
+});
+
+tarballServer.listen(0, "127.0.0.1", () => {
+  fs.writeFileSync(tarballPortPath, String(tarballServer.address().port));
+  registryServer.listen(0, "127.0.0.1", () => {
+    fs.writeFileSync(registryPortPath, String(registryServer.address().port));
+  });
 });
 EOF
   cat >"$client_script" <<'EOF'
@@ -678,13 +722,14 @@ request.on("error", (error) => {
 EOF
 
   "$REAL_NODE_BIN" "${server_dir}/https-server.cjs" \
-    "${cert_dir}/server.key" "${cert_dir}/server.pem" "$port_file" \
+    "${cert_dir}/server.key" "${cert_dir}/server.pem" \
+    "$registry_port_file" "$tarball_port_file" \
     "$package_tarball" "$altered_package_tarball" "$tarball_mode_file" \
-    "$registry_requests" \
+    "$redirect_mode_file" "$registry_requests" "$tarball_requests" \
     >"$server_output" 2>&1 &
   TLS_SERVER_PID=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
-    [[ -s "$port_file" ]] && break
+    [[ -s "$registry_port_file" && -s "$tarball_port_file" ]] && break
     if ! kill -0 "$TLS_SERVER_PID" 2>/dev/null; then
       printf 'Local HTTPS fixture server exited before becoming ready.\n' >&2
       cat "$server_output" >&2
@@ -692,12 +737,12 @@ EOF
     fi
     sleep 0.05
   done
-  if [[ ! -s "$port_file" ]]; then
+  if [[ ! -s "$registry_port_file" || ! -s "$tarball_port_file" ]]; then
     printf 'Local HTTPS fixture server did not become ready in time.\n' >&2
     cat "$server_output" >&2
     return 1
   fi
-  url="https://127.0.0.1:$(cat "$port_file")/"
+  url="https://127.0.0.1:$(cat "$registry_port_file")/"
 
   set +e
   env \
@@ -847,10 +892,34 @@ EOF
   assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
   assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
 
+  printf 'redirect\n' >"$redirect_mode_file"
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/redirect-integrity-npm-cache" "$redirect_integrity_npx_output"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Installed npx accepted altered tarball bytes after following a registry redirect.\n' >&2
+    cat "$redirect_integrity_npx_output" >&2
+    return 1
+  fi
+  local redirect_integrity_npx_result
+  redirect_integrity_npx_result=$(cat "$redirect_integrity_npx_output")
+  if [[ "$redirect_integrity_npx_result" != *"EINTEGRITY"* &&
+    "$redirect_integrity_npx_result" != *"integrity checksum failed"* ]]; then
+    printf 'Redirected altered tarball failed for a reason other than npm integrity validation:\n%s\n' \
+      "$redirect_integrity_npx_result" >&2
+    return 1
+  fi
+  assert_not_contains "$redirect_integrity_npx_result" \
+    "local npx package resolved over verified TLS"
+  assert_contains "$(cat "$registry_requests")" "GET /redirect.tgz"
+  assert_contains "$(cat "$tarball_requests")" "GET /fixture.tgz"
+
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and installed npx verify the test CA, reject an untrusted CA, and reject altered package bytes"
+  echo "PASS: Node and installed npx verify the test CA, reject an untrusted CA, and reject altered package bytes directly and after redirect"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
