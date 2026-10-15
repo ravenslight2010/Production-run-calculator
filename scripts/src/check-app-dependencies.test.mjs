@@ -163,7 +163,10 @@ test("reports a bare binary with multiple direct providers as ambiguous", () => 
     },
     files: [
       { path: "src/z-compiler.mjs", content: "tsc --version" },
-      { path: "src/a-compiler.mjs", content: "tsc --help && tsc --version" },
+      {
+        path: "src/a-compiler.mjs",
+        content: "tsc --help && tsc --version\n\nconst compiler = tsc;",
+      },
     ],
     binPackages: new Map([
       ["tsc", new Set(["typescript-native", "typescript"])],
@@ -177,8 +180,8 @@ test("reports a bare binary with multiple direct providers as ambiguous", () => 
       providers: ["typescript", "typescript-native"],
       locations: [
         "package.json#scripts.check",
-        "src/a-compiler.mjs",
-        "src/z-compiler.mjs",
+        "src/a-compiler.mjs:1,3",
+        "src/z-compiler.mjs:1",
       ],
     },
   ]);
@@ -224,7 +227,7 @@ test("prints ambiguous binary providers in the dependency audit report", async (
   assert.ok(
     warnings.some((warning) =>
       warning.includes(
-        'ambiguous binary "shared-tool" (provided by tool-one, tool-two; found in package.json#scripts.check, scripts/audit.mjs); not counted as dependency use.',
+        'ambiguous binary "shared-tool" (provided by tool-one, tool-two; found in package.json#scripts.check, scripts/audit.mjs:1); not counted as dependency use.',
       ),
     ),
   );

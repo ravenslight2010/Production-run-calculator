@@ -177,15 +177,19 @@ function collectBinaryUsage(
       `(^|[^\\w.-])(${escaped})(?=$|[^\\w.-])`,
       "gm",
     );
-    const hasBareReference = [...source.matchAll(binaryReference)].some(
-      (match) => {
-        const binaryStart = match.index + match[1].length;
-        return !nodeModulesPathRanges.some(
+    const matchingLines = new Set();
+    for (const match of source.matchAll(binaryReference)) {
+      const binaryStart = match.index + match[1].length;
+      if (
+        nodeModulesPathRanges.some(
           ([start, end]) => binaryStart >= start && binaryStart < end,
-        );
-      },
-    );
-    if (!hasBareReference) continue;
+        )
+      ) {
+        continue;
+      }
+      matchingLines.add(source.slice(0, binaryStart).split("\n").length);
+    }
+    if (matchingLines.size === 0) continue;
 
     const providers = [...packages]
       .filter((packageName) => dependencies.has(packageName))
@@ -195,9 +199,16 @@ function collectBinaryUsage(
     } else if (providers.length > 1) {
       const ambiguous = ambiguousBinaries.get(binName) ?? {
         providers,
-        locations: new Set(),
+        scriptLocations: new Set(),
+        sourceLines: new Map(),
       };
-      if (location) ambiguous.locations.add(location);
+      if (location?.startsWith("package.json#scripts.")) {
+        ambiguous.scriptLocations.add(location);
+      } else if (location) {
+        const lines = ambiguous.sourceLines.get(location) ?? new Set();
+        for (const line of matchingLines) lines.add(line);
+        ambiguous.sourceLines.set(location, lines);
+      }
       ambiguousBinaries.set(binName, ambiguous);
     }
   }
@@ -471,12 +482,16 @@ export function auditDependencyUsage({
         left.path.localeCompare(right.path),
     ),
     ambiguousBinaries: [...ambiguousBinaries]
-      .map(([name, { providers, locations }]) => ({
+      .map(([name, { providers, scriptLocations, sourceLines }]) => ({
         name,
         providers,
-        locations: [...locations].sort((left, right) =>
-          left.localeCompare(right),
-        ),
+        locations: [
+          ...scriptLocations,
+          ...[...sourceLines].map(
+            ([path, lines]) =>
+              `${path}:${[...lines].sort((left, right) => left - right).join(",")}`,
+          ),
+        ].sort((left, right) => left.localeCompare(right)),
       }))
       .sort((left, right) => left.name.localeCompare(right.name)),
   };
