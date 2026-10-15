@@ -4,7 +4,11 @@
 
 **GO for a plugin-only upgrade to `vite-plugin-pwa` 2.0.0.** The isolated candidate built successfully, generated the same manifest and Workbox implementation, and passed the focused PWA suite in Chromium and WebKit. This task did not change the supported dependency; `artifacts/run-calculator/package.json` remains on `^1.3.0`, with 1.3.0 in the supported lockfile.
 
-This is not a GO for claiming that authenticated production screens cold-start offline. That behavior is unavailable with either plugin version: the app shell loads from cache, but the session check cannot reach `/api/me` and the app shows “Unable to open Run Calculator.” An already-open run remains visible and usable when its connection drops. Treat offline session recovery as a separate product and security decision.
+This is not a GO for claiming that authenticated production screens cold-start offline. That behavior is unavailable with either plugin version: the app shell loads from cache, but the session check cannot reach `/api/me` and the app shows “Unable to open Run Calculator.”
+
+**Cold offline session recovery is not approved at this time.** Keep the current behavior: a cold offline launch may load the cached app shell, but it must not restore the authenticated production screen. An already-open run remains visible and usable when its connection drops; that existing in-memory continuity does not establish an authenticated session for a later cold start.
+
+The startup identity check in `artifacts/run-calculator/src/AuthContext.tsx` calls `/api/me` and uses the server-set HttpOnly `rc_auth` cookie; it does not restore an identity from persistent client storage. The API checks the token against current server-side session and account state, including reset, account-disable, password-change, and revocation fences. Offline, the client cannot determine whether any of those checks would now reject the session. Do not persist or trust a cached identity, cookie/token, or operational data as proof of current authorization. If this decision is revisited, first define the exact cached data allowed, its freshness and shared-device clearing rules, whether it is read-only, and the required online re-authentication before enabling server operations. No such offline restoration or cached operational view is authorized by this decision.
 
 When implementing the plugin upgrade, keep it isolated from unrelated lockfile updates. The temporary 2.0.0 evaluation branch also resolved `lru-cache` from 11.5.2 to 11.5.3; that was not part of the PWA plugin release and must not be carried into an upgrade without its own review.
 
@@ -45,7 +49,7 @@ The browser tests verify installation metadata and icon delivery, not the browse
 
 | Finding | Status | Evidence / disposition |
 | --- | --- | --- |
-| Cold offline reload cannot confirm the staff session, so it does not reopen the production screen | Open, same in both versions | Browser smoke sees the service-worker-cached document, then “Unable to open Run Calculator.” `AuthProvider` requires `/api/me`; changing this safely needs a separate session-policy decision. |
+| Cold offline reload cannot confirm the staff session, so it does not reopen the production screen | Resolved by policy decision; behavior unchanged | Browser smoke sees the service-worker-cached document, then “Unable to open Run Calculator.” `AuthContext.tsx` requires `/api/me`; the server applies current session/account/reset checks that cannot be verified offline. Cold offline restoration is not approved. |
 | Candidate dependency install initially omitted a workspace-package link | Resolved | The first candidate build failed resolving `@workspace/name-match`; a full workspace install in the temporary worktree restored links. The subsequent candidate build and browser runs passed. |
 | WebKit reported unavailable external Google Fonts in the network-isolated fixture | Resolved in test harness | The stale-chunk test ignores only errors naming the external `fonts.googleapis.com/css2` stylesheet; all other page errors remain failures. |
 | Candidate lock resolution updated unrelated `lru-cache` 11.5.2 → 11.5.3 | Evaluation-only caveat | The supported package manifest and lockfile are unchanged. Keep unrelated resolution drift out of the eventual upgrade. |
