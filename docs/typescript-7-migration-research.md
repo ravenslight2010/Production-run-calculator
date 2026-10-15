@@ -367,14 +367,29 @@ double-quote to single-quote changes in string literal types. Generated API decl
 also changed some quoted literal renderings to template-literal or single-quoted forms.
 The earlier notes list 217 textual differences, while the historical contract-comparison
 counts list 196 formatting-only and 9 approved semantic changes (205 combined). Those
-figures do not reconcile. The checked-in comparison artifact currently records 206 changed
-paths and an unknown runner image; it is not a substitute for the missing per-file
-classification report. Do not describe these counts as non-additive or claim that all changed
-declarations have zero unexplained semantic drift from the available evidence. Re-run the
-comparison on an identifiable approved runner and retain its revision-bound summary and
-per-file classification before relying on those claims. A production switch must continue to
-block any new declaration output until it is fixed or receives the same contract-owner
-review.
+figures do not reconcile. A separate archived comparison at
+`release-evidence-archive/stale-full-2026-09-14/evidence/typescript-7-comparison.json` reports
+217 changed paths with an unknown runner image, but it names source revision
+`63cfd77eef883cba583636e6fc4c72fa37cc24a6`, not the historical JSON's
+`72383c601448d234b7813451618c293ebdca7ac8`. Its counts and partial approval-hash overlap do
+not resolve the missing per-file classification report. Do not describe these counts as
+non-additive or claim that all changed declarations have zero unexplained semantic drift from
+the available evidence. Re-run the comparison on an identifiable approved runner and retain
+its revision-bound summary and per-file classification before relying on those claims. A
+production switch must continue to block any new declaration output until it is fixed or
+receives the same contract-owner review.
+
+**Historical correction status (2026-10-15):** The retained JSON named
+`typescript-7-comparison-2026-09-15.json` records source revision
+`72383c601448d234b7813451618c293ebdca7ac8`, 217 textually changed files, and package counts
+that sum to 217. The historical prose's contract totals remain 196 formatting-only plus 9
+approved semantic changes (205 total). The 12-file gap cannot be reconciled because the named
+source commit and raw per-file comparison report are unavailable. The retained JSON remains
+unchanged; the source-bound evidence review and integrity hash are in
+[`docs/evidence/typescript-7-comparison-2026-09-15-correction.md`](evidence/typescript-7-comparison-2026-09-15-correction.md).
+Do not treat the retained-summary consistency check as independent confirmation of the
+historical classifications or change the contract-owner conclusion without the missing
+revision-bound evidence and approval.
 
 The advisory release lane captures one cold and one warm measurement for every TypeScript
 6/7 comparison check and aggregates up to five prior successful, revision-bound CI
