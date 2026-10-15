@@ -186,6 +186,96 @@ test_release_runner_lock_history_viewer_shows_only_recent_safe_fields() {
   echo "PASS: lock-history viewer displays only the newest 20 safe fields and leaves history unchanged"
 }
 
+test_release_runner_lock_history_viewer_rejects_symlinked_history_without_reading_or_modifying_target() {
+  local workspace
+  local history_file
+  local target_file
+  local before_hash
+  local after_hash
+  local before_link
+  local after_link
+  local output
+  local status=0
+  workspace=$(make_workspace lock-history-viewer-symlink)
+  history_file=$(prepare_synthetic_history "$workspace")
+  target_file="${workspace}/symlink-target.jsonl"
+  printf '%s\n' \
+    '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":8,"outcome":"acquired","owner_pid":"123","owner_started_at":"2026-01-01T00:00:00Z","command":"LOCAL_SYMLINK_TARGET_SENTINEL"}' \
+    >"$target_file"
+  chmod 600 -- "$target_file"
+  rm -f -- "$history_file"
+  ln -s -- "$target_file" "$history_file"
+  before_hash=$(sha256sum "$target_file")
+  before_link=$(readlink -- "$history_file")
+
+  output=$(bash "${workspace}/scripts/src/show-release-lock-history.sh" 2>&1) ||
+    status=$?
+  [[ "$status" -eq 1 ]] || {
+    printf 'Expected symlinked history rejection, got status %s.\n' "$status" >&2
+    return 1
+  }
+  [[ "$output" == *"its file is unavailable."* ]] || {
+    printf 'Symlinked history was not rejected with the expected diagnostic.\n' >&2
+    return 1
+  }
+  [[ "$output" != *"LOCAL_SYMLINK_TARGET_SENTINEL"* ]] || {
+    printf 'Viewer exposed the symlink target contents.\n' >&2
+    return 1
+  }
+
+  after_hash=$(sha256sum "$target_file")
+  after_link=$(readlink -- "$history_file")
+  [[ "$before_hash" == "$after_hash" && "$before_link" == "$after_link" &&
+    -L "$history_file" ]] || {
+    printf 'Viewer changed the symlink or its target.\n' >&2
+    return 1
+  }
+  echo "PASS: lock-history viewer rejects symlinked history without exposing or changing its target"
+}
+
+test_release_runner_lock_history_viewer_rejects_broad_history_permissions_without_reading_or_modifying_file() {
+  local workspace
+  local history_file
+  local before_hash
+  local after_hash
+  local before_mode
+  local after_mode
+  local output
+  local status=0
+  workspace=$(make_workspace lock-history-viewer-broad-permissions)
+  history_file=$(prepare_synthetic_history "$workspace")
+  printf '%s\n' \
+    '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":8,"outcome":"acquired","owner_pid":"123","owner_started_at":"2026-01-01T00:00:00Z","command":"LOCAL_BROAD_PERMISSION_SENTINEL"}' \
+    >"$history_file"
+  chmod 644 -- "$history_file"
+  before_hash=$(sha256sum "$history_file")
+  before_mode=$(stat -c '%a' -- "$history_file")
+
+  output=$(bash "${workspace}/scripts/src/show-release-lock-history.sh" 2>&1) ||
+    status=$?
+  [[ "$status" -eq 1 ]] || {
+    printf 'Expected broadly permissioned history rejection, got status %s.\n' \
+      "$status" >&2
+    return 1
+  }
+  [[ "$output" == *"its file is unavailable."* ]] || {
+    printf 'Broadly permissioned history was not rejected with the expected diagnostic.\n' >&2
+    return 1
+  }
+  [[ "$output" != *"LOCAL_BROAD_PERMISSION_SENTINEL"* ]] || {
+    printf 'Viewer exposed the broadly permissioned history contents.\n' >&2
+    return 1
+  }
+
+  after_hash=$(sha256sum "$history_file")
+  after_mode=$(stat -c '%a' -- "$history_file")
+  [[ "$before_hash" == "$after_hash" && "$before_mode" == "$after_mode" ]] || {
+    printf 'Viewer changed the broadly permissioned history file.\n' >&2
+    return 1
+  }
+  echo "PASS: lock-history viewer rejects broad file permissions without exposing or changing history"
+}
+
 write_node() {
   local node_path="$1"
   local node_version="$2"
@@ -2666,6 +2756,8 @@ test_release_runner_lock_wait_times_out_with_owner_and_recovers
 test_release_runner_lock_history_rotates_and_recovers_malformed_state
 test_release_runner_lock_history_viewer_handles_missing_and_malformed_history
 test_release_runner_lock_history_viewer_shows_only_recent_safe_fields
+test_release_runner_lock_history_viewer_rejects_symlinked_history_without_reading_or_modifying_target
+test_release_runner_lock_history_viewer_rejects_broad_history_permissions_without_reading_or_modifying_file
 test_release_runner_lock_wait_interruption_is_recorded
 test_release_runner_nested_invocation_reuses_lock
 test_release_runner_preserves_child_status
