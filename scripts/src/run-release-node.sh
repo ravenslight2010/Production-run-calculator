@@ -296,6 +296,16 @@ if node_bin=$(command -v node 2>/dev/null); then
   fi
 fi
 
+# npm inherits Replit's package-firewall registry setting, which may be an
+# internal cleartext HTTP URL. Keep the HTTPS-only acquisition guard enabled
+# and use the public HTTPS registry unless a caller explicitly supplies a
+# different HTTPS registry (for example, the local TLS fixture in tests).
+release_node_registry="${RELEASE_NODE_NPM_REGISTRY:-https://registry.npmjs.org/}"
+if [[ ! "$release_node_registry" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then
+  printf 'Release runner requires a valid HTTPS npm registry for pinned Node acquisition.\n' >&2
+  exit 1
+fi
+
 # npx makes the requested Node package available as a binary. The nested
 # shell deliberately discovers that binary and prepends its directory to
 # PATH before starting pnpm; wrapping pnpm alone does not control the Node
@@ -362,6 +372,8 @@ guarded_node_options="--require=\"${SCRIPT_DIR}/release-node-https-only.cjs\"${N
 
 # shellcheck disable=SC2016
 NODE_OPTIONS="$guarded_node_options" \
+RELEASE_NODE_NPM_REGISTRY="$release_node_registry" \
+npm_config_registry="$release_node_registry" \
 RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
   python3 -c '
 import os

@@ -14,3 +14,9 @@ The workspace-global `pnpm` launcher can have an absolute shebang pointing at a 
 **Why:** The launcher is generated with its interpreter path, while child tools resolve `node` through the updated `PATH`; these can report different executable paths during the same check.
 
 **How to apply:** If process listings appear inconsistent after pinning Node, inspect `head -1 "$(command -v pnpm)"` and the release runner preflight result before changing toolchain configuration.
+
+The Replit npm package-firewall registry may be configured as cleartext HTTP, while release bootstrap intentionally rejects HTTP downloads. For pinned-Node acquisition, explicitly select an HTTPS npm registry instead of weakening the transport guard.
+
+**Why:** The HTTP registry setting caused post-merge setup to fail before dependency installation even though the pinned runtime package was available from the public HTTPS registry.
+
+**How to apply:** Keep HTTPS certificate verification and downgrade rejection enabled; scope the HTTPS registry override to Node package acquisition, and test that inherited HTTP configuration cannot override it.

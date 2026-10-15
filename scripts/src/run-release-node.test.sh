@@ -466,6 +466,7 @@ set -euo pipefail
 
 printf 'npx-invoked\n' >>"\$RUN_LOG"
 printf 'npx-node-options=%s\n' "\${NODE_OPTIONS:-unset}" >>"\$RUN_LOG"
+printf 'npx-registry=%s\n' "\${npm_config_registry:-unset}" >>"\$RUN_LOG"
 
 args=("\$@")
   separator=-1
@@ -531,6 +532,7 @@ run_launcher() {
 
   set +e
   env "${node_options_env[@]}" \
+    npm_config_registry="http://package-firewall.replit.internal/npm/" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     RUN_LOG="$log_path" PATH="$path_value" \
@@ -608,6 +610,7 @@ test_mismatching_node_uses_npx() {
   assert_contains "$events" "npx-invoked"
   assert_contains "$events" \
     "npx-node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\" --trace-warnings"
+  assert_contains "$events" "npx-registry=https://registry.npmjs.org/"
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "node-options=--trace-warnings"
@@ -617,6 +620,43 @@ test_mismatching_node_uses_npx() {
   fi
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   echo "PASS: mismatching Node path invokes npx, runs preflight, and preserves pinned Node for the child"
+}
+
+test_invalid_npx_registry_fails_before_package_acquisition() {
+  local workspace
+  local log_path
+  local status
+  workspace=$(make_workspace invalid-npx-registry)
+  log_path="${workspace}/events"
+
+  write_node "${workspace}/bin/node" "24.19.0"
+  write_pinned_npx "${workspace}/bin/npx" "${workspace}/pinned-bin"
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    npm_config_registry="http://package-firewall.replit.internal/npm/" \
+    RELEASE_NODE_NPM_REGISTRY="http://registry.example.test/" \
+    RUN_LOG="$log_path" \
+    PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+    >"${workspace}/output" 2>&1
+  status=$?
+  set -e
+
+  [[ "$status" -ne 0 ]] || {
+    printf 'Cleartext Node-acquisition registry unexpectedly succeeded.\n' >&2
+    cat "${workspace}/output" >&2
+    return 1
+  }
+  assert_contains "$(cat "${workspace}/output")" \
+    "Release runner requires a valid HTTPS npm registry for pinned Node acquisition."
+  [[ ! -s "$log_path" ]] || {
+    printf 'Invalid npm registry reached npx package acquisition.\n' >&2
+    cat "$log_path" >&2
+    return 1
+  }
+  echo "PASS: invalid cleartext registry is rejected before npx package acquisition"
 }
 
 test_wrong_fallback_node_version_fails_before_release_commands() {
@@ -1291,6 +1331,7 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
@@ -1314,6 +1355,7 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
@@ -1337,6 +1379,7 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
@@ -1360,6 +1403,7 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
@@ -1383,6 +1427,7 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
@@ -1409,6 +1454,7 @@ EOF
     -u NODE_OPTIONS \
     -u NODE_EXTRA_CA_CERTS \
     -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
     PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
     RUN_LOG="$npx_log" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
@@ -3023,6 +3069,7 @@ EOF
 
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
+test_invalid_npx_registry_fails_before_package_acquisition
 test_wrong_fallback_node_version_fails_before_release_commands
 test_npx_package_resolution_failure_fails_before_release_commands
 test_missing_node_selector_fails_before_release_commands
