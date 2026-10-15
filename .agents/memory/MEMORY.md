@@ -157,3 +157,4 @@
 - [Sync listener stop diagnostics](sync-listener-stop-diagnostics.md) — clear lag samples on shutdown and fence metric writes from in-flight drains that resume afterward.
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [WebKit GIO TLS](webkit-gio-tls-runtime.md) — bundled WPE can launch without a TLS provider; expose Nix `glib-networking` via `GIO_EXTRA_MODULES` and keep trust checks enabled.
+- [Local production graph builds](local-production-graph-build.md) — use development identity mode for local bundle analysis; keep publish-source identity changes in release workflows.

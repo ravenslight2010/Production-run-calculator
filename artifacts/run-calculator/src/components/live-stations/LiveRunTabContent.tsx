@@ -1,22 +1,5 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
-import { useEvent } from "../../hooks/useEvent";
 import { createFrameRepeater } from "../../frameRepeater";
-import {
-  flushPendingHomeFormWrites,
-  useHomeFormIdentityFences,
-  useHomeFormLifecycle,
-} from "../../hooks/useHomeFormLifecycle";
-import { useRunLifecycleManager } from "../../hooks/useRunLifecycleManager";
-import {
-  coordinateForegroundAdoption,
-  createForegroundSyncTodayRequest,
-  initialResetRequiresReload,
-  releaseCancelledForegroundRecovery,
-  releaseForegroundRecovery,
-  useHomeSyncCoordination,
-} from "../../hooks/useHomeSyncCoordination";
-import { consumeForegroundRecoveryResponse } from "../../foregroundRecoveryResponse";
-import { closeTopmostImportDialog, useHomeImportDialogs } from "../../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
   computeAutomaticFrontlineSupply,
@@ -29,39 +12,18 @@ import {
 } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
-import { WarehouseTabCtx, type WarehouseTabContextValue } from "../../contexts/WarehouseTabCtx";
-import { InventoryTabCtx, type InventoryTabContextValue } from "../../contexts/InventoryTabCtx";
-import { MixesTabCtx, type MixesTabContextValue } from "../../contexts/MixesTabCtx";
-import { SetupTabCtx, type SetupTabContextValue } from "../../contexts/SetupTabCtx";
 import WarehouseTabContent from "../../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../../components/FreezerSurplusPanel";
-import InventoryTabContent from "../../components/InventoryTabContent";
 import MixesTabContent from "../../components/MixesTabContent";
 import SetupContent from "../../components/SetupContent";
 import SummaryToolsContent from "../../components/SummaryToolsContent";
-import ScreenModeView from "../../components/ScreenModeView";
-import { ForegroundRecoveryStatus } from "../../components/ForegroundRecoveryStatus";
-import { VisibleTabScheduler } from "../../visibleTabScheduler";
-import { incrementFloorCaseCount } from "../../floorPackagingCorrection";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,
   reportAutomaticUpdateReloadSafety,
   useAutomaticUpdateReloadBlocker,
 } from "../../updateReloadSafety";
-import {
-  browserIsOnline,
-  resolveForegroundStopIntent,
-  type ForegroundStopIntent,
-} from "../../foregroundLifecycleIntent";
-import GlanceOverlay from "../../components/GlanceOverlay";
-import { useAccessibleDialogStack } from "../../components/useAccessibleDialog";
-import CompactRunStrip from "../../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../../components/ManualOverrideBanner";
-import { LiveSauceTabContent } from "../../components/live-stations/LiveSauceTabContent";
-import { LiveFrontlineTabContent } from "../../components/live-stations/LiveFrontlineTabContent";
-import { LivePackagingTabContent } from "../../components/live-stations/LivePackagingTabContent";
-import { LiveDoughTabContent } from "../../components/live-stations/LiveDoughTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../../components/MixAlreadyMadeInput";
 import { PrepMixMissingAmountsWarning } from "../../components/PrepMixMissingAmountsWarning";
@@ -153,15 +115,7 @@ import {
   writeDayResetAt,
   runLabel,
 } from "../../utils";
-import { normalizeScheduledDays, type ScheduledDay } from "../../scheduledDays";
 import { fetchWithTimeout } from "../../fetchWithTimeout";
-import { deriveFrontlineNeedRows } from "../../frontlineRows";
-import {
-  isSharedRecipeRefreshEligible,
-  orchestrateSharedRecipeRefresh,
-  refreshNamedRecipeProfilesAndPropagate,
-  runSharedRecipeRefresh,
-} from "../../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../../linePhases";
@@ -280,25 +234,7 @@ import {
   shouldKeepLocalRunLifecycle,
   shouldResetFormOnRunSwitch,
 } from "../../domain/runSyncPolicy";
-import {
-  loadPackagingProgress,
-  overlayPackagingProgress,
-  reconcilePackagingProgress,
-  recordAutomaticPackagingProgress,
-  recordManualPackagingProgress,
-  savePackagingProgress,
-} from "../../packagingProgress";
 import { isolatePendingRunPackagingProgress } from "../../runProgressIsolation";
-import {
-  consumeSyncWriteResponse,
-  isCanonicalRecoverySyncPayload,
-  isUnchangedSyncResponse,
-  isValidSyncSnapshotId,
-  persistedSyncPayload,
-  readCurrentRecoveryJson,
-  reconstructPartialSyncPayload,
-  syncPayloadMatchesSnapshot,
-} from "../../syncWriteResponse";
 import {
   canonicalProfileKey,
   flushProfileQueueStrict,
@@ -309,102 +245,28 @@ import {
   type ProfileReconcileResult,
 } from "../../profileServerSync";
 import {
-  fetchFactoryData,
-  hydrateFromServer,
-  putFactoryKey,
-  getStopReasons,
-  getPackagingSettings,
-  getShiftStartTime,
-  getProductionStartTime,
-  stampLocalWrite,
-  flushFactoryQueue,
-  FACTORY_KV_CACHED_KEYS,
-  runFactoryKvMigration,
-} from "../../factoryDataSync";
-import {
-  useRunTemplates,
-  saveRunTemplateApi,
-  deleteRunTemplatesApi,
-  runTemplatesQueryKey,
-  RUN_TEMPLATES_QUERY_KEY,
-} from "../../hooks/useRunTemplates";
-import {
   resolveDieLineDefaultsOnSwitch,
   resolveCrustLineDefaults,
   dieDefaultsKey,
   dieLineDefaultsFor,
 } from "../../dieDefaults";
-import { saveDieLineDefaults } from "../../dieLineDefaultsServer";
-import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../../hooks/useDieLineDefaults";
 import RunInsightsCard from "../../components/RunInsightsCard";
-import {
-  reportRunInsightsAfterFinalize,
-  buildTunnelDieDefaultEntry,
-  type RunSuggestion,
-} from "../../runInsights";
-import {
-  fetchServerDieTypes,
-  pushDieTypesToServer,
-  deleteDieTypesOnServer,
-  reconcileDieTypes,
-  DIE_TYPES_SERVER_MIGRATED_KEY,
-} from "../../dieTypesServer";
-import { findMixPresets, type MixPreset } from "../../mixPresets";
 import { MIX_SEED } from "../../mixSeed";
-import { groupWarehouseNeedRows, type WarehouseArea } from "../../warehouseGrouping";
-import FactoryResetCard from "../../components/FactoryResetCard";
-import AuditLogCard from "../../components/AuditLogCard";
-import SyncConflictStatsCard from "../../components/SyncConflictStatsCard";
-import DataHealthWorkspace from "../../components/DataHealthWorkspace";
-import SyncStatusPopover, { type SyncStatus } from "../../components/SyncStatusPopover";
-import {
-  buildSyncDiagnosticReport,
-  loadSyncDiagnostics,
-  loadSyncMeasurements,
-  recordSyncDiagnostic,
-  recordSyncMeasurement,
-  type SyncDiagnostic,
-  type SyncDiagnosticKind,
-  type SyncMeasurementTrigger,
-} from "../../syncDiagnostics";
 import ProfileDataHealthCard from "../../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../../components/ProfileNameLinkCleanupCard";
-import AiCorrectionsCard from "../../components/AiCorrectionsCard";
-import ManageRunsPanel from "../../components/ManageRunsPanel";
 import ReorderCard from "../../components/ReorderCard";
 import UseFirstCard from "../../components/UseFirstCard";
-import ScheduledRecipeWarningCard from "../../components/ScheduledRecipeWarningCard";
-import ManagerAttentionDialog, {
-  buildManagerAttentionItems,
-  managerAttentionCount,
-  type ManagerAttentionItem,
-} from "../../components/ManagerAttentionDialog";
 import ApplicatorEvidenceReview from "../../components/ApplicatorEvidenceReview";
-import { RecipeShareButtons } from "../../components/RecipeShareButtons";
-import AlertSettingsDialog from "../../components/AlertSettingsDialog";
 import { SetupRecipesRoleGate } from "../../components/SetupRecipesRoleGate";
 import { TickBar } from "../../components/TickBar";
 import { LineSetupRoleGate } from "../../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../../components/DoughRoleGate";
-import { useFreezerPullItems } from "../../hooks/useFreezerPullItems";
-import { useDropdownScrollKeeper } from "../../hooks/useDropdownScrollKeeper";
-import { useSupervisorPin } from "../../hooks/useSupervisorPin";
-import { updateSupervisorPin } from "../../supervisorPinApi";
 import {
   buildFreezerPullPlan,
   isMatchingSurplusProduct,
   summarizeSurplusForRun,
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
-import {
-  confirmFreezerSurplus,
-  fetchFreezerSurplus,
-  getFreezerSurplusRemainingMs,
-  replaceFreezerSurplusAllocation,
-} from "../../freezerSurplus";
-import { useMixes } from "../../hooks/useMixes";
-import { useOptimisticMixUpdates } from "../../hooks/useOptimisticMixUpdates";
-import { useIngredients } from "../../hooks/useIngredients";
 import {
   invalidateMasterDataBootstrap,
   invalidateMasterDataSlice,
@@ -429,56 +291,23 @@ import {
   addSpecMixesIfAbsent,
   type Mix,
 } from "@workspace/mixes";
-import { specMixDraftToMix } from "@workspace/premix-import";
-import { fetchMixes, saveMixes, deleteMixes } from "@/mixes";
-import { createSwipeState, updateSwipeAxis, resolveSwipe, isSwipeExcludedTarget, type SwipeState as SwipeGestureState } from "@/swipeGesture";
 import {
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
 } from "@workspace/cycle-count";
-import { useCycleCountSchedules } from "../../hooks/useCycleCountSchedules";
-import { markCycleCountCounted } from "../../cycleCount";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cachedProfileKeys } from "../../profileCache";
-import ChangePasswordCard from "../../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../../components/RecipeSubstitutionBadge";
-import { describeSubstitution } from "../../components/SubstitutionsManager";
-import MixReconcilePanel from "../../components/MixReconcilePanel";
-import ImportHistoryPanel from "../../components/ImportHistoryPanel";
-import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../../importHistory";
 import { resetSandboxRequest, reportUnauthorized } from "../../inventoryShared";
-import {
-  fetchIngredientBatchWeights,
-  saveIngredientBatchWeights,
-  normalizeBatchWeightChanges,
-  buildBatchWeightMap,
-  lookupBatchWeight,
-  collectBatchWeightCandidatesFromProfile,
-  filterStillCurrentBatchWeightEntries,
-  enqueueBatchWeightPropagation,
-  executeBatchWeightPropagation,
-  type BatchWeightCandidate,
-  type IngredientBatchWeightRow,
-  type BatchWeightPropagationProfile,
-} from "../../ingredientBatchWeights";
 import FillMissingPanel from "../../components/FillMissingPanel";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "../../components/OperationalReportPanel";
 import ManagerActionQueue from "../../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../../components/ShiftHandoffDigest";
-import ReportIssueDialog from "../../components/ReportIssueDialog";
-import GetStartedDialog from "../../components/GetStartedDialog";
-import { useGetStartedOverview } from "@workspace/onboarding";
-import GuidedTour from "../../components/GuidedTour";
-import { moveEntries, relocateValues } from "@workspace/schedule-move";
-import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
 import {
   applyRecipeSuggestion as applyRecipeSuggestionShared,
   type RecipeFieldId,
   type RecipeSuggestionLike,
 } from "@workspace/recipe-apply";
-import { buildDaySummaryInput, buildWeekSummaryInput } from "../../aiSummary";
-import { buildAnomalyInput } from "../../aiAnomaly";
-import { buildScheduleInput } from "../../aiSchedule";
 import { BehindPaceAlertBanner } from "../../components/BehindPaceAlertBanner";
 import {
   findFirstUnreadyScheduledRun,
@@ -513,7 +342,6 @@ import {
   collectStaleRecipeLinkNames,
   buildStaleCleanupSuggestions,
 } from "../../mergeRecipeNames";
-import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
 import {
   allergenMeta,
   allergenOptions,
@@ -523,34 +351,9 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import {
-  suggestMerges,
-  saveMergeAliases,
-  denyMerge,
-  fetchMergedAwayNames,
-  saveMergedAwayNames,
-  deleteMergedAwayNames,
-  fetchPendingDuplicateReviews,
-  savePendingDuplicateReviews,
-  resolvePendingDuplicateReview,
-  duplicateReviewGroupKey,
-  isCurrentMergeSuggestionRequest,
-  type ReviewedMergeSuggestion,
-  type MergeSuggestCategory,
-} from "../../mergeSuggest";
-import { saveAiCorrections } from "../../aiCorrections";
-import { AppSlotMathBadge } from "../../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../../performanceDiagnostics";
-import {
-  buildActiveRunIds,
-  buildPersistedRunValues,
-  buildRunSummarySnapshot,
-  overlayCurrentRunValues,
-} from "../../homePerformance";
-import { syncRetryDelay } from "../../syncRetry";
 
-import { usePresentationCast } from "../../hooks/usePresentationCast";
 import {
   getAutoTrackTiming,
   suggestedDoughStaging,
@@ -564,13 +367,8 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../../operationalIntentOutbox";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../../manualSectionLocks";
-import { consumeOperationalMutationCursor } from "../../operationalMutationCursor";
-import { useBackButtonTrap } from "../../hooks/useBackButtonTrap";
-import { HOME_TABS, useHomeNavigation, type HomeTab } from "../../hooks/useHomeNavigation";
-import { useHomeRunIdentity } from "../../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../../contexts/LiveRunContext";
 import { calcRef } from "../../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../../lineSpeed";
@@ -578,51 +376,9 @@ import { createPackagingControlAdapter, createPackagingManager, runUnlockedManua
 import {
   type OperationalSnapshotReceipt,
 } from "../../operationalState";
-import { HomeStationTabs } from "../../components/HomeStationTabs";
-import {
-  DepartmentProvider,
-  DeferredCheeseRecipesManager,
-  DeferredCycleCountManager,
-  DeferredDieLineDefaultsManager,
-  DeferredFreezerPullItemsManager,
-  DeferredInventoryTab,
-  DeferredMixesManager,
-  DeferredNamedRecipesManager,
-  DeferredProductionRulesManager,
-  DeferredStaffManagementSurface,
-  ManagementDepartment,
-  preloadManagementEditors,
-  preloadStaffManagementSurface,
-  ProductionLineDepartment,
-  QcDowntimeSurface,
-  QcIncidentsSurface,
-  QcQualitySurface,
-  WarehouseInventoryDepartment,
-  preloadWarehouseInventorySurface,
-  type DepartmentAppContext,
-} from "../../departments";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../../hooks/useNotifications";
 import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../../sauceBarrelStore";
-import { usePendingResetSummary } from "../../hooks/usePendingResetCount";
-import { useUnreviewedIncidentSummary } from "../../hooks/useUnreviewedIncidentCount";
-import { useProductionRules } from "../../hooks/useProductionRules";
-import { usePrepPhase, mergePrepPhaseClient, getPrepPhase, FRESH_PREP_PHASE } from "../../hooks/usePrepPhase";
-import {
-  evaluateRules,
-  newRule,
-  defaultRuleName,
-  ruleFieldDef,
-  RULE_FIELDS,
-  RULE_ATTRIBUTES,
-  ruleAttributeDef,
-  type ProductionRule,
-  type RuleType,
-  type RuleSequenceItem,
-} from "@workspace/production-rules";
-import { saveProductionRules, deleteProductionRules } from "../../productionRules";
-import { useMe } from "../../useRole";
-import { getImportAccess } from "../../importAccess";
 import {
   Factory,
   Layers,
@@ -698,32 +454,16 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
-import { loadWorkbookWorkflow } from "@/workbookWorkflow";
-import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
-import {
-  PENDING_DUPLICATE_REVIEW_SCAN,
-  loadPendingDuplicateReview,
-  pendingDuplicateReviewAfterResolution,
-  savePendingDuplicateReview,
-} from "@/pendingDuplicateReview";
 import type { ImportCommit } from "@/components/ExcelImportDialog";
-import { CameraFilePicker } from "@/components/CameraFilePicker";
-import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import type { SpecImportPrepared } from "@/specImport";
-import { requestParseSpecImages } from "@/parseSpecSheet";
 import type { ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import type { PremixImportPrepared } from "@/premixImport";
 import type { ShippingImportPrepared } from "@/shippingImport";
 import type { SauceGuideImportPrepared, DoughGuideImportPrepared } from "@/recipeGuideImport";
 import type { ShippingPatch } from "@workspace/shipping-import";
-import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
 import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
-import type { PremixFreezerPull } from "@workspace/premix-import";
-import CheeseReconcilePanel from "@/components/CheeseReconcilePanel";
-import { useDieLineDefaults } from "../../hooks/useDieLineDefaults";
 import type { CheeseImportPrepared } from "@/cheeseImport";
-import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe, CheeseComponent } from "@workspace/cheese-recipes";
 import {
   cheesePerFlavorComponentOz,
@@ -734,12 +474,7 @@ import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
 } from "@workspace/cheese-recipes";
-import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
-import { useNamedRecipes } from "@/hooks/useNamedRecipes";
-import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { fetchSpecImportAliases, saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
-import { refreshPhotoAliasesCache } from "@/photoAliasesStore";
 
 import {
   Form,
@@ -753,14 +488,9 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import SetupProfileEditor from "@/components/SetupProfileEditor";
-import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -777,16 +507,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { DeferredSurface } from "../../departments/DeferredDepartmentSurface";
 import RunAllergenFootprintPanel from "../RunAllergenFootprintPanel";
 
 import { PauseTunnelDecision, OperationalStateBadge, ElapsedTimeBadge, PerRunMixSlotBadge, NumField, DoughRecipeCard, FrontlineRecipeCard, CheesePickCard, MixRecipeCard, TypeDropdown, NotesTextarea, aggregatePackagingNeeds } from "../../pages/liveTabsSupport";
+
+const loadLineMapDashboard = () => import("../../components/LineMapDashboard");
 export const LiveRunTabContent = memo(function LiveRunTabContent() {
   const hx = useHomeCtx();
   const doughLock = useManualControlLock(hx.currentRun?.id, "dough-trays");
@@ -890,7 +616,13 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <span className="hidden sm:inline">Line Map</span>
                   </button>
                 </div>
-                {showLineMap && <LineMapDashboard />}
+                {showLineMap && (
+                  <DeferredSurface
+                    label="Line map"
+                    load={loadLineMapDashboard}
+                    componentProps={{}}
+                  />
+                )}
                 {/* Blank-run sweep confirmation dialog */}
                 {confirmRemoveBlanks && (
                   <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>

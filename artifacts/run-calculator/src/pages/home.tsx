@@ -43,7 +43,6 @@ import { MixesTabCtx, type MixesTabContextValue } from "../contexts/MixesTabCtx"
 import { SetupTabCtx, type SetupTabContextValue } from "../contexts/SetupTabCtx";
 import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
 import InventoryTabContent from "../components/InventoryTabContent";
-import ScreenModeView from "../components/ScreenModeView";
 import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
@@ -62,7 +61,6 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
-import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
@@ -389,7 +387,6 @@ import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
-import DataHealthWorkspace from "../components/DataHealthWorkspace";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
 import {
   buildSyncDiagnosticReport,
@@ -411,11 +408,6 @@ import IngredientAllergenMappingManager from "../components/IngredientAllergenMa
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
-import ManagerAttentionDialog, {
-  buildManagerAttentionItems,
-  managerAttentionCount,
-  type ManagerAttentionItem,
-} from "../components/ManagerAttentionDialog";
 import ApplicatorEvidenceReview from "../components/ApplicatorEvidenceReview";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
@@ -484,8 +476,6 @@ import { cachedProfileKeys } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
-import MixReconcilePanel from "../components/MixReconcilePanel";
-import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
 import { createImportOperationId } from "../importOperations";
 import {
@@ -513,6 +503,11 @@ import FillMissingPanel from "../components/FillMissingPanel";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
+import ManagerAttentionDialog, {
+  buildManagerAttentionItems,
+  managerAttentionCount,
+  type ManagerAttentionItem,
+} from "../components/ManagerAttentionDialog";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { TouchOptionPicker, TouchSelect } from "../components/TouchOptionPicker";
@@ -820,7 +815,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import SetupProfileEditor from "@/components/SetupProfileEditor";
 import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -869,6 +863,12 @@ const loadDoughGuideImportDialog = () =>
     default: module.DoughGuideImportDialog,
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
+const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
+const loadScreenModeView = () => import("../components/ScreenModeView");
+const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
+const loadImportHistoryPanel = () => import("../components/ImportHistoryPanel");
+const loadMixReconcilePanel = () => import("../components/MixReconcilePanel");
+const loadGlanceOverlay = () => import("../components/GlanceOverlay");
 
 // Keep the initial production view focused on the live Run panel. Other tabs
 // are loaded only when their tab content is selected; DeferredSurface provides
@@ -16497,7 +16497,14 @@ export default function Home() {
       {showFloorMode && <FloorModeView />}
 
       {/* ── Glance overlay ──────────────────────────────────────────────── */}
-      {showGlance && <GlanceOverlay />}
+      {showGlance && (
+        <DeferredSurface
+          label="glance view"
+          load={loadGlanceOverlay}
+          componentProps={{}}
+          presentation="dialog"
+        />
+      )}
 
 
       {/* ── Screens / Cast Dialog ───────────────────────────────────────── */}
@@ -17520,26 +17527,30 @@ export default function Home() {
                       </div>
                     )}
                     {(canManageProfiles || canManageInventory) && (
-                      <ImportHistoryPanel
-                        refreshSignal={sheetListSignal}
-                        enabledImporters={enabledImporterTypes}
-                        onStart={startImporterFromOperations}
-                        onRetry={retryImporterFromHistory}
-                        onReopen={(request) => {
-                          setImportReopenRequest((previous) => ({
-                            ...request,
-                            requestId: (previous?.requestId ?? 0) + 1,
-                          }));
-                          if (request.importType === "spec") {
-                            setActiveTab("ai");
-                            setShowManageDialog(false);
-                          } else {
-                            setManageCategory(request.importType === "premix" ? "mixes" : "cheeseRecipes");
-                          }
-                          toast({
-                            title: "Saved import review reopened",
-                            description: "Review the retained source-versus-landed details before applying any scoped repair.",
-                          });
+                      <DeferredSurface
+                        label="import history"
+                        load={loadImportHistoryPanel}
+                        componentProps={{
+                          refreshSignal: sheetListSignal,
+                          enabledImporters: enabledImporterTypes,
+                          onStart: startImporterFromOperations,
+                          onRetry: retryImporterFromHistory,
+                          onReopen: (request) => {
+                            setImportReopenRequest((previous) => ({
+                              ...request,
+                              requestId: (previous?.requestId ?? 0) + 1,
+                            }));
+                            if (request.importType === "spec") {
+                              setActiveTab("ai");
+                              setShowManageDialog(false);
+                            } else {
+                              setManageCategory(request.importType === "premix" ? "mixes" : "cheeseRecipes");
+                            }
+                            toast({
+                              title: "Saved import review reopened",
+                              description: "Review the retained source-versus-landed details before applying any scoped repair.",
+                            });
+                          },
                         }}
                       />
                     )}
@@ -17808,7 +17819,16 @@ export default function Home() {
                       ingredientSuggestions={unifiedIngredientUniverse}
                       onSaved={applyAcknowledgedMixSave}
                     />
-                    <MixReconcilePanel isManager={isManager} canManageInventory={canManageInventory} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
+                    <DeferredSurface
+                      label="mix reconciliation"
+                      load={loadMixReconcilePanel}
+                      componentProps={{
+                        isManager,
+                        canManageInventory,
+                        refreshSignal: sheetListSignal,
+                        reopenRequest: importReopenRequest,
+                      }}
+                    />
                   </div>
                 )}
 
@@ -17855,12 +17875,16 @@ export default function Home() {
                 {/* Audit log — manager-only read-only event history */}
                 {manageCategory === "audit" && canManageStaff && (
                   <div className="space-y-4">
-                    <DataHealthWorkspace
-                      onNavigate={(section) => {
-                        setManageCategory(section);
-                        setManageInput("");
-                        setPinChangeMsg("");
-                        setMgSelectedPreset(null);
+                    <DeferredSurface
+                      label="data health"
+                      load={loadDataHealthWorkspace}
+                      componentProps={{
+                        onNavigate: (section) => {
+                          setManageCategory(section);
+                          setManageInput("");
+                          setPinChangeMsg("");
+                          setMgSelectedPreset(null);
+                        },
                       }}
                     />
                     <SyncConflictStatsCard />
@@ -19214,55 +19238,62 @@ export default function Home() {
             Standalone brand/flavor setup editor. Lets a manager/supervisor
             pick any brand/flavor and edit its saved setup directly — reuses
             saveProfile/loadProfile and never touches the current run. */}
-        <SetupProfileEditor
-          open={setupEditorOpen}
-          onClose={() => setSetupEditorOpen(false)}
-          onSaved={handleSetupProfileSaved}
-          initialBrand={setupEditorBrand}
-          initialFlavor={setupEditorFlavor}
-          isSupervisor={isSupervisor}
-          canManageProfiles={canManageProfiles}
-          brands={brands}
-          brandFlavors={brandFlavors}
-          allergenExtra={customAllergens}
-          onAddBrand={addBrand}
-          onRemoveBrand={removeBrand}
-          onAddFlavor={addFlavor}
-          onRemoveFlavor={removeFlavor}
-          dieTypes={dieTypes}
-          onAddDieType={addDieType}
-          circles={circles}
-          onAddCircle={circlesList.add}
-          onRemoveCircle={circlesList.remove}
-          shipperOptions={shipper}
-          onAddShipper={shipperList.add}
-          onRemoveShipper={shipperList.remove}
-          skidStackingOptions={skidStacking}
-          onAddSkidStacking={skidStackingList.add}
-          onRemoveSkidStacking={skidStackingList.remove}
-          gripSheetsOptions={gripSheets}
-          onAddGripSheets={gripSheetsList.add}
-          onRemoveGripSheets={gripSheetsList.remove}
-          ingredientTypes={ingredientTypeOptions}
-          onAddIngredientType={addIngredientType}
-          onRemoveIngredientType={removeIngredientType}
-          pepTypes={pepTypes}
-          onAddPepType={addPepType}
-          onRemovePepType={removePepType}
-          doughIngredients={doughIngredients}
-          onAddDoughIngredient={addDoughIngredient}
-          onRemoveDoughIngredient={removeDoughIngredient}
-          doughRecipeNames={doughRecipeNames}
-          onAddDoughRecipeName={addDoughRecipeName}
-          onRemoveDoughRecipeName={removeDoughRecipeName}
-          frontlineIngredients={frontlineIngredients}
-          onAddFrontlineIngredient={addFrontlineIngredient}
-          onRemoveFrontlineIngredient={removeFrontlineIngredient}
-          frontlineRecipeNames={frontlineRecipeNames}
-          onAddFrontlineRecipeName={addFrontlineRecipeName}
-          onRemoveFrontlineRecipeName={removeFrontlineRecipeName}
-          ingredientUniverse={unifiedIngredientUniverse}
-        />
+        {setupEditorOpen && (
+          <DeferredSurface
+            label="setup profile editor"
+            load={loadSetupProfileEditor}
+            presentation="dialog"
+            componentProps={{
+              open: setupEditorOpen,
+              onClose: () => setSetupEditorOpen(false),
+              onSaved: handleSetupProfileSaved,
+              initialBrand: setupEditorBrand,
+              initialFlavor: setupEditorFlavor,
+              isSupervisor,
+              canManageProfiles,
+              brands,
+              brandFlavors,
+              allergenExtra: customAllergens,
+              onAddBrand: addBrand,
+              onRemoveBrand: removeBrand,
+              onAddFlavor: addFlavor,
+              onRemoveFlavor: removeFlavor,
+              dieTypes,
+              onAddDieType: addDieType,
+              circles,
+              onAddCircle: circlesList.add,
+              onRemoveCircle: circlesList.remove,
+              shipperOptions: shipper,
+              onAddShipper: shipperList.add,
+              onRemoveShipper: shipperList.remove,
+              skidStackingOptions: skidStacking,
+              onAddSkidStacking: skidStackingList.add,
+              onRemoveSkidStacking: skidStackingList.remove,
+              gripSheetsOptions: gripSheets,
+              onAddGripSheets: gripSheetsList.add,
+              onRemoveGripSheets: gripSheetsList.remove,
+              ingredientTypes: ingredientTypeOptions,
+              onAddIngredientType: addIngredientType,
+              onRemoveIngredientType: removeIngredientType,
+              pepTypes,
+              onAddPepType: addPepType,
+              onRemovePepType: removePepType,
+              doughIngredients,
+              onAddDoughIngredient: addDoughIngredient,
+              onRemoveDoughIngredient: removeDoughIngredient,
+              doughRecipeNames,
+              onAddDoughRecipeName: addDoughRecipeName,
+              onRemoveDoughRecipeName: removeDoughRecipeName,
+              frontlineIngredients,
+              onAddFrontlineIngredient: addFrontlineIngredient,
+              onRemoveFrontlineIngredient: removeFrontlineIngredient,
+              frontlineRecipeNames,
+              onAddFrontlineRecipeName: addFrontlineRecipeName,
+              onRemoveFrontlineRecipeName: removeFrontlineRecipeName,
+              ingredientUniverse: unifiedIngredientUniverse,
+            }}
+          />
+        )}
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
@@ -20160,7 +20191,14 @@ export default function Home() {
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
         <main>
-          {screenMode ? <ScreenModeView /> : mainContent}
+          {screenMode ? (
+            <DeferredSurface
+              label="screen mode"
+              load={loadScreenModeView}
+              componentProps={{}}
+              presentation="dialog"
+            />
+          ) : mainContent}
         </main>
         </LiveRunProvider>
         </DepartmentProvider>

@@ -14,6 +14,13 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/live-stations/LiveSetupRecipesTabContent.tsx",
   "/src/components/live-stations/LiveStoppagesTabContent.tsx",
   "/src/components/live-stations/LiveSummaryTabContent.tsx",
+  "/src/components/LineMapDashboard.tsx",
+  "/src/components/SetupProfileEditor.tsx",
+  "/src/components/ScreenModeView.tsx",
+  "/src/components/DataHealthWorkspace.tsx",
+  "/src/components/ImportHistoryPanel.tsx",
+  "/src/components/MixReconcilePanel.tsx",
+  "/src/components/GlanceOverlay.tsx",
 ];
 
 function normalize(value) {
@@ -75,7 +82,7 @@ export function checkHomeDeferredBoundary(manifest) {
   );
   if (leaked.length > 0) {
     throw new Error(
-      `Workflow-only Home panels re-entered the opening static graph:\n${leaked
+      `Deferred Home surfaces re-entered the opening static graph:\n${leaked
         .map((suffix) => `- ${suffix}`)
         .join("\n")}`,
     );
@@ -86,7 +93,7 @@ export function checkHomeDeferredBoundary(manifest) {
   );
   if (missing.length > 0) {
     throw new Error(
-      `Build manifest is missing deferred Home panel(s):\n${missing
+      `Build manifest is missing deferred Home surface(s):\n${missing
         .map((suffix) => `- ${suffix}`)
         .join("\n")}`,
     );
@@ -97,7 +104,7 @@ export function checkHomeDeferredBoundary(manifest) {
   );
   if (notDeferred.length > 0) {
     throw new Error(
-      `Home panel(s) are not reachable through a dynamic Home import:\n${notDeferred
+      `Home surface(s) are not reachable through a dynamic Home import:\n${notDeferred
         .map((suffix) => `- ${suffix}`)
         .join("\n")}`,
     );
@@ -122,7 +129,7 @@ function runCli() {
     JSON.parse(fs.readFileSync(manifestPath, "utf8")),
   );
   console.log(
-    `Home boundary OK: ${result.eagerModuleCount} opening modules; ${result.deferredHomePanels} workflow-only panels are deferred.`,
+    `Home boundary OK: ${result.eagerModuleCount} opening modules; ${result.deferredHomePanels} optional surfaces are deferred.`,
   );
 }
 
