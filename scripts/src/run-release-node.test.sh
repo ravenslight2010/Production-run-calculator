@@ -8,6 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LAUNCHER="${SCRIPT_DIR}/run-release-node.sh"
+HISTORY_VIEWER="${SCRIPT_DIR}/show-release-lock-history.sh"
 REAL_TIMEOUT_BIN=$(command -v timeout)
 REAL_NODE_BIN=$(command -v node)
 REAL_NODE_BIN_DIR=$(dirname "$REAL_NODE_BIN")
@@ -19,6 +20,7 @@ export SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN"
 TEST_ROOT=$(mktemp -d)
 TLS_SERVER_PID=""
 ACTIVE_RUNNER_PIDS=()
+SYNTHETIC_HISTORY_FILES=()
 
 cleanup_test_root() {
   local pid
@@ -30,6 +32,9 @@ cleanup_test_root() {
     kill "$TLS_SERVER_PID" 2>/dev/null || true
     wait "$TLS_SERVER_PID" 2>/dev/null || true
   fi
+  for history_file in "${SYNTHETIC_HISTORY_FILES[@]}"; do
+    rm -f -- "$history_file"
+  done
   rm -rf "$TEST_ROOT"
 }
 trap cleanup_test_root EXIT
@@ -62,6 +67,7 @@ make_workspace() {
 
   mkdir -p "${workspace}/scripts/src" "${workspace}/bin" "${workspace}/pinned-bin"
   cp "$LAUNCHER" "${workspace}/scripts/src/run-release-node.sh"
+  cp "$HISTORY_VIEWER" "${workspace}/scripts/src/show-release-lock-history.sh"
   printf '%s\n' "$REQUIRED_NODE_VERSION" >"${workspace}/.nvmrc"
 
   cat >"${workspace}/bin/release-child" <<'EOF'
@@ -95,6 +101,89 @@ lock_history_path() {
   key=${digest%% *}
   printf '/tmp/replit-release-runner-%s/%s.wait-history.jsonl\n' \
     "${UID:-$(id -u)}" "$key"
+}
+
+prepare_synthetic_history() {
+  local workspace="$1"
+  local history_file
+  local history_dir
+  history_file=$(lock_history_path "$workspace")
+  history_dir=$(dirname "$history_file")
+  mkdir -p "$history_dir"
+  chmod 700 -- "$history_dir"
+  : >"$history_file"
+  chmod 600 -- "$history_file"
+  SYNTHETIC_HISTORY_FILES+=("$history_file")
+  printf '%s\n' "$history_file"
+}
+
+test_release_runner_lock_history_viewer_handles_missing_and_malformed_history() {
+  local workspace
+  local history_file
+  local output
+  workspace=$(make_workspace lock-history-viewer-missing)
+
+  output=$(bash "${workspace}/scripts/src/show-release-lock-history.sh")
+  assert_contains "$output" "No local lock-wait history found for this workspace."
+  assert_contains "$output" \
+    "This local history does not include Replit-managed task-runner waits."
+
+  workspace=$(make_workspace lock-history-viewer-malformed)
+  history_file=$(prepare_synthetic_history "$workspace")
+  {
+    printf '%s\n' '{"malformed":"LOCAL_VIEWER_SECRET_SENTINEL"}'
+    printf '%s\n' \
+      '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":8,"outcome":"acquired","owner_pid":"123","owner_started_at":"2026-01-01T00:00:00Z","command":"LOCAL_VIEWER_SECRET_SENTINEL"}'
+    printf '%s\n' '{"timestamp_utc":"truncated'
+  } >"$history_file"
+
+  output=$(bash "${workspace}/scripts/src/show-release-lock-history.sh")
+  assert_contains "$output" "No valid local lock-wait history records found."
+  assert_not_contains "$output" "LOCAL_VIEWER_SECRET_SENTINEL"
+  assert_not_contains "$output" '"command"'
+  assert_contains "$output" \
+    "This local history does not include Replit-managed task-runner waits."
+  echo "PASS: lock-history viewer handles missing and malformed history without exposing raw lines"
+}
+
+test_release_runner_lock_history_viewer_shows_only_recent_safe_fields() {
+  local workspace
+  local history_file
+  local before_hash
+  local after_hash
+  local output
+  local attempt
+  local row_count
+  workspace=$(make_workspace lock-history-viewer-normal)
+  history_file=$(prepare_synthetic_history "$workspace")
+
+  for ((attempt = 1; attempt <= 22; attempt++)); do
+    printf \
+      '{"timestamp_utc":"2026-01-01T00:00:00Z","elapsed_wait_seconds":%s,"outcome":"acquired","owner_pid":"%s","owner_started_at":"2026-01-01T00:00:00Z"}\n' \
+      "$attempt" "$((1000 + attempt))" >>"$history_file"
+  done
+  before_hash=$(sha256sum "$history_file")
+  output=$(bash "${workspace}/scripts/src/show-release-lock-history.sh")
+  after_hash=$(sha256sum "$history_file")
+
+  [[ "$before_hash" == "$after_hash" ]] || {
+    printf 'Lock-history viewer modified the history file.\n' >&2
+    return 1
+  }
+  assert_contains "$output" \
+    $'2026-01-01T00:00:00Z\t3\tacquired\t1003\t2026-01-01T00:00:00Z'
+  assert_contains "$output" \
+    $'2026-01-01T00:00:00Z\t22\tacquired\t1022\t2026-01-01T00:00:00Z'
+  assert_not_contains "$output" $'2026-01-01T00:00:00Z\t1\t'
+  row_count=$(grep -c $'\t' <<<"$output")
+  [[ "$row_count" -eq 21 ]] || {
+    printf 'Expected one table header and 20 retained rows, got %s.\n' \
+      "$row_count" >&2
+    return 1
+  }
+  assert_contains "$output" \
+    "This local history does not include Replit-managed task-runner waits."
+  echo "PASS: lock-history viewer displays only the newest 20 safe fields and leaves history unchanged"
 }
 
 write_node() {
@@ -2575,6 +2664,8 @@ test_release_node_fallback_interrupt_stops_process_group
 test_release_runner_serializes_same_workspace_commands
 test_release_runner_lock_wait_times_out_with_owner_and_recovers
 test_release_runner_lock_history_rotates_and_recovers_malformed_state
+test_release_runner_lock_history_viewer_handles_missing_and_malformed_history
+test_release_runner_lock_history_viewer_shows_only_recent_safe_fields
 test_release_runner_lock_wait_interruption_is_recorded
 test_release_runner_nested_invocation_reuses_lock
 test_release_runner_preserves_child_status
