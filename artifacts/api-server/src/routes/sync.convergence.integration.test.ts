@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { rebaseStaleSyncIntent } from "@workspace/sync-contract/stale-base-recovery";
+import { stopIsolatedSyncProcess } from "./syncConvergenceProcess";
 
 type DbModule = typeof import("@workspace/db");
 type SyncPayload = Record<string, unknown>;
@@ -266,23 +267,6 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
     await stopIsolatedSyncProcess(child);
     throw error;
   }
-}
-
-async function stopIsolatedSyncProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    const finish = () => {
-      clearTimeout(timeout);
-      child.off("exit", finish);
-      resolve();
-    };
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish();
-    }, 5_000);
-    child.once("exit", finish);
-  });
 }
 
 async function stopSyncOutboxListenerInProcess(child: ChildProcess): Promise<void> {
