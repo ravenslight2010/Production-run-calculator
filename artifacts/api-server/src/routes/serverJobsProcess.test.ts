@@ -58,6 +58,7 @@ describe("stopIsolatedApiProcess", () => {
     const child = new FakeApiProcess();
     const shutdown = stopIsolatedApiProcess(child.asIsolatedApiProcess(), {
       forceKillTimeoutMs: 25,
+      postKillTimeoutMs: 40,
     });
 
     expect(child.kill).toHaveBeenCalledExactlyOnceWith("SIGTERM");
@@ -89,11 +90,34 @@ describe("stopIsolatedApiProcess", () => {
     expect(completed).toBe(false);
     expect(child.listenerCount("exit")).toBe(1);
     expect(child.listenerCount("close")).toBe(1);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
 
     child.signalCode = "SIGKILL";
     child.emit("exit", null, "SIGKILL");
     await expect(shutdown).resolves.toBeUndefined();
+    expectShutdownListenersRemoved(child);
+    expect(vi.getTimerCount()).toBe(0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+  });
+
+  it("rejects after SIGKILL if neither exit nor close arrives", async () => {
+    vi.useFakeTimers();
+    const child = new FakeApiProcess();
+    const shutdown = stopIsolatedApiProcess(child.asIsolatedApiProcess(), {
+      forceKillTimeoutMs: 25,
+      postKillTimeoutMs: 40,
+    });
+    const rejection = expect(shutdown).rejects.toThrow(
+      "did not emit exit or close within 40ms after SIGKILL (accepted); cleanup timed out",
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(40);
+    await rejection;
     expectShutdownListenersRemoved(child);
     expect(vi.getTimerCount()).toBe(0);
     child.stdout.destroy();
@@ -145,18 +169,51 @@ describe("waitForIsolatedApiProcess", () => {
     const startup = waitForIsolatedApiProcess(child.asIsolatedApiProcess(), {
       startupTimeoutMs: 25,
       forceKillTimeoutMs: 50,
+      postKillTimeoutMs: 40,
     });
 
     await vi.advanceTimersByTimeAsync(25);
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     await vi.advanceTimersByTimeAsync(50);
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(vi.getTimerCount()).toBe(1);
     child.signalCode = "SIGKILL";
     child.emit("exit", null, "SIGKILL");
-    child.emit("close", null, "SIGKILL");
 
     await expect(startup).rejects.toThrow("did not become ready");
     expect(child.signalCode).toBe("SIGKILL");
+    expectStartupListenersRemoved(child);
+    expect(vi.getTimerCount()).toBe(0);
+    child.stdout.destroy();
+    child.stderr.destroy();
+  });
+
+  it("rejects startup cleanup if SIGKILL produces no terminal event", async () => {
+    vi.useFakeTimers();
+    const child = new FakeApiProcess();
+    const startup = waitForIsolatedApiProcess(child.asIsolatedApiProcess(), {
+      startupTimeoutMs: 25,
+      forceKillTimeoutMs: 50,
+      postKillTimeoutMs: 40,
+    });
+    const rejection = startup.catch((error) => error);
+
+    await vi.advanceTimersByTimeAsync(25);
+    expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(40);
+    const cleanupError = await rejection;
+    if (!(cleanupError instanceof Error)) {
+      throw new Error("Expected startup cleanup to reject with an Error");
+    }
+    expect(cleanupError.message).toContain(
+      "did not emit exit or close within 40ms after SIGKILL (accepted); startup cleanup timed out",
+    );
+    expect(cleanupError.cause).toBeInstanceOf(Error);
+    expect((cleanupError.cause as Error).message).toContain("did not become ready");
     expectStartupListenersRemoved(child);
     expect(vi.getTimerCount()).toBe(0);
     child.stdout.destroy();
