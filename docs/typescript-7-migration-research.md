@@ -1291,3 +1291,45 @@ full reproduction as green.
 
 **Decision remains NO-GO for TypeScript 7 adoption.** TypeScript 6.0.3 remains authoritative;
 do not change dependency versions or bypass the release-age policy as part of this task.
+
+### Stable compiler API reassessment — 2026-10-15
+
+**Decision:** No stable TypeScript 7 programmatic API is published for the operations used
+by this repository's eleven consumers. Keep every consumer behind the TypeScript 6.0.3
+boundary. No migration was attempted because there is no stable candidate; no development
+build or `typescript/unstable/*` entry point was used.
+
+The current Microsoft [release list](https://github.com/microsoft/TypeScript/releases)
+still identifies TypeScript 7.0.2 as the latest stable 7.x release. The npm
+[dist-tags](https://registry.npmjs.org/-/package/typescript/dist-tags) report `latest` as
+7.0.2 and `next` as `7.1.0-dev.20261013.1`. Microsoft's
+[7.0 announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+explicitly says 7.0 does not ship with an API. The official
+[Compiler API guide](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+still warns that it describes TypeScript 6.0 and earlier and that 7.1 will have a different
+API.
+
+The published [`typescript@7.0.2` export map](https://registry.npmjs.org/typescript/7.0.2)
+exports the package root as `./lib/version.cjs`; programmatic subpaths are explicitly named
+`typescript/unstable/*` (including sync, async, AST, scanner, visitor, and filesystem
+surfaces). These exports do not meet the task's stable-API requirement for parsing, AST
+inspection/traversal, diagnostics, preprocessing, module resolution, or `transpileModule`.
+The existing eleven-consumer inventory above therefore remains unchanged: no consumer has
+a supported stable replacement, including the `preProcessFile` use in Vite config import
+discovery.
+
+Verification on the unchanged boundary:
+
+- `pnpm run check:typescript-api-v6` passed all 12 boundary tests and reported API version
+  6.0.3 with zero direct-import bypasses.
+- The evaluation-report retention tests/check and benchmark-report privacy tests passed;
+  the declaration-contract comparison tests passed.
+- All six calculator AST test files passed (56 tests total); the Vite config import tests
+  passed (3 tests), the config-loading check passed, and browser-spec syntax validation
+  passed for 39 files.
+- The API-server shared-diagnostic persistence architecture test passed (12 tests).
+
+The package boundary, consumers, root compiler, lockfile, editor SDK, and release gates were
+not changed. These checks confirm the existing TypeScript 6 isolation; they do not prove
+compatibility with a future TypeScript 7 API. Reassess only after Microsoft publishes stable
+API documentation and package exports for the operations above.
