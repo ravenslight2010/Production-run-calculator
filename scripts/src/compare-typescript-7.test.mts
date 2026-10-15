@@ -260,14 +260,25 @@ test("disposable reproduction shares declaration and prerequisite boundaries", a
   );
 });
 
-test("current comparison validates the historical summary without current-report counts", () => {
+test("historical summary validation stays separate from the current comparison", async () => {
   const reproductionScript = resolve(
     import.meta.dirname,
     "../../docs/evidence/reproduce-typescript-7-comparison.sh",
   );
+  const reproduction = await readFile(reproductionScript, "utf8");
   assert.deepEqual(
     typescript7RetainedSummaryCheckArgs(reproductionScript),
     [reproductionScript, "--check-retained-summary"],
+  );
+  assert.match(reproduction, /--check-current-summary SUMMARY_PATH/);
+  assert.match(reproduction, /capturedAt:/);
+  assert.match(reproduction, /sourceIdentity:/);
+  assert.match(reproduction, /bundleSha256:/);
+  assert.match(reproduction, /contractComparison:/);
+  assert.match(reproduction, /check_current_summary "\$OUT\/summary\.json"/);
+  assert.doesNotMatch(
+    reproduction,
+    /check_documented_declaration_counts "\$OUT\/summary\.json"/,
   );
 });
 
