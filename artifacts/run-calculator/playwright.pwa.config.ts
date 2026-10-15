@@ -4,7 +4,7 @@ import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 
 const webkitOptions = webkitLaunchOptions();
 const appShellInstallSmoke =
-  /serves app shell and declared install assets|blocks an offline intent after session revocation|rechecks an open run after reconnect|recovers from a temporary session check failure after offline startup|keeps a valid session through normal online run recovery/;
+  /serves app shell and declared install assets|blocks an offline intent after session revocation|rechecks an open run after reconnect|recovers from a temporary session check failure after offline startup|keeps startup retry available after session checks time out|keeps a valid session through normal online run recovery/;
 const chromiumLaunchOptions = {
   executablePath: resolveChromiumExecutable(),
 };

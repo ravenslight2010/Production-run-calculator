@@ -204,9 +204,13 @@ async function startVersionedServer(
   let staleAssetRequestCount = 0;
   let sessionValid = true;
   let temporarySessionProbeFailuresRemaining = 0;
+  let sessionProbesToHold = 0;
   const sessionRecoveryRequests = {
     me: 0,
+    acceptedMeResponses: 0,
     temporaryMeFailures: 0,
+    heldMeProbes: 0,
+    closedHeldMeProbes: 0,
     syncReads: 0,
     syncWrites: 0,
     rejected: 0,
@@ -269,6 +273,18 @@ async function startVersionedServer(
             .end(JSON.stringify({ error: "Temporarily unavailable" }));
           return;
         }
+        if (sessionProbesToHold > 0) {
+          sessionProbesToHold -= 1;
+          sessionRecoveryRequests.heldMeProbes += 1;
+          await new Promise<void>((resolve) => {
+            response.once("close", () => {
+              sessionRecoveryRequests.closedHeldMeProbes += 1;
+              resolve();
+            });
+          });
+          return;
+        }
+        sessionRecoveryRequests.acceptedMeResponses += 1;
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
           .end(JSON.stringify(sessionUser));
@@ -512,6 +528,9 @@ async function startVersionedServer(
     },
     failNextSessionProbes(count: number) {
       temporarySessionProbeFailuresRemaining = count;
+    },
+    holdNextSessionProbes(count: number) {
+      sessionProbesToHold = count;
     },
     dropSessionEventStreams() {
       for (const stream of sessionEventStreams) stream.destroy();
@@ -1431,6 +1450,127 @@ test.describe("PWA update handoff", () => {
       expect(server.sessionRecoveryRequests().temporaryMeFailures).toBe(2);
       await expect(startupError).toHaveCount(0);
       await expect(page.getByTestId("auth-startup-retry")).toHaveCount(0);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await server.close();
+    }
+  });
+
+  test("keeps startup retry available after session checks time out", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    const expectedExternalFontErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (error.message.includes("fonts.googleapis.com")) {
+        expectedExternalFontErrors.push(error.message);
+      } else {
+        pageErrors.push(error.message);
+      }
+    });
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+
+    try {
+      await page.route("https://fonts.googleapis.com/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/css", body: "" }),
+      );
+      await page.addInitScript(() => {
+        if (location.origin === "null") return;
+        const now = new Date();
+        const date = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+        ].join("-");
+        localStorage.setItem("run-calc-day", JSON.stringify({
+          runs: [{
+            id: "pwa-offline-timeout-startup-run",
+            brand: "Offline",
+            flavor: "Timeout",
+            startedAt: 1_000,
+          }],
+          currentIndex: 0,
+          date,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        }));
+      });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible();
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+      // Start from the cached app shell with no network. Stored production run
+      // data must not bypass the fresh session check on this cold app start.
+      await page.context().setOffline(true);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const startupError = page.getByRole("heading", {
+        name: "Unable to open Run Calculator",
+      });
+      const retry = page.getByTestId("auth-startup-retry");
+      await expect(startupError).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText(
+        "We couldn't confirm your staff session. Check the connection and try again.",
+      )).toBeVisible();
+      await expect(retry).toBeVisible();
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toHaveCount(0);
+      await expect(page.getByTestId("button-start-run")).toHaveCount(0);
+
+      // Hold both bounded probe attempts until the client aborts each at its
+      // deadline. The fixture's close() also closes these sockets on assertion
+      // failure, so a failed test cannot leave a held response behind.
+      server.holdNextSessionProbes(2);
+      await page.context().setOffline(false);
+      const checksBeforeTimeout = server.sessionRecoveryRequests().me;
+      const timeoutStartedAt = Date.now();
+      await retry.click();
+      await expect.poll(
+        () => server.sessionRecoveryRequests().closedHeldMeProbes,
+        { timeout: 30_000 },
+      ).toBe(2);
+      expect(Date.now() - timeoutStartedAt).toBeGreaterThanOrEqual(7_500);
+      expect(server.sessionRecoveryRequests()).toMatchObject({
+        me: checksBeforeTimeout + 2,
+        heldMeProbes: 2,
+        closedHeldMeProbes: 2,
+      });
+      await expect(startupError).toBeVisible();
+      await expect(page.getByText(
+        "We couldn't confirm your staff session. Check the connection and try again.",
+      )).toBeVisible();
+      await expect(retry).toBeVisible();
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toHaveCount(0);
+      await expect(page.getByTestId("button-start-run")).toHaveCount(0);
+
+      // Only a subsequent explicit retry receives the synthetic accepted
+      // response and opens the calculator.
+      const acceptedResponsesBeforeRetry =
+        server.sessionRecoveryRequests().acceptedMeResponses;
+      await retry.click();
+      await expect(page.getByRole("button", { name: "STOP RUN" })).toBeVisible({
+        timeout: 20_000,
+      });
+      expect(server.sessionRecoveryRequests().acceptedMeResponses).toBe(
+        acceptedResponsesBeforeRetry + 1,
+      );
+      await expect(startupError).toHaveCount(0);
+      await expect(page.getByTestId("auth-startup-retry")).toHaveCount(0);
+      expect(pageErrors).toEqual([]);
+      expect(expectedExternalFontErrors.every((message) =>
+        message.includes("fonts.googleapis.com/css2?family=Inter"),
+      )).toBe(true);
+      expect(server.fixtureErrors()).toEqual([]);
     } finally {
       if (!page.isClosed()) await page.context().setOffline(false);
       await server.close();
