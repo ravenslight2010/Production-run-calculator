@@ -297,7 +297,7 @@ test("release step summaries map structured outcomes into the shared lane contra
   assert.equal(resultFor("api-sync-sse").status, "PASS");
   assert.equal(resultFor("browser-webkit").status, "TIMEOUT");
   assert.equal(resultFor("browser-main").status, "INFRASTRUCTURE_ERROR");
-  assert.equal(resultFor("api-integration-shards").durationMs, 90);
+  assert.equal(resultFor("api-integration-shards").durationMs, 171);
   assert.equal(resultFor("browser-webkit").failure.kind, "timeout");
   assert.equal(resultFor("browser-compatibility").status, "PASS");
   assert.equal(resultFor("browser-webkit").counts, null);
@@ -836,7 +836,7 @@ test("release API unit count settings reach only the isolated test runner", asyn
   ]);
   assert.match(
     releaseCheck,
-    /step\.label === "API unit tests \(release shard 1\/7\)"/u,
+    /step\.label === "API unit tests \(release shard 1\/12\)"/u,
   );
   assert.match(
     releaseCheck,

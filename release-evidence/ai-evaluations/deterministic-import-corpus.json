@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "node": "24.21.0",
-    "pnpmLockSha256": "a24bc0c8b34fccec9f8c22b52e529c99828cc4fa36c109d74e6e79b51fce4e29",
+    "pnpmLockSha256": "1c83e87cbab2f7b0c4e931706c343bc89012b01c7fbdf4b50d61561bdaa599ee",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
-    "vitest": "5.0.3"
+    "vitest": "5.0.4"
   },
   "provider": {
     "identityState": "not-applicable",
@@ -66,7 +66,7 @@
     "evidenceType": "source-workbook-byte-hash",
     "evaluator": {
       "state": "hashed",
-      "sha256": "6d0068ace03a8d51649dff8a41cad38bb6fca8cfb493e0621af5042f882138d0"
+      "sha256": "1ad91ac1ffcfa719ca9ee78f218deeb0e6836fa3ce0365e6c694edfb8e83582b"
     }
   }
 }

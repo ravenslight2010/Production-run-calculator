@@ -1462,7 +1462,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
     }
     assert.match(
       checkpointReport,
-      /Blocked gates: API integration tests \(release shard 2\/7\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)/,
+      /Blocked gates: API integration tests \(release shard 2\/12\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)/,
       "checkpoint report must identify the source preflight as the common blocker",
     );
 
@@ -1482,7 +1482,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
     );
     assert.match(
       stoppedSummary,
-      /^Blocked gates: API integration tests \(release shard 2\/7\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)$/m,
+      /^Blocked gates: API integration tests \(release shard 2\/12\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)$/m,
       "stopped summary must preserve every API, release-test, and browser dependent gate",
     );
     assert.ok(

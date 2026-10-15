@@ -282,6 +282,21 @@ async function run(): Promise<void> {
     [],
     "every API integration test file must belong to exactly one logical release shard",
   );
+  const duplicateIntegrationShardIndexes = {
+    ...apiPackageJson.scripts,
+    [API_RELEASE_INTEGRATION_SCRIPT_NAMES.general[5]]:
+      apiPackageJson.scripts?.[
+        API_RELEASE_INTEGRATION_SCRIPT_NAMES.general[5]
+      ]?.replace("--shard=6/6", "--shard=1/6"),
+  };
+  assert.match(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      duplicateIntegrationShardIndexes,
+    ).join("\n"),
+    /each Vitest shard position exactly once/,
+    "integration shard commands must cover every Vitest shard position exactly once",
+  );
   const syncTestSource = await readFile(
     resolve(rootDir, "artifacts/api-server/src/routes/sync.integration.test.ts"),
     "utf8",

@@ -277,7 +277,7 @@ export type BrowserDurationRegression = {
 export const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 export const API_SHARD_WARNING_MS = 6 * 60_000;
 // The general integration shards run many per-file disposable database setup
-// hooks serially. Give only these three shards a longer, still-bounded window.
+// hooks serially. Give only these six shards a longer, still-bounded window.
 export const API_INTEGRATION_SHARD_TIMEOUT_MS = 12 * 60_000;
 export const API_INTEGRATION_SHARD_WARNING_MS = 10 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
@@ -1059,6 +1059,31 @@ export function apiIntegrationTestShardInventoryErrors(
     (path) => (logicalAssignments.get(path)?.length ?? 0) > 1,
   );
   const errors: string[] = [];
+  const generalShardIndexes = new Set<number>();
+  const invalidShardDefinitions = API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.filter(
+    (scriptName) => {
+      const shard = scripts[scriptName]?.match(/(?:^|\s)--shard=(\d+)\/(\d+)(?:\s|$)/);
+      if (!shard) return true;
+      const index = Number(shard[1]);
+      const total = Number(shard[2]);
+      if (
+        total !== API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.length ||
+        index < 1 ||
+        index > total ||
+        generalShardIndexes.has(index)
+      ) return true;
+      generalShardIndexes.add(index);
+      return false;
+    },
+  );
+  if (
+    invalidShardDefinitions.length > 0 ||
+    generalShardIndexes.size !== API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.length
+  ) {
+    errors.push(
+      `General API integration scripts must use each Vitest shard position exactly once across ${API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.length} shards.`,
+    );
+  }
   if (generalMembershipMismatch.length > 0) {
     errors.push(
       `General API integration shard membership differs for:\n${generalMembershipMismatch.join("\n")}`,
