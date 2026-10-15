@@ -487,9 +487,10 @@ export function auditDependencyUsage({
         providers,
         locations: [
           ...scriptLocations,
-          ...[...sourceLines].map(
-            ([path, lines]) =>
-              `${path}:${[...lines].sort((left, right) => left - right).join(",")}`,
+          ...[...sourceLines].flatMap(([path, lines]) =>
+            [...lines]
+              .sort((left, right) => left - right)
+              .map((line) => `${path}:${line}`),
           ),
         ].sort((left, right) => left.localeCompare(right)),
       }))

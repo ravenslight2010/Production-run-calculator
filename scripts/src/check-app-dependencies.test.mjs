@@ -180,7 +180,8 @@ test("reports a bare binary with multiple direct providers as ambiguous", () => 
       providers: ["typescript", "typescript-native"],
       locations: [
         "package.json#scripts.check",
-        "src/a-compiler.mjs:1,3",
+        "src/a-compiler.mjs:1",
+        "src/a-compiler.mjs:3",
         "src/z-compiler.mjs:1",
       ],
     },
@@ -203,7 +204,7 @@ test("prints ambiguous binary providers in the dependency audit report", async (
     await mkdir(join(rootPath, "scripts"), { recursive: true });
     await writeFile(
       join(rootPath, "scripts/audit.mjs"),
-      "shared-tool --version",
+      "shared-tool --version\nshared-tool --help",
     );
     for (const packageName of ["tool-one", "tool-two"]) {
       const packagePath = join(rootPath, "node_modules", packageName);
@@ -227,7 +228,7 @@ test("prints ambiguous binary providers in the dependency audit report", async (
   assert.ok(
     warnings.some((warning) =>
       warning.includes(
-        'ambiguous binary "shared-tool" (provided by tool-one, tool-two; found in package.json#scripts.check, scripts/audit.mjs:1); not counted as dependency use.',
+        'ambiguous binary "shared-tool" (provided by tool-one, tool-two; found in package.json#scripts.check, scripts/audit.mjs:1, scripts/audit.mjs:2); not counted as dependency use.',
       ),
     ),
   );
