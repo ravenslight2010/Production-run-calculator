@@ -53,6 +53,16 @@
       "safety": "static tests; no database writes"
     },
     {
+      "id": "ci-ipv6-loopback",
+      "surface": "CI typecheck and repository contract checks",
+      "command": "python3 scripts/src/check-ipv6-loopback.py",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Python 3", "Linux AF_INET6 loopback"],
+      "prerequisites": ["CI runner with IPv6 loopback enabled"],
+      "safety": "binds only to ::1; no external network or application data"
+    },
+    {
       "id": "ci-client-unit",
       "surface": "CI client and shared-library unit tests",
       "command": "pnpm --filter @workspace/run-calculator test",

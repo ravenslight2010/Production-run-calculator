@@ -639,6 +639,229 @@ test_mismatching_node_uses_npx() {
   echo "PASS: mismatching Node path invokes npx, runs preflight, and keeps the HTTPS-only guard for the child"
 }
 
+test_concurrent_fallbacks_use_private_npm_caches() {
+  local workspace_a
+  local workspace_b
+  local shared_home="${TEST_ROOT}/concurrent-shared-home"
+  local shared_cache="${shared_home}/.npm"
+  local shared_config="${shared_home}/.npmrc"
+  local temp_root="${TEST_ROOT}/concurrent-tmp"
+  local barrier="${TEST_ROOT}/concurrent-npx-barrier"
+  local shared_cache_hash_before
+  local shared_cache_hash_after
+  local config_hash_before
+  local config_hash_after
+  local cache_a
+  local cache_b
+  local fallback_dir_a
+  local fallback_dir_b
+  local launcher_pid_a
+  local launcher_pid_b
+  local status_a=0
+  local status_b=0
+  local output_a
+  local output_b
+  local attempt
+  local workspace
+  local capture
+  local events
+  local path
+
+  workspace_a=$(make_workspace concurrent-fallback-a)
+  workspace_b=$(make_workspace concurrent-fallback-b)
+  mkdir -p -- "$shared_home" "$shared_cache" "$temp_root" "$barrier"
+  chmod 700 -- "$shared_home" "$shared_cache" "$temp_root" "$barrier"
+  printf '%s\n' \
+    'registry=http://shared-config.invalid/npm/' \
+    "cache=${shared_cache}" >"$shared_config"
+  printf 'shared-cache-sentinel\n' >"${shared_cache}/sentinel"
+  chmod 600 -- "$shared_config" "${shared_cache}/sentinel"
+  shared_cache_hash_before=$(sha256sum "$shared_cache/sentinel")
+  config_hash_before=$(sha256sum "$shared_config")
+
+  write_node "${workspace_a}/bin/node" "24.19.0"
+  write_node "${workspace_b}/bin/node" "24.19.0"
+  write_node "${workspace_a}/pinned-bin/node" "$REQUIRED_NODE_VERSION"
+  write_node "${workspace_b}/pinned-bin/node" "$REQUIRED_NODE_VERSION"
+
+  for workspace in "$workspace_a" "$workspace_b"; do
+    cat >"${workspace}/bin/npx" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${RUN_LOG:?}"
+: "${NPX_CAPTURE:?}"
+: "${NPX_BARRIER:?}"
+: "${PINNED_NODE_BIN:?}"
+
+fallback_dir=$(dirname "$RELEASE_NODE_FALLBACK_MARKER")
+{
+  printf 'home=%s\n' "$HOME"
+  printf 'userconfig=%s\n' "${npm_config_userconfig:-unset}"
+  printf 'inherited-cache=%s\n' "$EXPECTED_SHARED_CACHE"
+  printf 'registry=%s\n' "${npm_config_registry:-unset}"
+  printf 'fallback-marker=%s\n' "$RELEASE_NODE_FALLBACK_MARKER"
+  printf 'fallback-dir=%s\n' "$fallback_dir"
+  printf 'fallback-dir-mode=%s\n' "$(stat -c '%a' "$fallback_dir")"
+  printf 'private-cache=%s\n' "${npm_config_cache:-unset}"
+  printf 'private-cache-mode=%s\n' "$(stat -c '%a' "$npm_config_cache")"
+} >"$NPX_CAPTURE"
+grep -Fx "cache=${EXPECTED_SHARED_CACHE}" "$npm_config_userconfig" >/dev/null
+grep -Fx "registry=http://shared-config.invalid/npm/" \
+  "$npm_config_userconfig" >/dev/null
+
+touch "${NPX_BARRIER}/$(basename "$NPX_CAPTURE").ready"
+for ((attempt = 0; attempt < 200; attempt++)); do
+  [[ -f "${NPX_BARRIER}/npx-a.ready" &&
+    -f "${NPX_BARRIER}/npx-b.ready" ]] && break
+  sleep 0.05
+done
+if [[ ! -f "${NPX_BARRIER}/npx-a.ready" ||
+  ! -f "${NPX_BARRIER}/npx-b.ready" ]]; then
+  printf 'Concurrent fallback barrier timed out.\n' >&2
+  exit 1
+fi
+
+args=("$@")
+separator=-1
+for ((index = 0; index < ${#args[@]}; index++)); do
+  if [[ "${args[index]}" == "--" ]]; then
+    separator="$index"
+    break
+  fi
+done
+if (( separator < 0 )); then
+  printf 'Expected npx arguments to contain --.\n' >&2
+  exit 1
+fi
+
+export PATH="${PINNED_NODE_BIN}:$PATH"
+command_args=("${args[@]:$((separator + 1))}")
+exec "${command_args[@]}"
+EOF
+    chmod +x "${workspace}/bin/npx"
+  done
+
+  (
+    env -u NODE_OPTIONS \
+      HOME="$shared_home" \
+      TMPDIR="$temp_root" \
+      npm_config_userconfig="$shared_config" \
+      npm_config_cache="$shared_cache" \
+      npm_config_registry="http://inherited-config.invalid/npm/" \
+      RELEASE_NODE_NPM_REGISTRY="https://registry.npmjs.org/" \
+      RUN_LOG="${workspace_a}/events" \
+      NPX_CAPTURE="${TEST_ROOT}/npx-a" \
+      NPX_BARRIER="$barrier" \
+      EXPECTED_SHARED_CACHE="$shared_cache" \
+      PINNED_NODE_BIN="${workspace_a}/pinned-bin" \
+      PATH="${workspace_a}/bin:${PATH}" \
+      bash "${workspace_a}/scripts/src/run-release-node.sh" release-child \
+      >"${workspace_a}/output" 2>&1
+  ) &
+  launcher_pid_a=$!
+  ACTIVE_RUNNER_PIDS+=("$launcher_pid_a")
+
+  (
+    env -u NODE_OPTIONS \
+      HOME="$shared_home" \
+      TMPDIR="$temp_root" \
+      npm_config_userconfig="$shared_config" \
+      npm_config_cache="$shared_cache" \
+      npm_config_registry="http://inherited-config.invalid/npm/" \
+      RELEASE_NODE_NPM_REGISTRY="https://registry.npmjs.org/" \
+      RUN_LOG="${workspace_b}/events" \
+      NPX_CAPTURE="${TEST_ROOT}/npx-b" \
+      NPX_BARRIER="$barrier" \
+      EXPECTED_SHARED_CACHE="$shared_cache" \
+      PINNED_NODE_BIN="${workspace_b}/pinned-bin" \
+      PATH="${workspace_b}/bin:${PATH}" \
+      bash "${workspace_b}/scripts/src/run-release-node.sh" release-child \
+      >"${workspace_b}/output" 2>&1
+  ) &
+  launcher_pid_b=$!
+  ACTIVE_RUNNER_PIDS+=("$launcher_pid_b")
+
+  if wait "$launcher_pid_a"; then
+    status_a=0
+  else
+    status_a=$?
+  fi
+  if wait "$launcher_pid_b"; then
+    status_b=0
+  else
+    status_b=$?
+  fi
+  output_a=$(cat "${workspace_a}/output")
+  output_b=$(cat "${workspace_b}/output")
+  if (( status_a != 0 || status_b != 0 )); then
+    printf 'Concurrent fallback runs failed (a=%s, b=%s).\nRun A:\n%s\nRun B:\n%s\n' \
+      "$status_a" "$status_b" "$output_a" "$output_b" >&2
+    return 1
+  fi
+
+  for capture in "${TEST_ROOT}/npx-a" "${TEST_ROOT}/npx-b"; do
+    [[ -f "$capture" ]] || {
+      printf 'Missing concurrent npx capture: %s\n' "$capture" >&2
+      return 1
+    }
+    assert_contains "$(cat "$capture")" "home=${shared_home}"
+    assert_contains "$(cat "$capture")" "userconfig=${shared_config}"
+    assert_contains "$(cat "$capture")" "inherited-cache=${shared_cache}"
+    assert_contains "$(cat "$capture")" \
+      "registry=https://registry.npmjs.org/"
+    assert_contains "$(cat "$capture")" "fallback-dir-mode=700"
+    assert_contains "$(cat "$capture")" "private-cache-mode=700"
+    assert_contains "$(cat "$capture")" \
+      "private-cache=$(sed -n 's/^fallback-dir=//p' "$capture")/npm-cache"
+  done
+
+  cache_a=$(sed -n 's/^private-cache=//p' "${TEST_ROOT}/npx-a")
+  cache_b=$(sed -n 's/^private-cache=//p' "${TEST_ROOT}/npx-b")
+  fallback_dir_a=$(sed -n 's/^fallback-dir=//p' "${TEST_ROOT}/npx-a")
+  fallback_dir_b=$(sed -n 's/^fallback-dir=//p' "${TEST_ROOT}/npx-b")
+  [[ "$cache_a" != "$cache_b" && "$fallback_dir_a" != "$fallback_dir_b" ]] || {
+    printf 'Concurrent fallback invocations shared a private temporary cache.\n' >&2
+    return 1
+  }
+
+  for workspace in "$workspace_a" "$workspace_b"; do
+    events=$(cat "${workspace}/events")
+    assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
+    assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
+    assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
+    assert_contains "$events" \
+      "node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
+  done
+
+  for path in "$cache_a" "$cache_b" "$fallback_dir_a" "$fallback_dir_b"; do
+    [[ ! -e "$path" ]] || {
+      printf 'Completed fallback left temporary cache data behind: %s\n' "$path" >&2
+      return 1
+    }
+  done
+  shared_cache_hash_after=$(sha256sum "$shared_cache/sentinel")
+  config_hash_after=$(sha256sum "$shared_config")
+  [[ "$shared_cache_hash_before" == "$shared_cache_hash_after" &&
+    "$config_hash_before" == "$config_hash_after" &&
+    "$(find "$shared_cache" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 1 ]] || {
+    printf 'Concurrent fallback modified the shared npm cache or inherited config.\n' >&2
+    return 1
+  }
+
+  # Verify both runners entered npx before either was allowed to continue.
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [[ -f "${barrier}/npx-a.ready" && -f "${barrier}/npx-b.ready" ]] && break
+    sleep 0.05
+  done
+  [[ -f "${barrier}/npx-a.ready" && -f "${barrier}/npx-b.ready" ]] || {
+    printf 'The fallback invocations did not overlap inside npx.\n' >&2
+    return 1
+  }
+
+  echo "PASS: concurrent pinned-Node fallbacks use distinct private caches, run the exact Node version, and clean up without changing shared npm state"
+}
+
 test_invalid_npx_registry_fails_before_package_acquisition() {
   local workspace
   local log_path
@@ -2978,12 +3201,15 @@ test_release_node_fallback_interrupt_stops_process_group() {
   local stopped_path
   local output_path
   local launcher_pid
+  local cache_path_file
+  local cache_path
   local attempt
   local actual_status
   workspace=$(make_workspace fallback-interrupt)
   log_path="${workspace}/events"
   started_path="${workspace}/npx-started"
   stopped_path="${workspace}/npx-stopped"
+  cache_path_file="${workspace}/npx-cache-path"
   output_path="${workspace}/output"
   mkdir -p "${workspace}/tmp"
   write_node "${workspace}/bin/node" "24.19.0"
@@ -2991,6 +3217,7 @@ test_release_node_fallback_interrupt_stops_process_group() {
 #!/usr/bin/env bash
 set -euo pipefail
 touch "$NPX_STARTED"
+printf '%s\n' "$npm_config_cache" >"$NPX_CACHE_PATH"
 trap 'touch "$NPX_STOPPED"; exit 143' TERM
 while :; do
   sleep 1
@@ -3001,6 +3228,7 @@ EOF
   RUN_LOG="$log_path" \
     NPX_STARTED="$started_path" \
     NPX_STOPPED="$stopped_path" \
+    NPX_CACHE_PATH="$cache_path_file" \
     TMPDIR="${workspace}/tmp" \
     PATH="${workspace}/bin:${PATH}" \
     bash "${workspace}/scripts/src/run-release-node.sh" release-child \
@@ -3018,6 +3246,19 @@ EOF
     cat "$output_path" >&2
     return 1
   fi
+  [[ -s "$cache_path_file" ]] || {
+    printf 'Pinned-Node fallback did not expose its temporary cache path.\n' >&2
+    kill -TERM "$launcher_pid" 2>/dev/null || true
+    wait "$launcher_pid" 2>/dev/null || true
+    return 1
+  }
+  cache_path=$(cat "$cache_path_file")
+  [[ -d "$cache_path" && "$(stat -c '%a' "$cache_path")" == "700" ]] || {
+    printf 'Pinned-Node fallback cache was not private while active.\n' >&2
+    kill -TERM "$launcher_pid" 2>/dev/null || true
+    wait "$launcher_pid" 2>/dev/null || true
+    return 1
+  }
 
   kill -TERM "$launcher_pid"
   set +e
@@ -3033,6 +3274,10 @@ EOF
   [[ -f "$stopped_path" ]] || {
     printf 'Pinned-Node fallback did not forward TERM to its process group.\n' >&2
     cat "$output_path" >&2
+    return 1
+  }
+  [[ ! -e "$cache_path" ]] || {
+    printf 'Interrupted pinned-Node fallback left its temporary npm cache behind.\n' >&2
     return 1
   }
   [[ -z "$(find "${workspace}/tmp" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]] || {
@@ -3607,6 +3852,7 @@ EOF
 
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
+test_concurrent_fallbacks_use_private_npm_caches
 test_invalid_npx_registry_fails_before_package_acquisition
 test_ipv6_npx_registry_url_is_forwarded
 test_wrong_fallback_node_version_fails_before_release_commands
@@ -3614,13 +3860,13 @@ test_npx_package_resolution_failure_fails_before_release_commands
 test_missing_node_selector_fails_before_release_commands
 test_empty_node_selector_fails_before_release_commands
 test_missing_npx_fails_before_release_commands
+test_release_node_fallback_interrupt_stops_process_group
 test_release_dependency_installs_use_https_guard
 test_release_runner_verifies_local_tls_certificates
 test_isolated_browser_status_and_database_cleanup
 test_isolated_browser_interrupt_cleans_database
 test_isolated_sync_interrupt_cleans_database_and_children
 test_isolated_sync_timeout_cleans_descendants_before_database
-test_release_node_fallback_interrupt_stops_process_group
 test_release_runner_serializes_same_workspace_commands
 test_release_runner_lock_wait_times_out_with_owner_and_recovers
 test_release_runner_lock_history_rotates_and_recovers_malformed_state

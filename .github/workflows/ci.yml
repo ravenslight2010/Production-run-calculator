@@ -116,6 +116,10 @@ jobs:
         run: node scripts/src/test-results.mjs run --lane ci-skill-catalog-check -- pnpm run check:skill-catalog
       - name: Test skill catalog contract
         run: node scripts/src/test-results.mjs run --lane ci-skill-catalog-tests -- pnpm --filter @workspace/scripts run test:skill-catalog
+      - name: Require IPv6 loopback for release-node TLS tests
+        run: >-
+          node scripts/src/test-results.mjs run --lane ci-ipv6-loopback --
+          python3 scripts/src/check-ipv6-loopback.py
       - name: Run routine scripts tests
         run: node scripts/src/test-results.mjs run --lane ci-scripts-routine -- pnpm --filter @workspace/scripts run test
       - name: Upload machine-readable test report

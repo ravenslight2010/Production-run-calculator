@@ -358,22 +358,33 @@ ci_schema_safe_rollback_job_block() {
 
 test_ci_runs_routine_scripts_tests() {
   local typecheck_block
+  local ipv6_step_line
   local routine_step_line
   local catalog_step_line
 
   typecheck_block=$(ci_typecheck_job_block)
+  assert_contains "$typecheck_block" \
+    "      - name: Require IPv6 loopback for release-node TLS tests"
+  assert_contains "$typecheck_block" \
+    "node scripts/src/test-results.mjs run --lane ci-ipv6-loopback --"
+  assert_contains "$typecheck_block" \
+    "python3 scripts/src/check-ipv6-loopback.py"
   assert_contains "$typecheck_block" "      - name: Run routine scripts tests"
   assert_contains "$typecheck_block" \
     "        run: node scripts/src/test-results.mjs run --lane ci-scripts-routine -- pnpm --filter @workspace/scripts run test"
 
+  ipv6_step_line=$(grep -nF -- \
+    "      - name: Require IPv6 loopback for release-node TLS tests" \
+    "$CI_WORKFLOW" | cut -d: -f1)
   routine_step_line=$(grep -nF -- \
     "      - name: Run routine scripts tests" "$CI_WORKFLOW" | cut -d: -f1)
   catalog_step_line=$(grep -nF -- \
     "      - name: Test skill catalog contract" "$CI_WORKFLOW" | cut -d: -f1)
-  if [[ -z "$routine_step_line" || -z "$catalog_step_line" ||
+  if [[ -z "$ipv6_step_line" || -z "$routine_step_line" ||
+    -z "$catalog_step_line" || "$ipv6_step_line" -ge "$routine_step_line" ||
     "$routine_step_line" -le "$catalog_step_line" ]]; then
     printf \
-      'Routine scripts tests must run after the skill catalog contract in %s.\n' \
+      'The IPv6 preflight and routine scripts tests must follow the skill catalog contract in %s.\n' \
       "$CI_WORKFLOW" >&2
     return 1
   fi
