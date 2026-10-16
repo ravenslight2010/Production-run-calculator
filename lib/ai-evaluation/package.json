@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./app-knowledge": "./src/appKnowledge.ts",
+    "./local-candidate": "./src/localCandidate.ts",
     "./spec-import-gold-review": "./src/spec-import-gold-review.ts"
   },
   "scripts": {

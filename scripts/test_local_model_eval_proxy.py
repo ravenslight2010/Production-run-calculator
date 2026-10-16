@@ -5,7 +5,7 @@ import subprocess
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import local_model_eval_proxy as proxy
 
@@ -13,7 +13,7 @@ import local_model_eval_proxy as proxy
 def valid_body() -> bytes:
     return json.dumps(
         {
-            "model": "qwen3:8b",
+            "model": "qwen3.5-9b-q3_k_m",
             "messages": [{"role": "user", "content": "synthetic test"}],
             "max_tokens": 32,
         }
@@ -24,27 +24,28 @@ class ProxyValidationTests(unittest.TestCase):
     def test_context_is_fixed_at_approved_limit(self):
         raw = json.dumps(
             {
-                "model": "qwen3:8b",
+                "model": "qwen3.5-9b-q3_k_m",
                 "messages": [{"role": "user", "content": "synthetic test"}],
-                "options": {"num_ctx": 8192, "temperature": 0},
+                "num_ctx": 4096,
             }
         ).encode("utf-8")
 
         normalized = json.loads(proxy.validate_completion_body(raw))
 
-        self.assertNotIn("num_ctx", normalized["options"])
-        self.assertEqual(normalized["model"], "qwen3:8b")
+        self.assertNotIn("num_ctx", normalized)
+        self.assertEqual(normalized["model"], proxy.MODEL)
+        self.assertEqual(normalized["max_tokens"], proxy.MAX_OUTPUT_TOKENS)
 
     def test_rejects_nonapproved_model_streaming_and_excess_context(self):
         invalid_requests = [
             {"model": "another-model", "messages": []},
-            {"model": "qwen3:8b", "messages": [], "stream": True},
+            {"model": "qwen3.5-9b-q3_k_m", "messages": [], "stream": True},
             {
-                "model": "qwen3:8b",
+                "model": "qwen3.5-9b-q3_k_m",
                 "messages": [],
-                "options": {"num_ctx": 32769},
+                "num_ctx": 4097,
             },
-            {"model": "qwen3:8b", "messages": [], "num_ctx": 32769},
+            {"model": "qwen3.5-9b-q3_k_m", "messages": [], "num_ctx": 4097},
         ]
 
         for request in invalid_requests:
@@ -58,36 +59,42 @@ class ProxyValidationTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 413)
 
-    def test_completion_budget_is_capped_to_context_limit(self):
+    def test_completion_budget_is_normalized_and_oversize_is_rejected(self):
         raw = json.dumps(
             {
-                "model": "qwen3:8b",
+                "model": "qwen3.5-9b-q3_k_m",
                 "messages": [{"role": "user", "content": "synthetic test"}],
-                "max_completion_tokens": 65536,
+                "max_completion_tokens": 32,
             }
         ).encode("utf-8")
 
         normalized = json.loads(proxy.validate_completion_body(raw))
 
-        self.assertEqual(normalized["max_completion_tokens"], 32768)
+        self.assertEqual(normalized["max_tokens"], 32)
+        self.assertNotIn("max_completion_tokens", normalized)
+        oversized = json.dumps(
+            {
+                "model": proxy.MODEL,
+                "messages": [{"role": "user", "content": "synthetic test"}],
+                "max_tokens": proxy.MAX_OUTPUT_TOKENS + 1,
+            }
+        ).encode()
+        with self.assertRaises(proxy.ProxyError):
+            proxy.validate_completion_body(oversized)
 
     def test_rejects_requests_without_chat_messages(self):
         with self.assertRaises(proxy.ProxyError):
-            proxy.validate_completion_body(b'{"model":"qwen3:8b","messages":[]}')
+            proxy.validate_completion_body(b'{"model":"qwen3.5-9b-q3_k_m","messages":[]}')
 
     def test_model_identity_must_match_the_pinned_digest(self):
         approved = json.dumps(
             {
-                "models": [
-                    {"name": "qwen3:8b", "digest": proxy.MODEL_DIGEST},
-                ]
+                "data": [{"id": proxy.MODEL}]
             }
         ).encode("utf-8")
         changed = json.dumps(
             {
-                "models": [
-                    {"name": "qwen3:8b", "digest": "0" * 64},
-                ]
+                "data": [{"id": "another-model"}]
             }
         ).encode("utf-8")
 
@@ -95,8 +102,66 @@ class ProxyValidationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             proxy.verify_model_identity(changed)
 
+    def test_rejects_remote_images_and_untrusted_tool_calls(self):
+        requests = [
+            {
+                "model": proxy.MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "https://example.invalid/image.png"},
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "model": proxy.MODEL,
+                "messages": [{"role": "user", "content": "synthetic"}],
+                "tools": [{"type": "function"}],
+            },
+        ]
+        for request in requests:
+            with self.subTest(request=request):
+                with self.assertRaises(proxy.ProxyError):
+                    proxy.validate_completion_body(json.dumps(request).encode())
+
+    def test_accepts_only_inline_synthetic_images(self):
+        request = {
+            "model": proxy.MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "synthetic"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,aGVsbG8="},
+                        },
+                    ],
+                }
+            ],
+        }
+        normalized = json.loads(
+            proxy.validate_completion_body(json.dumps(request).encode())
+        )
+        self.assertEqual(normalized["messages"], request["messages"])
+
 
 class ProxyForwardingTests(unittest.TestCase):
+    def test_client_disconnect_is_closed_without_logging_response_details(self):
+        handler = Mock()
+        handler.close_connection = False
+        handler.wfile.write.side_effect = BrokenPipeError()
+
+        proxy._write_response_body(handler, b"synthetic readiness body")
+
+        self.assertTrue(handler.close_connection)
+        handler.wfile.write.assert_called_once_with(b"synthetic readiness body")
+
     def test_http_access_logging_does_not_emit_request_or_response_text(self):
         handler = object.__new__(proxy.EndpointHandler)
         with patch("sys.stderr", new_callable=io.StringIO) as stderr:
@@ -119,8 +184,14 @@ class ProxyForwardingTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, b'{"ok":true}')
         command = run.call_args.args[0]
-        self.assertEqual(command[command.index("--max-time") + 1], "120")
-        self.assertEqual(run.call_args.kwargs["timeout"], 122)
+        self.assertEqual(
+            command[command.index("--max-time") + 1],
+            str(proxy.REQUEST_DEADLINE_SECONDS),
+        )
+        self.assertEqual(
+            run.call_args.kwargs["timeout"],
+            proxy.REQUEST_DEADLINE_SECONDS + 2,
+        )
 
     def test_timeout_returns_safe_504_without_forwarding_details(self):
         with patch.object(
@@ -131,7 +202,10 @@ class ProxyForwardingTests(unittest.TestCase):
             status, body = proxy.forward_completion(valid_body())
 
         self.assertEqual(status, 504)
-        self.assertIn(b"120-second deadline", body)
+        self.assertIn(
+            f"{proxy.REQUEST_DEADLINE_SECONDS}-second deadline".encode(),
+            body,
+        )
         self.assertNotIn(b"synthetic test", body)
 
     def test_only_one_completion_request_is_in_flight(self):

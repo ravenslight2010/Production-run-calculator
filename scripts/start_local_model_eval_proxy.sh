@@ -7,16 +7,26 @@ proxy_script="$workspace_root/scripts/local_model_eval_proxy.py"
 state_root="${XDG_STATE_HOME:-"${HOME:?HOME must be set}/.local/state"}"
 state_dir="${LOCAL_MODEL_ENDPOINT_STATE_DIR:-$state_root/local-model-eval-proxy}"
 pid_file="$state_dir/proxy.pid"
-startup_timeout="${LOCAL_MODEL_STARTUP_TIMEOUT_SECONDS:-60}"
+log_file="$state_dir/proxy.log"
+startup_timeout="${LOCAL_MODEL_STARTUP_TIMEOUT_SECONDS:-600}"
 
-if ! [[ "$startup_timeout" =~ ^[1-9][0-9]{0,2}$ ]] || ((startup_timeout > 300)); then
-  echo "Startup timeout must be between 1 and 300 seconds." >&2
+if ! [[ "$startup_timeout" =~ ^[1-9][0-9]{0,2}$ ]] || ((startup_timeout > 600)); then
+  echo "Startup timeout must be between 1 and 600 seconds." >&2
   exit 2
 fi
 
 umask 077
 mkdir -p "$state_dir"
 chmod 700 "$state_dir"
+if ! command -v setsid >/dev/null 2>&1; then
+  echo "setsid is required to keep the private evaluator independent of the launching shell." >&2
+  exit 1
+fi
+if [[ -f "$log_file" ]] && (( $(wc -c < "$log_file") > 2097152 )); then
+  mv -f "$log_file" "$log_file.previous"
+fi
+: >> "$log_file"
+chmod 600 "$log_file"
 exec 9>"$state_dir/startup.lock"
 flock -x 9
 
@@ -42,7 +52,7 @@ endpoint_ready() {
   command -v python3 >/dev/null 2>&1 || return 1
   curl --noproxy '*' --silent --fail --connect-timeout 1 --max-time 3 \
     --max-filesize 65536 \
-    http://127.0.0.1:11434/v1/models 2>/dev/null |
+    http://127.0.0.1:11434/healthz 2>/dev/null |
     python3 -c '
 import json
 import sys
@@ -51,9 +61,9 @@ try:
     data = json.load(sys.stdin)
 except (json.JSONDecodeError, UnicodeDecodeError):
     raise SystemExit(1)
-raise SystemExit(0 if any(
-    isinstance(model, dict) and model.get("id") == "qwen3:8b"
-    for model in data.get("data", [])
+raise SystemExit(0 if (
+    data.get("status") == "healthy"
+    and data.get("model") == "qwen3.5-9b-q3_k_m"
 ) else 1)
 ' >/dev/null 2>&1
 }
@@ -96,7 +106,7 @@ start_endpoint() {
   fi
 
   cd "$workspace_root"
-  nohup python3 "$proxy_script" 9>&- </dev/null >/dev/null 2>&1 &
+  nohup setsid python3 "$proxy_script" 9>&- </dev/null >>"$log_file" 2>&1 &
   pid=$!
   temporary_pid_file="$pid_file.tmp.$$"
   printf '%s\n' "$pid" > "$temporary_pid_file"
@@ -112,6 +122,9 @@ start_endpoint() {
   fi
   rm -f "$pid_file"
   echo "Local model endpoint did not become ready; startup output was suppressed." >&2
+  if [[ -s "$log_file" ]]; then
+    tail -n 20 "$log_file" >&2
+  fi
   return 1
 }
 

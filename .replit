@@ -1,5 +1,4 @@
 modules = ["nodejs-24", "python-3.11", "postgresql-16"]
-onBoot = "bash scripts/start_local_model_eval_proxy.sh start"
 
 [deployment]
 router = "application"
@@ -15,13 +14,16 @@ env = { "CI" = "true" }
 runButton = "Project"
 
 [[workflows.workflow]]
-name = "Project"
-mode = "parallel"
+name = "Local AI evaluator (private)"
+mode = "sequential"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "release:standard"
+task = "shell.exec"
+args = "python3 scripts/local_model_eval_setup.py serve"
 
 [[workflows.workflow]]
 name = "test"
@@ -169,12 +171,22 @@ task = "shell.exec"
 args = "bash scripts/src/run-release-node.sh pnpm run release:check:full"
 
 [[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "release:standard"
+
+[[workflows.workflow]]
 name = "browser-full-159"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "bash scripts/src/run-release-node.sh bash scripts/src/run-isolated-browser-suite.sh"
+
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
