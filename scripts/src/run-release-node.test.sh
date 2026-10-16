@@ -838,6 +838,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local registry_port_file="${server_dir}/registry-port"
   local tarball_port_file="${server_dir}/tarball-port"
   local expired_port_file="${server_dir}/expired-port"
+  local ipv6_port_file="${server_dir}/ipv6-port"
   local future_port_file="${server_dir}/future-port"
   local http_tarball_port_file="${server_dir}/http-tarball-port"
   local server_output="${server_dir}/output"
@@ -871,6 +872,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local package_name="replit-release-runner-tls-fixture"
   local package_version="1.0.0"
   local ip_mismatch_output="${workspace}/ip-mismatch-output"
+  local ipv6_mismatch_output="${workspace}/ipv6-mismatch-output"
   local hostname_mismatch_output="${workspace}/hostname-mismatch-output"
   local expired_certificate_output="${workspace}/expired-certificate-output"
   local future_certificate_output="${workspace}/future-certificate-output"
@@ -880,6 +882,8 @@ test_release_runner_verifies_local_tls_certificates() {
   local mismatched_url
   local expired_certificate_url
   local future_certificate_url
+  local ipv6_url
+  local mismatched_ipv6_url
   local attempt
   local status
 
@@ -1034,6 +1038,27 @@ EOF
       cat "${cert_dir}/openssl-output" >&2
       return 1
     }
+  cat >"${cert_dir}/ipv6-server-extensions.cnf" <<'EOF'
+[server_cert]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=IP:::1
+EOF
+  "$OPENSSL_BIN" x509 -req \
+    -in "${cert_dir}/server.csr" \
+    -CA "${cert_dir}/test-ca.pem" \
+    -CAkey "${cert_dir}/test-ca.key" \
+    -CAcreateserial \
+    -out "${cert_dir}/server-ipv6.pem" \
+    -days 2 \
+    -extfile "${cert_dir}/ipv6-server-extensions.cnf" \
+    -extensions server_cert \
+    >>"${cert_dir}/openssl-output" 2>&1 || {
+      printf 'Could not sign the temporary IPv6 TLS server certificate.\n' >&2
+      cat "${cert_dir}/openssl-output" >&2
+      return 1
+    }
 
   mkdir -p \
     "${package_root}/bin" \
@@ -1080,11 +1105,13 @@ const [
   registryPortPath,
   tarballPortPath,
   expiredPortPath,
+  ipv6PortPath,
   expiredCertPath,
   futurePortPath,
   futureCertPath,
   futureKeyPath,
   httpTarballPortPath,
+  ipv6CertPath,
   packageTarballPath,
   alteredPackageTarballPath,
   packageManifestPath,
@@ -1111,6 +1138,10 @@ const expiredTlsOptions = {
 const futureTlsOptions = {
   key: fs.readFileSync(futureKeyPath),
   cert: fs.readFileSync(futureCertPath),
+};
+const ipv6TlsOptions = {
+  key: fs.readFileSync(keyPath),
+  cert: fs.readFileSync(ipv6CertPath),
 };
 const registryServer = https.createServer(
   tlsOptions,
@@ -1219,6 +1250,10 @@ const futureServer = https.createServer(futureTlsOptions, (_request, response) =
   response.writeHead(200, { "content-type": "text/plain" });
   response.end("future-dated TLS fixture");
 });
+const ipv6Server = https.createServer(ipv6TlsOptions, (_request, response) => {
+  response.writeHead(200, { "content-type": "text/plain" });
+  response.end("verified local TLS fixture");
+});
 
 const httpTarballServer = require("node:http").createServer((request, response) => {
   fs.appendFileSync(httpTarballRequestLogPath, `${request.method} ${request.url}\n`);
@@ -1247,6 +1282,9 @@ httpTarballServer.listen(0, "127.0.0.1", () => {
         fs.writeFileSync(expiredPortPath, String(expiredServer.address().port));
         futureServer.listen(0, "127.0.0.1", () => {
           fs.writeFileSync(futurePortPath, String(futureServer.address().port));
+          ipv6Server.listen(0, "::1", () => {
+            fs.writeFileSync(ipv6PortPath, String(ipv6Server.address().port));
+          });
         });
       });
     });
@@ -1265,13 +1303,20 @@ const requestOptions = {
       callback = options;
       options = {};
     }
+    const normalizedHostname = hostname.replace(/^\[|\]$/g, "");
     if (
-      hostname !== "localhost" &&
-      hostname !== "mismatched-name.invalid" &&
-      hostname !== "expired-name.invalid" &&
-      hostname !== "future-name.invalid"
+      normalizedHostname !== "localhost" &&
+      normalizedHostname !== "mismatched-name.invalid" &&
+      normalizedHostname !== "expired-name.invalid" &&
+      normalizedHostname !== "future-name.invalid" &&
+      normalizedHostname !== "::1" &&
+      normalizedHostname !== "::2"
     ) {
       callback(new Error(`Unexpected TLS fixture hostname: ${hostname}`));
+      return;
+    }
+    if (normalizedHostname === "::1" || normalizedHostname === "::2") {
+      callback(null, normalizedHostname, 6);
       return;
     }
     if (options.all) {
@@ -1290,6 +1335,18 @@ if (url.hostname === "127.0.0.2") {
     tls.connect({
       ...options,
       socket: net.connect({ host: "127.0.0.1", port: options.port }),
+    });
+  requestOptions.agent = agent;
+}
+
+if (url.hostname === "[::2]") {
+  // Route the mismatched IPv6 URL literal to the same ::1 HTTPS listener.
+  // TLS still checks the original URL host against the certificate IP SAN.
+  const agent = new https.Agent();
+  agent.createConnection = (options) =>
+    tls.connect({
+      ...options,
+      socket: net.connect({ host: "::1", port: options.port }),
     });
   requestOptions.agent = agent;
 }
@@ -1324,9 +1381,11 @@ EOF
   "$REAL_NODE_BIN" "${server_dir}/https-server.cjs" \
     "${cert_dir}/server.key" "${cert_dir}/server.pem" \
     "$registry_port_file" "$tarball_port_file" "$expired_port_file" \
+    "$ipv6_port_file" \
     "${cert_dir}/server-expired.pem" "$future_port_file" \
     "${cert_dir}/server-future.pem" "${cert_dir}/server-future.key" \
     "$http_tarball_port_file" \
+    "${cert_dir}/server-ipv6.pem" \
     "$package_tarball" "$altered_package_tarball" \
     "${package_root}/package.json" "$tarball_mode_file" \
     "$redirect_mode_file" "$metadata_mode_file" \
@@ -1336,7 +1395,7 @@ EOF
   for ((attempt = 0; attempt < 100; attempt++)); do
     [[ -s "$registry_port_file" && -s "$tarball_port_file" &&
       -s "$expired_port_file" && -s "$future_port_file" &&
-      -s "$http_tarball_port_file" ]] && break
+      -s "$http_tarball_port_file" && -s "$ipv6_port_file" ]] && break
     if ! kill -0 "$TLS_SERVER_PID" 2>/dev/null; then
       printf 'Local HTTPS fixture server exited before becoming ready.\n' >&2
       cat "$server_output" >&2
@@ -1346,7 +1405,7 @@ EOF
   done
   if [[ ! -s "$registry_port_file" || ! -s "$tarball_port_file" ||
     ! -s "$expired_port_file" || ! -s "$future_port_file" ||
-    ! -s "$http_tarball_port_file" ]]; then
+    ! -s "$http_tarball_port_file" || ! -s "$ipv6_port_file" ]]; then
     printf 'Local HTTPS fixture server did not become ready in time.\n' >&2
     cat "$server_output" >&2
     return 1
@@ -1357,6 +1416,8 @@ EOF
   mismatched_url="https://mismatched-name.invalid:$(cat "$registry_port_file")/"
   expired_certificate_url="https://expired-name.invalid:$(cat "$expired_port_file")/"
   future_certificate_url="https://future-name.invalid:$(cat "$future_port_file")/"
+  ipv6_url="https://[::1]:$(cat "$ipv6_port_file")/"
+  mismatched_ipv6_url="https://[::2]:$(cat "$ipv6_port_file")/"
 
   set +e
   env \
@@ -1381,6 +1442,56 @@ EOF
     return 1
   fi
   assert_contains "$(cat "$npx_log")" "npx-invoked"
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$ipv6_url" >"$trusted_output" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ "$(cat "$trusted_output")" != *"verified local TLS fixture"* ]]; then
+    printf 'Pinned runner did not accept the matching IPv6 certificate SAN (status %s):\n' \
+      "$status" >&2
+    cat "$trusted_output" >&2
+    return 1
+  fi
+
+  set +e
+  env \
+    -u NODE_OPTIONS \
+    -u NODE_EXTRA_CA_CERTS \
+    -u NODE_TLS_REJECT_UNAUTHORIZED \
+    RELEASE_NODE_NPM_REGISTRY="$url" \
+    PATH="${wrong_node_dir}:${REAL_NODE_BIN_DIR}:${PATH}" \
+    RUN_LOG="$npx_log" \
+    SSL_CERT_FILE="${workspace}/missing-ca.pem" \
+    SSL_CERT_DIR="${workspace}/missing-ca-dir" \
+    NODE_EXTRA_CA_CERTS="${cert_dir}/test-ca.pem" \
+    bash "${workspace}/scripts/src/run-release-node.sh" \
+    node "$client_script" "$mismatched_ipv6_url" \
+    >"$ipv6_mismatch_output" 2>&1
+  status=$?
+  set -e
+  local ipv6_mismatch_result
+  ipv6_mismatch_result=$(cat "$ipv6_mismatch_output")
+  if [[ "$status" -eq 0 ]] ||
+    [[ "$ipv6_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
+    printf 'Trusted TLS with a mismatched IPv6 address did not fail certificate-name validation (status %s):\n%s\n' \
+      "$status" "$ipv6_mismatch_result" >&2
+    return 1
+  fi
+  assert_not_contains "$ipv6_mismatch_result" "ECONNREFUSED"
+  assert_not_contains "$ipv6_mismatch_result" "ECONNRESET"
 
   set +e
   env \
@@ -1962,7 +2073,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node and package managers verify trusted TLS, reject invalid certificates, block HTTPS-to-HTTP tarball downgrades with fresh caches, and reject altered bytes before package lifecycle hooks; npm install rejects altered shasum-only bytes before preinstall, both directly and after redirect"
+  echo "PASS: Node TLS identity checks accept matching IPv4/IPv6 IP SANs and reject mismatches; Node and package managers verify trusted TLS; untrusted, mismatched, invalid, expired, and future-dated certificates are rejected; HTTPS-to-HTTP tarball downgrades are blocked with fresh caches; altered bytes, including direct, redirected, and shasum-only npm cases, are rejected before package lifecycle hooks"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
