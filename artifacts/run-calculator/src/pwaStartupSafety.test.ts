@@ -80,4 +80,18 @@ describe("pre-Home PWA reload safety", () => {
       today,
     })).resolves.toBe(false);
   });
+
+  it("fails closed when reading the persisted day state throws", async () => {
+    const fetcher = vi.fn();
+    await expect(checkPreHomeReloadSafety({
+      fetcher,
+      storage: {
+        getItem: () => {
+          throw new Error("storage blocked");
+        },
+      },
+      today,
+    })).resolves.toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });

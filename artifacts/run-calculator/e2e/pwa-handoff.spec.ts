@@ -2925,6 +2925,145 @@ test.describe("PWA update handoff", () => {
     }
   });
 
+  test("opens Home after the pre-Home day-state read throws without recovering a stale chunk", async ({
+    page,
+  }) => {
+    const homeServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+    const staleChunkServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: homeServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const dayStateKey = "run-calc-day";
+        const originalGetItem = Storage.prototype.getItem;
+        const evidence = { firstReadThrew: false, successfulReads: 0 };
+        Object.defineProperty(window, "__pwaDayStateReadEvidence", {
+          value: evidence,
+        });
+        Storage.prototype.getItem = function (key: string) {
+          if (
+            this === window.localStorage &&
+            key === dayStateKey &&
+            !evidence.firstReadThrew
+          ) {
+            evidence.firstReadThrew = true;
+            throw new DOMException("Storage is blocked", "SecurityError");
+          }
+          const value = originalGetItem.call(this, key);
+          if (this === window.localStorage && key === dayStateKey) {
+            evidence.successfulReads += 1;
+          }
+          return value;
+        };
+
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const captureKey = "__pwa_recovery_marker_capture";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.sessionStorage && key === markerKey) {
+            const captured = JSON.parse(localStorage.getItem(captureKey) ?? "[]") as string[];
+            captured.push(value);
+            localStorage.setItem(captureKey, JSON.stringify(captured));
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+
+      await page.goto(homeServer.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      const homeStorageReadEvidence = await page.evaluate(() => (
+        window as Window & {
+          __pwaDayStateReadEvidence?: {
+            firstReadThrew: boolean;
+            successfulReads: number;
+          };
+        }
+      ).__pwaDayStateReadEvidence);
+      expect(homeStorageReadEvidence?.firstReadThrew).toBe(true);
+      expect(homeStorageReadEvidence?.successfulReads).toBeGreaterThan(0);
+      expect(homeServer.sessionRecoveryRequests().acceptedMeResponses).toBeGreaterThan(0);
+
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: staleChunkServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        staleChunkServer,
+        fixture.staleHomeChunk,
+      );
+      await expect(page.getByText(
+        /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+      )).toBeVisible();
+
+      const storageReadEvidence = await page.evaluate(() => {
+        const evidence = (
+          window as Window & {
+            __pwaDayStateReadEvidence?: {
+              firstReadThrew: boolean;
+              successfulReads: number;
+            };
+          }
+        ).__pwaDayStateReadEvidence;
+        const successfulReadsBeforeProbe = evidence?.successfulReads ?? 0;
+        const value = localStorage.getItem("run-calc-day");
+        return {
+          firstReadThrew: evidence?.firstReadThrew ?? false,
+          successfulReadsBeforeProbe,
+          value,
+          laterReadWorks: true,
+        };
+      });
+      expect(storageReadEvidence.firstReadThrew).toBe(true);
+      expect(storageReadEvidence.laterReadWorks).toBe(true);
+
+      // The shortened production idle timer has elapsed, but a failed local
+      // day-state read must not authorize an automatic reload.
+      await page.waitForTimeout(1_500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+      expect(await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+      expect(await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_marker_capture") ?? "[]") as string[],
+      )).toEqual([]);
+
+      const observations = staleChunkServer.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      expect(observations.filter((item) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toHaveLength(0);
+      expect(staleChunkServer.staleAssetRequestCount()).toBe(1);
+      expect(homeServer.fixtureErrors()).toEqual([]);
+      expect(staleChunkServer.fixtureErrors()).toEqual([]);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await homeServer.close();
+      await staleChunkServer.close();
+    }
+  });
+
   test("opens Home after a pre-Home safety timeout without automatically recovering a stale chunk", async ({
     page,
   }) => {
