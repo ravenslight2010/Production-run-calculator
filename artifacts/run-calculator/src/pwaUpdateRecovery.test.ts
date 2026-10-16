@@ -6,6 +6,7 @@ import {
   consumeStaleAssetRecoveryAttempt,
   recordStaleAssetRecoveryAttempt,
   STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS,
+  STALE_ASSET_RELOAD_FALLBACK_MS,
   WORKER_UPDATE_TIMEOUT_MS,
   WORKER_INSTALL_TIMEOUT_MS,
   updateAndReload,
@@ -197,6 +198,55 @@ describe("updateAndReload", () => {
 
     expect(activateWaitingWorker).toHaveBeenCalledWith(false, expect.any(Function));
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("allows a slow update check and healthy installation to finish within the combined recovery budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const installListeners = new Set<() => void>();
+      const worker = {
+        state: "installing" as ServiceWorkerState,
+        addEventListener: (_type: "statechange", listener: () => void) => {
+          installListeners.add(listener);
+        },
+        removeEventListener: (_type: "statechange", listener: () => void) => {
+          installListeners.delete(listener);
+        },
+      };
+      const registration = {
+        waiting: undefined as ServiceWorker | undefined,
+        installing: worker as unknown as ServiceWorker,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        update: vi.fn(() => new Promise<void>((resolve) => {
+          setTimeout(resolve, WORKER_UPDATE_TIMEOUT_MS - 100);
+        })),
+      };
+      const activateWaitingWorker = vi.fn().mockResolvedValue(undefined);
+      const reload = vi.fn();
+
+      const recovery = updateAndReload(registration, activateWaitingWorker, reload);
+      await vi.advanceTimersByTimeAsync(WORKER_UPDATE_TIMEOUT_MS - 100);
+      expect(activateWaitingWorker).not.toHaveBeenCalled();
+
+      setTimeout(() => {
+        worker.state = "installed";
+        registration.waiting = worker as unknown as ServiceWorker;
+        for (const listener of installListeners) listener();
+      }, WORKER_INSTALL_TIMEOUT_MS - 100);
+      await vi.advanceTimersByTimeAsync(WORKER_INSTALL_TIMEOUT_MS - 100);
+      await recovery;
+
+      expect(activateWaitingWorker).toHaveBeenCalledOnce();
+      expect(reload).not.toHaveBeenCalled();
+      expect(installListeners.size).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(STALE_ASSET_RELOAD_FALLBACK_MS).toBeGreaterThan(
+        WORKER_UPDATE_TIMEOUT_MS + WORKER_INSTALL_TIMEOUT_MS - 200,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls back to reload when an installing worker never settles", async () => {

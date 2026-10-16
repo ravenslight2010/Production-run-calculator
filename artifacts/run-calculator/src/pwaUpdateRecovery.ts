@@ -15,7 +15,10 @@ type ActivateWaitingWorker = (
 
 export const WORKER_UPDATE_TIMEOUT_MS = 5_000;
 export const WORKER_INSTALL_TIMEOUT_MS = 5_000;
-export const STALE_ASSET_RELOAD_FALLBACK_MS = WORKER_INSTALL_TIMEOUT_MS + 1_000;
+// Update discovery and installation run sequentially. Keep the screen-level
+// fallback alive for both bounded waits, plus a small handoff margin.
+export const STALE_ASSET_RELOAD_FALLBACK_MS =
+  WORKER_UPDATE_TIMEOUT_MS + WORKER_INSTALL_TIMEOUT_MS + 1_000;
 const STALE_ASSET_RECOVERY_PREFIX = "run-calc:stale-asset-recovery:";
 const STALE_ASSET_RECOVERY_PENDING_KEY = "run-calc:stale-asset-recovery-pending:v1";
 export const STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS = 30 * 60 * 1000;
