@@ -3565,7 +3565,10 @@ describe("QC workflows", () => {
           ],
           substitutions,
         },
-        runValues: { [runId]: settings },
+        runValues: {
+          [runId]: settings,
+          [incompleteRunId]: { ...settings, doughRecipe: [] },
+        },
       },
     });
 
@@ -3580,6 +3583,7 @@ describe("QC workflows", () => {
     const checklistData = await checklistRes.json() as {
       componentChecklist: {
         status: string;
+        issues: Array<{ setting: string; message: string }>;
         source: { kind: string; date: string; revision: string } | null;
         expectedComponents: Array<{ componentId: string; name: string }>;
       };
@@ -3666,13 +3670,46 @@ describe("QC workflows", () => {
     });
     expect(incompleteEvent.status).toBe(201);
     expect(((await incompleteEvent.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
-      .toMatchObject({ expectedStatus: "incomplete", outcome: "not-evaluated" });
+      .toMatchObject({
+        expectedStatus: "incomplete",
+        outcome: "not-evaluated",
+        expectedIssues: expect.arrayContaining([
+          expect.objectContaining({ setting: "Dough recipe" }),
+        ]),
+      });
+    const incompleteChecklist = await req(QC_OPERATOR, "GET", `/api/qc/runs/${incompleteRunId}`);
+    expect(((await incompleteChecklist.json()) as {
+      componentChecklist: { status: string; issues: Array<{ setting: string; message: string }> };
+    }).componentChecklist).toMatchObject({
+      status: "incomplete",
+      issues: expect.arrayContaining([
+        expect.objectContaining({ setting: "Dough recipe" }),
+      ]),
+    });
     const ambiguousEvent = await req(QC_OPERATOR, "POST", "/api/qc/component-checks", {
       operationId: randomUUID(), runId: ambiguousRunId, observations: [],
     });
     expect(ambiguousEvent.status).toBe(201);
     expect(((await ambiguousEvent.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
       .toMatchObject({ expectedStatus: "incomplete", outcome: "not-evaluated" });
+    const ambiguousChecklist = await req(QC_OPERATOR, "GET", `/api/qc/runs/${ambiguousRunId}`);
+    const ambiguousChecklistPayload = ((await ambiguousChecklist.json()) as {
+      componentChecklist: {
+        status: string;
+        reason: string;
+        issues: Array<{ setting: string; message: string }>;
+        expectedComponents: unknown[];
+      };
+    }).componentChecklist;
+    expect(ambiguousChecklistPayload).toMatchObject({
+      status: "incomplete",
+      reason: "The current run snapshot is incomplete or ambiguous.",
+      issues: [{
+        setting: "Canonical run settings",
+        message: "The current run snapshot is incomplete or ambiguous.",
+      }],
+      expectedComponents: [],
+    });
 
     const completedRunId = "qc-components-completed";
     const startedAt = Date.now() - 60_000;

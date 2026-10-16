@@ -22,14 +22,79 @@ export type ExpectedQcComponent = {
   ingredientId?: string;
 };
 
+export type QcComponentIssue = {
+  setting: string;
+  message: string;
+};
+
 export type QcComponentResolution = {
   status: "complete" | "incomplete";
   reason?: string;
+  issues: QcComponentIssue[];
   components: ExpectedQcComponent[];
 };
 
 const MAX_EXPECTED_COMPONENTS = 200;
 const MAX_COMPONENT_NAME = 200;
+const MAX_COMPONENT_ISSUES = 12;
+
+const SETTING_BY_FIELD: Record<string, string> = {
+  doughRecipeName: "Dough recipe",
+  doughRecipe: "Dough recipe",
+  frontlineRecipeName: "Frontline (Sauce) recipe",
+  frontlineRecipe: "Frontline (Sauce) recipe",
+  app1Type: "Applicator 1",
+  app1CheeseRecipeName: "Applicator 1",
+  app1CheeseRecipe: "Applicator 1",
+  app2Type: "Applicator 2",
+  app2CheeseRecipeName: "Applicator 2",
+  app2CheeseRecipe: "Applicator 2",
+  app3Type: "Applicator 3",
+  app3CheeseRecipeName: "Applicator 3",
+  app3CheeseRecipe: "Applicator 3",
+  app4Type: "Applicator 4",
+  app4CheeseRecipeName: "Applicator 4",
+  app4CheeseRecipe: "Applicator 4",
+  pep1Type: "Pepperoni 1",
+  pep1TypeB: "Pepperoni 1",
+  pep2Type: "Pepperoni 2",
+  pep2TypeB: "Pepperoni 2",
+};
+
+function issue(setting: string, message: string): QcComponentIssue {
+  return { setting, message };
+}
+
+function groupSetting(group: string): string {
+  if (group === "Dough") return "Dough recipe";
+  if (group === "Frontline (Sauce)") return "Frontline (Sauce) recipe";
+  if (/^Applicator [1-4]$/.test(group)) return group;
+  if (group.startsWith("Pepperoni")) {
+    return group.includes("2") ? "Pepperoni 2" : "Pepperoni 1";
+  }
+  return "Saved component settings";
+}
+
+function issuesForInvalidSettings(
+  issues: readonly { path: PropertyKey[] }[],
+): QcComponentIssue[] {
+  const settings = new Set<string>();
+  for (const validationIssue of issues) {
+    const field = validationIssue.path[0];
+    const setting = typeof field === "string"
+      ? SETTING_BY_FIELD[field]
+      : undefined;
+    settings.add(setting ?? "Saved component settings");
+  }
+  return [...settings]
+    .slice(0, MAX_COMPONENT_ISSUES)
+    .map((setting) => issue(
+      setting,
+      setting === "Saved component settings"
+        ? "Save or review the run's component settings before evaluating the checklist."
+        : `Review the saved ${setting.toLocaleLowerCase("en-US")}; required values are missing or invalid.`,
+    ));
+}
 
 const recipeRowSchema = z.object({
   ingredient: z.string().max(MAX_COMPONENT_NAME),
@@ -112,6 +177,7 @@ export function resolveQcExpectedComponents(
     return {
       status: "incomplete",
       reason: "Canonical run component settings are missing or invalid.",
+      issues: issuesForInvalidSettings(valuesResult.error.issues),
       components: [],
     };
   }
@@ -123,6 +189,10 @@ export function resolveQcExpectedComponents(
     return {
       status: "incomplete",
       reason: "The production-day substitution list is invalid.",
+      issues: [issue(
+        "Production-day substitutions",
+        "Ask a manager to correct the saved substitution list before evaluating expected components.",
+      )],
       components: [],
     };
   }
@@ -132,7 +202,14 @@ export function resolveQcExpectedComponents(
     substitutionsResult.data,
   );
   const components: ExpectedQcComponent[] = [];
+  const issues: QcComponentIssue[] = [];
   let incompleteReason: string | undefined;
+  const addIssue = (setting: string, message: string) => {
+    const duplicate = issues.some((item) => item.setting === setting && item.message === message);
+    if (!duplicate && issues.length < MAX_COMPONENT_ISSUES) {
+      issues.push(issue(setting, message));
+    }
+  };
 
   const add = (
     componentId: string,
@@ -143,10 +220,18 @@ export function resolveQcExpectedComponents(
     const name = cleanedName(rawName);
     if (!name) {
       incompleteReason ??= "A configured component has no identifiable name.";
+      addIssue(
+        groupSetting(group),
+        `Add a name to every configured ${groupSetting(group).toLocaleLowerCase("en-US")} component.`,
+      );
       return;
     }
     if (components.length >= MAX_EXPECTED_COMPONENTS) {
       incompleteReason ??= "The expected component set exceeds the supported limit.";
+      addIssue(
+        "Saved component settings",
+        `Reduce configured component rows to ${MAX_EXPECTED_COMPONENTS} or fewer.`,
+      );
       return;
     }
     components.push({
@@ -173,6 +258,7 @@ export function resolveQcExpectedComponents(
       addRecipeRows("Dough", "dough", values.doughRecipe);
     } else {
       incompleteReason ??= "The configured dough recipe has no component rows.";
+      addIssue("Dough recipe", "Add at least one named component to the saved dough recipe.");
     }
   }
 
@@ -202,7 +288,10 @@ export function resolveQcExpectedComponents(
       addRecipeRows(group, slot, rows);
     } else if (typeIsRecipe) {
       if (recipeName) add(`${slot}:product`, group, recipeName);
-      else incompleteReason ??= `${group} is configured without an identifiable recipe.`;
+      else {
+        incompleteReason ??= `${group} is configured without an identifiable recipe.`;
+        addIssue(group, `Select a saved recipe or add named component rows for ${group}.`);
+      }
     } else if (isConfiguredType(type)) {
       add(`${slot}:type`, group, type);
     } else if (recipeName) {
@@ -222,11 +311,16 @@ export function resolveQcExpectedComponents(
 
   if (components.length === 0) {
     incompleteReason ??= "No configured components were found for this run.";
+    addIssue(
+      "Saved component settings",
+      "Confirm that at least one component is configured in the saved run settings.",
+    );
   }
 
   return {
     status: incompleteReason ? "incomplete" : "complete",
     ...(incompleteReason ? { reason: incompleteReason } : {}),
+    issues,
     components,
   };
 }

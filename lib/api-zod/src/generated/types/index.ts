@@ -557,6 +557,7 @@ export * from './qcComponentCheckInput';
 export * from './qcComponentCheckInputObservationsItem';
 export * from './qcComponentCheckInputObservationsItemObservation';
 export * from './qcComponentChecklist';
+export * from './qcComponentChecklistIssuesItem';
 export * from './qcComponentChecklistSource';
 export * from './qcComponentChecklistSourceKind';
 export * from './qcComponentChecklistStatus';

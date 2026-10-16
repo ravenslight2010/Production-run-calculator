@@ -55,6 +55,7 @@ const qcMocks = vi.hoisted(() => ({
       weightCheckEventsComplete: true,
       componentChecklist: {
         status: "complete",
+        issues: [] as Array<{ setting: string; message: string }>,
         expectedComponents: [] as Array<{ componentId: string; group: string; name: string; ingredientId?: string }>,
         source: {
           kind: "current-day-canonical-settings",
@@ -186,6 +187,7 @@ beforeEach(() => {
     weightCheckEventsComplete: true,
     componentChecklist: {
       status: "complete",
+      issues: [],
       expectedComponents: [],
       source: {
         kind: "current-day-canonical-settings",
@@ -247,6 +249,7 @@ describe("QC workflow UI", () => {
   it("submits observations only for server-resolved expected components", () => {
     qcMocks.run.data.componentChecklist = {
       status: "complete",
+      issues: [],
       expectedComponents: [
         { componentId: "dough:0", group: "Dough", name: "Flour", ingredientId: "flour" },
       ],
@@ -281,13 +284,54 @@ describe("QC workflow UI", () => {
     qcMocks.run.data.componentChecklist = {
       status: "incomplete",
       reason: "The configured dough recipe has no component rows.",
+      issues: [
+        {
+          setting: "Dough recipe",
+          message: "Add at least one named component to the saved dough recipe.",
+        },
+        {
+          setting: "Frontline (Sauce) recipe",
+          message: "Add a name to every configured Frontline (Sauce) recipe component.",
+        },
+        {
+          setting: "Applicator 1",
+          message: "Select a saved recipe or add named component rows for Applicator 1.",
+        },
+        {
+          setting: "Pepperoni 1",
+          message: "Review the saved pepperoni 1; required values are missing or invalid.",
+        },
+        {
+          setting: "Production-day substitutions",
+          message: "Ask a manager to correct the saved substitution list before evaluating expected components.",
+        },
+        {
+          setting: "Saved component settings",
+          message: "Confirm that at least one component is configured in the saved run settings.",
+        },
+        {
+          setting: "Canonical run settings",
+          message: "The current run snapshot is incomplete or ambiguous.",
+        },
+      ],
       expectedComponents: [],
       source: null,
     };
     renderTab();
 
     expect(screen.getByText("Not fully evaluated")).toBeTruthy();
-    expect(screen.getByText(/cannot pass while expected components are incomplete or ambiguous/i)).toBeTruthy();
+    expect(screen.getByText("Saved settings to review")).toBeTruthy();
+    const issueItems = screen.getAllByTestId(/^qc-component-setting-issue-/);
+    const issueText = issueItems.map((item) => item.textContent).join(" ");
+    expect(issueText).toContain("Dough recipe:");
+    expect(issueText).toContain("Frontline (Sauce) recipe:");
+    expect(issueText).toContain("Applicator 1:");
+    expect(issueText).toContain("Pepperoni 1:");
+    expect(issueText).toContain("Production-day substitutions:");
+    expect(issueText).toContain("Saved component settings:");
+    expect(issueText).toContain("Canonical run settings:");
+    expect(screen.getByText(/cannot replace the server-resolved expected list/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/expected component/i)).toBeNull();
     fireEvent.click(screen.getByTestId("button-record-component-check"));
     expect(qcMocks.mutation.mutate).toHaveBeenCalledWith({
       data: expect.objectContaining({ runId: "run-1", observations: [] }),
@@ -467,6 +511,7 @@ describe("QC workflow UI", () => {
       weightCheckEventsComplete: false,
       componentChecklist: {
         status: "incomplete",
+        issues: [{ setting: "Canonical run settings", message: "The current run snapshot is incomplete or ambiguous." }],
         expectedComponents: [],
         source: null,
       },
@@ -481,8 +526,10 @@ describe("QC workflow UI", () => {
 
   it("uses a saved check to set the next reminder and recalculates when switching runs", () => {
     const start = Date.parse("2025-01-01T00:00:00.000Z");
+    const pauseStart = start + 35 * 60_000;
+    const resumedAt = start + 55 * 60_000;
     vi.useFakeTimers();
-    vi.setSystemTime(start + 45 * 60_000);
+    vi.setSystemTime(resumedAt);
     qcMocks.targets.data.targets = [{
       ingredientId: "flour",
       ingredientName: "Flour",
@@ -501,11 +548,12 @@ describe("QC workflow UI", () => {
         weightCheckEvents: [{
           ingredientId: "flour",
           checkType: "30-minute",
-          createdAt: new Date(start + 20 * 60_000).toISOString(),
+          createdAt: new Date(start + 30 * 60_000).toISOString(),
         }],
         weightCheckEventsComplete: true,
         componentChecklist: {
           status: "complete",
+          issues: [],
           expectedComponents: [],
           source: null,
         },
@@ -521,6 +569,7 @@ describe("QC workflow UI", () => {
         weightCheckEventsComplete: true,
         componentChecklist: {
           status: "complete",
+          issues: [],
           expectedComponents: [],
           source: null,
         },
@@ -569,6 +618,7 @@ describe("QC workflow UI", () => {
       }],
       componentChecklist: {
         status: "complete",
+        issues: [],
         expectedComponents: [],
         source: null,
       },
@@ -614,6 +664,7 @@ describe("QC workflow UI", () => {
       }],
       componentChecklist: {
         status: "complete",
+        issues: [],
         expectedComponents: [],
         source: null,
       },

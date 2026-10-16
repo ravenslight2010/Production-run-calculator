@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { QcComponentChecklistIssuesItem } from './qcComponentChecklistIssuesItem';
 import type { QcComponentChecklistSource } from './qcComponentChecklistSource';
 import type { QcComponentChecklistStatus } from './qcComponentChecklistStatus';
 import type { QcExpectedComponent } from './qcExpectedComponent';
@@ -12,6 +13,8 @@ import type { QcExpectedComponent } from './qcExpectedComponent';
 export interface QcComponentChecklist {
   status: QcComponentChecklistStatus;
   reason?: string;
+  /** @maxItems 12 */
+  issues: QcComponentChecklistIssuesItem[];
   expectedComponents: QcExpectedComponent[];
   source: QcComponentChecklistSource;
 }

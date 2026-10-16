@@ -800,6 +800,7 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
           ...(typeof output.payload.expectedReason === "string"
             ? { reason: output.payload.expectedReason }
             : {}),
+          issues: [],
           components: expectedComponents,
         }, observations);
         output.payload = {
@@ -1113,6 +1114,12 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
         reason: sourceLookup.state === "unavailable"
           ? sourceLookup.reason
           : "Expected components are unavailable for this run.",
+        issues: [{
+          setting: "Canonical run settings",
+          message: sourceLookup.state === "unavailable"
+            ? sourceLookup.reason
+            : "Confirm that this run has saved canonical component settings.",
+        }],
         components: [],
       };
     const rows = await db.select().from(qcWorkflowEventsTable).where(and(
@@ -1172,6 +1179,7 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
       componentChecklist: {
         status: componentResolution.status,
         ...(componentResolution.reason ? { reason: componentResolution.reason } : {}),
+        issues: componentResolution.issues,
         expectedComponents: componentResolution.components,
         source: sourceLookup.state === "found"
           ? {
@@ -1417,6 +1425,10 @@ router.post("/qc/component-checks", requireCapability("record-qc"), async (req, 
         : {
           status: "incomplete" as const,
           reason: sourceLookup.reason,
+          issues: [{
+            setting: "Canonical run settings",
+            message: sourceLookup.reason,
+          }],
           components: [],
         };
       const componentIds = new Set(resolution.components.map((item) => item.componentId));
@@ -1443,6 +1455,7 @@ router.post("/qc/component-checks", requireCapability("record-qc"), async (req, 
             : null,
           expectedStatus: resolution.status,
           ...(resolution.reason ? { expectedReason: resolution.reason } : {}),
+          expectedIssues: resolution.issues,
           expectedComponents: resolution.components,
           results: evaluation.items.map(({ componentId, observation, outcome }) => ({
             componentId,

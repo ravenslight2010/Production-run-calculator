@@ -8121,10 +8121,20 @@ components:
 
     QcComponentChecklist:
       type: object
-      required: [status, expectedComponents, source]
+      required: [status, issues, expectedComponents, source]
       properties:
         status: { type: string, enum: [complete, incomplete] }
         reason: { type: string }
+        issues:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [setting, message]
+            properties:
+              setting: { type: string, maxLength: 80 }
+              message: { type: string, maxLength: 240 }
         expectedComponents:
           type: array
           items: { $ref: "#/components/schemas/QcExpectedComponent" }

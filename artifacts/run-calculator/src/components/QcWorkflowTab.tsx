@@ -854,10 +854,29 @@ export default function QcWorkflowTab({
               <p className="mt-3 text-xs text-muted-foreground" role="status">Loading server-resolved components…</p>
             ) : (
               <>
-                {componentChecklist.reason && (
-                  <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-200" role="status">
-                    {componentChecklist.reason} The checklist cannot pass while expected components are incomplete or ambiguous.
-                  </p>
+                {(componentChecklist.reason || componentChecklist.issues.length > 0) && (
+                  <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-200" role="status" data-testid="status-qc-component-settings">
+                    {componentChecklist.reason && (
+                      <p>
+                        {componentChecklist.reason} The checklist cannot pass while expected components are incomplete or ambiguous.
+                      </p>
+                    )}
+                    {componentChecklist.issues.length > 0 && (
+                      <div className={componentChecklist.reason ? "mt-2" : ""}>
+                        <p className="font-semibold">Saved settings to review</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-5">
+                          {componentChecklist.issues.map((item, index) => (
+                            <li key={`${item.setting}-${index}`} data-testid={`qc-component-setting-issue-${index}`}>
+                              <span className="font-semibold">{item.setting}:</span> {item.message}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="mt-2">
+                          Ask a manager to update the saved run settings. This checklist cannot replace the server-resolved expected list.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {componentChecklist.source && (
                   <p className="mt-2 text-[11px] text-muted-foreground">

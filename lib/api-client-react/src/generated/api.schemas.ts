@@ -3079,6 +3079,87 @@ export interface QcWeightCheckInput {
 }
 
 export type QcComponentCheckInputObservationsItemObservation = typeof QcComponentCheckInputObservationsItemObservation[keyof typeof QcComponentCheckInputObservationsItemObservation];
+
+
+export const QcComponentCheckInputObservationsItemObservation = {
+  'present-correct': 'present-correct',
+  'present-mismatch': 'present-mismatch',
+  missing: 'missing',
+  'not-checked': 'not-checked',
+} as const;
+
+export type QcComponentCheckInputObservationsItem = {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  componentId: string;
+  observation: QcComponentCheckInputObservationsItemObservation;
+};
+
+export interface QcComponentCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /** @maxItems 200 */
+  observations: QcComponentCheckInputObservationsItem[];
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export interface QcExpectedComponent {
+  componentId: string;
+  group: string;
+  name: string;
+  ingredientId?: string;
+}
+
+export type QcComponentChecklistStatus = typeof QcComponentChecklistStatus[keyof typeof QcComponentChecklistStatus];
+
+
+export const QcComponentChecklistStatus = {
+  complete: 'complete',
+  incomplete: 'incomplete',
+} as const;
+
+export type QcComponentChecklistIssuesItem = {
+  /** @maxLength 80 */
+  setting: string;
+  /** @maxLength 240 */
+  message: string;
+};
+
+export type QcComponentChecklistSourceKind = typeof QcComponentChecklistSourceKind[keyof typeof QcComponentChecklistSourceKind];
+
+
+export const QcComponentChecklistSourceKind = {
+  'completed-run-snapshot': 'completed-run-snapshot',
+  'current-day-canonical-settings': 'current-day-canonical-settings',
+} as const;
+
+export type QcComponentChecklistSource = {
+  kind: QcComponentChecklistSourceKind;
+  date: string;
+  revision: string;
+} | null;
+
+export interface QcComponentChecklist {
+  status: QcComponentChecklistStatus;
+  reason?: string;
+  /** @maxItems 12 */
+  issues: QcComponentChecklistIssuesItem[];
+  expectedComponents: QcExpectedComponent[];
+  source: QcComponentChecklistSource;
+}
+
+export interface QcComponentCheckResponse {
+  event: QcEvent;
+  duplicate: boolean;
+}
+
 export type QcAllergenReviewInputFootprintStatus = typeof QcAllergenReviewInputFootprintStatus[keyof typeof QcAllergenReviewInputFootprintStatus];
 
 
@@ -8294,72 +8375,4 @@ export type ListDistillationApplyEvidence200 = {
   records: DistillationApplyEvidenceRecord[];
   /** @nullable */
   nextCursor: string | null;
-};
-
-export const QcComponentCheckInputObservationsItemObservation = {
-  'present-correct': 'present-correct',
-  'present-mismatch': 'present-mismatch',
-  missing: 'missing',
-  'not-checked': 'not-checked',
-} as const;
-
-export type QcComponentChecklistSourceKind = typeof QcComponentChecklistSourceKind[keyof typeof QcComponentChecklistSourceKind];
-
-export const QcComponentChecklistSourceKind = {
-  'completed-run-snapshot': 'completed-run-snapshot',
-  'current-day-canonical-settings': 'current-day-canonical-settings',
-} as const;
-
-export type QcComponentChecklistStatus = typeof QcComponentChecklistStatus[keyof typeof QcComponentChecklistStatus];
-
-export const QcComponentChecklistStatus = {
-  complete: 'complete',
-  incomplete: 'incomplete',
-} as const;
-
-export interface QcComponentChecklist {
-  status: QcComponentChecklistStatus;
-  reason?: string;
-  expectedComponents: QcExpectedComponent[];
-  source: QcComponentChecklistSource;
-}
-
-export interface QcComponentCheckResponse {
-  event: QcEvent;
-  duplicate: boolean;
-}
-
-export interface QcExpectedComponent {
-  componentId: string;
-  group: string;
-  name: string;
-  ingredientId?: string;
-}
-
-export type QcComponentChecklistSource = {
-  kind: QcComponentChecklistSourceKind;
-  date: string;
-  revision: string;
-} | null;
-
-export interface QcComponentCheckInput {
-  operationId: string;
-  /**
-     * @minLength 1
-     * @maxLength 200
-     */
-  runId: string;
-  /** @maxItems 200 */
-  observations: QcComponentCheckInputObservationsItem[];
-  /** @maxLength 1000 */
-  note?: string;
-}
-
-export type QcComponentCheckInputObservationsItem = {
-  /**
-     * @minLength 1
-     * @maxLength 80
-     */
-  componentId: string;
-  observation: QcComponentCheckInputObservationsItemObservation;
 };
