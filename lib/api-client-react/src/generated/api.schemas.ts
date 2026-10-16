@@ -6966,6 +6966,30 @@ export interface FieldCheckSummary {
   issueStatus: FieldCheckSummaryIssueStatus;
 }
 
+export type FieldChecksReportPopulationCountBasis = typeof FieldChecksReportPopulationCountBasis[keyof typeof FieldChecksReportPopulationCountBasis];
+
+
+export const FieldChecksReportPopulationCountBasis = {
+  'lifetime-issues': 'lifetime-issues',
+  'retained-observations': 'retained-observations',
+} as const;
+
+export type FieldChecksReportPopulationRetentionDays = typeof FieldChecksReportPopulationRetentionDays[keyof typeof FieldChecksReportPopulationRetentionDays];
+
+
+export const FieldChecksReportPopulationRetentionDays = {
+  NUMBER_30: 30,
+} as const;
+
+export type FieldChecksReportPopulation = {
+  /** @nullable */
+  appBuild: string | null;
+  /** @nullable */
+  deviceCategory: string | null;
+  countBasis: FieldChecksReportPopulationCountBasis;
+  retentionDays: FieldChecksReportPopulationRetentionDays;
+};
+
 export type FieldChecksReportScope = typeof FieldChecksReportScope[keyof typeof FieldChecksReportScope];
 
 
@@ -6984,6 +7008,7 @@ export const FieldChecksReportOverallStatus = {
 } as const;
 
 export interface FieldChecksReport {
+  population: FieldChecksReportPopulation;
   version: string;
   scope: FieldChecksReportScope;
   generatedAt: string;
@@ -7865,6 +7890,36 @@ export const ListImportHistoryStatus = {
   complete: 'complete',
   partial: 'partial',
   failed: 'failed',
+} as const;
+
+export type GetFieldChecksParams = {
+/**
+ * Exact build identifier; use local for unknown builds. Omit for all builds.
+ * @minLength 1
+ * @maxLength 100
+ */
+appBuild?: string;
+/**
+ * Exact retained browser/device category. Omit for all categories.
+ */
+deviceCategory?: GetFieldChecksDeviceCategory;
+};
+
+export type GetFieldChecksDeviceCategory = typeof GetFieldChecksDeviceCategory[keyof typeof GetFieldChecksDeviceCategory];
+
+
+export const GetFieldChecksDeviceCategory = {
+  'desktop-chrome': 'desktop-chrome',
+  'desktop-safari': 'desktop-safari',
+  'desktop-firefox': 'desktop-firefox',
+  'mobile-chrome': 'mobile-chrome',
+  'mobile-safari': 'mobile-safari',
+  'tablet-browser': 'tablet-browser',
+  'android-phone': 'android-phone',
+  'android-tablet': 'android-tablet',
+  ipad: 'ipad',
+  iphone: 'iphone',
+  'other-browser': 'other-browser',
 } as const;
 
 export type ApplyAiRetentionCleanup200 = {

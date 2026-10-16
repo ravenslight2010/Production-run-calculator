@@ -465,6 +465,7 @@ export const submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne = 100
 export const submitFieldCheckObservationsBodyObservationsMax = 20;
 export const submitFieldCheckObservationsResponseAcceptedMin = 0;
 export const submitFieldCheckObservationsResponseDuplicateMin = 0;
+export const getFieldChecksQueryAppBuildMax = 100;
 export const getFieldChecksResponseChecksItemLastSuccessfulMetricsMinOne = 0;
 export const getFieldChecksResponseChecksItemLastSuccessfulMetricsMaxOne = 10000000;
 export const confirmHardwareFieldCheckResponseAcceptedMin = 0;
@@ -7071,13 +7072,27 @@ export const SubmitFieldCheckObservationsResponse = zod.object({
 
 
 /**
- * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
+ * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
  * @summary Get manager field-check health
  */
 
 
 
+export const GetFieldChecksQueryParams = zod.object({
+  "appBuild": zod.coerce.string().min(1).max(getFieldChecksQueryAppBuildMax).optional().describe('Exact build identifier; use local for unknown builds. Omit for all builds.'),
+  "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'android-phone', 'android-tablet', 'ipad', 'iphone', 'other-browser']).optional().describe('Exact retained browser/device category. Omit for all categories.')
+})
+
+
+
+
 export const GetFieldChecksResponse = zod.object({
+  "population": zod.object({
+  "appBuild": zod.string().nullable(),
+  "deviceCategory": zod.string().nullable(),
+  "countBasis": zod.enum(['lifetime-issues', 'retained-observations']),
+  "retentionDays": zod.literal(30)
+}),
   "version": zod.string(),
   "scope": zod.enum(['current facility']),
   "generatedAt": zod.coerce.date(),

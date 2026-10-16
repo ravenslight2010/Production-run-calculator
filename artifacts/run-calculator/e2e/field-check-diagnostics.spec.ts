@@ -61,9 +61,13 @@ test("manager sees safe sync categories and performance sources from isolated AP
     .toEqual(expect.arrayContaining([expect.objectContaining({ metrics: { sourceCode: 4, durationMs: 20004 } })]));
   expect(await failures.innerText()).not.toMatch(/Bearer|field_view|field_diagnostics|\/api\//);
   await expect(failures.getByText("Unidentified local build; not release verification evidence.").first()).toBeVisible();
+  await expect(page.locator("html")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
+  await failures.screenshot({ path: testInfo.outputPath("safe-field-check-details.png") });
+
   const downloadButton = page.getByRole("button", { name: "Download safe field-check report" });
   await expect(downloadButton).toBeVisible();
-  // Launch failure is visible, never deletes or recovers the retained observations.
+  // Preserve the support-download regression alongside filtering: a failed
+  // download must never delete or recover observations.
   const before = await failures.innerText();
   await page.evaluate(() => {
     const original = URL.createObjectURL;
@@ -98,7 +102,67 @@ test("manager sees safe sync categories and performance sources from isolated AP
   const after = await request.get(`${API_BASE}/api/field-checks`, { headers: { Authorization: `Bearer ${account.token}` } });
   expect((await after.json()).checks).toEqual(data.checks);
   await expect(page.locator("html")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
-  await failures.screenshot({ path: testInfo.outputPath("safe-field-check-details.png") });
+
+  // These older failures are outside the five most recent global rows. Filtering
+  // must query the full retained population, not those five rows in the browser.
+  const selectedSamples = Array.from({ length: 7 }, (_, i) => ({
+    observationId: `${uniqueTestId("selected_field")}-${i}`,
+    checkName: "sync-acknowledgment", checkVersion: "3", outcome: "failure",
+    observedAt: new Date(Date.now() - 120_000 - i * 1000).toISOString(),
+    appBuild: "fixture-build-a", deviceCategory: "mobile-safari", metrics: { failureCode: 2 },
+  }));
+  expect((await request.post(`${API_BASE}/api/field-checks/observations`, {
+    headers: { Authorization: `Bearer ${account.token}` }, data: { observations: selectedSamples },
+  })).status()).toBe(202);
+  const panel = page.getByTestId("field-checks-panel");
+  const filters = page.getByRole("group", { name: "Field evidence filters" });
+  const population = page.getByTestId("field-evidence-population");
+  await expect(population).toContainText("Unfiltered:");
+  await filters.getByLabel("Build", { exact: true }).selectOption("exact");
+  await filters.getByLabel("Exact build identifier", { exact: true }).fill("fixture-build-a");
+  await filters.getByLabel("Browser category").selectOption("mobile-safari");
+  await filters.getByRole("button", { name: "Apply field filters" }).click();
+  await expect(population).toContainText("Selected population: fixture-build-a · mobile-safari");
+  await expect(panel.getByText("Failures: 7 · Incomplete: 0 · Open", { exact: true })).toBeVisible();
+  await expect(failures).toContainText("fixture-build-a");
+  await expect(failures).not.toContainText("build local");
+  await expect(panel.getByText("Server rejected a stale/reset write", { exact: true }).first()).toBeVisible();
+
+  await filters.getByLabel("Browser category").selectOption("desktop-firefox");
+  await filters.getByRole("button", { name: "Apply field filters" }).click();
+  await expect(panel.getByText("Failures: 7 · Incomplete: 0 · Open", { exact: true })).toHaveCount(0);
+  await expect(failures).toHaveCount(0);
+  await expect(population).toContainText("desktop-firefox");
+
+  await filters.getByLabel("Build", { exact: true }).selectOption("unknown");
+  await filters.getByLabel("Browser category").selectOption("mobile-chrome");
+  await filters.getByRole("button", { name: "Apply field filters" }).click();
+  await expect(population).toContainText("Unknown build (local)");
+  await expect(failures.getByText("Unidentified local build; not release verification evidence.").first()).toBeVisible();
+  await expect(failures).not.toContainText("fixture-build-a");
+  await expect(page.locator("html")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
+  await filters.scrollIntoViewIfNeeded();
+  await filters.screenshot({ path: testInfo.outputPath("field-evidence-filters.png") });
+
+  // A rejected read must not leave previous population results displayed.
+  await page.route("**/api/field-checks?*", (route) => route.fulfill({
+    status: 400, json: { error: "Invalid field-check filters" },
+  }));
+  await filters.getByLabel("Build", { exact: true }).selectOption("exact");
+  await filters.getByLabel("Exact build identifier", { exact: true }).fill("fixture-error");
+  await filters.getByRole("button", { name: "Apply field filters" }).click();
+  await expect(panel.getByText("Couldn’t load field-check evidence.", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(failures).toHaveCount(0);
+  await page.unroute("**/api/field-checks?*");
+  await filters.getByRole("button", { name: "Clear field filters" }).click();
+  await expect(population).toContainText("Unfiltered:");
+  await expect(failures).toBeVisible();
+  await page.reload();
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
+  await page.getByRole("button", { name: /^More/ }).click();
+  await page.getByRole("menuitem", { name: "Reported issues" }).click();
+  await expect(page.getByTestId("field-evidence-population")).toContainText("Unfiltered:");
+  await expect(page.locator("html")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
   const restricted = await fixtures.createAccount({
     username: uniqueTestId("field_no_review"), password: "TestPass123!",
     capabilities: DEFAULT_MANAGER_CAPABILITIES.filter((capability) => capability !== "review-incidents"),

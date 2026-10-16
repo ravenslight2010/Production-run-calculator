@@ -7,6 +7,7 @@ import {
   hardwareConfirmationObservation,
   validateFieldCheckBatch,
   validateHardwareConfirmation,
+  fieldCheckFiltersSchema,
 } from "./fieldChecks";
 
 const validObservation = {
@@ -21,6 +22,17 @@ const validObservation = {
 };
 
 describe("field-check contract", () => {
+  it("accepts only bounded exact scalar report filters", () => {
+    for (const filters of [{}, { appBuild: "local" }, { appBuild: "x".repeat(100), deviceCategory: "mobile-safari" }]) {
+      expect(fieldCheckFiltersSchema.safeParse(filters).success).toBe(true);
+    }
+    for (const filters of [
+      { appBuild: "" }, { appBuild: " x " }, { appBuild: "x".repeat(101) },
+      { appBuild: ["a", "b"] }, { appBuild: { eq: "a" } },
+      { deviceCategory: "safari" }, { deviceCategory: ["mobile-safari"] },
+      { scope: "sandbox" }, { limit: "5000" },
+    ]) expect(fieldCheckFiltersSchema.safeParse(filters).success).toBe(false);
+  });
   it("validates v3 diagnostic allowlists while accepting queued legacy evidence", () => {
     const accepts = (checkName: string, metrics: Record<string, number>, outcome = "failure", checkVersion = "3") =>
       validateFieldCheckBatch({ observations: [{ ...validObservation, checkName, checkVersion, outcome, metrics }] }).ok;

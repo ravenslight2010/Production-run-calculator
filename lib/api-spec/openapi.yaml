@@ -4702,7 +4702,28 @@ paths:
       summary: Get manager field-check health
       description: >-
         Returns deterministic health rollups for passive browser evidence and
-        explicit unsupported states for hardware-only checks.
+        explicit unsupported states for hardware-only checks. Optional filters
+        are combined with AND and applied to all observations received within
+        the last 30 days in the authorized facility/sandbox scope, before counts,
+        recovery and recent-row limits are calculated. appBuild is an exact,
+        case-sensitive match; local means an unknown build, not an environment.
+        Filtered recovery requires a success strictly later than the latest
+        non-success in that population. No matches return collecting/unsupported
+        checks and zero counts, not facility-wide issue state. Unfiltered reports
+        preserve lifetime issue counts/status. Advisory only, never release proof.
+      parameters:
+        - in: query
+          name: appBuild
+          required: false
+          description: Exact build identifier; use local for unknown builds. Omit for all builds.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - in: query
+          name: deviceCategory
+          required: false
+          description: Exact retained browser/device category. Omit for all categories.
+          schema:
+            type: string
+            enum: [desktop-chrome, desktop-safari, desktop-firefox, mobile-chrome, mobile-safari, tablet-browser, android-phone, android-tablet, ipad, iphone, other-browser]
       responses:
         "200":
           description: Field-check health for the current facility
@@ -4710,6 +4731,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FieldChecksReport"
+        "400":
+          description: Invalid, repeated, empty or unsupported query filter
         "403":
           description: Incident review capability required
 
@@ -13113,8 +13136,16 @@ components:
 
     FieldChecksReport:
       type: object
-      required: [version, scope, generatedAt, checks, overallStatus, actionableCount]
+      required: [version, scope, generatedAt, checks, overallStatus, actionableCount, population]
       properties:
+        population:
+          type: object
+          required: [appBuild, deviceCategory, countBasis, retentionDays]
+          properties:
+            appBuild: { type: string, nullable: true }
+            deviceCategory: { type: string, nullable: true }
+            countBasis: { type: string, enum: [lifetime-issues, retained-observations] }
+            retentionDays: { type: integer, enum: [30] }
         version: { type: string }
         scope: { type: string, enum: [current facility] }
         generatedAt:

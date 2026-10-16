@@ -398,6 +398,104 @@ describe("field-check evidence from two authenticated clients", () => {
   });
 });
 
+describe("filtered field evidence", () => {
+  it("derives counts, rows and recovery from the full retained scoped population", async () => {
+    const now = Date.now();
+    const rows = [
+      ...Array.from({ length: 7 }, (_, i) => ({
+        ...observation(`selected-${i}`, "failure", "mobile-chrome"),
+        appBuild: "local", observedAt: new Date(now - 60_000 - i * 1000).toISOString(),
+      })),
+      ...Array.from({ length: 6 }, (_, i) => ({
+        ...observation(`other-build-${i}`, "failure", "tablet-browser"),
+        appBuild: "build-b", observedAt: new Date(now - 30_000 - i * 1000).toISOString(),
+      })),
+      { ...observation("other-build-success", "success", "mobile-chrome"), appBuild: "build-b",
+        observedAt: new Date(now - 1000).toISOString() },
+      { ...observation("same-build-other-browser-success", "success", "tablet-browser"),
+        appBuild: "local", observedAt: new Date(now - 2000).toISOString() },
+    ];
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", { observations: rows })).status).toBe(202);
+    await db.insert(fieldCheckObservationsTable).values([
+      { scope: "sandbox", observationId: "sandbox-only", checkName: "cross-device-convergence",
+        checkVersion: "1", outcome: "failure", appBuild: "local", deviceCategory: "mobile-chrome",
+        observedAt: new Date(now), receivedAt: new Date(now), metrics: {} },
+      { scope: "live", observationId: "expired-only", checkName: "cross-device-convergence",
+        checkVersion: "1", outcome: "failure", appBuild: "local", deviceCategory: "mobile-chrome",
+        observedAt: new Date(now - 100_000), receivedAt: new Date(now - 31 * 86400_000), metrics: {} },
+    ]);
+    const observationsBefore = await db.select().from(fieldCheckObservationsTable);
+    const issuesBefore = await db.select().from(fieldCheckIssuesTable);
+    const report = async (query = "") => {
+      const response = await request(MANAGER, "GET", `/api/field-checks${query}`);
+      expect(response.status).toBe(200);
+      return await response.json() as FieldChecksReport;
+    };
+    const unfiltered = await report();
+    expect(unfiltered.population.countBasis).toBe("lifetime-issues");
+    expect(unfiltered.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 13, actionable: false, issueStatus: "recovered" });
+    const selected = await report("?appBuild=local&deviceCategory=mobile-chrome");
+    expect(selected.population).toEqual({
+      appBuild: "local", deviceCategory: "mobile-chrome", countBasis: "retained-observations", retentionDays: 30,
+    });
+    expect(selected.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, incompleteCount: 0, actionable: true, issueStatus: "open",
+        lastSuccessfulAt: null, recentFailures: expect.any(Array) });
+    expect(selected.checks.find((c) => c.name === "cross-device-convergence")?.recentFailures).toHaveLength(5);
+    const buildOnly = await report("?appBuild=local");
+    expect(buildOnly.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, actionable: false, issueStatus: "recovered" });
+    const browserOnly = await report("?deviceCategory=mobile-chrome");
+    expect(browserOnly.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, actionable: false, issueStatus: "recovered" });
+    for (const query of ["?appBuild=missing", "?appBuild=LOCAL", "?appBuild=local&deviceCategory=mobile-safari"]) {
+      const empty = await report(query);
+      expect(empty.actionableCount).toBe(0);
+      expect(empty.checks.every((c) => c.failureCount === 0 && c.incompleteCount === 0 &&
+        c.lastSuccessfulAt === null && c.issueStatus === null && c.recentFailures.length === 0)).toBe(true);
+    }
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual(observationsBefore);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBefore);
+    expect(await db.select().from(dailySyncTable)).toEqual([]);
+    // An older success arriving last must not recover newer failures.
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{ ...rows[0], observationId: "late-old-success", outcome: "success",
+        observedAt: new Date(now - 120_000).toISOString() }],
+    })).status).toBe(202);
+    expect((await report("?appBuild=local&deviceCategory=mobile-chrome")).checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ actionable: true, issueStatus: "open" });
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{ ...rows[0], observationId: "selected-recovery", outcome: "success",
+        observedAt: new Date().toISOString() }],
+    })).status).toBe(202);
+    expect((await report("?appBuild=local&deviceCategory=mobile-chrome")).checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, actionable: false, issueStatus: "recovered" });
+  });
+
+  it("rejects malformed filters and preserves review authorization", async () => {
+    for (const query of [
+      "?appBuild=", `?appBuild=${"a".repeat(101)}`, "?appBuild=a&appBuild=b",
+      "?deviceCategory=unknown", "?deviceCategory=mobile-chrome&deviceCategory=mobile-safari",
+      "?appBuild%5Bx%5D=a", "?scope=sandbox", "?appBuild=%20local%20",
+    ]) expect((await request(MANAGER, "GET", `/api/field-checks${query}`)).status).toBe(400);
+    expect((await request(PHONE_USER, "GET", "/api/field-checks?appBuild=local")).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/field-checks?appBuild=local`)).status).toBe(401);
+  });
+
+  it("uses matching incomplete counts for escalation and later recovery", async () => {
+    const inputs = Array.from({ length: 3 }, (_, i) => ({
+      ...observation(`incomplete-${i}`, "failure", "mobile-chrome"),
+      outcome: "incomplete", appBuild: "selected", observedAt: new Date(Date.now() - 10_000 - i * 1000).toISOString(),
+    }));
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", { observations: inputs })).status).toBe(202);
+    const response = await request(MANAGER, "GET", "/api/field-checks?appBuild=selected");
+    const report = await response.json() as FieldChecksReport;
+    expect(report.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 0, incompleteCount: 3, actionable: true, issueStatus: "open" });
+  });
+});
+
 describe("manager-only hardware confirmations", () => {
   it("records an iPhone confirmation and reports the expanded catalog", async () => {
     const response = await request(

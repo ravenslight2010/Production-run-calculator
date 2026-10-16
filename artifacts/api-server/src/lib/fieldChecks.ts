@@ -356,7 +356,21 @@ export type FieldChecksReport = {
   checks: FieldCheckSummary[];
   overallStatus: FieldCheckStatus;
   actionableCount: number;
+  population: {
+    appBuild: string | null;
+    deviceCategory: string | null;
+    countBasis: "lifetime-issues" | "retained-observations";
+    retentionDays: 30;
+  };
 };
+
+// Strict scalar filters: never accept arrays/objects, wildcard searches or
+// caller-controlled scopes. Reuse the ingestion enums without widening them.
+export const fieldCheckFiltersSchema = z.object({
+  appBuild: z.string().min(1).max(100).refine((value) => value === value.trim()).optional(),
+  deviceCategory: observationSchema.shape.deviceCategory.optional(),
+}).strict();
+export type FieldCheckFilters = z.infer<typeof fieldCheckFiltersSchema>;
 
 export function deriveFieldCheckStatus(input: {
   observedBy: FieldCheckObservedBy;
@@ -500,16 +514,19 @@ export async function recordFieldCheckBatch(
   return { accepted, duplicate };
 }
 
-export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChecksReport> {
+export async function buildFieldChecksReport(now = Date.now(), filters: FieldCheckFilters = {}): Promise<FieldChecksReport> {
   const scope = currentScope();
+  const filtered = filters.appBuild !== undefined || filters.deviceCategory !== undefined;
   const [observations, issues] = await Promise.all([
     db.select().from(fieldCheckObservationsTable)
       .where(and(
         eq(fieldCheckObservationsTable.scope, scope),
         gt(fieldCheckObservationsTable.receivedAt, new Date(now - FIELD_CHECK_RETENTION_DAYS * 24 * 60 * 60 * 1000)),
+        filters.appBuild === undefined ? undefined : eq(fieldCheckObservationsTable.appBuild, filters.appBuild),
+        filters.deviceCategory === undefined ? undefined : eq(fieldCheckObservationsTable.deviceCategory, filters.deviceCategory),
       ))
       .orderBy(desc(fieldCheckObservationsTable.observedAt)),
-    db.select().from(fieldCheckIssuesTable)
+    filtered ? Promise.resolve([]) : db.select().from(fieldCheckIssuesTable)
       .where(eq(fieldCheckIssuesTable.scope, scope)),
   ]);
   const issueByName = new Map(issues.map((issue) => [issue.checkName, issue]));
@@ -518,12 +535,16 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
     const issue = issueByName.get(check.name);
     const last = rows[0];
     const lastSuccess = rows.find((row) => row.outcome === "success");
+    const lastNonSuccess = rows.find((row) => row.outcome !== "success");
+    const filteredIssueStatus = !lastNonSuccess ? null
+      : lastSuccess && lastSuccess.observedAt.getTime() > lastNonSuccess.observedAt.getTime()
+        ? "recovered" : "open";
     const recentFailures = rows.filter((row) => row.outcome !== "success").slice(0, 5).map(failureDto);
     const incompleteCount = issue?.incompleteCount ?? rows.filter((row) => row.outcome === "incomplete").length;
     const failureCount = issue?.failureCount ?? rows.filter((row) => row.outcome === "failure").length;
     const actionable = (
       failureCount > 0 || incompleteCount >= FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD
-    ) && issue?.status !== "recovered";
+    ) && (filtered ? filteredIssueStatus : issue?.status) !== "recovered";
     const status = deriveFieldCheckStatus({
       observedBy: check.observedBy,
       expiresHours: check.expiresHours,
@@ -547,7 +568,7 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
       failureCount,
       incompleteCount,
       actionable,
-      issueStatus: issue?.status === "open" || issue?.status === "recovered"
+      issueStatus: filtered ? filteredIssueStatus : issue?.status === "open" || issue?.status === "recovered"
         ? (issue.status as "open" | "recovered")
         : null,
     };
@@ -566,6 +587,12 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
     checks: summaries,
     overallStatus,
     actionableCount,
+    population: {
+      appBuild: filters.appBuild ?? null,
+      deviceCategory: filters.deviceCategory ?? null,
+      countBasis: filtered ? "retained-observations" : "lifetime-issues",
+      retentionDays: 30,
+    },
   };
 }
 

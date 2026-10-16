@@ -98,6 +98,7 @@ import type {
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
   GetBuildInfo503,
+  GetFieldChecksParams,
   GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
@@ -17679,21 +17680,28 @@ export const useSubmitFieldCheckObservations = <TError = ErrorType<void>,
       return useMutation(getSubmitFieldCheckObservationsMutationOptions(options), queryClient);
     }
 
-export const getGetFieldChecksUrl = () => {
+export const getGetFieldChecksUrl = (params?: GetFieldChecksParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/field-checks`
+  return stringifiedParams.length > 0 ? `/api/field-checks?${stringifiedParams}` : `/api/field-checks`
 }
 
 /**
- * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
+ * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
  * @summary Get manager field-check health
  */
-export const getFieldChecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<FieldChecksReport> => {
+export const getFieldChecks = async (params?: GetFieldChecksParams, options?: Parameters<typeof customFetch>[1]): Promise<FieldChecksReport> => {
 
-  return customFetch<FieldChecksReport>(getGetFieldChecksUrl(),
+  return customFetch<FieldChecksReport>(getGetFieldChecksUrl(params),
   {
     ...options,
     method: 'GET'
@@ -17706,23 +17714,23 @@ export const getFieldChecks = async ( options?: Parameters<typeof customFetch>[1
 
 
 
-export const getGetFieldChecksQueryKey = () => {
+export const getGetFieldChecksQueryKey = (params?: GetFieldChecksParams,) => {
     return [
-    `/api/field-checks`
+    `/api/field-checks`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetFieldChecksQueryOptions = <TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getGetFieldChecksQueryOptions = <TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetFieldChecksQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetFieldChecksQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFieldChecks>>> = ({ signal }) => getFieldChecks({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFieldChecks>>> = ({ signal }) => getFieldChecks(params, { signal, ...requestOptions });
 
 
 
@@ -17736,7 +17744,7 @@ export type GetFieldChecksQueryError = ErrorType<void>
 
 
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
+ params: undefined |  GetFieldChecksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getFieldChecks>>,
           TError,
@@ -17746,7 +17754,7 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
+ params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getFieldChecks>>,
           TError,
@@ -17756,7 +17764,7 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -17764,11 +17772,11 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
  */
 
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetFieldChecksQueryOptions(options)
+  const queryOptions = getGetFieldChecksQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

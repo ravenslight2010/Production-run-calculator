@@ -18,11 +18,31 @@ function fixture() {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("allowlisted field-check export", () => {
+  it("labels filtered populations without exporting raw build identifiers or extra metadata", () => {
+    const input = { ...fixture(), population: {
+      appBuild: "PRIVATE-build-identifier", deviceCategory: "mobile-safari",
+      countBasis: "retained-observations", retentionDays: 30, actor: "PRIVATE-actor",
+    } };
+    const result = createFieldCheckExport(input, at);
+    expect(result.json).not.toMatch(/PRIVATE/);
+    expect(JSON.parse(result.json).population).toEqual({
+      selection: "filtered", countBasis: "retained-observations",
+      retentionDays: 30, buildSelection: "selected-unverified", deviceCategory: "mobile-safari",
+    });
+    input.population.appBuild = "local";
+    expect(JSON.parse(createFieldCheckExport(input, at).json).population.buildSelection).toBe("unknown-local");
+    expect(JSON.parse(createFieldCheckExport({ ...fixture(), population: {
+      appBuild: null, deviceCategory: null, countBasis: "lifetime-issues", retentionDays: 30,
+    } }, at).json).population).toEqual({
+      selection: "unfiltered", countBasis: "lifetime-issues", retentionDays: 30,
+      buildSelection: "all", deviceCategory: "all",
+    });
+  });
   it("defines every exported field and version, exact times, scope and advisory provenance", () => {
     const result = createFieldCheckExport(fixture(), at);
     expect(result.filename).toBe("field-check-report-v1-2026-10-16T12-34-56-789Z.json");
     const output = JSON.parse(result.json);
-    expect(Object.keys(output)).toEqual(["schemaVersion", "capturedAt", "facilityScope", "provenance",
+    expect(Object.keys(output)).toEqual(["schemaVersion", "capturedAt", "facilityScope", "population", "provenance",
       "diagnosticCodeLegend", "reportGeneratedAt", "overallStatus", "checks"]);
     expect(output).toMatchObject({
       schemaVersion: 1, capturedAt: at.toISOString(), facilityScope: "current facility",

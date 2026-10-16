@@ -5,6 +5,7 @@ import { requireCapability, requireManagerRole } from "../middlewares/requireCap
 import {
   FIELD_CHECK_MAX_BATCH,
   buildFieldChecksReport,
+  fieldCheckFiltersSchema,
   hardwareConfirmationObservation,
   recordFieldCheckBatch,
   validateFieldCheckBatch,
@@ -52,8 +53,13 @@ router.post(
 router.get(
   "/field-checks",
   requireCapability("review-incidents"),
-  async (_req, res): Promise<void> => {
-    res.json(await buildFieldChecksReport());
+  async (req, res): Promise<void> => {
+    const filters = fieldCheckFiltersSchema.safeParse(req.query);
+    if (!filters.success) {
+      res.status(400).json({ error: "Invalid field-check filters" });
+      return;
+    }
+    res.json(await buildFieldChecksReport(Date.now(), filters.data));
   },
 );
 

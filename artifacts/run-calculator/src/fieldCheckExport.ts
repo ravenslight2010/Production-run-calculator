@@ -47,6 +47,7 @@ function diagnostics(name: string, value: unknown) {
 
 export function createFieldCheckExport(input: unknown, capturedAt = new Date()) {
   const report = record(input);
+  const population = record(report.population);
   if (!Array.isArray(report.checks) || report.checks.length > CHECKS.length ||
       report.scope !== "current facility" || !Number.isFinite(capturedAt.getTime())) {
     throw new Error("Field-check report unavailable or too large");
@@ -87,6 +88,18 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
     schemaVersion: 1,
     capturedAt: capturedAt.toISOString(),
     facilityScope: "current facility",
+    population: {
+      selection: population.countBasis === "retained-observations" ? "filtered"
+        : population.countBasis === "lifetime-issues" ? "unfiltered" : MISSING,
+      countBasis: category(population.countBasis, ["retained-observations", "lifetime-issues"]),
+      retentionDays: population.retentionDays === 30 ? 30 : MISSING,
+      // Preserve population semantics without exporting a free-form build ID.
+      buildSelection: population.appBuild === null ? "all"
+        : population.appBuild === "local" ? "unknown-local"
+          : typeof population.appBuild === "string" ? "selected-unverified" : MISSING,
+      deviceCategory: population.deviceCategory === null ? "all"
+        : category(population.deviceCategory, DEVICES),
+    },
     provenance: {
       kind: "advisory-field-evidence",
       environment: "unknown",

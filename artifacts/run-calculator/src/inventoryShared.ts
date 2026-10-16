@@ -1,4 +1,6 @@
 import type { FormValues } from "./types";
+import type { GetFieldChecksParams, FieldChecksReportPopulation } from "@workspace/api-client-react";
+export type { GetFieldChecksParams } from "@workspace/api-client-react";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
@@ -1597,11 +1599,17 @@ export type FieldChecksReport = {
   checks: FieldCheckSummary[];
   overallStatus: "healthy" | "collecting" | "needs-review" | "unsupported";
   actionableCount: number;
+  population: FieldChecksReportPopulation;
 };
 
 // Incident and field-check review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
-export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
+export const fetchFieldChecks = (filters: GetFieldChecksParams = {}) => {
+  const query = new URLSearchParams();
+  if (filters.appBuild !== undefined) query.set("appBuild", filters.appBuild);
+  if (filters.deviceCategory !== undefined) query.set("deviceCategory", filters.deviceCategory);
+  return api<FieldChecksReport>(`/field-checks${query.size ? `?${query}` : ""}`);
+};
 export const confirmHardwareFieldCheck = (body: {
   checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
     "safe-area-clearance" | "camera-file-selection" | "update-handoff" |

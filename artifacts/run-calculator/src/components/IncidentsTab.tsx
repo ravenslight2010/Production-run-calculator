@@ -28,7 +28,9 @@ import {
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
 import { fieldCheckDiagnosticLabel, productionRunSaveFailureLabel } from "../fieldChecks";
+import { FieldEvidenceFilters } from "./FieldEvidenceFilters";
 import { downloadFieldCheckExport } from "../fieldCheckExport";
+import type { GetFieldChecksParams } from "../inventoryShared";
 import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
@@ -268,12 +270,16 @@ function FieldChecksPanel({
   error,
   canConfirmHardware,
   canDownload,
+  filters,
+  onApplyFilters,
 }: {
   report: Awaited<ReturnType<typeof fetchFieldChecks>> | undefined;
   isLoading: boolean;
   error: unknown;
   canConfirmHardware: boolean;
   canDownload: boolean;
+  filters: GetFieldChecksParams;
+  onApplyFilters: (filters: GetFieldChecksParams) => void;
 }) {
   const queryClient = useQueryClient();
   const [downloadError, setDownloadError] = useState(false);
@@ -326,6 +332,7 @@ function FieldChecksPanel({
           </span>
         )}
       </div>
+      <FieldEvidenceFilters filters={filters} onApply={onApplyFilters} />
       {canDownload && (
         <div className="space-y-1">
           <button type="button" onClick={downloadReport}
@@ -334,7 +341,7 @@ function FieldChecksPanel({
             Download safe field-check report
           </button>
           <p className="text-xs text-muted-foreground">
-            JSON with bounded diagnostic details only. Advisory, not release or physical-device verification.
+            JSON for the displayed population with bounded diagnostic details only. Advisory, not release or physical-device verification.
           </p>
           {downloadError && <p role="alert" className="text-sm text-red-400">
             Couldn’t download the report. Observations are unchanged. Try again.
@@ -433,7 +440,7 @@ function FieldChecksPanel({
               </p>
               {actionable.flatMap((check) =>
                 check.recentFailures.slice(0, 3).map((failure, index) => (
-                  <div key={`${check.name}-${failure.observedAt}-${index}`} className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
+                  <div key={`${check.name}-${failure.observedAt}-${index}`} className="break-words rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-semibold text-foreground">{check.label}</span>
                       <span className="text-muted-foreground">{timeAgo(failure.observedAt)}</span>
@@ -474,6 +481,9 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
         </span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">{check.evidence}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Failures: {check.failureCount} · Incomplete: {check.incompleteCount} · {check.issueStatus === "recovered" ? "Recovered" : check.issueStatus === "open" ? "Open" : "No issue recorded"}
+      </p>
       <p className="mt-1 text-[11px] text-muted-foreground">
         Last success: {check.lastSuccessfulAt ? timeAgo(check.lastSuccessfulAt) : "Not yet"}
         {typeof check.lastSuccessfulMetrics?.durationMs === "number"
@@ -527,14 +537,15 @@ export default function IncidentsTab() {
   const [platform, setPlatform] = useState<PlatformFilter>("all");
   const [source, setSource] = useState<SourceFilter>("all");
   const [workflowState, setWorkflowState] = useState<WorkflowFilter>("all");
+  const [fieldFilters, setFieldFilters] = useState<GetFieldChecksParams>({});
   const [selectedIncidentId] = useState(() => {
     const match = window.location.hash.match(/^#incidents\/(.+)$/);
     return match ? decodeURIComponent(match[1]) : null;
   });
   const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
   const { data: fieldChecks, isLoading: fieldChecksLoading, error: fieldChecksError } = useQuery({
-    queryKey: ["fieldChecks"],
-    queryFn: fetchFieldChecks,
+    queryKey: ["fieldChecks", fieldFilters],
+    queryFn: () => fetchFieldChecks(fieldFilters),
     enabled: canReview,
     refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
@@ -582,10 +593,12 @@ export default function IncidentsTab() {
       <CardContent className="space-y-3">
         <FieldChecksPanel
           report={fieldChecks}
-          canDownload={canReview}
           isLoading={fieldChecksLoading}
           error={fieldChecksError}
           canConfirmHardware={canConfirmHardware}
+          canDownload={canReview}
+          filters={fieldFilters}
+          onApplyFilters={setFieldFilters}
         />
         {hasIncidents && <IncidentPatternsPanel disabled={isLoading} />}
         <section aria-labelledby="incident-list-heading" className="space-y-3">
