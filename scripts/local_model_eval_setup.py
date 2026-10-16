@@ -217,6 +217,17 @@ def _valid_runtime() -> bool:
     return True
 
 
+def _runtime_archive_candidate(extracted: Path) -> Path:
+    """Find the pinned runtime tree in supported Ollama archive layouts."""
+    for candidate in (extracted / "ollama", extracted):
+        if (
+            (candidate / "bin" / "ollama").is_file()
+            and (candidate / "lib" / "ollama" / "llama-server").is_file()
+        ):
+            return candidate
+    raise SetupError("The pinned runtime archive has an unexpected layout.")
+
+
 def _expected_ownership_marker() -> dict[str, object]:
     return {
         "format": STATE_MARKER,
@@ -283,9 +294,7 @@ def _ensure_runtime() -> None:
             capture_output=True,
             timeout=300,
         )
-        candidate = extracted / "ollama"
-        if not candidate.is_dir():
-            raise SetupError("The pinned runtime archive has an unexpected layout.")
+        candidate = _runtime_archive_candidate(extracted)
         old = runtime_parent / "ollama-0.40.5.previous"
         if RUNTIME_DIR.exists():
             if RUNTIME_DIR.is_symlink():

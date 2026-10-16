@@ -141,6 +141,38 @@ class DownloadIntegrityTests(unittest.TestCase):
             self.assertEqual((model_dir / "model.gguf").read_bytes(), payload)
 
 
+class RuntimeArchiveLayoutTests(unittest.TestCase):
+    def test_accepts_ollama_runtime_nested_under_archive_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            extracted = pathlib.Path(directory)
+            runtime = extracted / "ollama"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "lib" / "ollama").mkdir(parents=True)
+            (runtime / "bin" / "ollama").write_bytes(b"ollama")
+            (runtime / "lib" / "ollama" / "llama-server").write_bytes(b"llama")
+
+            self.assertEqual(setup._runtime_archive_candidate(extracted), runtime)
+
+    def test_accepts_official_install_layout_at_archive_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            extracted = pathlib.Path(directory)
+            (extracted / "bin").mkdir()
+            (extracted / "lib" / "ollama").mkdir(parents=True)
+            (extracted / "bin" / "ollama").write_bytes(b"ollama")
+            (extracted / "lib" / "ollama" / "llama-server").write_bytes(b"llama")
+
+            self.assertEqual(setup._runtime_archive_candidate(extracted), extracted)
+
+    def test_rejects_archive_missing_pinned_runtime_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            extracted = pathlib.Path(directory)
+            (extracted / "bin").mkdir()
+            (extracted / "bin" / "ollama").write_bytes(b"ollama")
+
+            with self.assertRaisesRegex(setup.SetupError, "unexpected layout"):
+                setup._runtime_archive_candidate(extracted)
+
+
 class SafeRemovalTests(unittest.TestCase):
     def test_marker_claims_only_verified_evaluator_directories(self):
         with tempfile.TemporaryDirectory() as directory:

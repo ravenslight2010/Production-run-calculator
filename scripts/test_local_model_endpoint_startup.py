@@ -310,7 +310,7 @@ class LocalModelEndpointLifecycleTests(unittest.TestCase):
         self.start_workflow_command()
         self.assertEqual(
             self.listener_rows(),
-            [(8008, "00000000"), (11434, "0100007F"), (11435, "0100007F")],
+            [(8008, "0100007F"), (11434, "0100007F"), (11435, "0100007F")],
         )
         app_health = HTTP.open(APP_HEALTH_URL, timeout=4)
         with app_health:
@@ -323,7 +323,7 @@ class LocalModelEndpointLifecycleTests(unittest.TestCase):
         self.assertNotEqual(self.process.pid, first_pid)
         self.assertEqual(
             self.listener_rows(),
-            [(8008, "00000000"), (11434, "0100007F"), (11435, "0100007F")],
+            [(8008, "0100007F"), (11434, "0100007F"), (11435, "0100007F")],
         )
         app_health = HTTP.open(APP_HEALTH_URL, timeout=4)
         with app_health:

@@ -98,3 +98,58 @@ gap should PaddleOCR-VL-1.6 be considered on the same image subset.
 
 No customer content, Gemini request, or raw model prompt/completion is included
 in this report.
+
+## Startup-budget follow-up — 2026-10-16
+
+The host again reported Linux x86_64, 8 CPU threads, and a 16 GiB cgroup memory
+limit. The pinned weight and projector sizes and SHA-256 digests matched. The
+4096-token context and 256-token output budgets were unchanged.
+
+| Run | Total to private API ready | Model-server ready | Maximum sampled `memory.current` | `memory.peak` high-water | OOM counters | Application API |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| Setup-driven detached start/stop | 23.443 s | Ready before helper returned (exact intermediate time not captured) | 14,055,534,592 B | 14,439,686,144 B | All zero | Not running |
+| Managed restart rejected by memory preflight | 4.9 s to bounded rejection; model did not launch | Not reached | 11,381,526,528 B observed during the rejection window | 14,439,686,144 B | All zero | Not running |
+| Managed restart after headroom recovered | 128.681 s | 124.148 s | 8,868,888,576 B | 14,439,686,144 B | All zero | Not running |
+| Second successful managed restart | 11.212 s | 11.212 s | 8,868,085,760 B | 14,439,686,144 B | All zero | Not running |
+| Managed restart with the API healthy | 114.171 s | 114.062 s | 13,317,754,880 B | 13,335,293,952 B | All zero | HTTP 200, `ok`; all six readiness checks `ok` |
+| Dedicated detached helper start/stop | 117.393 s | 117.078 s | 8,838,852,608 B | 13,335,293,952 B | All zero | Stopped for this cycle |
+
+The setup-driven helper stop completed in 1.160 seconds; the dedicated
+`scripts/start_local_model_eval_proxy.sh stop` completed in 6.036 seconds, and
+all evaluator listeners were closed afterward. On successful runs, the private
+health response identified `qwen3.5-9b-q3_k_m` and `contextLimit: 4096`. Ports
+8008, 11434, and 11435 were observed bound only to 127.0.0.1. The application
+API's 8080 listener was the expected preview service and was separate from the
+private evaluator ports. The cgroup high-water stayed below its
+17,179,869,184-byte limit; each sampled `memory.current` maximum is separate
+from its cgroup's cumulative `memory.peak`.
+
+The first managed attempt failed closed before launching the model because
+preflight saw about 5.4 GiB of headroom, below its existing 8 GiB minimum. In
+that attempt, the safe preflight message appeared within about five seconds
+and no evaluator listener opened. Use later dropped below the threshold without
+clearing caches.
+After the API-backed restart, memory use remained just above the threshold for
+a further 180 seconds after stopping the evaluator; the dedicated helper was
+started only after stopping the API freed enough headroom. No model artifacts
+were deleted and no system caches were manually cleared. These results do not
+justify changing the 480-second runtime readiness deadline, the 600-second
+helper startup ceiling, or the 4096/256 model budgets.
+
+The first artifact setup attempt also exposed a packaging mismatch: the pinned
+Ollama archive contains its runtime at the archive root, while setup expected a
+nested `ollama/` directory. Setup now accepts either layout and still verifies
+the installed runtime identity. The initial pre-install focused run passed 40
+tests with its artifact-dependent lifecycle integration skipped. After
+installation, a final focused run passed 40 setup, proxy, smoke, and lifecycle
+contract tests. The lifecycle listener assertion now matches the observed
+loopback-only readiness bind; real startup and stop behavior was measured
+separately above.
+
+The managed API artifact workflow timed out while rebuilding its run
+environment, before its command started. With approval, the same configured
+development startup script was run through the pinned Node runner; its
+`push-force` schema step completed and `/api/healthz` returned HTTP 200 with
+`status: ok` and all six readiness checks `ok`. The API remained healthy during
+the measured API-backed evaluator restart. The API process was stopped after
+verification.
