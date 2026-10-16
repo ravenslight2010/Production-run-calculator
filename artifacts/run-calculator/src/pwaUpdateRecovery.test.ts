@@ -72,6 +72,33 @@ describe("clearStaleAppShellCaches", () => {
     expect(remove).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
   });
+
+  it("resolves safely when cache-key reads are rejected", async () => {
+    const remove = vi.fn();
+
+    await expect(clearStaleAppShellCaches({
+      keys: vi.fn().mockRejectedValue(new Error("cache keys unavailable")),
+      delete: remove,
+    })).resolves.toBeUndefined();
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("resolves safely when deleting app-shell caches is rejected without touching runtime caches", async () => {
+    const remove = vi.fn().mockRejectedValue(new Error("cache deletion unavailable"));
+
+    await expect(clearStaleAppShellCaches({
+      keys: vi.fn().mockResolvedValue([
+        "workbox-precache-v2-http://app.test/",
+        "google-fonts-cache",
+      ]),
+      delete: remove,
+    })).resolves.toBeUndefined();
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
+    expect(remove).not.toHaveBeenCalledWith("google-fonts-cache");
+  });
 });
 
 describe("updateAndReload", () => {

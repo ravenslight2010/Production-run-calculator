@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ import ErrorBoundary, {
   isStaleDeploymentAssetError,
 } from "./ErrorBoundary";
 import { reportIncident } from "../inventoryShared";
+import { updateAndReload } from "../pwaUpdateRecovery";
 import { reportAutomaticUpdateReloadSafety } from "../updateReloadSafety";
 import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
 
@@ -25,6 +26,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   reportAutomaticUpdateReloadSafety(false);
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -136,6 +138,53 @@ describe("ErrorBoundary recovery actions", () => {
       errorStack: expect.stringMatching(/^x{4000}$/),
     }));
   });
+
+  it.each(["cache-key reads", "cache deletion"] as const)(
+    "continues the worker-update reload fallback when %s fail",
+    async (failingOperation) => {
+      const user = userEvent.setup();
+      const keys = vi.fn().mockImplementation(async () => {
+        if (failingOperation === "cache-key reads") throw new Error("cache keys unavailable");
+        return ["workbox-precache-v2-http://app.test/", "google-fonts-cache"];
+      });
+      const remove = vi.fn().mockImplementation(async () => {
+        if (failingOperation === "cache deletion") throw new Error("cache deletion unavailable");
+        return true;
+      });
+      vi.stubGlobal("caches", { keys, delete: remove });
+      const reload = vi.fn();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, reload },
+      });
+      const registration = {
+        waiting: undefined as ServiceWorker | undefined,
+        update: vi.fn().mockRejectedValue(new Error("worker unavailable")),
+      };
+      const onUpdateAndReload = (canReload?: () => boolean) =>
+        updateAndReload(registration, undefined, reload, canReload);
+
+      render(
+        <ErrorBoundary onUpdateAndReload={onUpdateAndReload}>
+          <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+        </ErrorBoundary>,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Update and reload" }));
+      await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+
+      expect(keys).toHaveBeenCalledOnce();
+      if (failingOperation === "cache-key reads") {
+        expect(remove).not.toHaveBeenCalled();
+      } else {
+        expect(remove).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
+        expect(remove).not.toHaveBeenCalledWith("google-fonts-cache");
+      }
+      expect(registration.update).toHaveBeenCalledOnce();
+    },
+  );
 
   it("schedules one stale-chunk recovery only when the captured app state is safe", async () => {
     const updateAndReload = vi.fn().mockResolvedValue(undefined);
