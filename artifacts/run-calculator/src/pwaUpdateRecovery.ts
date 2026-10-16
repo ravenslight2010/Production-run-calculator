@@ -44,6 +44,9 @@ export function recordStaleAssetRecoveryAttempt(
 ): boolean {
   if (!storage || !buildId.trim() || !Number.isSafeInteger(now)) return false;
   try {
+    // Do not let a failed write leave an older recovery attempt eligible for
+    // confirmation on the next startup.
+    removePendingAttempt(storage);
     storage.setItem(STALE_ASSET_RECOVERY_PENDING_KEY, JSON.stringify({
       fromBuild: buildFingerprint(buildId),
       attemptedAt: now,

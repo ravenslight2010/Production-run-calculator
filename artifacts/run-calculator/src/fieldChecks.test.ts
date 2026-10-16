@@ -271,6 +271,54 @@ describe("field-check observer", () => {
     expect(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1")).toBeNull();
   });
 
+  it.each(["read", "remove"] as const)(
+    "does not report stale-deployment recovery success when session storage %s fails",
+    async (failurePoint) => {
+      const pendingMarker = new Map<string, string>();
+      recordStaleAssetRecoveryAttempt("old-build", {
+        getItem: (key) => pendingMarker.get(key) ?? null,
+        setItem: (key, value) => void pendingMarker.set(key, value),
+        removeItem: (key) => void pendingMarker.delete(key),
+      }, Date.now() - 1000);
+      const marker = pendingMarker.get("run-calc:stale-asset-recovery-pending:v1");
+      expect(marker).toBeDefined();
+
+      const sessionStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+      const unavailableStorage = {
+        getItem: () => {
+          if (failurePoint === "read") throw new Error("session storage is unavailable");
+          return marker ?? null;
+        },
+        setItem: vi.fn(),
+        removeItem: () => {
+          if (failurePoint === "remove") throw new Error("session storage is unavailable");
+        },
+      };
+      Object.defineProperty(globalThis, "sessionStorage", {
+        configurable: true,
+        value: unavailableStorage,
+      });
+
+      let stop = () => {};
+      try {
+        stop = createFieldCheckObserver("new-build");
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        stop();
+        if (sessionStorageDescriptor) {
+          Object.defineProperty(globalThis, "sessionStorage", sessionStorageDescriptor);
+        } else {
+          delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+        }
+      }
+
+      const observations = submit.mock.calls.flatMap((call) => call[0]);
+      expect(observations.some((item: { checkName: string; outcome: string }) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toBe(false);
+    },
+  );
+
   it("retains distinct sync causes, recovery and builds, without raw diagnostics", async () => {
     const stop = createFieldCheckObserver("local");
     for (const failureCode of Object.values(SYNC_ACK_FAILURE_CODES)) {

@@ -56,6 +56,46 @@ describe("stale-asset recovery evidence", () => {
       "new-build", storage, 10_000 + STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS + 1,
     )).toBe(false);
   });
+
+  it("clears an older marker when recording fails and keeps the user-directed reload available", async () => {
+    const key = "run-calc:stale-asset-recovery-pending:v1";
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (storageKey: string) => values.get(storageKey) ?? null,
+      setItem: (storageKey: string, value: string) => {
+        if (storageKey === key) throw new Error("session storage is unavailable");
+        values.set(storageKey, value);
+      },
+      removeItem: (storageKey: string) => void values.delete(storageKey),
+    };
+    values.set(key, JSON.stringify({ fromBuild: "1234", attemptedAt: 100_000 }));
+
+    expect(recordStaleAssetRecoveryAttempt("new-build", storage, 101_000)).toBe(false);
+    expect(values.has(key)).toBe(false);
+
+    const reload = vi.fn();
+    await updateAndReload(undefined, undefined, reload);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("does not confirm a marker when reading or removing it throws", () => {
+    const key = "run-calc:stale-asset-recovery-pending:v1";
+    const marker = JSON.stringify({ fromBuild: "1234", attemptedAt: 100_000 });
+    const unreadableStorage = {
+      getItem: () => { throw new Error("session storage is unavailable"); },
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    };
+    const unremovableStorage = {
+      getItem: () => marker,
+      setItem: vi.fn(),
+      removeItem: () => { throw new Error("session storage is unavailable"); },
+    };
+
+    expect(consumeStaleAssetRecoveryAttempt("new-build", unreadableStorage, 101_000)).toBe(false);
+    expect(consumeStaleAssetRecoveryAttempt("new-build", unremovableStorage, 101_000)).toBe(false);
+    expect(unremovableStorage.getItem(key)).toBe(marker);
+  });
 });
 
 describe("clearStaleAppShellCaches", () => {
