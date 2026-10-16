@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# Replit's managed interactive Bash startup sources $REPL_HOME/.config/bashrc.
+# Select the repository-pinned Node before presenting the interactive prompt.
+if [[ -z "${REPL_HOME:-}" || ! -d "$REPL_HOME" ]]; then
+  printf 'Cannot select the project Node runtime: REPL_HOME is unavailable.\n' >&2
+  exit 1
+fi
+
+if ! source "$REPL_HOME/scripts/src/select-replit-shell-node.sh"; then
+  exit 1
+fi
