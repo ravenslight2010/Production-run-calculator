@@ -1,10 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
+import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 
 const apiPort = process.env.RELEASE_BROWSER_API_PORT ?? "18083";
 const webPort = process.env.RELEASE_BROWSER_WEB_PORT ?? "18084";
 const apiUrl = `http://127.0.0.1:${apiPort}`;
 const webUrl = `http://127.0.0.1:${webPort}`;
+const webkitOptions = webkitLaunchOptions();
 
 export default defineConfig({
   testDir: "./e2e",
@@ -40,8 +42,17 @@ export default defineConfig({
     video: "off",
     launchOptions: { executablePath: resolveChromiumExecutable() },
   },
-  projects: [{
-    name: "chromium",
-    use: { ...devices["Desktop Chrome"] },
-  }],
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "webkit",
+      use: {
+        ...devices["Desktop Safari"],
+        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+      },
+    },
+  ],
 });

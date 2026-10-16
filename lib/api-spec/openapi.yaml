@@ -1133,6 +1133,38 @@ paths:
         "400": { description: Invalid weight or missing out-of-tolerance note }
         "403": { description: QC recording capability required }
 
+  /qc/component-checks:
+    post:
+      operationId: recordQcComponentCheck
+      tags: [inventory]
+      summary: Record an advisory run-component identity and presence checklist
+      description: >-
+        The server resolves expected components from canonical per-run settings
+        and same-day substitutions (or the immutable completed-run snapshot).
+        The caller submits observations only; expected values and outcomes are
+        never accepted from the client. Incomplete or ambiguous expected data
+        cannot pass. This record does not block production or shipping.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcComponentCheckInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the original event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "201":
+          description: Server-evaluated append-only component checklist event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "400": { description: Invalid observations or component identifiers }
+        "403": { description: QC recording capability required }
+        "404": { description: Run not found in canonical production records }
+        "409": { description: Operation ID conflicts with a prior event }
+
   /qc/runs/{runId}:
     get:
       operationId: getQcRun
@@ -7975,7 +8007,7 @@ components:
         recordId: { type: string, format: uuid }
         eventType:
           type: string
-          enum: [lot, weight, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+          enum: [lot, weight, component-check, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
         runId: { type: string, nullable: true }
         profileKey: { type: string, nullable: true }
         ingredientId: { type: string, nullable: true }
@@ -8057,6 +8089,62 @@ components:
         actualUnit: { type: string, enum: [oz, g, lb, kg] }
         note: { type: string, maxLength: 1000 }
 
+    QcComponentCheckInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, runId, observations]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        observations:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [componentId, observation]
+            properties:
+              componentId: { type: string, minLength: 1, maxLength: 80 }
+              observation:
+                type: string
+                enum: [present-correct, present-mismatch, missing, not-checked]
+        note: { type: string, maxLength: 1000 }
+
+    QcExpectedComponent:
+      type: object
+      required: [componentId, group, name]
+      properties:
+        componentId: { type: string }
+        group: { type: string }
+        name: { type: string }
+        ingredientId: { type: string }
+
+    QcComponentChecklist:
+      type: object
+      required: [status, expectedComponents, source]
+      properties:
+        status: { type: string, enum: [complete, incomplete] }
+        reason: { type: string }
+        expectedComponents:
+          type: array
+          items: { $ref: "#/components/schemas/QcExpectedComponent" }
+        source:
+          oneOf:
+            - type: object
+              required: [kind, date, revision]
+              properties:
+                kind: { type: string, enum: [completed-run-snapshot, current-day-canonical-settings] }
+                date: { type: string, format: date }
+                revision: { type: string }
+            - type: "null"
+
+    QcComponentCheckResponse:
+      type: object
+      required: [event, duplicate]
+      properties:
+        event: { $ref: "#/components/schemas/QcEvent" }
+        duplicate: { type: boolean }
+
     QcAllergenReviewInput:
       type: object
       required: [operationId, runId, footprintReviewed, footprint, stagedIngredients, stagedIngredientsStatus, cleaningStatus]
@@ -8125,7 +8213,7 @@ components:
 
     QcRunResponse:
       type: object
-      required: [runId, items, hasMore, nextCursor, weightCheckEvents, weightCheckEventsComplete, signoff]
+      required: [runId, items, hasMore, nextCursor, weightCheckEvents, weightCheckEventsComplete, componentChecklist, signoff]
       properties:
         runId: { type: string }
         items:
@@ -8148,6 +8236,8 @@ components:
         weightCheckEventsComplete:
           description: False when the 5000-record limit truncated the timeline.
           type: boolean
+        componentChecklist:
+          $ref: "#/components/schemas/QcComponentChecklist"
         signoff:
           oneOf:
             - type: object
@@ -8287,9 +8377,9 @@ components:
         fields:
           type: array
           minItems: 1
-          maxItems: 4
+          maxItems: 5
           uniqueItems: true
-          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.lotNumber] }
+          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.lotNumber, payload.expectedComponents] }
 
     Capability:
       type: string

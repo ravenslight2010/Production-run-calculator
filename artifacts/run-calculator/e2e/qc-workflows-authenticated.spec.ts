@@ -97,6 +97,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   const managerRole = uniqueTestId("qc-manager-role");
   const ingredientId = uniqueTestId("qc-ingredient");
   const ingredientName = uniqueTestId("QC Flour");
+  const substitutedIngredientName = uniqueTestId("Rice Flour");
   const brand = uniqueTestId("QC Browser");
   const flavor = "Evidence Review";
   const profileKey = `${brand.toLowerCase()}__${flavor.toLowerCase()}`;
@@ -114,6 +115,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   let operatorSawSignoff = false;
   let operatorSignoffStatus: number | null = null;
   let managerSignoffStatus: number | null = null;
+  let componentEventId: number | null = null;
   let exportSummary = "not attempted";
   let scopedHistorySummary = "not checked";
   let finalEventSummary: Array<{ event_type: string; scope: string; count: number }> = [];
@@ -182,7 +184,12 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
           runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
           currentIndex: 0,
           resetAt: 0,
-          substitutions: [],
+          substitutions: [{
+            id: "qc-browser-dough-substitution",
+            ingredient: ingredientName,
+            action: "swap",
+            substitute: substitutedIngredientName,
+          }],
           substitutionLog: [],
           stagedItems: {},
         },
@@ -190,9 +197,27 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
           [runId]: {
             casesNeeded: 1,
             casesPerSkid: 12,
+            doughRecipeName: "Browser Dough",
+            doughRecipe: [{ ingredient: ingredientName, ingredientId, lbs: 10 }],
+            frontlineRecipeName: "",
+            frontlineRecipe: [],
             app1Type: "cheese",
             app1CheeseRecipeName: ingredientName,
+            app1CheeseRecipe: [{ ingredient: ingredientName, ingredientId, lbs: 2 }],
             app1OzPerPizza: 1.25,
+            app2Type: "",
+            app2CheeseRecipeName: "",
+            app2CheeseRecipe: [],
+            app3Type: "",
+            app3CheeseRecipeName: "",
+            app3CheeseRecipe: [],
+            app4Type: "",
+            app4CheeseRecipeName: "",
+            app4CheeseRecipe: [],
+            pep1Type: "",
+            pep1TypeB: "",
+            pep2Type: "",
+            pep2TypeB: "",
           },
         },
         runValuesUpdatedAt: { [runId]: Date.now() },
@@ -234,6 +259,45 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
 
     await openQc(operatorPage.page);
     await expect(operatorPage.page.getByTestId("text-qc-run-id")).toHaveText(runId);
+    const componentChecklist = operatorPage.page.getByTestId("qc-component-checklist");
+    await expect(componentChecklist.getByText("Expected list complete", { exact: true })).toBeVisible();
+    await expect(componentChecklist.getByText(substitutedIngredientName, { exact: true })).toHaveCount(2);
+    const responsiveViewports = [
+      { name: "desktop", width: 1440, height: 900 },
+      { name: "phone", width: 390, height: 844 },
+      { name: "tablet-portrait", width: 768, height: 1024 },
+      { name: "tablet-landscape", width: 1024, height: 768 },
+    ] as const;
+    for (const viewport of responsiveViewports) {
+      await operatorPage.page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await expect(componentChecklist).toBeVisible();
+      const sectionBounds = await componentChecklist.boundingBox();
+      expect(sectionBounds, `${viewport.name} checklist layout`).not.toBeNull();
+      expect(sectionBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(sectionBounds!.x + sectionBounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+      await capture(operatorPage.page, testInfo, `operator-component-check-${viewport.name}`);
+    }
+    await operatorPage.page.setViewportSize(VIEWPORT);
+    await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Dough)`).selectOption("present-correct");
+    await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Applicator 1)`).selectOption("present-correct");
+    const componentResponsePromise = operatorPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/component-checks")
+      && response.request().method() === "POST");
+    await componentChecklist.getByRole("button", { name: "Record checklist", exact: true }).click();
+    const componentResponse = await componentResponsePromise;
+    expect(componentResponse.status()).toBe(201);
+    const componentResponseBody = await componentResponse.json() as {
+      event: { id: number; payload: { outcome: string } };
+    };
+    componentEventId = componentResponseBody.event.id;
+    expect(componentResponseBody.event.payload.outcome).toBe("pass");
+    const componentEvent = operatorPage.page.getByTestId(`qc-history-event-${componentEventId}`);
+    await expect(componentEvent).toBeVisible();
+    await componentEvent.locator("button").first().click();
+    await expect(componentEvent).toContainText("Component checklist result");
+    await expect(componentEvent).toContainText("pass");
+    await capture(operatorPage.page, testInfo, "operator-component-check-saved");
+
     const managerOnlyUiBefore = {
       targetEditor: await operatorPage.page.getByText("Set or clear an override", { exact: true }).count(),
       export: await operatorPage.page.getByRole("button", { name: "Export CSV", exact: true }).count(),
@@ -365,6 +429,32 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       managerPage.page.getByTestId(/^qc-history-event-/).filter({ hasText: "cleaning verification" }),
     ).toBeVisible();
 
+    if (componentEventId !== null) {
+      const managerComponentEvent = managerPage.page.getByTestId(`qc-history-event-${componentEventId}`);
+      await expect(managerComponentEvent).toBeVisible();
+      await managerComponentEvent.locator("button").first().click();
+      await managerComponentEvent.getByLabel("Correction reason").fill("Correct identity observation");
+      await managerComponentEvent.getByLabel("Replacement payload JSON").fill(JSON.stringify({
+        observations: [{ componentId: "dough:0", observation: "present-mismatch" }],
+      }));
+      const correctionResponsePromise = managerPage.page.waitForResponse((response) =>
+        response.url().includes(`/api/qc/events/${componentEventId}/corrections`)
+        && response.request().method() === "POST");
+      await managerComponentEvent.getByRole("button", { name: "Append correction", exact: true }).click();
+      expect((await correctionResponsePromise).status()).toBe(201);
+      await expect(managerComponentEvent.getByText("Corrected", { exact: true })).toBeVisible();
+      await expect(managerComponentEvent).toContainText("fail");
+
+      await managerComponentEvent.getByLabel("Redaction reason").fill("Redact expected identities in the display");
+      await managerComponentEvent.getByLabel("Expected component identities").check();
+      const redactionResponsePromise = managerPage.page.waitForResponse((response) =>
+        response.url().includes(`/api/qc/events/${componentEventId}/redactions`)
+        && response.request().method() === "POST");
+      await managerComponentEvent.getByRole("button", { name: "Append redaction", exact: true }).click();
+      expect((await redactionResponsePromise).status()).toBe(201);
+      await expect(managerComponentEvent).toContainText("Expected component identities were redacted.");
+    }
+
     const managerSignoff = managerPage.page.getByRole("button", { name: "Sign off reviewed set", exact: true });
     const managerSignoffResponse = managerPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/run-signoffs")
@@ -390,6 +480,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     const csv = await readFile(downloadPath, "utf8");
     expect(csv).toContain(lotNumber);
     expect(csv).toContain(runId);
+    expect(csv).toContain("component-check");
     expect(csv).toContain("run-signoff");
     expect(csv).not.toContain(decoyLot);
     exportSummary = `downloaded ${csv.split(/\r?\n/).filter(Boolean).length - 1} fixture rows; lot/run/sign-off present`;
@@ -410,6 +501,11 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await expect(persistedHistory.filter({ has: managerPage.page.getByText("allergen review", { exact: true }) })).toBeVisible();
     await expect(persistedHistory.filter({ has: managerPage.page.getByText("cleaning", { exact: true }) })).toBeVisible();
     await expect(persistedHistory.filter({ hasText: "cleaning verification" })).toBeVisible();
+    if (componentEventId !== null) {
+      const persistedComponentEvent = managerPage.page.getByTestId(`qc-history-event-${componentEventId}`);
+      await persistedComponentEvent.locator("button").first().click();
+      await expect(persistedComponentEvent).toContainText("Expected component identities were redacted.");
+    }
     await expect(managerPage.page.getByText(/1\.3 oz ±0\.2 · QC override/)).toBeVisible();
     await capture(managerPage.page, testInfo, "manager-qc-state-after-reload");
 
@@ -456,6 +552,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       "target-setting",
       "lot",
       "weight",
+      "component-check",
       "allergen-review",
       "cleaning",
       "cleaning-verification",
@@ -491,6 +588,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       operatorSawSignoff,
       operatorSignoffStatus,
       managerSignoffStatus,
+      componentEventId,
       exportSummary,
       scopedHistorySummary,
       persistedEvents: finalEventSummary,

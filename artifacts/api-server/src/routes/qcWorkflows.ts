@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { and, desc, eq, gt, gte, inArray, lt, lte, max, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -12,8 +12,13 @@ import {
   qcWorkflowEventsTable,
   type QcWorkflowEventRow,
 } from "@workspace/db";
-import { currentScope } from "../lib/requestScope";
 import { facilityDate } from "../lib/facilityTime";
+import {
+  evaluateQcComponents,
+  resolveQcExpectedComponents,
+  type QcComponentObservation,
+} from "../lib/qcComponentChecks";
+import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
   projectActivitySnapshot,
@@ -148,6 +153,26 @@ const signoffBodySchema = z.object({
   note: noteSchema,
 });
 
+const componentObservationSchema = z.object({
+  componentId: z.string().trim().min(1).max(80),
+  observation: z.enum(["present-correct", "present-mismatch", "missing", "not-checked"]),
+}).strict();
+
+const componentCheckBodySchema = z.object({
+  operationId: operationIdSchema,
+  runId: runIdSchema,
+  observations: z.array(componentObservationSchema).max(200),
+  note: noteSchema,
+}).strict().superRefine((body, ctx) => {
+  if (new Set(body.observations.map((item) => item.componentId)).size !== body.observations.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["observations"],
+      message: "Each component may be observed only once",
+    });
+  }
+});
+
 const correctionBodySchema = z.object({
   operationId: operationIdSchema,
   reason: z.string().trim().min(1).max(500),
@@ -160,9 +185,15 @@ const correctionBodySchema = z.object({
 const redactionBodySchema = z.object({
   operationId: operationIdSchema,
   reason: z.string().trim().min(1).max(500),
-  fields: z.array(z.enum(["actorId", "ingredientName", "payload.note", "payload.lotNumber"]))
+  fields: z.array(z.enum([
+    "actorId",
+    "ingredientName",
+    "payload.note",
+    "payload.lotNumber",
+    "payload.expectedComponents",
+  ]))
     .min(1)
-    .max(4)
+    .max(5)
     .refine((fields) => new Set(fields).size === fields.length, "Redaction fields must be unique"),
 });
 
@@ -226,6 +257,122 @@ function lockRun(scope: string, runId: string) {
 
 function lockTarget(scope: string, profileKey: string, ingredientId: string) {
   return sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${scope}:${profileKey}:${ingredientId}`}, 0))`;
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, child]) => [key, stableValue(child)]));
+  }
+  return value;
+}
+
+function snapshotHash(snapshot: unknown): string {
+  return createHash("sha256").update(JSON.stringify(stableValue(snapshot))).digest("hex");
+}
+
+function recordObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+type QcExecutor = Pick<typeof db, "select">;
+
+type CanonicalRunSource = {
+  kind: "completed-run-snapshot" | "current-day-canonical-settings";
+  date: string;
+  revision: string;
+  values: unknown;
+  substitutions: unknown;
+  runSubTab?: unknown;
+  profileKey?: string;
+};
+
+type CanonicalRunLookup =
+  | { state: "found"; source: CanonicalRunSource }
+  | { state: "unavailable"; reason: string }
+  | { state: "not-found" };
+
+async function resolveCanonicalRunSource(
+  executor: QcExecutor,
+  scope: string,
+  runId: string,
+): Promise<CanonicalRunLookup> {
+  const completedRows = await executor.select().from(completedRunHistoryTable).where(and(
+    eq(completedRunHistoryTable.scope, scope),
+    eq(completedRunHistoryTable.runId, runId),
+  )).limit(2).for("update");
+  if (completedRows.length > 1) {
+    return { state: "unavailable", reason: "More than one completed snapshot matches this run." };
+  }
+  const completed = completedRows[0];
+  if (completed) {
+    const snapshot = recordObject(completed.snapshot);
+    const dayState = recordObject(snapshot?.dayState);
+    const runValues = recordObject(snapshot?.runValues);
+    const runs = Array.isArray(dayState?.runs) ? dayState.runs : [];
+    const matches = runs.filter((item) => recordObject(item)?.id === runId);
+    if (
+      !snapshot
+      || snapshotHash(snapshot) !== completed.snapshotHash
+      || dayState?.date !== completed.date
+      || matches.length !== 1
+      || !runValues
+    ) {
+      return { state: "unavailable", reason: "The completed run snapshot is incomplete or invalid." };
+    }
+    const run = recordObject(matches[0]);
+    const identity = run
+      ? `${String(run.brand ?? "").trim().toLocaleLowerCase("en-US")}__${String(run.flavor ?? "").trim().toLocaleLowerCase("en-US")}`
+      : "";
+    return {
+      state: "found",
+      source: {
+        kind: "completed-run-snapshot",
+        date: completed.date,
+        revision: completed.snapshotHash,
+        values: runValues[runId],
+        substitutions: dayState.substitutions,
+        runSubTab: run?.subTab,
+        ...(identity && identity !== "__" ? { profileKey: identity } : {}),
+      },
+    };
+  }
+
+  const today = facilityDate();
+  const [daily] = await executor.select().from(dailySyncTable).where(and(
+    eq(dailySyncTable.scope, scope),
+    eq(dailySyncTable.date, today),
+  )).limit(1).for("update");
+  if (!daily) return { state: "not-found" };
+  const data = recordObject(daily.data);
+  const dayState = recordObject(data?.dayState);
+  const runValues = recordObject(data?.runValues);
+  const runs = Array.isArray(dayState?.runs) ? dayState.runs : [];
+  const matches = runs.filter((item) => recordObject(item)?.id === runId);
+  if (matches.length === 0) return { state: "not-found" };
+  if (matches.length !== 1 || !dayState || !runValues) {
+    return { state: "unavailable", reason: "The current run snapshot is incomplete or ambiguous." };
+  }
+  const run = recordObject(matches[0]);
+  const identity = run
+    ? `${String(run.brand ?? "").trim().toLocaleLowerCase("en-US")}__${String(run.flavor ?? "").trim().toLocaleLowerCase("en-US")}`
+    : "";
+  return {
+    state: "found",
+    source: {
+      kind: "current-day-canonical-settings",
+      date: daily.date,
+      revision: String(daily.canonicalRevision),
+      values: runValues[runId],
+      substitutions: dayState.substitutions,
+      runSubTab: run?.subTab,
+      ...(identity && identity !== "__" ? { profileKey: identity } : {}),
+    },
+  };
 }
 
 function eventToApi(row: QcWorkflowEventRow) {
@@ -510,6 +657,7 @@ function projectAuditActionForReader<
 async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = false) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.id));
+  const rowTypes = new Map(rows.map((row) => [String(row.id), row.eventType]));
   const overlays = await db.select().from(qcWorkflowEventsTable).where(and(
     eq(qcWorkflowEventsTable.scope, currentScope()),
     inArray(qcWorkflowEventsTable.relatedEventId, ids),
@@ -537,10 +685,38 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     if (overlay.eventType === "correction") {
       const replacement = overlay.payload.replacement;
       if (replacement && typeof replacement === "object" && !Array.isArray(replacement)) {
-        corrections.set(target, {
-          ...(corrections.get(target) ?? {}),
-          ...(replacement as Record<string, unknown>),
-        });
+        const replacementFields = replacement as Record<string, unknown>;
+        const prior = corrections.get(target) ?? {};
+        if (rowTypes.get(target) === "component-check" && Array.isArray(replacementFields.observations)) {
+          const merged = new Map<string, unknown>();
+          if (Array.isArray(prior.observations)) {
+            for (const observation of prior.observations) {
+              if (observation && typeof observation === "object"
+                && typeof (observation as Record<string, unknown>).componentId === "string") {
+                merged.set(
+                  (observation as Record<string, unknown>).componentId as string,
+                  observation,
+                );
+              }
+            }
+          }
+          for (const observation of replacementFields.observations) {
+            if (observation && typeof observation === "object"
+              && typeof (observation as Record<string, unknown>).componentId === "string") {
+              merged.set(
+                (observation as Record<string, unknown>).componentId as string,
+                observation,
+              );
+            }
+          }
+          corrections.set(target, {
+            ...prior,
+            ...replacementFields,
+            observations: [...merged.values()],
+          });
+        } else {
+          corrections.set(target, { ...prior, ...replacementFields });
+        }
         if (typeof (replacement as Record<string, unknown>).station === "string") {
           correctedStations.set(target, String((replacement as Record<string, unknown>).station));
         }
@@ -583,6 +759,59 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
           }
           : {}),
       };
+      if (row.eventType === "component-check" && Array.isArray(replacement.observations)) {
+        const expectedComponents = Array.isArray(output.payload.expectedComponents)
+          ? output.payload.expectedComponents.flatMap((candidate) => {
+            const item = recordObject(candidate);
+            if (
+              !item
+              || typeof item.componentId !== "string"
+              || typeof item.group !== "string"
+              || typeof item.name !== "string"
+            ) return [];
+            return [{
+              componentId: item.componentId,
+              group: item.group,
+              name: item.name,
+              ...(typeof item.ingredientId === "string" ? { ingredientId: item.ingredientId } : {}),
+            }];
+          })
+          : [];
+        const observations = new Map<string, QcComponentObservation>();
+        if (Array.isArray(output.payload.results)) {
+          for (const candidate of output.payload.results) {
+            const item = recordObject(candidate);
+            if (
+              item
+              && typeof item.componentId === "string"
+              && ["present-correct", "present-mismatch", "missing", "not-checked"].includes(String(item.observation))
+            ) observations.set(item.componentId, item.observation as QcComponentObservation);
+          }
+        }
+        for (const candidate of replacement.observations) {
+          const item = recordObject(candidate);
+          if (item && typeof item.componentId === "string"
+            && ["present-correct", "present-mismatch", "missing", "not-checked"].includes(String(item.observation))) {
+            observations.set(item.componentId, item.observation as QcComponentObservation);
+          }
+        }
+        const evaluation = evaluateQcComponents({
+          status: output.payload.expectedStatus === "complete" ? "complete" : "incomplete",
+          ...(typeof output.payload.expectedReason === "string"
+            ? { reason: output.payload.expectedReason }
+            : {}),
+          components: expectedComponents,
+        }, observations);
+        output.payload = {
+          ...output.payload,
+          results: evaluation.items.map(({ componentId, observation, outcome }) => ({
+            componentId,
+            observation,
+            outcome,
+          })),
+          outcome: evaluation.outcome,
+        };
+      }
       output.corrected = true;
     }
     const station = correctedStations.get(String(row.id));
@@ -592,6 +821,9 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     if (fields?.has("ingredientName")) output.ingredientName = null;
     if (fields?.has("payload.note")) output.payload = { ...output.payload, note: "[redacted]" };
     if (fields?.has("payload.lotNumber")) output.payload = { ...output.payload, lotNumber: "[redacted]" };
+    if (fields?.has("payload.expectedComponents")) {
+      output.payload = { ...output.payload, expectedComponents: "[redacted]" };
+    }
     if (fields?.size) output.redactedFields = [...fields];
     const details = auditDetails.get(String(row.id));
     if (details?.length) output.auditDetails = details;
@@ -617,7 +849,22 @@ function validateCorrection(
         checkType: CHECK_TYPE.optional(),
         note: correctionNote,
       }).strict()
-      : eventType === "allergen-review"
+        : eventType === "component-check"
+          ? z.object({
+            observations: z.array(componentObservationSchema).max(200).optional(),
+            note: correctionNote,
+          }).strict().superRefine((replacement, ctx) => {
+            if (replacement.observations
+              && new Set(replacement.observations.map((item) => item.componentId)).size
+                !== replacement.observations.length) {
+              ctx.addIssue({
+                code: "custom",
+                path: ["observations"],
+                message: "Each component may be corrected only once",
+              });
+            }
+          })
+        : eventType === "allergen-review"
         ? z.object({
           footprint: footprintSchema.optional(),
           stagedIngredients: allergenReviewBodySchema.shape.stagedIngredients.optional(),
@@ -666,8 +913,8 @@ async function findActiveIngredient(ingredientId: string) {
   return ingredient;
 }
 
-async function findOperation(operationId: string) {
-  const [existing] = await db.select().from(qcWorkflowEventsTable).where(and(
+async function findOperation(operationId: string, executor: QcExecutor = db) {
+  const [existing] = await executor.select().from(qcWorkflowEventsTable).where(and(
     eq(qcWorkflowEventsTable.scope, currentScope()),
     eq(qcWorkflowEventsTable.operationId, operationId),
   )).limit(1);
@@ -854,6 +1101,20 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
   const limit = MAX_RUN_PAGE;
   try {
     const scope = currentScope();
+    const sourceLookup = await resolveCanonicalRunSource(db, scope, parsedRunId.data);
+    const componentResolution = sourceLookup.state === "found"
+      ? resolveQcExpectedComponents(
+        sourceLookup.source.values,
+        sourceLookup.source.substitutions,
+        sourceLookup.source.runSubTab,
+      )
+      : {
+        status: "incomplete" as const,
+        reason: sourceLookup.state === "unavailable"
+          ? sourceLookup.reason
+          : "Expected components are unavailable for this run.",
+        components: [],
+      };
     const rows = await db.select().from(qcWorkflowEventsTable).where(and(
       eq(qcWorkflowEventsTable.scope, scope),
       eq(qcWorkflowEventsTable.runId, parsedRunId.data),
@@ -908,6 +1169,18 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
       nextCursor: hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null,
       weightCheckEvents,
       weightCheckEventsComplete,
+      componentChecklist: {
+        status: componentResolution.status,
+        ...(componentResolution.reason ? { reason: componentResolution.reason } : {}),
+        expectedComponents: componentResolution.components,
+        source: sourceLookup.state === "found"
+          ? {
+            kind: sourceLookup.source.kind,
+            date: sourceLookup.source.date,
+            revision: sourceLookup.source.revision,
+          }
+          : null,
+      },
       signoff: signoff
         ? {
           eventId: signoff.id,
@@ -1103,6 +1376,114 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
     });
   } catch (error) {
     reportRouteError(req, res, "failed to load daily allergen activity", error);
+  }
+});
+
+router.post("/qc/component-checks", requireCapability("record-qc"), async (req, res) => {
+  const body = requireValid(componentCheckBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  const normalizedObservations = [...body.observations]
+    .sort((a, b) => a.componentId.localeCompare(b.componentId));
+  const matchesPriorOperation = (event: QcWorkflowEventRow) => {
+    const payload = event.payload;
+    return event.eventType === "component-check"
+      && event.runId === body.runId
+      && payload.note === body.note
+      && JSON.stringify(payload.requestedObservations) === JSON.stringify(normalizedObservations);
+  };
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockRun(scope, body.runId));
+      const prior = await findOperation(body.operationId, tx);
+      if (prior) {
+        return matchesPriorOperation(prior)
+          ? { kind: "duplicate" as const, event: prior }
+          : { kind: "conflict" as const };
+      }
+
+      const sourceLookup = await resolveCanonicalRunSource(tx, scope, body.runId);
+      if (sourceLookup.state === "not-found") return { kind: "not-found" as const };
+      const resolution = sourceLookup.state === "found"
+        ? resolveQcExpectedComponents(
+          sourceLookup.source.values,
+          sourceLookup.source.substitutions,
+          sourceLookup.source.runSubTab,
+        )
+        : {
+          status: "incomplete" as const,
+          reason: sourceLookup.reason,
+          components: [],
+        };
+      const componentIds = new Set(resolution.components.map((item) => item.componentId));
+      if (normalizedObservations.some((item) => !componentIds.has(item.componentId))) {
+        return { kind: "invalid-observation" as const };
+      }
+      const observationMap = new Map<string, QcComponentObservation>(
+        normalizedObservations.map((item) => [item.componentId, item.observation]),
+      );
+      const evaluation = evaluateQcComponents(resolution, observationMap);
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "component-check",
+        runId: body.runId,
+        profileKey: sourceLookup.state === "found" ? sourceLookup.source.profileKey ?? null : null,
+        payload: {
+          expectedSource: sourceLookup.state === "found"
+            ? {
+              kind: sourceLookup.source.kind,
+              date: sourceLookup.source.date,
+              revision: sourceLookup.source.revision,
+            }
+            : null,
+          expectedStatus: resolution.status,
+          ...(resolution.reason ? { expectedReason: resolution.reason } : {}),
+          expectedComponents: resolution.components,
+          results: evaluation.items.map(({ componentId, observation, outcome }) => ({
+            componentId,
+            observation,
+            outcome,
+          })),
+          outcome: evaluation.outcome,
+          requestedObservations: normalizedObservations,
+          note: body.note,
+        },
+      });
+      return { kind: "created" as const, event };
+    });
+    if (result.kind === "not-found") {
+      safeError(res, 404, "Run not found in the canonical production records");
+      return;
+    }
+    if (result.kind === "invalid-observation") {
+      safeError(res, 400, "An observation does not match a server-resolved component");
+      return;
+    }
+    if (result.kind === "conflict") {
+      safeError(res, 409, "This operation ID was already used");
+      return;
+    }
+    if (result.kind === "duplicate") {
+      res.status(200).json({ event: publicEvent(result.event), duplicate: true });
+      return;
+    }
+    res.status(201).json({ event: publicEvent(result.event), duplicate: false });
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      if (matchesPriorOperation(existing)) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to record QC component check", error);
   }
 });
 
@@ -1412,7 +1793,7 @@ router.post("/qc/events/:eventId/corrections", requireCapability("manage-qc"), a
       eq(qcWorkflowEventsTable.scope, currentScope()),
       eq(qcWorkflowEventsTable.id, eventId),
     )).limit(1);
-    if (!target || !["lot", "weight", "allergen-review", "cleaning"].includes(target.eventType)) {
+    if (!target || !["lot", "weight", "component-check", "allergen-review", "cleaning"].includes(target.eventType)) {
       safeError(res, 404, "Correctable QC record not found");
       return;
     }
@@ -1420,6 +1801,19 @@ router.post("/qc/events/:eventId/corrections", requireCapability("manage-qc"), a
     if (!replacement) {
       safeError(res, 400, "Correction contains invalid or unsupported fields");
       return;
+    }
+    if (target.eventType === "component-check" && Array.isArray(replacement.observations)) {
+      const expectedIds = new Set(
+        (Array.isArray(target.payload.expectedComponents) ? target.payload.expectedComponents : [])
+          .flatMap((item) => {
+            const component = recordObject(item);
+            return typeof component?.componentId === "string" ? [component.componentId] : [];
+          }),
+      );
+      if (replacement.observations.some((item) => !expectedIds.has(item.componentId))) {
+        safeError(res, 400, "Correction contains an unknown component");
+        return;
+      }
     }
     if (target.eventType === "cleaning") {
       const start = Date.parse(String(replacement.startedAt ?? target.payload.startedAt ?? ""));

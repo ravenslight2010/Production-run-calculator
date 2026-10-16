@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { QcComponentChecklist } from './qcComponentChecklist';
 import type { QcEvent } from './qcEvent';
 import type { QcRunResponseSignoff } from './qcRunResponseSignoff';
 import type { QcRunResponseWeightCheckEventsItem } from './qcRunResponseWeightCheckEventsItem';
@@ -19,5 +20,6 @@ export interface QcRunResponse {
   weightCheckEvents: QcRunResponseWeightCheckEventsItem[];
   /** False when the 5000-record limit truncated the timeline. */
   weightCheckEventsComplete: boolean;
+  componentChecklist: QcComponentChecklist;
   signoff: QcRunResponseSignoff;
 }

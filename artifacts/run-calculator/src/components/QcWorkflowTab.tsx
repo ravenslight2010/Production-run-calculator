@@ -31,6 +31,8 @@ import type {
   GetQcHistoryParams,
   QcAllergenReviewInput,
   QcCleaningInput,
+  QcComponentCheckInput,
+  QcComponentCheckInputObservationsItemObservation,
   QcCorrectionInput,
   QcEvent,
   QcRedactionInput,
@@ -47,6 +49,7 @@ import {
   useGetQcRun,
   useGetQcTargets,
   useRecordQcAllergenReview,
+  useRecordQcComponentCheck,
   useRecordQcCleaning,
   useRecordQcLot,
   useRecordQcWeightCheck,
@@ -273,6 +276,10 @@ export default function QcWorkflowTab({
   const [lotNumber, setLotNumber] = useState("");
   const [lotStation, setLotStation] = useState("dough");
   const [lotNote, setLotNote] = useState("");
+  const [componentObservations, setComponentObservations] = useState<
+    Record<string, QcComponentCheckInputObservationsItemObservation>
+  >({});
+  const [componentCheckNote, setComponentCheckNote] = useState("");
   const [weightIngredient, setWeightIngredient] = useState("");
   const [checkType, setCheckType] = useState<QcWeightCheckInput["checkType"]>(
     runIsActive ? "30-minute" : "pre-run",
@@ -346,6 +353,9 @@ export default function QcWorkflowTab({
       queryKey: getGetQcRunQueryKey(runId),
     },
   });
+  const componentChecklist = runQuery.data?.runId === runId
+    ? runQuery.data.componentChecklist
+    : undefined;
   const historyParams: GetQcHistoryParams = {
     ...(historyFrom ? { from: historyFrom } : {}),
     ...(historyTo ? { to: `${historyTo}T23:59:59.999Z` } : {}),
@@ -369,11 +379,25 @@ export default function QcWorkflowTab({
   const lotMutation = useRecordQcLot({ mutation: { onSuccess: refreshAfterWrite } });
   const weightMutation = useRecordQcWeightCheck({ mutation: { onSuccess: refreshAfterWrite } });
   const allergenMutation = useRecordQcAllergenReview({ mutation: { onSuccess: refreshAfterWrite } });
+  const componentCheckMutation = useRecordQcComponentCheck({
+    mutation: {
+      onSuccess: async () => {
+        setComponentObservations({});
+        setComponentCheckNote("");
+        await refreshAfterWrite();
+      },
+    },
+  });
   const cleaningMutation = useRecordQcCleaning({ mutation: { onSuccess: refreshAfterWrite } });
   const verificationMutation = useVerifyQcCleaning({ mutation: { onSuccess: refreshAfterWrite } });
   const signoffMutation = useSignoffQcRun({ mutation: { onSuccess: refreshAfterWrite } });
   const correctionMutation = useCorrectQcEvent({ mutation: { onSuccess: refreshAfterWrite } });
   const redactionMutation = useRedactQcEvent({ mutation: { onSuccess: refreshAfterWrite } });
+
+  useEffect(() => {
+    setComponentObservations({});
+    setComponentCheckNote("");
+  }, [runId, componentChecklist?.source?.date, componentChecklist?.source?.revision]);
 
   const availableIngredients = useMemo(() => {
     if (!catalog) return [];
@@ -483,6 +507,20 @@ export default function QcWorkflowTab({
         setWeightNote("");
       },
     });
+  };
+
+  const submitComponentCheck = () => {
+    if (!runId || !componentChecklist) return;
+    const data: QcComponentCheckInput = {
+      operationId: operationId(),
+      runId,
+      observations: componentChecklist.expectedComponents.map((component) => ({
+        componentId: component.componentId,
+        observation: componentObservations[component.componentId] ?? "not-checked",
+      })),
+      ...(componentCheckNote.trim() ? { note: componentCheckNote.trim() } : {}),
+    };
+    componentCheckMutation.mutate({ data });
   };
 
   const submitAllergenReview = () => {
@@ -617,7 +655,24 @@ export default function QcWorkflowTab({
     setExpandedEventId(next);
     if (next !== null) {
       setCorrectionReason("");
-      setReplacementJson(JSON.stringify(event.payload, null, 2));
+      const componentReplacement = {
+        observations: Array.isArray(event.payload.results)
+          ? event.payload.results.flatMap((candidate) => {
+            if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+            const item = candidate as Record<string, unknown>;
+            return typeof item.componentId === "string"
+              && ["present-correct", "present-mismatch", "missing", "not-checked"].includes(String(item.observation))
+              ? [{ componentId: item.componentId, observation: item.observation }]
+              : [];
+          })
+          : [],
+        note: typeof event.payload.note === "string" ? event.payload.note : "",
+      };
+      setReplacementJson(JSON.stringify(
+        event.eventType === "component-check" ? componentReplacement : event.payload,
+        null,
+        2,
+      ));
       setCorrectionInputError("");
       setRedactionReason("");
       setRedactionFields([]);
@@ -775,6 +830,94 @@ export default function QcWorkflowTab({
               </div>
             </section>
           )}
+          <section
+            className={`${panelClass} p-4 sm:p-5`}
+            aria-labelledby="qc-component-check-title"
+            data-testid="qc-component-checklist"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 id="qc-component-check-title" className="text-sm font-bold">Component identity and presence</h2>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+                  Advisory checklist only. The server resolves expected run components and substitutions; this does not clear a production or shipping hold.
+                </p>
+              </div>
+              {componentChecklist?.status === "complete"
+                ? <StatusPill tone="green">Expected list complete</StatusPill>
+                : <StatusPill tone="amber">Not fully evaluated</StatusPill>}
+            </div>
+            {runQuery.isError ? (
+              <div className="mt-3">
+                <QueryFailure message="Expected components could not be loaded, so no checklist result can be evaluated." retry={() => void runQuery.refetch()} />
+              </div>
+            ) : runQuery.isLoading || !componentChecklist ? (
+              <p className="mt-3 text-xs text-muted-foreground" role="status">Loading server-resolved components…</p>
+            ) : (
+              <>
+                {componentChecklist.reason && (
+                  <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-200" role="status">
+                    {componentChecklist.reason} The checklist cannot pass while expected components are incomplete or ambiguous.
+                  </p>
+                )}
+                {componentChecklist.source && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Expected values: {componentChecklist.source.kind === "completed-run-snapshot" ? "immutable completed-run snapshot" : "canonical run settings"} · {componentChecklist.source.date}
+                  </p>
+                )}
+                {componentChecklist.expectedComponents.length === 0 ? (
+                  <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground" role="status">
+                    No complete expected component list is available. A recorded checklist will remain not evaluated.
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    {componentChecklist.expectedComponents.map((component) => (
+                      <div key={component.componentId} className="grid gap-2 rounded-lg border border-border/70 bg-background/70 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(14rem,.7fr)] sm:items-center">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{component.group}</p>
+                          <p className="break-words text-sm font-medium">{component.name}</p>
+                        </div>
+                        <label className="block min-w-0">
+                          <span className={labelClass}>Observation</span>
+                          <select
+                            className={controlClass}
+                            value={componentObservations[component.componentId] ?? "not-checked"}
+                            disabled={!canRecordQc || componentCheckMutation.isPending}
+                            aria-label={`Observation for ${component.name} (${component.group})`}
+                            onChange={(event) => setComponentObservations((current) => ({
+                              ...current,
+                              [component.componentId]: event.target.value as QcComponentCheckInputObservationsItemObservation,
+                            }))}
+                          >
+                            <option value="not-checked">Not checked</option>
+                            <option value="present-correct">Present and identity matches</option>
+                            <option value="present-mismatch">Present, identity differs</option>
+                            <option value="missing">Missing</option>
+                          </select>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-4 space-y-3">
+                  <Textarea label="Checklist note (optional)" value={componentCheckNote} onChange={setComponentCheckNote} placeholder="Brief context for this observation" rows={2} />
+                  <MutationAlert error={componentCheckMutation.error} onRetry={submitComponentCheck} />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {!canRecordQc && <p className="text-xs text-muted-foreground">QC recording access is required to submit observations.</p>}
+                    <button
+                      type="button"
+                      className={actionClass}
+                      onClick={submitComponentCheck}
+                      disabled={!canRecordQc || !runId || !componentChecklist || componentCheckMutation.isPending}
+                      data-testid="button-record-component-check"
+                    >
+                      {componentCheckMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
+                      Record checklist
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,.75fr)]">
             <section className={`${panelClass} overflow-hidden`} aria-labelledby="qc-record-title">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
@@ -1151,7 +1294,7 @@ export default function QcWorkflowTab({
                   <article key={event.id} className="overflow-hidden rounded-xl border border-border/75 bg-background/70" data-testid={`qc-history-event-${event.id}`}>
                     <button type="button" className="flex min-h-[64px] w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/30" onClick={() => toggleExpandedEvent(event)}>
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#e9f1ef] text-[#397065] dark:bg-emerald-950/40 dark:text-emerald-300">
-                        {event.eventType === "weight" ? <Weight className="h-4 w-4" /> : event.eventType === "allergen-review" ? <ShieldCheck className="h-4 w-4" /> : <FileClock className="h-4 w-4" />}
+                        {event.eventType === "weight" ? <Weight className="h-4 w-4" /> : event.eventType === "allergen-review" ? <ShieldCheck className="h-4 w-4" /> : event.eventType === "component-check" ? <ClipboardCheck className="h-4 w-4" /> : <FileClock className="h-4 w-4" />}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1176,6 +1319,45 @@ export default function QcWorkflowTab({
                             return <span key={key} className="mr-2 inline-block"><span className="font-semibold">{key}:</span> {hidden ? "Redacted" : typeof value === "object" ? JSON.stringify(value) : String(value)}</span>;
                           }) : "No payload fields"}</p></div>
                         </div>
+                        {event.eventType === "component-check" && (
+                          <div className="rounded-lg border border-border/70 bg-background p-3" data-testid={`qc-component-history-${event.id}`}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-xs font-bold">Component checklist result</p>
+                              <StatusPill tone={event.payload.outcome === "pass" ? "green" : event.payload.outcome === "fail" ? "rose" : "amber"}>
+                                {typeof event.payload.outcome === "string" ? event.payload.outcome : "not evaluated"}
+                              </StatusPill>
+                            </div>
+                            {Array.isArray(event.payload.expectedComponents) ? (
+                              <ul className="mt-2 space-y-1.5">
+                                {event.payload.expectedComponents.map((candidate, index) => {
+                                  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+                                  const component = candidate as Record<string, unknown>;
+                                  if (typeof component.componentId !== "string" || typeof component.name !== "string") return null;
+                                  const result = Array.isArray(event.payload.results)
+                                    ? event.payload.results.find((item) => item && typeof item === "object"
+                                      && !Array.isArray(item)
+                                      && (item as Record<string, unknown>).componentId === component.componentId) as Record<string, unknown> | undefined
+                                    : undefined;
+                                  const outcome = typeof result?.outcome === "string" ? result.outcome : "not-evaluated";
+                                  return (
+                                    <li key={`${component.componentId}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 px-2.5 py-2">
+                                      <span className="min-w-0">
+                                        <span className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{String(component.group ?? "Component")}</span>
+                                        <span className="text-xs font-medium">{component.name}</span>
+                                      </span>
+                                      <span className="text-right text-[10px] text-muted-foreground">{String(result?.observation ?? "not-checked")} · {outcome}</span>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : (
+                              <p className="mt-2 text-xs text-muted-foreground">Expected component identities were redacted.</p>
+                            )}
+                            {typeof event.payload.expectedReason === "string" && (
+                              <p className="mt-2 text-xs text-amber-900 dark:text-amber-200">{event.payload.expectedReason}</p>
+                            )}
+                          </div>
+                        )}
                         {canManageQc && (
                           <div className="grid gap-4 border-t border-border/70 pt-3 lg:grid-cols-2">
                             <div className="space-y-2">
@@ -1200,6 +1382,7 @@ export default function QcWorkflowTab({
                                   ["ingredientName", "Ingredient name"],
                                   ["payload.note", "Payload note"],
                                   ["payload.lotNumber", "Lot number"],
+                                  ["payload.expectedComponents", "Expected component identities"],
                                 ].map(([field, text]) => (
                                   <label key={field} className="flex items-center gap-2 text-xs">
                                     <input type="checkbox" className="h-4 w-4 accent-[#548f80]" checked={redactionFields.includes(field)} onChange={(event) => setRedactionFields((current) => event.target.checked ? [...current, field] : current.filter((item) => item !== field))} />

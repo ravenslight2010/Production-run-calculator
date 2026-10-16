@@ -2876,6 +2876,7 @@ export type QcEventEventType = typeof QcEventEventType[keyof typeof QcEventEvent
 export const QcEventEventType = {
   lot: 'lot',
   weight: 'weight',
+  'component-check': 'component-check',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
   'cleaning-verification': 'cleaning-verification',
@@ -3077,6 +3078,7 @@ export interface QcWeightCheckInput {
   note?: string;
 }
 
+export type QcComponentCheckInputObservationsItemObservation = typeof QcComponentCheckInputObservationsItemObservation[keyof typeof QcComponentCheckInputObservationsItemObservation];
 export type QcAllergenReviewInputFootprintStatus = typeof QcAllergenReviewInputFootprintStatus[keyof typeof QcAllergenReviewInputFootprintStatus];
 
 
@@ -3259,6 +3261,7 @@ export interface QcRunResponse {
   weightCheckEvents: QcRunResponseWeightCheckEventsItem[];
   /** False when the 5000-record limit truncated the timeline. */
   weightCheckEventsComplete: boolean;
+  componentChecklist: QcComponentChecklist;
   signoff: QcRunResponseSignoff;
 }
 
@@ -3448,6 +3451,7 @@ export const QcRedactionInputFieldsItem = {
   ingredientName: 'ingredientName',
   payloadnote: 'payload.note',
   payloadlotNumber: 'payload.lotNumber',
+  payloadexpectedComponents: 'payload.expectedComponents',
 } as const;
 
 export interface QcRedactionInput {
@@ -3459,7 +3463,7 @@ export interface QcRedactionInput {
   reason: string;
   /**
      * @minItems 1
-     * @maxItems 4
+     * @maxItems 5
      */
   fields: QcRedactionInputFieldsItem[];
 }
@@ -8290,4 +8294,72 @@ export type ListDistillationApplyEvidence200 = {
   records: DistillationApplyEvidenceRecord[];
   /** @nullable */
   nextCursor: string | null;
+};
+
+export const QcComponentCheckInputObservationsItemObservation = {
+  'present-correct': 'present-correct',
+  'present-mismatch': 'present-mismatch',
+  missing: 'missing',
+  'not-checked': 'not-checked',
+} as const;
+
+export type QcComponentChecklistSourceKind = typeof QcComponentChecklistSourceKind[keyof typeof QcComponentChecklistSourceKind];
+
+export const QcComponentChecklistSourceKind = {
+  'completed-run-snapshot': 'completed-run-snapshot',
+  'current-day-canonical-settings': 'current-day-canonical-settings',
+} as const;
+
+export type QcComponentChecklistStatus = typeof QcComponentChecklistStatus[keyof typeof QcComponentChecklistStatus];
+
+export const QcComponentChecklistStatus = {
+  complete: 'complete',
+  incomplete: 'incomplete',
+} as const;
+
+export interface QcComponentChecklist {
+  status: QcComponentChecklistStatus;
+  reason?: string;
+  expectedComponents: QcExpectedComponent[];
+  source: QcComponentChecklistSource;
+}
+
+export interface QcComponentCheckResponse {
+  event: QcEvent;
+  duplicate: boolean;
+}
+
+export interface QcExpectedComponent {
+  componentId: string;
+  group: string;
+  name: string;
+  ingredientId?: string;
+}
+
+export type QcComponentChecklistSource = {
+  kind: QcComponentChecklistSourceKind;
+  date: string;
+  revision: string;
+} | null;
+
+export interface QcComponentCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /** @maxItems 200 */
+  observations: QcComponentCheckInputObservationsItem[];
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcComponentCheckInputObservationsItem = {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  componentId: string;
+  observation: QcComponentCheckInputObservationsItemObservation;
 };

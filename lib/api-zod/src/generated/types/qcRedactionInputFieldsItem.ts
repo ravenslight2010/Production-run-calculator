@@ -14,4 +14,5 @@ export const QcRedactionInputFieldsItem = {
   ingredientName: 'ingredientName',
   payloadnote: 'payload.note',
   payloadlotNumber: 'payload.lotNumber',
+  payloadexpectedComponents: 'payload.expectedComponents',
 } as const;

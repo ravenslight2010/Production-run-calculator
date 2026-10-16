@@ -10,3 +10,11 @@ Phase 1 is non-blocking and adds run-linked lot and weight records, a non-blocki
 **Why:** The owner approved a record-first release and explicitly deferred run/shipping blocks and label claims so the app does not silently alter production or make unsupported safety assertions.
 
 **How to apply:** Use these choices when planning or implementing QC Phase 1. Run blocking, shipping holds, label declarations, and other deferred workflows require separate owner approval.
+
+## Separately approved component-check slice
+
+The owner separately approved a run-component checklist limited to identity and presence, using canonical per-run settings and same-day substitutions as its expected-value source. Completed runs must use their immutable snapshot; client-provided expected values are never authoritative. This does not approve sensory, weight, label, allergen, safety-claim, production-hold, or shipping-hold checks, and it does not approve broader QC Phase 2.
+
+**Why:** The approval was explicitly bounded to confirming what configured components are present and correctly identified, without adding safety or release authority.
+
+**How to apply:** Keep this approval limited to the component-check workflow. Treat all other Phase 2 or safety-related criteria as deferred until separately approved.

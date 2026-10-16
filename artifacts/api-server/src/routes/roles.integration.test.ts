@@ -23,13 +23,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
 import { signLegacyTokenForTests, verifyPassword } from "../lib/auth";
-import type { Capability } from "../lib/roles";
 import { facilityDate } from "../lib/facilityTime";
+import type { Capability } from "../lib/roles";
 
 // The complete capability set, mirrored locally so the test never statically
 // imports lib/roles (which would bind @workspace/db's pool before beforeAll can
@@ -92,9 +92,9 @@ let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let ingredientsTable: DbModule["ingredientsTable"];
 let brandProfilesTable: DbModule["brandProfilesTable"];
-let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
+let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let ingredientBatchWeightsTable: DbModule["ingredientBatchWeightsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
@@ -176,9 +176,9 @@ beforeAll(async () => {
   inventorySettingsTable = dbMod.inventorySettingsTable;
   ingredientsTable = dbMod.ingredientsTable;
   brandProfilesTable = dbMod.brandProfilesTable;
-  qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   dailySyncTable = dbMod.dailySyncTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
+  qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   ingredientBatchWeightsTable = dbMod.ingredientBatchWeightsTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
@@ -3510,6 +3510,203 @@ describe("QC workflows", () => {
     expect(((await reopened.json()) as { signoff: { signedOff: boolean; reopened: boolean } }).signoff)
       .toMatchObject({ signedOff: false, reopened: true });
     expect((await signoff()).status).toBe(201);
+  });
+
+  it("resolves component checks from canonical settings, evaluates them server-side, and audits retry/correction/redaction", async () => {
+    await seedQcWorkflowFixtures();
+    const date = facilityDate();
+    const runId = "qc-components-run";
+    const incompleteRunId = "qc-components-incomplete";
+    const ambiguousRunId = "qc-components-ambiguous";
+    const settings = {
+      doughRecipeName: "House Dough",
+      doughRecipe: [{ ingredient: "Flour", ingredientId: "qc-dough", lbs: 10 }],
+      frontlineRecipeName: "Jarred Marinara",
+      frontlineRecipe: [],
+      app1Type: "cheese",
+      app1CheeseRecipeName: "Mozzarella",
+      app1CheeseRecipe: [{ ingredient: "Mozzarella", ingredientId: "qc-mozzarella", lbs: 2 }],
+      app2Type: "",
+      app2CheeseRecipeName: "",
+      app2CheeseRecipe: [],
+      app3Type: "",
+      app3CheeseRecipeName: "",
+      app3CheeseRecipe: [],
+      app4Type: "",
+      app4CheeseRecipeName: "",
+      app4CheeseRecipe: [],
+      pep1Type: "Pepperoni",
+      pep1TypeB: "",
+      pep2Type: "",
+      pep2TypeB: "",
+    };
+    const substitutions = [{
+      id: "qc-flour-sub",
+      ingredient: "Flour",
+      action: "swap",
+      substitute: "Rice Flour",
+    }];
+    await db.delete(dailySyncTable).where(and(
+      eq(dailySyncTable.date, date),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    await db.insert(dailySyncTable).values({
+      date,
+      scope: "live",
+      canonicalRevision: 7,
+      data: {
+        dayState: {
+          date,
+          runs: [
+            { id: runId, brand: "QC Brand", flavor: "QC Flavor", subTab: "dough" },
+            { id: incompleteRunId, brand: "QC Brand", flavor: "Incomplete", subTab: "dough" },
+            { id: ambiguousRunId, brand: "QC Brand", flavor: "Ambiguous", subTab: "dough" },
+            { id: ambiguousRunId, brand: "QC Brand", flavor: "Ambiguous", subTab: "dough" },
+          ],
+          substitutions,
+        },
+        runValues: { [runId]: settings },
+      },
+    });
+
+    const signoff = await req(QC_MANAGER, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(),
+      runId,
+    });
+    expect(signoff.status).toBe(201);
+
+    const checklistRes = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(checklistRes.status).toBe(200);
+    const checklistData = await checklistRes.json() as {
+      componentChecklist: {
+        status: string;
+        source: { kind: string; date: string; revision: string } | null;
+        expectedComponents: Array<{ componentId: string; name: string }>;
+      };
+    };
+    expect(checklistData.componentChecklist).toMatchObject({
+      status: "complete",
+      source: { kind: "current-day-canonical-settings", date, revision: "7" },
+    });
+    expect(checklistData.componentChecklist.expectedComponents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ componentId: "dough:0", name: "Rice Flour" }),
+      expect.objectContaining({ componentId: "sauce:product", name: "Jarred Marinara" }),
+      expect.objectContaining({ componentId: "app1:0", name: "Mozzarella" }),
+    ]));
+    const observations = checklistData.componentChecklist.expectedComponents.map((component) => ({
+      componentId: component.componentId,
+      observation: "present-correct",
+    }));
+    const operationId = randomUUID();
+    const componentBody = { operationId, runId, observations, note: "Checked against the run setup" };
+
+    expect((await req(WAREHOUSE, "POST", "/api/qc/component-checks", componentBody)).status).toBe(403);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/component-checks", {
+      ...componentBody,
+      expectedComponents: checklistData.componentChecklist.expectedComponents,
+    })).status).toBe(400);
+
+    const saved = await req(QC_OPERATOR, "POST", "/api/qc/component-checks", componentBody);
+    expect(saved.status).toBe(201);
+    const savedData = await saved.json() as {
+      event: { id: number; actorId: string; createdAt: string; payload: Record<string, unknown> };
+      duplicate: boolean;
+    };
+    expect(savedData.duplicate).toBe(false);
+    expect(savedData.event).toMatchObject({
+      actorId: QC_OPERATOR,
+      payload: { expectedStatus: "complete", outcome: "pass", note: "Checked against the run setup" },
+    });
+    expect(Number.isNaN(Date.parse(savedData.event.createdAt))).toBe(false);
+
+    const retry = await req(QC_OPERATOR, "POST", "/api/qc/component-checks", componentBody);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({
+      duplicate: true,
+      event: { id: savedData.event.id },
+    });
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/component-checks", {
+      ...componentBody,
+      note: "Changed input with the old operation ID",
+    })).status).toBe(409);
+
+    const reopened = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await reopened.json()) as { signoff: { signedOff: boolean; reopened: boolean } }).signoff)
+      .toMatchObject({ signedOff: false, reopened: true });
+
+    expect((await req(QC_OPERATOR, "POST", `/api/qc/events/${savedData.event.id}/corrections`, {
+      operationId: randomUUID(),
+      reason: "Correct the observed presence",
+      replacement: { observations: [{ componentId: "dough:0", observation: "missing" }] },
+    })).status).toBe(403);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${savedData.event.id}/corrections`, {
+      operationId: randomUUID(),
+      reason: "Correct the observed presence",
+      replacement: { observations: [{ componentId: "dough:0", observation: "missing" }] },
+    })).status).toBe(201);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${savedData.event.id}/redactions`, {
+      operationId: randomUUID(),
+      reason: "Remove component identities from the history view",
+      fields: ["payload.expectedComponents"],
+    })).status).toBe(201);
+
+    const history = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    const historyItems = (await history.json() as {
+      items: Array<{ eventType: string; corrected?: boolean; redactedFields?: string[]; payload: Record<string, unknown> }>;
+    }).items;
+    const checkedEvent = historyItems.find((event) => event.eventType === "component-check");
+    expect(checkedEvent).toMatchObject({
+      corrected: true,
+      redactedFields: ["payload.expectedComponents"],
+      payload: { outcome: "fail", expectedComponents: "[redacted]" },
+    });
+
+    const incompleteEvent = await req(QC_OPERATOR, "POST", "/api/qc/component-checks", {
+      operationId: randomUUID(), runId: incompleteRunId, observations: [],
+    });
+    expect(incompleteEvent.status).toBe(201);
+    expect(((await incompleteEvent.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
+      .toMatchObject({ expectedStatus: "incomplete", outcome: "not-evaluated" });
+    const ambiguousEvent = await req(QC_OPERATOR, "POST", "/api/qc/component-checks", {
+      operationId: randomUUID(), runId: ambiguousRunId, observations: [],
+    });
+    expect(ambiguousEvent.status).toBe(201);
+    expect(((await ambiguousEvent.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
+      .toMatchObject({ expectedStatus: "incomplete", outcome: "not-evaluated" });
+
+    const completedRunId = "qc-components-completed";
+    const startedAt = Date.now() - 60_000;
+    const endedAt = Date.now() - 1_000;
+    const completedSnapshot = {
+      dayState: {
+        date,
+        runs: [{
+          id: completedRunId,
+          brand: "QC Brand",
+          flavor: "QC Flavor",
+          subTab: "dough",
+          startedAt,
+          endedAt,
+        }],
+        substitutions,
+      },
+      runValues: { [completedRunId]: settings },
+    };
+    expect((await req(QC_OPERATOR, "POST", "/api/completed-history", {
+      operationId: randomUUID(),
+      runId: completedRunId,
+      date,
+      completedAt: new Date(endedAt).toISOString(),
+      snapshot: completedSnapshot,
+    })).status).toBe(201);
+    const completedChecklist = await req(QC_OPERATOR, "GET", `/api/qc/runs/${completedRunId}`);
+    expect(((await completedChecklist.json()) as {
+      componentChecklist: { status: string; source: { kind: string } | null; expectedComponents: Array<{ name: string }> };
+    }).componentChecklist).toMatchObject({
+      status: "complete",
+      source: { kind: "completed-run-snapshot" },
+      expectedComponents: expect.arrayContaining([expect.objectContaining({ name: "Rice Flour" })]),
+    });
   });
 
   it("keeps incomplete allergen states visible and appends audited corrections and redactions", async () => {

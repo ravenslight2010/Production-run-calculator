@@ -1253,6 +1253,14 @@ describe("factory purge retains QC history", () => {
         eventType: "allergen-review", runId: "purge-run", actorId: SANDBOX,
         payload: { footprintReviewed: true, footprint: { status: "incomplete", allergens: [], unknownIngredients: ["Unknown"], missingComponents: [] } },
       },
+      {
+        scope: "live", operationId: "purge-live-component-qc", recordId: "purge-live-component-qc-record",
+        eventType: "component-check", runId: "purge-run", actorId: MANAGER, payload: { outcome: "not-evaluated" },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-component-qc", recordId: "purge-sandbox-component-qc-record",
+        eventType: "component-check", runId: "purge-run", actorId: SANDBOX, payload: { outcome: "not-evaluated" },
+      },
     ]);
     await db.insert(inventoryItemsTable).values([
       { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
@@ -1274,6 +1282,8 @@ describe("factory purge retains QC history", () => {
     expect(workflowEvents.filter((row) => row.eventType === "lot").map((row) => row.payload.lotNumber).sort())
       .toEqual(["Live QC retained", "Sandbox QC retained"]);
     expect(workflowEvents.filter((row) => row.eventType === "allergen-review").map((row) => row.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    expect(workflowEvents.filter((row) => row.eventType === "component-check").map((row) => row.scope).sort())
       .toEqual(["live", "sandbox"]);
     const items = await db.select().from(inventoryItemsTable);
     expect(items.map((row) => row.scope)).toEqual([scope === "live" ? "sandbox" : "live"]);

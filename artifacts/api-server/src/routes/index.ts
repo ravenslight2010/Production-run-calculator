@@ -273,6 +273,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "record-qc", [
     "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
+    "POST /qc/component-checks",
     "POST /qc/cleaning-records", "POST /qc/cleaning-records/:eventId/verification",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-qc", [

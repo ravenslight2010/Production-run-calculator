@@ -282,6 +282,14 @@ describe("POST /sync/reset", () => {
         eventType: "allergen-review", runId: "reset-run", actorId: MANAGER,
         payload: { footprintReviewed: true, footprint: { status: "incomplete", allergens: [], unknownIngredients: ["Unknown"], missingComponents: [] } },
       },
+      {
+        scope: "live", operationId: "reset-component-live", recordId: "live-component-record",
+        eventType: "component-check", runId: "reset-run", actorId: MANAGER, payload: { outcome: "not-evaluated" },
+      },
+      {
+        scope: "sandbox", operationId: "reset-component-sandbox", recordId: "sandbox-component-record",
+        eventType: "component-check", runId: "reset-run", actorId: MANAGER, payload: { outcome: "not-evaluated" },
+      },
     ]);
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
@@ -299,6 +307,8 @@ describe("POST /sync/reset", () => {
     expect(qcEvents.filter((event) => event.eventType === "lot").map((event) => event.payload.lotNumber).sort())
       .toEqual(["LIVE-RETAINED", "SANDBOX-RETAINED"]);
     expect(qcEvents.filter((event) => event.eventType === "allergen-review").map((event) => event.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    expect(qcEvents.filter((event) => event.eventType === "component-check").map((event) => event.scope).sort())
       .toEqual(["live", "sandbox"]);
   });
 

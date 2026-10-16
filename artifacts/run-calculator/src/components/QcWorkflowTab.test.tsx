@@ -53,6 +53,15 @@ const qcMocks = vi.hoisted(() => ({
         createdAt: string;
       }>,
       weightCheckEventsComplete: true,
+      componentChecklist: {
+        status: "complete",
+        expectedComponents: [] as Array<{ componentId: string; group: string; name: string; ingredientId?: string }>,
+        source: {
+          kind: "current-day-canonical-settings",
+          date: "2030-03-10",
+          revision: "1",
+        } as { kind: "current-day-canonical-settings" | "completed-run-snapshot"; date: string; revision: string } | null,
+      },
       signoff: null,
     },
     isLoading: false,
@@ -93,6 +102,7 @@ const qcMocks = vi.hoisted(() => ({
   },
   mutation: {
     mutateAsync: vi.fn(),
+    mutate: vi.fn(),
     error: null,
     isPending: false,
   },
@@ -110,6 +120,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useGetQcRun: (runId: string) => (qcMocks.runs[runId] as typeof qcMocks.run | undefined) ?? qcMocks.run,
   useGetQcTargets: () => qcMocks.targets,
   useRecordQcAllergenReview: () => qcMocks.mutation,
+  useRecordQcComponentCheck: () => qcMocks.mutation,
   useRecordQcCleaning: () => qcMocks.mutation,
   useRecordQcLot: () => qcMocks.mutation,
   useRecordQcWeightCheck: () => qcMocks.mutation,
@@ -173,9 +184,19 @@ beforeEach(() => {
     hasMore: false,
     weightCheckEvents: [],
     weightCheckEventsComplete: true,
+    componentChecklist: {
+      status: "complete",
+      expectedComponents: [],
+      source: {
+        kind: "current-day-canonical-settings",
+        date: "2030-03-10",
+        revision: "1",
+      },
+    },
     signoff: null,
   };
   qcMocks.runs = {};
+  qcMocks.mutation.mutate.mockClear();
 });
 
 const stagedIngredients: QcAllergenReviewInput["stagedIngredients"] = [
@@ -222,8 +243,57 @@ function renderTab(options: RenderOptions = {}) {
     },
   };
 }
-
 describe("QC workflow UI", () => {
+  it("submits observations only for server-resolved expected components", () => {
+    qcMocks.run.data.componentChecklist = {
+      status: "complete",
+      expectedComponents: [
+        { componentId: "dough:0", group: "Dough", name: "Flour", ingredientId: "flour" },
+      ],
+      source: {
+        kind: "current-day-canonical-settings",
+        date: "2030-03-10",
+        revision: "2",
+      },
+    };
+    renderTab();
+
+    expect(screen.getByText("Expected values: canonical run settings · 2030-03-10")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Observation for Flour (Dough)"), {
+      target: { value: "present-correct" },
+    });
+    fireEvent.change(screen.getByLabelText("Checklist note (optional)"), {
+      target: { value: "Verified at setup" },
+    });
+    fireEvent.click(screen.getByTestId("button-record-component-check"));
+
+    expect(qcMocks.mutation.mutate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "run-1",
+        observations: [{ componentId: "dough:0", observation: "present-correct" }],
+        note: "Verified at setup",
+      }),
+    });
+    expect(screen.getByText(/does not clear a production or shipping hold/i)).toBeTruthy();
+  });
+
+  it("keeps incomplete expected lists visibly not fully evaluated", () => {
+    qcMocks.run.data.componentChecklist = {
+      status: "incomplete",
+      reason: "The configured dough recipe has no component rows.",
+      expectedComponents: [],
+      source: null,
+    };
+    renderTab();
+
+    expect(screen.getByText("Not fully evaluated")).toBeTruthy();
+    expect(screen.getByText(/cannot pass while expected components are incomplete or ambiguous/i)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("button-record-component-check"));
+    expect(qcMocks.mutation.mutate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ runId: "run-1", observations: [] }),
+    });
+  });
+
   it("shows a read-only daily report with separate manual and derived states", () => {
     renderTab();
     fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
@@ -349,7 +419,7 @@ describe("QC workflow UI", () => {
   });
 
   it("shows each configured target's next check time and marks due and overdue reminders", () => {
-    const now = Date.parse("2025-01-01T00:31:00.000Z");
+    const now = Date.parse("2025-01-01T02:00:00.000Z");
     vi.useFakeTimers();
     vi.setSystemTime(now);
     qcMocks.targets.data.targets = [{
@@ -395,11 +465,16 @@ describe("QC workflow UI", () => {
       hasMore: false,
       weightCheckEvents: [],
       weightCheckEventsComplete: false,
+      componentChecklist: {
+        status: "incomplete",
+        expectedComponents: [],
+        source: null,
+      },
       signoff: null,
     };
     renderTab({ runIsActive: true, runStartedAt: now - 2 * 60 * 60_000 });
 
-    expect(screen.getByRole("status").textContent)
+    expect(screen.getByText(/more weight records than can be summarized/).textContent)
       .toContain("more weight records than can be summarized");
     expect(screen.queryByTestId("qc-weight-reminder-flour")).toBeNull();
   });
@@ -429,30 +504,46 @@ describe("QC workflow UI", () => {
           createdAt: new Date(start + 20 * 60_000).toISOString(),
         }],
         weightCheckEventsComplete: true,
+        componentChecklist: {
+          status: "complete",
+          expectedComponents: [],
+          source: null,
+        },
       },
     };
     qcMocks.runs["run-2"] = {
       ...qcMocks.run,
-      data: { runId: "run-2", items: [] },
+      data: {
+        runId: "run-2",
+        items: [],
+        hasMore: false,
+        weightCheckEvents: [],
+        weightCheckEventsComplete: true,
+        componentChecklist: {
+          status: "complete",
+          expectedComponents: [],
+          source: null,
+        },
+        signoff: null,
+      },
     };
     const rendered = renderTab({
-      runId: "run-1",
-      runIsActive: true,
+      runIsActive: false,
       runStartedAt: start,
+      runStoppages: [{ type: "pause", startedAt: pauseStart }],
     });
-    expect(screen.getByTestId("qc-weight-reminder-flour").querySelector("time")?.getAttribute("datetime"))
-      .toBe(new Date(start + 50 * 60_000).toISOString());
+    expect(screen.queryByTestId("qc-weight-reminders")).toBeNull();
 
     rendered.rerenderTab({
-      runId: "run-2",
       runIsActive: true,
-      runStartedAt: start + 40 * 60_000,
+      runStartedAt: start + 20 * 60_000,
+      runStoppages: [{ type: "pause", startedAt: pauseStart, endedAt: resumedAt }],
     });
     expect(screen.getByTestId("qc-weight-reminder-flour").querySelector("time")?.getAttribute("datetime"))
-      .toBe(new Date(start + 70 * 60_000).toISOString());
+      .toBe(new Date(start + 80 * 60_000).toISOString());
   });
 
-  it("keeps reminders paused and resumes on the active-time schedule", () => {
+  it("recreates the same reminder after remounting with persisted run data", () => {
     const start = Date.parse("2025-01-01T00:00:00.000Z");
     const pauseStart = start + 35 * 60_000;
     const resumedAt = start + 55 * 60_000;
@@ -476,6 +567,11 @@ describe("QC workflow UI", () => {
         payload: { checkType: "30-minute" },
         createdAt: new Date(start + 30 * 60_000).toISOString(),
       }],
+      componentChecklist: {
+        status: "complete",
+        expectedComponents: [],
+        source: null,
+      },
       signoff: null,
     };
     const rendered = renderTab({
@@ -516,6 +612,11 @@ describe("QC workflow UI", () => {
         payload: { checkType: "30-minute" },
         createdAt: new Date(start + 30 * 60_000).toISOString(),
       }],
+      componentChecklist: {
+        status: "complete",
+        expectedComponents: [],
+        source: null,
+      },
       signoff: null,
     };
     const options = { runIsActive: true, runStartedAt: start };
