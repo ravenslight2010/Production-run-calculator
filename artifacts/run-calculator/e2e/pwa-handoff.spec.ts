@@ -309,6 +309,7 @@ async function startVersionedServer(
     origin: string | null;
     status: number;
     userId: string;
+    authenticated: boolean;
   }> = [];
   const factoryData = new Map<string, { value: unknown; updatedAt: string }>();
   let releaseIntentAuthResponse: (() => void) | undefined;
@@ -407,6 +408,20 @@ async function startVersionedServer(
         return;
       }
       if (options.sessionRecovery && requestPath === "api/factory-data") {
+        const authenticated = sessionValid;
+        if (!authenticated) {
+          factoryDataRequests.push({
+            method: request.method ?? "GET",
+            origin: request.headers.origin ?? null,
+            status: 401,
+            userId: activeSessionUserId,
+            authenticated,
+          });
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Unauthorized" }));
+          return;
+        }
         const canManageFactorySettings =
           sessionUsers.get(activeSessionUserId)?.capabilities.includes("manage-factory-settings")
           ?? false;
@@ -416,6 +431,7 @@ async function startVersionedServer(
             origin: request.headers.origin ?? null,
             status: 403,
             userId: activeSessionUserId,
+            authenticated,
           });
           response
             .writeHead(403, { "content-type": "application/json; charset=utf-8" })
@@ -428,6 +444,7 @@ async function startVersionedServer(
             origin: request.headers.origin ?? null,
             status: 200,
             userId: activeSessionUserId,
+            authenticated,
           });
           response
             .writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -460,6 +477,7 @@ async function startVersionedServer(
             origin: request.headers.origin ?? null,
             status: 200,
             userId: activeSessionUserId,
+            authenticated,
           });
           response
             .writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -557,6 +575,9 @@ async function startVersionedServer(
             .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
           return;
         }
+        // Test-only fault injection for the PWA outbox's explicit 403-retry
+        // behavior. The real operational-intents route is auth-only; this
+        // synthetic denial is not a capability contract.
         if (!intentPermissionGranted) {
           sessionRecoveryRequests.permissionDenied += 1;
           response
@@ -650,14 +671,21 @@ async function startVersionedServer(
         }
       }
       if (requestPath === "api/me") {
+        const user = sessionUsers.get(activeSessionUserId);
+        if (!sessionValid || !user) {
+          response
+            .writeHead(401, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Unauthorized" }));
+          return;
+        }
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
           .end(JSON.stringify({
-            userId: "pwa-smoke-user",
-            role: "operator",
-            capabilities: [],
+            userId: user.userId,
+            role: user.role,
+            capabilities: user.capabilities,
             email: null,
-            name: "PWA Smoke",
+            name: user.name,
             onboardingSeen: true,
             tourCompleted: true,
             floorModeEnabled: false,
@@ -675,6 +703,7 @@ async function startVersionedServer(
             origin: request.headers.origin ?? null,
             status: 404,
             userId: activeSessionUserId,
+            authenticated: sessionValid,
           });
         }
         response
@@ -1901,6 +1930,47 @@ test.describe("PWA update handoff", () => {
     }
   });
 
+  test("matches the /api/me stub to the active authenticated fixture identity", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+    );
+
+    try {
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("heading", { name: "Production Run Calculator" }))
+        .toBeVisible();
+
+      const authenticated = await page.evaluate(async () => {
+        const response = await fetch("/api/me");
+        return { status: response.status, user: await response.json() };
+      });
+      expect(authenticated).toMatchObject({
+        status: 200,
+        user: {
+          userId: "pwa-session-user",
+          role: "operator",
+          capabilities: [],
+          name: "PWA Session",
+        },
+      });
+
+      server.setSessionValid(false);
+      const unauthenticated = await page.evaluate(async () => {
+        const response = await fetch("/api/me");
+        return { status: response.status, body: await response.json() };
+      });
+      expect(unauthenticated).toEqual({
+        status: 401,
+        body: { error: "Unauthorized" },
+      });
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
   test("matches factory-data access to the active session capability", async ({ page }) => {
     const pageErrors: string[] = [];
     const expectedExternalFontErrors: string[] = [];
@@ -1940,11 +2010,13 @@ test.describe("PWA update handoff", () => {
           method: "GET",
           status: 403,
           userId: "pwa-session-user",
+          authenticated: true,
         }),
         expect.objectContaining({
           method: "PUT",
           status: 403,
           userId: "pwa-session-user",
+          authenticated: true,
         }),
       ]));
 
@@ -1991,11 +2063,39 @@ test.describe("PWA update handoff", () => {
           method: "PUT",
           status: 200,
           userId: "pwa-session-manager",
+          authenticated: true,
         }),
         expect.objectContaining({
           method: "GET",
           status: 200,
           userId: "pwa-session-manager",
+          authenticated: true,
+        }),
+      ]));
+
+      server.setSessionValid(false);
+      const unauthenticatedResults = await page.evaluate(async () => {
+        const read = await fetch("/api/factory-data");
+        const write = await fetch("/api/factory-data", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key: "expired-session-test", value: "denied" }),
+        });
+        return { readStatus: read.status, writeStatus: write.status };
+      });
+      expect(unauthenticatedResults).toEqual({ readStatus: 401, writeStatus: 401 });
+      expect(server.factoryDataRequests()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          method: "GET",
+          status: 401,
+          userId: "pwa-session-manager",
+          authenticated: false,
+        }),
+        expect.objectContaining({
+          method: "PUT",
+          status: 401,
+          userId: "pwa-session-manager",
+          authenticated: false,
         }),
       ]));
       expect(pageErrors).toEqual([]);
@@ -2183,7 +2283,7 @@ test.describe("PWA update handoff", () => {
       expect(
         server.factoryDataRequests()
           .filter((request) => request.method === "GET")
-          .every((request) => request.status === 403),
+          .every((request) => request.status === (request.authenticated ? 403 : 401)),
       ).toBe(true);
       expect(
         server.factoryDataRequests().some((request) => request.method === "OPTIONS"),
@@ -2191,7 +2291,7 @@ test.describe("PWA update handoff", () => {
       expect(
         server.factoryDataRequests()
           .filter((request) => request.method === "PUT")
-          .every((request) => request.status === 403),
+          .every((request) => request.status === (request.authenticated ? 403 : 401)),
       ).toBe(true);
       await expect.poll(() => page.evaluate((id) => {
         const raw = localStorage.getItem(
