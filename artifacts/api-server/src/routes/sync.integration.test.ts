@@ -2454,6 +2454,20 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
 });
 
 describe("GET /sync/operational-intents/cursor", () => {
+  it("returns an empty page and preserves invalid-cursor errors", async () => {
+    const empty = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, {
+      headers: authHeaders(),
+    });
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ cursor: 0, hasMore: false, mutations: [] });
+
+    const invalid = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=-1`, {
+      headers: authHeaders(),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ error: "Invalid mutation cursor" });
+  });
+
   it("pages materialized receipts and never leaks another scope", async () => {
     await db.insert(operationalIntentLedgerTable).values([
       ...Array.from({ length: 101 }, (_, index) => ({

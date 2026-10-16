@@ -62,6 +62,7 @@ import {
   reconcileOperationalIntentInTransaction,
   type OperationalIntentTransactionResult,
 } from "../lib/operationalIntentService";
+import { readOperationalIntentCursorPage } from "../lib/operationalIntentCursorService";
 import {
   broadcastInventoryChange,
   consumeRunInTransaction,
@@ -2145,45 +2146,7 @@ router.get("/sync/operational-intents/cursor", async (req: Request, res: Respons
   }
   const scope = currentScope();
   try {
-    const rows = await db.select({
-      cursor: operationalIntentLedgerTable.sequence,
-      date: operationalIntentLedgerTable.date,
-      outcome: operationalIntentLedgerTable.outcome,
-      snapshot: operationalIntentLedgerTable.snapshot,
-      commandType: operationalIntentLedgerTable.commandType,
-      actorId: operationalIntentLedgerTable.actorId,
-      deviceId: operationalIntentLedgerTable.deviceId,
-      baseRevision: operationalIntentLedgerTable.baseRevision,
-      canonicalRevision: operationalIntentLedgerTable.canonicalRevision,
-      serverReceivedAt: operationalIntentLedgerTable.serverReceivedAt,
-      createdAt: operationalIntentLedgerTable.createdAt,
-    }).from(operationalIntentLedgerTable)
-      .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
-      .orderBy(asc(operationalIntentLedgerTable.sequence))
-      .limit(100);
-    // Cursor recovery must be monotonic across pages. Never mix a compacted
-    // receipt's current materialization with a later retained historical
-    // snapshot: every adoptable receipt in this page points at the current
-    // scoped materialization for its date.
-    const dates = [...new Set(rows.map((row) => row.date))];
-    const materialized = dates.length
-      ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data }).from(dailySyncTable)
-        .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
-      : [];
-    const byDate = new Map(materialized.map((row) => [row.date, row.data]));
-    res.json({
-      cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
-      hasMore: rows.length === 100,
-      mutations: rows.map(({ snapshot: _historical, ...row }) => {
-        const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
-        const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
-        return {
-          ...row,
-          snapshot,
-          materializedSnapshotId: snapshot ? syncSnapshotId(snapshot) : null,
-        };
-      }),
-    });
+    res.json(await readOperationalIntentCursorPage(scope, after));
   } catch (error) {
     req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
     res.status(500).json({ error: "Mutation cursor could not sync" });
