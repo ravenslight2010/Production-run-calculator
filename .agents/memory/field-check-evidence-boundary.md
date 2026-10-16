@@ -27,3 +27,13 @@ build, while filtering just a few global recent rows can miss that group entirel
 **How to apply:** Scope matching observations before summarizing or limiting
 rows. Recovery needs later success in that same population; label bounded
 retention and never present the result as a revision-bound release gate.
+
+Manager browser assertions that combine a check title with its coverage and
+issue state should select the complete check card, not the title's immediate
+parent; the title is nested inside a smaller header.
+
+**Why:** A title-level locator can resolve successfully while excluding the
+coverage and issue-state text the test intends to verify.
+
+**How to apply:** Anchor the assertion to the whole rendered check card and use
+the catalog label verbatim, including punctuation.

@@ -3,10 +3,12 @@ import { submitFieldCheckObservations } from "./inventoryShared";
 import { useAuth } from "./useAuth";
 import { AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS, PERFORMANCE_BUDGETS } from "./performanceDiagnostics";
 import { PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
+import { consumeStaleAssetRecoveryAttempt } from "./pwaUpdateRecovery";
 export { fieldCheckDiagnosticLabel, PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
 
 export const FIELD_CHECK_VERSION = "3";
 export const FIELD_CHECK_SIGNAL_EVENT = "calculator-field-check-signal";
+export const FIELD_CHECK_QUEUE_EVENT = "calculator-field-check-queue";
 export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
 
 export const PRODUCTION_RUN_SAVE_FAILURE_CODES = {
@@ -34,10 +36,11 @@ export const FIELD_CHECK_CATALOG = [
   { name: "production-run-save-sync", label: "Production-run save and sync", observedBy: "browser" as const },
   { name: "spec-import-review-commit", label: "Spec import parse, review, and commit", observedBy: "browser" as const },
   { name: "cross-device-convergence", label: "Cross-device convergence", observedBy: "browser" as const },
-  { name: "reload-persistence", label: "Reload persistence", observedBy: "browser" as const },
+  { name: "reload-persistence", label: "Reload startup", observedBy: "browser" as const },
   { name: "offline-recovery", label: "Offline recovery", observedBy: "browser" as const },
   { name: "offline-queue-replay", label: "Offline queue replay", observedBy: "browser" as const },
   { name: "pwa-update-handoff", label: "PWA update handoff", observedBy: "browser" as const },
+  { name: "stale-deployment-recovery", label: "Stale-deployment recovery", observedBy: "browser" as const },
   { name: "performance", label: "Performance", observedBy: "browser" as const },
   { name: "touch-accuracy", label: "Touch accuracy", observedBy: "hardware" as const },
   { name: "keyboard-clearance", label: "Keyboard clearance", observedBy: "hardware" as const },
@@ -118,6 +121,7 @@ function safeMetrics(
     // Preserve very slow failures as a saturated measurement, not a missing sample.
     return { durationMs: Math.round(Math.min(metrics.durationMs!, 10_000_000) * 100) / 100, sourceCode: metrics.sourceCode! };
   }
+  if (checkName === "stale-deployment-recovery") return {};
   if (workflowChecks.has(checkName)) {
     const durationMs = metrics.durationMs;
     if (!Number.isFinite(durationMs) || durationMs! < 0 || durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS) {
@@ -176,6 +180,33 @@ function saveQueue(queue: ReturnType<typeof loadQueue>): void {
     localStorage.setItem(queueKey, JSON.stringify(queue.slice(-maxQueue)));
   } catch {
     // Collection must never affect production persistence.
+  }
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(FIELD_CHECK_QUEUE_EVENT));
+}
+
+export type FieldCheckQueueStatus = {
+  available: boolean;
+  count: number;
+  oldestAgeMs: number | null;
+};
+
+export function getFieldCheckQueueStatus(now = Date.now()): FieldCheckQueueStatus {
+  try {
+    // Probe storage separately so a denied localStorage read is not mistaken
+    // for a confirmed empty queue.
+    localStorage.getItem(queueKey);
+    const queue = loadQueue();
+    const oldest = queue
+      .map((item) => Date.parse(item.observedAt))
+      .filter(Number.isFinite)
+      .reduce<number | null>((value, timestamp) => value === null ? timestamp : Math.min(value, timestamp), null);
+    return {
+      available: true,
+      count: queue.length,
+      oldestAgeMs: oldest === null ? null : Math.min(30 * 24 * 60 * 60 * 1000, Math.max(0, now - oldest)),
+    };
+  } catch {
+    return { available: false, count: 0, oldestAgeMs: null };
   }
 }
 
@@ -315,6 +346,9 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   window.addEventListener("offline", onOffline);
   window.addEventListener("calculator-performance", onPerformance);
   queueSignal({ checkName: "startup", outcome: "success" }, appBuild);
+  if (consumeStaleAssetRecoveryAttempt(appBuild)) {
+    queueSignal({ checkName: "stale-deployment-recovery", outcome: "success" }, appBuild);
+  }
   const navigation = performance.getEntriesByType("navigation").at(-1) as PerformanceNavigationTiming | undefined;
   if (navigation?.type === "reload") queueSignal({ checkName: "reload-persistence", outcome: "success" }, appBuild);
   const interval = window.setInterval(() => void flush(), 120_000);

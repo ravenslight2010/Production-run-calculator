@@ -2,13 +2,15 @@
 const CHECKS = [
   "startup", "foreground-recovery", "sync-acknowledgment", "production-run-save-sync",
   "spec-import-review-commit", "cross-device-convergence", "reload-persistence",
-  "offline-recovery", "offline-queue-replay", "pwa-update-handoff", "performance",
+  "offline-recovery", "offline-queue-replay", "pwa-update-handoff",
+  "stale-deployment-recovery", "performance",
   "touch-accuracy", "keyboard-clearance", "orientation-layout", "safe-area-clearance",
   "camera-file-selection", "update-handoff", "process-kill-recovery",
 ] as const;
 const DEVICES = ["desktop-chrome", "desktop-safari", "desktop-firefox", "mobile-chrome",
   "mobile-safari", "tablet-browser", "other-browser", "android-phone", "android-tablet", "ipad", "iphone"];
 const STATUSES = ["healthy", "collecting", "needs-review", "unsupported"];
+const COVERAGES = ["never-observed", "current", "stale", "no-success"];
 export const FIELD_CHECK_EXPORT_MAX_BYTES = 64_000;
 const MISSING = "unavailable";
 function record(value: unknown): Record<string, unknown> {
@@ -26,6 +28,10 @@ function timestamp(value: unknown) {
 }
 function count(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000
+    ? value : MISSING;
+}
+function receiptDelay(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 172_800_000
     ? value : MISSING;
 }
 function diagnostics(name: string, value: unknown) {
@@ -61,8 +67,10 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
     return {
       name,
       status: category(check.status, STATUSES),
+      coverage: category(check.coverage, COVERAGES),
       observedBy: category(check.observedBy, ["browser", "hardware"]),
       lastObservedAt: timestamp(check.lastObservedAt),
+      lastReceiptDelayMs: receiptDelay(check.lastReceiptDelayMs),
       lastSuccessfulAt: timestamp(check.lastSuccessfulAt),
       lastSuccessfulDiagnostics: diagnostics(name, check.lastSuccessfulMetrics),
       failureCount: count(check.failureCount),

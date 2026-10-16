@@ -166,6 +166,7 @@ export * from './fieldChecksReportPopulationCountBasis';
 export * from './fieldChecksReportPopulationRetentionDays';
 export * from './fieldChecksReportScope';
 export * from './fieldCheckSummary';
+export * from './fieldCheckSummaryCoverage';
 export * from './fieldCheckSummaryIssueStatus';
 export * from './fieldCheckSummaryLastSuccessfulMetrics';
 export * from './fieldCheckSummaryObservedBy';

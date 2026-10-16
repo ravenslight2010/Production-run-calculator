@@ -19,5 +19,6 @@ export const FieldCheckObservationInputCheckName = {
   'reload-persistence': 'reload-persistence',
   'offline-recovery': 'offline-recovery',
   'pwa-update-handoff': 'pwa-update-handoff',
+  'stale-deployment-recovery': 'stale-deployment-recovery',
   performance: 'performance',
 } as const;

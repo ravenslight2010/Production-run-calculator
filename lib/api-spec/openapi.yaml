@@ -4675,8 +4675,11 @@ paths:
         successful sync observations have empty metrics. Version 3 performance
         observations require only durationMs (0 to 10000000) and sourceCode
         (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API
-        network failure). Versions 1 and 2 remain accepted for queued evidence;
-        unsupported diagnostic versions are rejected.
+        network failure). Stale-deployment-recovery accepts no metrics; an
+        incomplete outcome is an attempt without confirmation, and success is
+        emitted only after authenticated startup on a different build. Versions
+        1 and 2 remain accepted for queued evidence; unsupported diagnostic
+        versions are rejected.
       requestBody:
         required: true
         content:
@@ -4701,8 +4704,11 @@ paths:
       tags: [incidents]
       summary: Get manager field-check health
       description: >-
-        Returns deterministic health rollups for passive browser evidence and
-        explicit unsupported states for hardware-only checks. Optional filters
+        Returns deterministic health rollups separately from evidence coverage
+        for passive browser evidence and explicit unsupported states for
+        hardware-only checks. Receipt delay is an estimate from the browser's
+        observation timestamp to server receipt; missing or future timestamps
+        remain unknown. Optional filters
         are combined with AND and applied to all observations received within
         the last 30 days in the authorized facility/sandbox scope, before counts,
         recovery and recent-row limits are calculated. appBuild is an exact,
@@ -13000,6 +13006,7 @@ components:
             - reload-persistence
             - offline-recovery
             - pwa-update-handoff
+            - stale-deployment-recovery
             - performance
         checkVersion:
           type: string
@@ -13035,6 +13042,7 @@ components:
             (integer 1 through 3); other sync outcomes have empty metrics.
             Performance requires only durationMs (0 to 10000000) and sourceCode
             (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network).
+            Stale-deployment-recovery accepts no metrics.
           additionalProperties:
             type: number
             minimum: 0
@@ -13090,12 +13098,14 @@ components:
         - name
         - label
         - status
+        - coverage
         - observedBy
         - evidence
         - expiresHours
         - lastSuccessfulAt
         - lastSuccessfulMetrics
         - lastObservedAt
+        - lastReceiptDelayMs
         - recentFailures
         - failureCount
         - incompleteCount
@@ -13107,6 +13117,11 @@ components:
         status:
           type: string
           enum: [healthy, collecting, needs-review, unsupported]
+          description: Health rollup; evidence coverage is reported separately.
+        coverage:
+          type: string
+          enum: [never-observed, current, stale, no-success]
+          description: Whether evidence has never been observed, has a fresh success, has a stale success, or contains only non-success observations.
         observedBy:
           type: string
           enum: [browser, hardware]
@@ -13124,6 +13139,11 @@ components:
         lastObservedAt:
           type: [string, "null"]
           format: date-time
+        lastReceiptDelayMs:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 172800000
+          description: Bounded estimate from the browser observation timestamp to server receipt; null when unavailable or the browser timestamp is in the future.
         recentFailures:
           type: array
           items: { $ref: "#/components/schemas/FieldCheckFailure" }

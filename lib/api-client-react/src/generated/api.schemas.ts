@@ -6783,6 +6783,7 @@ export const FieldCheckObservationInputCheckName = {
   'reload-persistence': 'reload-persistence',
   'offline-recovery': 'offline-recovery',
   'pwa-update-handoff': 'pwa-update-handoff',
+  'stale-deployment-recovery': 'stale-deployment-recovery',
   performance: 'performance',
 } as const;
 
@@ -6809,7 +6810,7 @@ export const FieldCheckObservationInputDeviceCategory = {
 } as const;
 
 /**
- * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network).
+ * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Stale-deployment-recovery accepts no metrics.
  */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};
 
@@ -6830,7 +6831,7 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
-  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). */
+  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Stale-deployment-recovery accepts no metrics. */
   metrics: FieldCheckObservationInputMetrics;
 }
 
@@ -6910,6 +6911,9 @@ export interface FieldCheckFailure {
   metrics: FieldCheckFailureMetrics;
 }
 
+/**
+ * Health rollup; evidence coverage is reported separately.
+ */
 export type FieldCheckSummaryStatus = typeof FieldCheckSummaryStatus[keyof typeof FieldCheckSummaryStatus];
 
 
@@ -6918,6 +6922,19 @@ export const FieldCheckSummaryStatus = {
   collecting: 'collecting',
   'needs-review': 'needs-review',
   unsupported: 'unsupported',
+} as const;
+
+/**
+ * Whether evidence has never been observed, has a fresh success, has a stale success, or contains only non-success observations.
+ */
+export type FieldCheckSummaryCoverage = typeof FieldCheckSummaryCoverage[keyof typeof FieldCheckSummaryCoverage];
+
+
+export const FieldCheckSummaryCoverage = {
+  'never-observed': 'never-observed',
+  current: 'current',
+  stale: 'stale',
+  'no-success': 'no-success',
 } as const;
 
 export type FieldCheckSummaryObservedBy = typeof FieldCheckSummaryObservedBy[keyof typeof FieldCheckSummaryObservedBy];
@@ -6947,7 +6964,10 @@ export const FieldCheckSummaryIssueStatus = {
 export interface FieldCheckSummary {
   name: string;
   label: string;
+  /** Health rollup; evidence coverage is reported separately. */
   status: FieldCheckSummaryStatus;
+  /** Whether evidence has never been observed, has a fresh success, has a stale success, or contains only non-success observations. */
+  coverage: FieldCheckSummaryCoverage;
   observedBy: FieldCheckSummaryObservedBy;
   evidence: string;
   /** @nullable */
@@ -6958,6 +6978,13 @@ export interface FieldCheckSummary {
   lastSuccessfulMetrics: FieldCheckSummaryLastSuccessfulMetrics;
   /** @nullable */
   lastObservedAt: string | null;
+  /**
+     * Bounded estimate from the browser observation timestamp to server receipt; null when unavailable or the browser timestamp is in the future.
+     * @minimum 0
+     * @maximum 172800000
+     * @nullable
+     */
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;

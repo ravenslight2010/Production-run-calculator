@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FieldCheckFailure } from './fieldCheckFailure';
+import type { FieldCheckSummaryCoverage } from './fieldCheckSummaryCoverage';
 import type { FieldCheckSummaryIssueStatus } from './fieldCheckSummaryIssueStatus';
 import type { FieldCheckSummaryLastSuccessfulMetrics } from './fieldCheckSummaryLastSuccessfulMetrics';
 import type { FieldCheckSummaryObservedBy } from './fieldCheckSummaryObservedBy';
@@ -14,7 +15,10 @@ import type { FieldCheckSummaryStatus } from './fieldCheckSummaryStatus';
 export interface FieldCheckSummary {
   name: string;
   label: string;
+  /** Health rollup; evidence coverage is reported separately. */
   status: FieldCheckSummaryStatus;
+  /** Whether evidence has never been observed, has a fresh success, has a stale success, or contains only non-success observations. */
+  coverage: FieldCheckSummaryCoverage;
   observedBy: FieldCheckSummaryObservedBy;
   evidence: string;
   /** @nullable */
@@ -25,6 +29,13 @@ export interface FieldCheckSummary {
   lastSuccessfulMetrics: FieldCheckSummaryLastSuccessfulMetrics;
   /** @nullable */
   lastObservedAt: Date | null;
+  /**
+     * Bounded estimate from the browser observation timestamp to server receipt; null when unavailable or the browser timestamp is in the future.
+     * @minimum 0
+     * @maximum 172800000
+     * @nullable
+     */
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;

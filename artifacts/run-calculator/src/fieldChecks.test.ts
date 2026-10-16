@@ -3,6 +3,8 @@ import {
   createFieldCheckObserver,
   emitFieldCheckSignal,
   FIELD_CHECK_SIGNAL_EVENT,
+  FIELD_CHECK_QUEUE_EVENT,
+  getFieldCheckQueueStatus,
   FIELD_CHECK_CATALOG,
   productionRunSaveFailureLabel,
   PRODUCTION_RUN_SAVE_FAILURE_CODES,
@@ -10,6 +12,7 @@ import {
   fieldCheckDiagnosticLabel,
 } from "./fieldChecks";
 import { recordPerformance } from "./performanceDiagnostics";
+import { recordStaleAssetRecoveryAttempt } from "./pwaUpdateRecovery";
 
 const submit = vi.hoisted(() => vi.fn().mockResolvedValue({ accepted: 1, duplicate: 0 }));
 vi.mock("./inventoryShared", () => ({ submitFieldCheckObservations: submit }));
@@ -17,7 +20,11 @@ vi.mock("./inventoryShared", () => ({ submitFieldCheckObservations: submit }));
 describe("field-check observer", () => {
   beforeEach(() => {
     localStorage.clear();
-    submit.mockReset().mockResolvedValue({ accepted: 1, duplicate: 0 });
+    sessionStorage.clear();
+    submit.mockReset().mockImplementation(async (observations: unknown[]) => ({
+      accepted: observations.length,
+      duplicate: 0,
+    }));
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
   });
 
@@ -113,6 +120,40 @@ describe("field-check observer", () => {
     }
   });
 
+  it("reports bounded current-browser queue count and oldest age", () => {
+    const now = Date.now();
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify([
+      {
+        observationId: "client:startup:old",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now - 90_000).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      },
+    ]));
+    expect(getFieldCheckQueueStatus(now)).toEqual({ available: true, count: 1, oldestAgeMs: 90_000 });
+  });
+
+  it("announces queue changes and confirms recovery only after a different-build authenticated startup", async () => {
+    const changed = vi.fn();
+    window.addEventListener(FIELD_CHECK_QUEUE_EVENT, changed);
+    recordStaleAssetRecoveryAttempt("old-build", sessionStorage, Date.now() - 1000);
+    const stop = createFieldCheckObserver("new-build");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stop();
+    window.removeEventListener(FIELD_CHECK_QUEUE_EVENT, changed);
+
+    const observations = submit.mock.calls.flatMap((call) => call[0]);
+    expect(observations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ checkName: "stale-deployment-recovery", outcome: "success", metrics: {} }),
+    ]));
+    expect(changed).toHaveBeenCalled();
+    expect(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1")).toBeNull();
+  });
+
   it("retains distinct sync causes, recovery and builds, without raw diagnostics", async () => {
     const stop = createFieldCheckObserver("local");
     for (const failureCode of Object.values(SYNC_ACK_FAILURE_CODES)) {
@@ -194,6 +235,19 @@ describe("field-check observer", () => {
     expect(submit).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(submit).toHaveBeenCalledTimes(2);
+
+    stop();
+    vi.useRealTimers();
+  });
+
+  it("keeps queued evidence when no valid delivery confirmation is available", async () => {
+    vi.useFakeTimers();
+    submit.mockRejectedValue(new Error("delivery confirmation unavailable"));
+    const stop = createFieldCheckObserver("unconfirmed-build");
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(submit).toHaveBeenCalledOnce();
+    expect(getFieldCheckQueueStatus()).toMatchObject({ available: true, count: 1 });
 
     stop();
     vi.useRealTimers();

@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Health rollup; evidence coverage is reported separately.
+ */
 export type FieldCheckSummaryStatus = typeof FieldCheckSummaryStatus[keyof typeof FieldCheckSummaryStatus];
 
 

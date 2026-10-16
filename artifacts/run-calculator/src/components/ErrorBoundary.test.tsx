@@ -120,6 +120,12 @@ describe("ErrorBoundary recovery actions", () => {
 
     expect(updateAndReload).toHaveBeenCalledOnce();
     expect(reload).toHaveBeenCalledOnce();
+    const attempt = JSON.parse(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1") ?? "null");
+    expect(attempt).toMatchObject({
+      fromBuild: expect.stringMatching(/^[a-f0-9]{1,8}$/),
+      attemptedAt: expect.any(Number),
+    });
+    expect(JSON.stringify(attempt)).not.toMatch(/https|stack|user|device/i);
     expect(vi.mocked(reportIncident)).toHaveBeenCalledWith(expect.objectContaining({
       appVersion: expect.any(String),
       errorMessage: expect.stringContaining("[stale_deployment_asset]"),

@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   claimStaleAssetRecoveryAttempt,
   clearStaleAppShellCaches,
+  consumeStaleAssetRecoveryAttempt,
+  recordStaleAssetRecoveryAttempt,
+  STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS,
   updateAndReload,
 } from "./pwaUpdateRecovery";
 
@@ -17,6 +20,41 @@ describe("claimStaleAssetRecoveryAttempt", () => {
     expect(claimStaleAssetRecoveryAttempt("old-build", storage)).toBe(true);
     expect(claimStaleAssetRecoveryAttempt("old-build", storage)).toBe(false);
     expect(claimStaleAssetRecoveryAttempt("new-build", storage)).toBe(true);
+  });
+});
+
+describe("stale-asset recovery evidence", () => {
+  it("stores only a bounded fingerprint and confirms only a timely different-build startup", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+      removeItem: (key: string) => void values.delete(key),
+    };
+    const attemptedAt = 100_000;
+
+    expect(recordStaleAssetRecoveryAttempt("old-build", storage, attemptedAt)).toBe(true);
+    const raw = values.get("run-calc:stale-asset-recovery-pending:v1")!;
+    expect(raw).not.toContain("old-build");
+    expect(JSON.parse(raw)).toEqual({ fromBuild: expect.stringMatching(/^[a-f0-9]{1,8}$/), attemptedAt });
+    expect(consumeStaleAssetRecoveryAttempt("old-build", storage, attemptedAt + 1000)).toBe(false);
+    expect(values.has("run-calc:stale-asset-recovery-pending:v1")).toBe(false);
+
+    recordStaleAssetRecoveryAttempt("old-build", storage, attemptedAt);
+    expect(consumeStaleAssetRecoveryAttempt("new-build", storage, attemptedAt + 1000)).toBe(true);
+  });
+
+  it("leaves an expired or unavailable update outcome unconfirmed", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+      removeItem: (key: string) => void values.delete(key),
+    };
+    recordStaleAssetRecoveryAttempt("old-build", storage, 10_000);
+    expect(consumeStaleAssetRecoveryAttempt(
+      "new-build", storage, 10_000 + STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS + 1,
+    )).toBe(false);
   });
 });
 

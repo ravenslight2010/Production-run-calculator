@@ -25,77 +25,84 @@ export const FIELD_CHECK_CATALOG = [
     name: "startup",
     label: "Startup",
     observedBy: "browser",
-    evidence: "Authenticated app startup and home bundle timing.",
+    evidence: "Recorded when the authenticated field-check observer starts; home-bundle timing is a separate performance observation.",
     expiresHours: 24,
   },
   {
     name: "foreground-recovery",
     label: "Background / foreground recovery",
     observedBy: "browser",
-    evidence: "A visible session returned after the page was hidden.",
+    evidence: "Recorded when this page becomes visible after the browser reported it hidden.",
     expiresHours: 72,
   },
   {
     name: "sync-acknowledgment",
     label: "Sync acknowledgment",
     observedBy: "browser",
-    evidence: "The server acknowledged a naturally occurring sync write.",
+    evidence: "Recorded when a naturally occurring sync write receives its server acknowledgment.",
     expiresHours: 72,
   },
   {
     name: "production-run-save-sync",
     label: "Production-run save and sync",
     observedBy: "browser",
-    evidence: "Success requires a server acknowledgment; interrupted saves are incomplete, and only bounded durations are recorded.",
+    evidence: "Recorded after a production-run save; success requires server acknowledgment, interruption is incomplete, and only bounded duration/cause codes are retained.",
     expiresHours: 72,
   },
   {
     name: "spec-import-review-commit",
     label: "Spec import parse, review, and commit",
     observedBy: "browser",
-    evidence: "User cancellations are incomplete; success requires persisted changes, and only bounded durations are recorded.",
+    evidence: "Recorded after the spec-import review/commit flow; cancellation is incomplete, success requires persisted changes, and only bounded duration is retained.",
     expiresHours: 168,
   },
   {
     name: "cross-device-convergence",
     label: "Cross-device convergence",
     observedBy: "browser",
-    evidence: "This browser applied a naturally occurring peer update.",
+    evidence: "Recorded when this browser applies a naturally occurring peer or merged update.",
     expiresHours: 168,
   },
   {
     name: "reload-persistence",
-    label: "Reload persistence",
+    label: "Reload startup",
     observedBy: "browser",
-    evidence: "The browser reported a normal reload and the app booted again.",
+    evidence: "Recorded after a full-page reload followed by authenticated observer startup; saved-data persistence is not checked.",
     expiresHours: 168,
   },
   {
     name: "offline-recovery",
     label: "Offline recovery",
     observedBy: "browser",
-    evidence: "The browser returned online after an offline interval.",
+    evidence: "Recorded when the browser reports returning online after an offline interval.",
     expiresHours: 168,
   },
   {
     name: "offline-queue-replay",
     label: "Offline queue replay",
     observedBy: "browser",
-    evidence: "A queued offline operation received a server acknowledgment after connectivity returned.",
+    evidence: "Recorded when a queued offline operation receives server acknowledgment after connectivity returns.",
     expiresHours: 168,
   },
   {
     name: "pwa-update-handoff",
     label: "PWA update handoff",
     observedBy: "browser",
-    evidence: "A service worker update became ready for an explicit staff handoff.",
+    evidence: "Recorded when a service-worker update is ready or an update handoff is initiated; this does not confirm recovery.",
+    expiresHours: 720,
+  },
+  {
+    name: "stale-deployment-recovery",
+    label: "Stale-deployment recovery",
+    observedBy: "browser",
+    evidence: "An update attempt is incomplete until an authenticated startup on a different build; same-build or interrupted attempts remain unconfirmed.",
     expiresHours: 720,
   },
   {
     name: "performance",
     label: "Performance",
     observedBy: "browser",
-    evidence: "Browser timing samples stayed within the reviewed budget.",
+    evidence: "Records home-bundle load, page-navigation load, and API timeout/network timings against their reviewed budgets.",
     expiresHours: 72,
   },
   {
@@ -152,6 +159,7 @@ export const FIELD_CHECK_CATALOG = [
 export type FieldCheckName = (typeof FIELD_CHECK_CATALOG)[number]["name"];
 export type FieldCheckOutcome = "success" | "failure" | "incomplete";
 export type FieldCheckStatus = "healthy" | "collecting" | "needs-review" | "unsupported";
+export type FieldCheckCoverage = "never-observed" | "current" | "stale" | "no-success";
 export type FieldCheckObservedBy = "browser" | "hardware";
 export type FieldCheckMetrics = Record<string, number>;
 
@@ -212,6 +220,9 @@ const observationSchema = z.object({
       Object.hasOwn(value.metrics, "durationMs") &&
       Number.isInteger(value.metrics.sourceCode) && [1, 2, 3, 4].includes(value.metrics.sourceCode!);
     if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected bounded durationMs and an approved performance source only" });
+  }
+  if (value.checkName === "stale-deployment-recovery" && Object.keys(value.metrics).length !== 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Recovery evidence does not accept metrics" });
   }
   if (workflowCheckNames.has(value.checkName as FieldCheckName)) {
     const metrics = value.metrics ?? {};
@@ -336,12 +347,14 @@ export type FieldCheckSummary = {
   name: FieldCheckName;
   label: string;
   status: FieldCheckStatus;
+  coverage: FieldCheckCoverage;
   observedBy: FieldCheckObservedBy;
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
   lastSuccessfulMetrics: FieldCheckMetrics | null;
   lastObservedAt: string | null;
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -390,6 +403,19 @@ export function deriveFieldCheckStatus(input: {
   return input.lastSuccessfulAt && isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())
     ? "healthy"
     : "collecting";
+}
+
+export function deriveFieldCheckCoverage(input: {
+  expiresHours: number | null;
+  lastSuccessfulAt: Date | null;
+  hasObservation: boolean;
+  now?: number;
+}): FieldCheckCoverage {
+  if (!input.hasObservation) return "never-observed";
+  if (!input.lastSuccessfulAt) return "no-success";
+  return input.expiresHours === null ||
+    isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())
+    ? "current" : "stale";
 }
 
 function iso(date: Date | null | undefined): string | null {
@@ -536,15 +562,21 @@ export async function buildFieldChecksReport(now = Date.now(), filters: FieldChe
     const last = rows[0];
     const lastSuccess = rows.find((row) => row.outcome === "success");
     const lastNonSuccess = rows.find((row) => row.outcome !== "success");
-    const filteredIssueStatus = !lastNonSuccess ? null
-      : lastSuccess && lastSuccess.observedAt.getTime() > lastNonSuccess.observedAt.getTime()
-        ? "recovered" : "open";
+    const filteredRecovered = Boolean(
+      lastNonSuccess && lastSuccess &&
+      lastSuccess.observedAt.getTime() > lastNonSuccess.observedAt.getTime(),
+    );
+    const issueRecovered = filtered ? filteredRecovered : issue?.status === "recovered";
     const recentFailures = rows.filter((row) => row.outcome !== "success").slice(0, 5).map(failureDto);
     const incompleteCount = issue?.incompleteCount ?? rows.filter((row) => row.outcome === "incomplete").length;
     const failureCount = issue?.failureCount ?? rows.filter((row) => row.outcome === "failure").length;
     const actionable = (
       failureCount > 0 || incompleteCount >= FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD
-    ) && (filtered ? filteredIssueStatus : issue?.status) !== "recovered";
+    ) && !issueRecovered;
+    const issueStatus: "open" | "recovered" | null = filtered
+      ? !lastNonSuccess ? null : filteredRecovered ? "recovered" : actionable ? "open" : null
+      : issue?.status === "recovered" ? "recovered"
+        : issue?.status === "open" && actionable ? "open" : null;
     const status = deriveFieldCheckStatus({
       observedBy: check.observedBy,
       expiresHours: check.expiresHours,
@@ -556,6 +588,12 @@ export async function buildFieldChecksReport(now = Date.now(), filters: FieldChe
       name: check.name,
       label: check.label,
       status,
+      coverage: deriveFieldCheckCoverage({
+        expiresHours: check.expiresHours,
+        lastSuccessfulAt: lastSuccess?.observedAt ?? null,
+        hasObservation: rows.length > 0,
+        now,
+      }),
       observedBy: check.observedBy,
       evidence: check.evidence,
       expiresHours: check.expiresHours,
@@ -564,13 +602,14 @@ export async function buildFieldChecksReport(now = Date.now(), filters: FieldChe
         ? ((lastSuccess?.metrics ?? null) as FieldCheckMetrics | null)
         : null,
       lastObservedAt: iso(last?.observedAt),
+      lastReceiptDelayMs: last && last.receivedAt.getTime() >= last.observedAt.getTime()
+        ? Math.min(2 * FIELD_CHECK_MAX_CLOCK_SKEW_MS, last.receivedAt.getTime() - last.observedAt.getTime())
+        : null,
       recentFailures,
       failureCount,
       incompleteCount,
       actionable,
-      issueStatus: filtered ? filteredIssueStatus : issue?.status === "open" || issue?.status === "recovered"
-        ? (issue.status as "open" | "recovered")
-        : null,
+      issueStatus,
     };
   });
   const actionableCount = summaries.filter((summary) => summary.actionable).length;

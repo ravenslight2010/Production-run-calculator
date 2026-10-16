@@ -39,6 +39,20 @@ test("manager sees safe sync categories and performance sources from isolated AP
     headers: { Authorization: `Bearer ${account.token}` }, data: { observations: samples },
   });
   expect(result.status()).toBe(202);
+  const recoveryAttempt = await request.post(`${API_BASE}/api/field-checks/observations`, {
+    headers: { Authorization: `Bearer ${account.token}` },
+    data: { observations: [{
+      observationId: uniqueTestId("stale_recovery_attempt"),
+      checkName: "stale-deployment-recovery",
+      checkVersion: "3",
+      outcome: "incomplete",
+      observedAt: new Date().toISOString(),
+      appBuild: "fixture-old-build",
+      deviceCategory: "mobile-chrome",
+      metrics: {},
+    }] },
+  });
+  expect(recoveryAttempt.status()).toBe(202);
   // Passive observations from this test browser must not recover the seeded failures.
   await page.route("**/api/field-checks/observations", (route) => route.fulfill({
     status: 202, json: { accepted: 0, duplicate: 0 },
@@ -50,6 +64,15 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await page.getByRole("menuitem", { name: "Reported issues" }).click();
   const failures = page.getByLabel("Actionable field-check failures");
   await expect(failures).toBeVisible();
+  const fieldChecks = page.getByTestId("field-checks-panel");
+  await expect(fieldChecks.getByText("Evidence coverage: Never observed").first()).toBeVisible();
+  const recoveryCard = fieldChecks.getByText("Stale-deployment recovery", { exact: true }).locator("../..");
+  await expect(recoveryCard).toContainText("Evidence coverage: Observed, no success");
+  await expect(recoveryCard).toContainText("Failures: 0 · Incomplete: 1 · No issue recorded");
+  await expect(recoveryCard).toContainText("Last success: Not yet");
+  await expect(fieldChecks.getByText(/Server receipt delay estimate: Unknown\/unconfirmed/).first()).toBeVisible();
+  await expect(fieldChecks.getByText(/Server receipt delay estimate: .*after the browser timestamp/).first()).toBeVisible();
+  await expect(fieldChecks.getByLabel("This browser's pending field-check delivery")).toContainText("This browser only:");
   for (const label of ["Login or permission rejected", "Server rejected a stale/reset write", "Sync retries exhausted",
     "Home bundle load · 20001 ms", "Page navigation load · 20002 ms", "API timeout / abort · 20003 ms"]) {
     await expect(failures.getByText(label, { exact: true })).toBeVisible();

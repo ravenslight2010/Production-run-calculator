@@ -16,8 +16,73 @@ type ActivateWaitingWorker = (
 export const WORKER_INSTALL_TIMEOUT_MS = 5_000;
 export const STALE_ASSET_RELOAD_FALLBACK_MS = WORKER_INSTALL_TIMEOUT_MS + 1_000;
 const STALE_ASSET_RECOVERY_PREFIX = "run-calc:stale-asset-recovery:";
+const STALE_ASSET_RECOVERY_PENDING_KEY = "run-calc:stale-asset-recovery-pending:v1";
+export const STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS = 30 * 60 * 1000;
 
-type SessionStorageLike = Pick<Storage, "getItem" | "setItem">;
+type SessionStorageLike = Pick<Storage, "getItem" | "setItem"> & Partial<Pick<Storage, "removeItem">>;
+
+function buildFingerprint(buildId: string): string {
+  let hash = 2166136261;
+  for (const char of buildId.slice(0, 100)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return (hash >>> 0).toString(16);
+}
+
+function removePendingAttempt(storage: SessionStorageLike): void {
+  if (storage.removeItem) storage.removeItem(STALE_ASSET_RECOVERY_PENDING_KEY);
+  else storage.setItem(STALE_ASSET_RECOVERY_PENDING_KEY, "");
+}
+
+/**
+ * Stores only a build fingerprint and timestamp so a later authenticated
+ * startup can confirm whether this recovery actually entered a different build.
+ */
+export function recordStaleAssetRecoveryAttempt(
+  buildId: string,
+  storage: SessionStorageLike | undefined =
+    typeof sessionStorage === "undefined" ? undefined : sessionStorage,
+  now = Date.now(),
+): boolean {
+  if (!storage || !buildId.trim() || !Number.isSafeInteger(now)) return false;
+  try {
+    storage.setItem(STALE_ASSET_RECOVERY_PENDING_KEY, JSON.stringify({
+      fromBuild: buildFingerprint(buildId),
+      attemptedAt: now,
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Consumes the one pending marker on the next authenticated startup. A same
+ * build or expired marker is left unconfirmed rather than reported as failure.
+ */
+export function consumeStaleAssetRecoveryAttempt(
+  buildId: string,
+  storage: SessionStorageLike | undefined =
+    typeof sessionStorage === "undefined" ? undefined : sessionStorage,
+  now = Date.now(),
+): boolean {
+  if (!storage) return false;
+  try {
+    const raw = storage.getItem(STALE_ASSET_RECOVERY_PENDING_KEY);
+    if (!raw) return false;
+    removePendingAttempt(storage);
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const marker = parsed as { fromBuild?: unknown; attemptedAt?: unknown };
+    if (Object.keys(marker).sort().join(",") !== "attemptedAt,fromBuild" ||
+        typeof marker.fromBuild !== "string" || !/^[a-f0-9]{1,8}$/.test(marker.fromBuild) ||
+        typeof marker.attemptedAt !== "number" ||
+        !Number.isSafeInteger(marker.attemptedAt)) return false;
+    const age = now - marker.attemptedAt;
+    return age >= 0 && age <= STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS &&
+      marker.fromBuild !== buildFingerprint(buildId);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Allows one service-worker recovery attempt per failing build in a tab.

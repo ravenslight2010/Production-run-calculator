@@ -1566,7 +1566,17 @@ export const submitFieldCheckObservations = async (
     }
     throw error;
   }
-  return (await res.json()) as { accepted: number; duplicate: number };
+  const result: unknown = await res.json();
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("Field-check delivery confirmation unavailable");
+  }
+  const counts = result as { accepted?: unknown; duplicate?: unknown };
+  if (!Number.isSafeInteger(counts.accepted) || (counts.accepted as number) < 0 ||
+      !Number.isSafeInteger(counts.duplicate) || (counts.duplicate as number) < 0 ||
+      (counts.accepted as number) + (counts.duplicate as number) !== observations.length) {
+    throw new Error("Field-check delivery confirmation unavailable");
+  }
+  return { accepted: counts.accepted as number, duplicate: counts.duplicate as number };
 };
 
 export type FieldCheckFailure = {
@@ -1580,12 +1590,14 @@ export type FieldCheckSummary = {
   name: string;
   label: string;
   status: "healthy" | "collecting" | "needs-review" | "unsupported";
+  coverage: "never-observed" | "current" | "stale" | "no-success";
   observedBy: "browser" | "hardware";
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
   lastSuccessfulMetrics: Record<string, number> | null;
   lastObservedAt: string | null;
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;

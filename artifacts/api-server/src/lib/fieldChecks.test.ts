@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD,
   deriveFieldCheckStatus,
+  deriveFieldCheckCoverage,
   HARDWARE_CHECK_VERSION,
   FIELD_CHECK_CATALOG,
   hardwareConfirmationObservation,
@@ -43,6 +44,8 @@ describe("field-check contract", () => {
     expect(accepts("sync-acknowledgment", { failureCode: 1, runId: 123 })).toBe(false);
     expect(accepts("sync-acknowledgment", { failureCode: 1 }, "success")).toBe(false);
     expect(accepts("sync-acknowledgment", {}, "success")).toBe(true);
+    expect(accepts("stale-deployment-recovery", {}, "incomplete")).toBe(true);
+    expect(accepts("stale-deployment-recovery", { durationMs: 1 }, "success")).toBe(false);
     for (const sourceCode of [1, 2, 3, 4]) expect(accepts("performance", { sourceCode, durationMs: 1501 })).toBe(true);
     const invalidMetrics: Array<Record<string, number>> = [
       { sourceCode: 99, durationMs: 1 }, { sourceCode: 1 }, { sourceCode: 1, durationMs: -1 },
@@ -167,6 +170,26 @@ describe("field-check contract", () => {
     expect(FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD).toBe(3);
   });
 
+  it("keeps evidence coverage separate from health", () => {
+    const now = Date.parse("2026-09-03T12:00:00.000Z");
+    expect(deriveFieldCheckCoverage({
+      expiresHours: 24, lastSuccessfulAt: null, hasObservation: false, now,
+    })).toBe("never-observed");
+    expect(deriveFieldCheckCoverage({
+      expiresHours: 24, lastSuccessfulAt: null, hasObservation: true, now,
+    })).toBe("no-success");
+    expect(deriveFieldCheckCoverage({
+      expiresHours: 24, lastSuccessfulAt: new Date(now - 60_000), hasObservation: true, now,
+    })).toBe("current");
+    expect(deriveFieldCheckCoverage({
+      expiresHours: 24, lastSuccessfulAt: new Date(now - 25 * 60 * 60 * 1000), hasObservation: true, now,
+    })).toBe("stale");
+    expect(deriveFieldCheckCoverage({
+      expiresHours: null, lastSuccessfulAt: new Date(now - 5 * 365 * 24 * 60 * 60 * 1000),
+      hasObservation: true, now,
+    })).toBe("current");
+  });
+
   it("accepts only bounded, current hardware confirmations", () => {
     const confirmation = {
       checkName: "touch-accuracy",
@@ -202,6 +225,10 @@ describe("field-check contract", () => {
       observedBy: "browser",
       expiresHours: 168,
     });
+    expect(FIELD_CHECK_CATALOG.find((check) => check.name === "reload-persistence")?.label)
+      .toBe("Reload startup");
+    expect(FIELD_CHECK_CATALOG.find((check) => check.name === "stale-deployment-recovery")?.evidence)
+      .toContain("different build");
     for (const name of ["orientation-layout", "safe-area-clearance", "camera-file-selection", "update-handoff"]) {
       expect(FIELD_CHECK_CATALOG.find((check) => check.name === name)).toMatchObject({
         observedBy: "hardware",

@@ -7,7 +7,8 @@ function fixture() {
     scope: "current facility", generatedAt: at.toISOString(), overallStatus: "needs-review",
     checks: [{
       name: "performance", status: "needs-review", observedBy: "browser",
-      lastObservedAt: at.toISOString(), lastSuccessfulAt: null, lastSuccessfulMetrics: null,
+      coverage: "no-success", lastObservedAt: at.toISOString(), lastReceiptDelayMs: 12_345,
+      lastSuccessfulAt: null, lastSuccessfulMetrics: null,
       failureCount: 1, incompleteCount: 0, actionable: true, issueStatus: "open",
       recentFailures: [{
         outcome: "failure", observedAt: at.toISOString(), appBuild: "local", deviceCategory: "mobile-chrome",
@@ -50,7 +51,8 @@ describe("allowlisted field-check export", () => {
       provenance: { environment: "unknown", buildIdentity: "unknown", missingDetailLabel: "unavailable" },
       checks: [{
         name: "performance", status: "needs-review", observedBy: "browser",
-        lastObservedAt: at.toISOString(), lastSuccessfulAt: "unavailable",
+        coverage: "no-success", lastObservedAt: at.toISOString(), lastReceiptDelayMs: 12_345,
+        lastSuccessfulAt: "unavailable",
         lastSuccessfulDiagnostics: { durationMs: "unavailable", durationAtCeiling: false, failureCode: "unavailable", sourceCode: "unavailable" },
         failureCount: 1, incompleteCount: 0, actionable: true, issueStatus: "open",
         recentFailures: [{
@@ -60,7 +62,8 @@ describe("allowlisted field-check export", () => {
       }],
     });
     expect(output.provenance.notice).toContain("Not release readiness or physical-device verification");
-    expect(Object.keys(output.checks[0])).toEqual(["name", "status", "observedBy", "lastObservedAt",
+    expect(Object.keys(output.checks[0])).toEqual(["name", "status", "coverage", "observedBy", "lastObservedAt",
+      "lastReceiptDelayMs",
       "lastSuccessfulAt", "lastSuccessfulDiagnostics", "failureCount", "incompleteCount", "actionable",
       "issueStatus", "recentFailures"]);
     expect(Object.keys(output.checks[0].recentFailures[0])).toEqual(["outcome", "observedAt",

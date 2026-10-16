@@ -189,6 +189,91 @@ function syncAcknowledgmentObservation(
 }
 
 describe("field-check evidence from two authenticated clients", () => {
+  it("reports never-observed, stale, and no-success coverage with bounded receipt delay", async () => {
+    const now = Date.now();
+    const observedAt = new Date(now - 30_000);
+    const accepted = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        observationId: "coverage-startup-failure",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "failure",
+        observedAt: observedAt.toISOString(),
+        appBuild: "coverage-fixture",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      }],
+    });
+    expect(accepted.status).toBe(202);
+    await db.update(fieldCheckObservationsTable)
+      .set({ receivedAt: new Date(observedAt.getTime() + 12_345) })
+      .where(eq(fieldCheckObservationsTable.observationId, "coverage-startup-failure"));
+    await db.insert(fieldCheckObservationsTable).values({
+      scope: "live",
+      observationId: "coverage-stale-performance",
+      checkName: "foreground-recovery",
+      checkVersion: "1",
+      outcome: "success",
+      observedAt: new Date(now - 73 * 60 * 60 * 1000),
+      receivedAt: new Date(now - 73 * 60 * 60 * 1000 + 3000),
+      appBuild: "coverage-fixture",
+      deviceCategory: "desktop-chrome",
+      metrics: {},
+    });
+
+    const response = await request(MANAGER, "GET", "/api/field-checks");
+    const report = await response.json() as FieldChecksReport;
+    expect(report.checks.find((check) => check.name === "offline-recovery"))
+      .toMatchObject({ coverage: "never-observed", lastReceiptDelayMs: null });
+    expect(report.checks.find((check) => check.name === "startup"))
+      .toMatchObject({ coverage: "no-success", lastReceiptDelayMs: 12_345 });
+    expect(report.checks.find((check) => check.name === "foreground-recovery"))
+      .toMatchObject({ coverage: "stale", lastReceiptDelayMs: 3000 });
+  });
+
+  it("shows a stale-deployment attempt as unconfirmed until a later-build startup succeeds", async () => {
+    const attempt = {
+      observationId: "recovery-attempt-incomplete",
+      checkName: "stale-deployment-recovery",
+      checkVersion: "3",
+      outcome: "incomplete",
+      observedAt: new Date().toISOString(),
+      appBuild: "old-build",
+      deviceCategory: "desktop-chrome",
+      metrics: {},
+    };
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [attempt],
+    })).status).toBe(202);
+    const unconfirmedReport = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(unconfirmedReport.checks.find((check) => check.name === "stale-deployment-recovery")).toMatchObject({
+      coverage: "no-success",
+      failureCount: 0,
+      incompleteCount: 1,
+      actionable: false,
+      issueStatus: null,
+      lastSuccessfulAt: null,
+      recentFailures: [expect.objectContaining({ outcome: "incomplete" })],
+    });
+
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...attempt,
+        observationId: "recovery-attempt-confirmed",
+        outcome: "success",
+        observedAt: new Date(Date.now() + 1000).toISOString(),
+        appBuild: "new-build",
+      }],
+    })).status).toBe(202);
+    const recoveredReport = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(recoveredReport.checks.find((check) => check.name === "stale-deployment-recovery")).toMatchObject({
+      coverage: "current",
+      actionable: false,
+      issueStatus: "recovered",
+      lastSuccessfulAt: expect.any(String),
+    });
+  });
+
   it("retains v3 allowlisted causes and sources through deduplication and recovery", async () => {
     const inputs = [
       ...[1, 2, 3].map((failureCode) => ({

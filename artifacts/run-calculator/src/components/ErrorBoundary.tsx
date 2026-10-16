@@ -6,8 +6,10 @@ import { WEB_BUILD_ID } from "../buildIdentity";
 import {
   claimStaleAssetRecoveryAttempt,
   clearStaleAppShellCaches,
+  recordStaleAssetRecoveryAttempt,
   STALE_ASSET_RELOAD_FALLBACK_MS,
 } from "../pwaUpdateRecovery";
+import { emitFieldCheckSignal } from "../fieldChecks";
 import { getAutomaticUpdateReloadSafety } from "../updateReloadSafety";
 
 type Props = {
@@ -112,6 +114,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     ) return;
 
     this.staleAssetRecoveryStarted = true;
+    this.recordRecoveryAttempt();
     const fallback = window.setTimeout(() => {
       if (canReload()) window.location.reload();
     }, STALE_ASSET_RELOAD_FALLBACK_MS);
@@ -123,6 +126,11 @@ export default class ErrorBoundary extends Component<Props, State> {
     } finally {
       window.clearTimeout(fallback);
     }
+  }
+
+  private recordRecoveryAttempt(): void {
+    recordStaleAssetRecoveryAttempt(WEB_BUILD_ID);
+    emitFieldCheckSignal("stale-deployment-recovery", "incomplete");
   }
 
   render() {
@@ -163,6 +171,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               if (needsUpdate && this.props.onUpdateAndReload) {
                 if (claimStaleAssetRecoveryAttempt(WEB_BUILD_ID)) {
                   if (staleDeploymentAsset) {
+                    this.recordRecoveryAttempt();
                     // If the lazy chunk failed before the registration effect
                     // settled, the normal worker handoff can wait indefinitely
                     // in some browsers. Keep it as the primary path, but make

@@ -27,7 +27,13 @@ import {
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
-import { fieldCheckDiagnosticLabel, productionRunSaveFailureLabel } from "../fieldChecks";
+import {
+  fieldCheckDiagnosticLabel,
+  getFieldCheckQueueStatus,
+  FIELD_CHECK_QUEUE_EVENT,
+  productionRunSaveFailureLabel,
+  type FieldCheckQueueStatus,
+} from "../fieldChecks";
 import { FieldEvidenceFilters } from "./FieldEvidenceFilters";
 import { downloadFieldCheckExport } from "../fieldCheckExport";
 import type { GetFieldChecksParams } from "../inventoryShared";
@@ -264,6 +270,20 @@ const FIELD_STATUS_CLASS: Record<FieldCheckSummary["status"], string> = {
   unsupported: "bg-muted text-muted-foreground",
 };
 
+const FIELD_COVERAGE_LABEL: Record<FieldCheckSummary["coverage"], string> = {
+  "never-observed": "Never observed",
+  current: "Current success",
+  stale: "Stale last success",
+  "no-success": "Observed, no success",
+};
+
+function queueAgeLabel(ageMs: number): string {
+  if (ageMs < 60_000) return "under 1 minute";
+  if (ageMs < 60 * 60_000) return `${Math.floor(ageMs / 60_000)} minutes`;
+  if (ageMs < 24 * 60 * 60_000) return `${Math.floor(ageMs / (60 * 60_000))} hours`;
+  return `${Math.floor(ageMs / (24 * 60 * 60_000))} days`;
+}
+
 function FieldChecksPanel({
   report,
   isLoading,
@@ -283,6 +303,17 @@ function FieldChecksPanel({
 }) {
   const queryClient = useQueryClient();
   const [downloadError, setDownloadError] = useState(false);
+  const [localQueue, setLocalQueue] = useState<FieldCheckQueueStatus>(() => getFieldCheckQueueStatus());
+  useEffect(() => {
+    const refreshLocalQueue = () => setLocalQueue(getFieldCheckQueueStatus());
+    window.addEventListener(FIELD_CHECK_QUEUE_EVENT, refreshLocalQueue);
+    const interval = window.setInterval(refreshLocalQueue, 30_000);
+    refreshLocalQueue();
+    return () => {
+      window.removeEventListener(FIELD_CHECK_QUEUE_EVENT, refreshLocalQueue);
+      window.clearInterval(interval);
+    };
+  }, []);
   function downloadReport() {
     if (!canDownload || !report || isLoading || error) return;
     setDownloadError(false);
@@ -328,10 +359,15 @@ function FieldChecksPanel({
         </div>
         {report && (
           <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${FIELD_STATUS_CLASS[report.overallStatus]}`}>
-            {FIELD_STATUS_LABEL[report.overallStatus]}
+            Overall health: {FIELD_STATUS_LABEL[report.overallStatus]}
           </span>
         )}
       </div>
+      <p className="text-xs text-muted-foreground" aria-label="This browser's pending field-check delivery">
+        This browser only: {localQueue.available
+          ? `${localQueue.count} observation${localQueue.count === 1 ? "" : "s"} queued${localQueue.oldestAgeMs === null ? "" : ` · oldest ${queueAgeLabel(localQueue.oldestAgeMs)}`}. This is not a facility-wide delivery status.`
+          : "queue status unavailable; delivery is unconfirmed."}
+      </p>
       <FieldEvidenceFilters filters={filters} onApply={onApplyFilters} />
       {canDownload && (
         <div className="space-y-1">
@@ -396,7 +432,7 @@ function FieldChecksPanel({
                 <div key={check.name} className="rounded-md border border-border bg-background/50 p-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-foreground">
-                      {check.label}: {check.status === "healthy" ? "Confirmed" : FIELD_STATUS_LABEL[check.status]}
+                       {check.label}: Health {FIELD_STATUS_LABEL[check.status]} · Coverage {FIELD_COVERAGE_LABEL[check.coverage]}
                     </span>
                     {canConfirmHardware && (
                       <div className="flex gap-1">
@@ -421,6 +457,7 @@ function FieldChecksPanel({
                       </div>
                     )}
                   </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{check.evidence}</p>
                   {check.lastObservedAt && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       Last recorded {timeAgo(check.lastObservedAt)}
@@ -477,12 +514,20 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium text-foreground">{check.label}</p>
         <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FIELD_STATUS_CLASS[check.status]}`}>
-          {FIELD_STATUS_LABEL[check.status]}
+          Health: {FIELD_STATUS_LABEL[check.status]}
         </span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">{check.evidence}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">
+        Evidence coverage: {FIELD_COVERAGE_LABEL[check.coverage]}
+      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
         Failures: {check.failureCount} · Incomplete: {check.incompleteCount} · {check.issueStatus === "recovered" ? "Recovered" : check.issueStatus === "open" ? "Open" : "No issue recorded"}
+      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Server receipt delay estimate: {check.lastReceiptDelayMs === null
+          ? "Unknown/unconfirmed"
+          : `${queueAgeLabel(check.lastReceiptDelayMs)} after the browser timestamp (clock differences may affect this estimate)`}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground">
         Last success: {check.lastSuccessfulAt ? timeAgo(check.lastSuccessfulAt) : "Not yet"}
