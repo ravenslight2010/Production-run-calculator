@@ -28,6 +28,7 @@ import {
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
 import { fieldCheckDiagnosticLabel, productionRunSaveFailureLabel } from "../fieldChecks";
+import { downloadFieldCheckExport } from "../fieldCheckExport";
 import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
@@ -266,13 +267,25 @@ function FieldChecksPanel({
   isLoading,
   error,
   canConfirmHardware,
+  canDownload,
 }: {
   report: Awaited<ReturnType<typeof fetchFieldChecks>> | undefined;
   isLoading: boolean;
   error: unknown;
   canConfirmHardware: boolean;
+  canDownload: boolean;
 }) {
   const queryClient = useQueryClient();
+  const [downloadError, setDownloadError] = useState(false);
+  function downloadReport() {
+    if (!canDownload || !report || isLoading || error) return;
+    setDownloadError(false);
+    try {
+      downloadFieldCheckExport(report);
+    } catch {
+      setDownloadError(true);
+    }
+  }
   const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad" | "iphone">("android-phone");
   const confirmation = useMutation({
     mutationFn: (input: {
@@ -313,6 +326,21 @@ function FieldChecksPanel({
           </span>
         )}
       </div>
+      {canDownload && (
+        <div className="space-y-1">
+          <button type="button" onClick={downloadReport}
+            disabled={!report || isLoading || !!error}
+            className="min-h-11 rounded-md border border-border px-3 text-sm disabled:opacity-50">
+            Download safe field-check report
+          </button>
+          <p className="text-xs text-muted-foreground">
+            JSON with bounded diagnostic details only. Advisory, not release or physical-device verification.
+          </p>
+          {downloadError && <p role="alert" className="text-sm text-red-400">
+            Couldn’t download the report. Observations are unchanged. Try again.
+          </p>}
+        </div>
+      )}
       {isLoading ? (
         <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground" role="status">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading field evidence…
@@ -554,6 +582,7 @@ export default function IncidentsTab() {
       <CardContent className="space-y-3">
         <FieldChecksPanel
           report={fieldChecks}
+          canDownload={canReview}
           isLoading={fieldChecksLoading}
           error={fieldChecksError}
           canConfirmHardware={canConfirmHardware}

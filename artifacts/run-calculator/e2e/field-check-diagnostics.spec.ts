@@ -61,6 +61,56 @@ test("manager sees safe sync categories and performance sources from isolated AP
     .toEqual(expect.arrayContaining([expect.objectContaining({ metrics: { sourceCode: 4, durationMs: 20004 } })]));
   expect(await failures.innerText()).not.toMatch(/Bearer|field_view|field_diagnostics|\/api\//);
   await expect(failures.getByText("Unidentified local build; not release verification evidence.").first()).toBeVisible();
+  const downloadButton = page.getByRole("button", { name: "Download safe field-check report" });
+  await expect(downloadButton).toBeVisible();
+  // Launch failure is visible, never deletes or recovers the retained observations.
+  const before = await failures.innerText();
+  await page.evaluate(() => {
+    const original = URL.createObjectURL;
+    URL.createObjectURL = () => { throw new Error("isolated download failure"); };
+    (window as unknown as { restoreExportUrl: () => void }).restoreExportUrl = () => { URL.createObjectURL = original; };
+  });
+  await downloadButton.click();
+  await expect(page.getByRole("alert").filter({ hasText: "Couldn’t download the report" })).toBeVisible();
+  expect(await failures.innerText()).toBe(before);
+  await page.evaluate(() => (window as unknown as { restoreExportUrl: () => void }).restoreExportUrl());
+  const downloadEvent = page.waitForEvent("download");
+  await downloadButton.click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toMatch(/^field-check-report-v1-\d{4}-[\dTZ-]+\.json$/);
+  expect(await download.failure()).toBeNull();
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream!) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString("utf8");
+  expect(Buffer.byteLength(text)).toBeLessThan(64_000);
+  expect(text).not.toMatch(/Bearer|field_view|field_diagnostics|\/api\/|observationId|userId|clientId|runId/);
+  const exported = JSON.parse(text);
+  expect(exported).toMatchObject({ schemaVersion: 1, facilityScope: "current facility",
+    provenance: { kind: "advisory-field-evidence", environment: "unknown", buildIdentity: "unknown" } });
+  expect(exported.checks.find((check: { name: string }) => check.name === "performance").recentFailures)
+    .toEqual(expect.arrayContaining([expect.objectContaining({
+      buildCategory: "unknown-local", deviceCategory: "mobile-chrome",
+      diagnostics: expect.objectContaining({ sourceCode: 4, durationMs: 20004 }),
+    })]));
+  await expect(page.getByRole("alert").filter({ hasText: "Couldn’t download the report" })).toHaveCount(0);
+  expect(await failures.innerText()).toBe(before);
+  const after = await request.get(`${API_BASE}/api/field-checks`, { headers: { Authorization: `Bearer ${account.token}` } });
+  expect((await after.json()).checks).toEqual(data.checks);
   await expect(page.locator("html")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
   await failures.screenshot({ path: testInfo.outputPath("safe-field-check-details.png") });
+  const restricted = await fixtures.createAccount({
+    username: uniqueTestId("field_no_review"), password: "TestPass123!",
+    capabilities: DEFAULT_MANAGER_CAPABILITIES.filter((capability) => capability !== "review-incidents"),
+  });
+  const denied = await request.get(`${API_BASE}/api/field-checks`, {
+    headers: { Authorization: `Bearer ${restricted.token}` },
+  });
+  expect(denied.status()).toBe(403);
+  await page.context().addCookies([{ name: "rc_auth", value: restricted.token, url: API_BASE }]);
+  await page.reload();
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
+  await expect(downloadButton).toHaveCount(0);
+  await page.getByRole("button", { name: /^More/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Reported issues" })).toHaveCount(0);
 });
