@@ -6,6 +6,7 @@ import {
   consumeStaleAssetRecoveryAttempt,
   recordStaleAssetRecoveryAttempt,
   STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS,
+  WORKER_INSTALL_TIMEOUT_MS,
   updateAndReload,
 } from "./pwaUpdateRecovery";
 
@@ -195,6 +196,50 @@ describe("updateAndReload", () => {
 
     expect(activateWaitingWorker).toHaveBeenCalledWith(false, expect.any(Function));
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("falls back to reload when an installing worker never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const reload = vi.fn();
+      const activateWaitingWorker = vi.fn();
+      const stateListeners = new Set<() => void>();
+      const worker = {
+        state: "installing" as ServiceWorkerState,
+        addEventListener: (_type: "statechange", listener: () => void) => {
+          stateListeners.add(listener);
+        },
+        removeEventListener: (_type: "statechange", listener: () => void) => {
+          stateListeners.delete(listener);
+        },
+      };
+      const registration = {
+        waiting: undefined as ServiceWorker | undefined,
+        installing: worker as unknown as ServiceWorker,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        update: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const recovery = updateAndReload(registration, activateWaitingWorker, reload);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(vi.getTimerCount()).toBe(1);
+      expect(reload).not.toHaveBeenCalled();
+      expect(stateListeners.size).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(WORKER_INSTALL_TIMEOUT_MS);
+      await recovery;
+
+      expect(activateWaitingWorker).not.toHaveBeenCalled();
+      expect(reload).toHaveBeenCalledOnce();
+      expect(stateListeners.size).toBe(0);
+      expect(registration.removeEventListener).toHaveBeenCalledOnce();
+      expect(registration.removeEventListener).toHaveBeenCalledWith("updatefound", expect.any(Function));
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls back to reload when an installing worker fails and becomes redundant", async () => {
