@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { QcActivityAuditDetail } from './qcActivityAuditDetail';
 import type { QcAllergenActivityResponseRunsItemAllergenReviewsItemState } from './qcAllergenActivityResponseRunsItemAllergenReviewsItemState';
 
 export type QcAllergenActivityResponseRunsItemAllergenReviewsItem = {
@@ -21,4 +22,6 @@ export type QcAllergenActivityResponseRunsItemAllergenReviewsItem = {
   note: string | null;
   corrected: boolean;
   redactedFields: string[];
+  /** Present only for live-scope QC managers; contains no replacement or redacted source values. */
+  auditDetails?: QcActivityAuditDetail[];
 };

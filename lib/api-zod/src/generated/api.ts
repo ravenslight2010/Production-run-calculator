@@ -1914,6 +1914,7 @@ export const RecordQcWeightCheckResponse = zod.object({
 
 
 /**
+ * Staff see corrected/redacted markers but correction and redaction action rows omit actor IDs and payloads. Live-scope QC managers receive the actor and reason only, never replacement payloads or redacted source values.
  * @summary Read QC records and review state for one run
  */
 
@@ -1962,7 +1963,7 @@ export const GetQcRunResponse = zod.object({
 
 
 /**
- * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance.
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance. Correction and redaction reasons and actor IDs are included only for QC managers reading live-scope data; redacted source values are never included in those audit details.
  * @summary Read recorded allergen activity for one facility production day
  */
 export const GetQcAllergenActivityQueryParams = zod.object({
@@ -2006,7 +2007,13 @@ export const GetQcAllergenActivityResponse = zod.object({
   "missingComponents": zod.array(zod.string()).nullable(),
   "note": zod.string().nullable(),
   "corrected": zod.boolean(),
-  "redactedFields": zod.array(zod.string())
+  "redactedFields": zod.array(zod.string()),
+  "auditDetails": zod.array(zod.object({
+  "action": zod.enum(['correction', 'redaction']),
+  "actorId": zod.string().nullable().describe('Server-recorded actor ID for the audit action'),
+  "reason": zod.string().nullable().describe('Reason recorded with the audit action'),
+  "recordedAt": zod.coerce.date()
+})).optional().describe('Present only for live-scope QC managers; contains no replacement or redacted source values.')
 })),
   "cleaningEvents": zod.array(zod.object({
   "eventId": zod.int(),
@@ -2018,10 +2025,22 @@ export const GetQcAllergenActivityResponse = zod.object({
   "verification": zod.object({
   "status": zod.enum(['recorded', 'not-recorded']),
   "recordedAt": zod.coerce.date().nullable(),
-  "note": zod.string().nullable()
+  "note": zod.string().nullable(),
+  "auditDetails": zod.array(zod.object({
+  "action": zod.enum(['correction', 'redaction']),
+  "actorId": zod.string().nullable().describe('Server-recorded actor ID for the audit action'),
+  "reason": zod.string().nullable().describe('Reason recorded with the audit action'),
+  "recordedAt": zod.coerce.date()
+})).optional().describe('Present only for live-scope QC managers; contains no replacement or redacted source values.')
 }),
   "corrected": zod.boolean(),
-  "redactedFields": zod.array(zod.string())
+  "redactedFields": zod.array(zod.string()),
+  "auditDetails": zod.array(zod.object({
+  "action": zod.enum(['correction', 'redaction']),
+  "actorId": zod.string().nullable().describe('Server-recorded actor ID for the audit action'),
+  "reason": zod.string().nullable().describe('Reason recorded with the audit action'),
+  "recordedAt": zod.coerce.date()
+})).optional().describe('Present only for live-scope QC managers; contains no replacement or redacted source values.')
 }))
 }))
 })
@@ -2200,6 +2219,7 @@ export const SignoffQcRunResponse = zod.object({
 
 
 /**
+ * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
  * @summary Read bounded, facility-scoped QC history
  */
 
@@ -2242,7 +2262,7 @@ export const GetQcHistoryResponse = zod.object({
 
 
 /**
- * QC manager or app manager capability required.
+ * QC manager or app manager capability required. Live-scope exports include correction/redaction actors and reasons but omit replacement payloads and redacted source values. Sandbox exports omit overlay actors and payloads.
  * @summary Export full filtered QC history as CSV
  */
 

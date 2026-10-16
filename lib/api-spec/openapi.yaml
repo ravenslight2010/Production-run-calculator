@@ -1138,6 +1138,11 @@ paths:
       operationId: getQcRun
       tags: [inventory]
       summary: Read QC records and review state for one run
+      description: >-
+        Staff see corrected/redacted markers but correction and redaction action
+        rows omit actor IDs and payloads. Live-scope QC managers receive the
+        actor and reason only, never replacement payloads or redacted source
+        values.
       parameters:
         - name: runId
           in: path
@@ -1164,7 +1169,9 @@ paths:
         reviews. Missing source data is reported as unavailable, not inferred.
         Cleaning and verification appear only as recorded events; this response
         does not determine clearance, violations, near misses, label claims, or
-        compliance.
+        compliance. Correction and redaction reasons and actor IDs are included
+        only for QC managers reading live-scope data; redacted source values are
+        never included in those audit details.
       parameters:
         - name: date
           in: query
@@ -1272,6 +1279,11 @@ paths:
       operationId: getQcHistory
       tags: [inventory]
       summary: Read bounded, facility-scoped QC history
+      description: >-
+        QC staff see corrected/redacted record markers, but correction and
+        redaction action rows omit their actor IDs and payloads. Live-scope QC
+        managers may inspect the recorded actor and reason only; replacement
+        values and redacted source values remain hidden.
       parameters:
         - { name: from, in: query, required: false, schema: { type: string }, description: Inclusive ISO date or timestamp }
         - { name: to, in: query, required: false, schema: { type: string }, description: Inclusive ISO date or timestamp }
@@ -1294,7 +1306,11 @@ paths:
       operationId: exportQcHistoryCsv
       tags: [inventory]
       summary: Export full filtered QC history as CSV
-      description: QC manager or app manager capability required.
+      description: >-
+        QC manager or app manager capability required. Live-scope exports
+        include correction/redaction actors and reasons but omit replacement
+        payloads and redacted source values. Sandbox exports omit overlay
+        actors and payloads.
       parameters:
         - { name: from, in: query, required: false, schema: { type: string } }
         - { name: to, in: query, required: false, schema: { type: string } }
@@ -8200,6 +8216,10 @@ components:
                     note: { type: string, nullable: true }
                     corrected: { type: boolean }
                     redactedFields: { type: array, items: { type: string } }
+                    auditDetails:
+                      type: array
+                      description: Present only for live-scope QC managers; contains no replacement or redacted source values.
+                      items: { $ref: "#/components/schemas/QcActivityAuditDetail" }
               cleaningEvents:
                 type: array
                 items:
@@ -8219,8 +8239,16 @@ components:
                         status: { type: string, enum: [recorded, not-recorded] }
                         recordedAt: { type: string, format: date-time, nullable: true }
                         note: { type: string, nullable: true }
+                        auditDetails:
+                          type: array
+                          description: Present only for live-scope QC managers; contains no replacement or redacted source values.
+                          items: { $ref: "#/components/schemas/QcActivityAuditDetail" }
                     corrected: { type: boolean }
                     redactedFields: { type: array, items: { type: string } }
+                    auditDetails:
+                      type: array
+                      description: Present only for live-scope QC managers; contains no replacement or redacted source values.
+                      items: { $ref: "#/components/schemas/QcActivityAuditDetail" }
     QcActivitySourceStatus:
       type: object
       required: [status, reason, count]
@@ -8228,6 +8256,15 @@ components:
         status: { type: string, enum: [available, unavailable, not-applicable] }
         reason: { type: string, nullable: true }
         count: { type: integer, nullable: true }
+
+    QcActivityAuditDetail:
+      type: object
+      required: [action, actorId, reason, recordedAt]
+      properties:
+        action: { type: string, enum: [correction, redaction] }
+        actorId: { type: string, nullable: true, description: Server-recorded actor ID for the audit action }
+        reason: { type: string, nullable: true, description: Reason recorded with the audit action }
+        recordedAt: { type: string, format: date-time }
 
     QcCorrectionInput:
       type: object

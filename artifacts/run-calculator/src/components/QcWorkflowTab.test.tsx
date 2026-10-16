@@ -188,6 +188,7 @@ type RenderOptions = {
   runStartedAt?: number | null;
   runStoppages?: Array<{ type?: string; startedAt: number; endedAt?: number }>;
   runIsActive?: boolean;
+  canManageQc?: boolean;
 };
 
 function renderTab(options: RenderOptions = {}) {
@@ -207,7 +208,7 @@ function renderTab(options: RenderOptions = {}) {
         substitutions={[]}
         stagedIngredients={stagedIngredients}
         canRecordQc
-        canManageQc={false}
+        canManageQc={currentOptions.canManageQc ?? false}
         canViewPhotos={false}
       />
     </QueryClientProvider>
@@ -233,6 +234,93 @@ describe("QC workflow UI", () => {
     expect(screen.getByText(/does not establish cleaning between runs/)).toBeTruthy();
     expect(screen.queryByText("No derived-footprint review event was recorded for this run."))
       .toBeTruthy();
+  });
+
+  it("shows audit reasons and recorded actors only to QC managers without revealing redacted notes", () => {
+    qcMocks.activity.data = {
+      date: "2026-10-16",
+      sources: {
+        endedRuns: { status: "available", reason: null, count: 1 },
+        activeRuns: { status: "not-applicable", reason: null, count: null },
+        qcEvents: { status: "available", reason: null, count: 3 },
+      },
+      runs: [{
+        runId: "run-1",
+        label: "A Plain",
+        source: "completed-snapshot",
+        manualAllergen: { status: "recorded", value: "none" },
+        derivedReviewState: "reviewed",
+        allergenReviews: [{
+          eventId: 77,
+          recordedAt: "2026-10-16T18:00:00.000Z",
+          state: "reviewed",
+          allergens: ["milk"],
+          unknownIngredients: [],
+          missingComponents: [],
+          note: "[redacted]",
+          corrected: true,
+          redactedFields: ["payload.note"],
+          auditDetails: [
+            {
+              action: "correction",
+              actorId: "qc-manager-id",
+              reason: "Correct the allergen review",
+              recordedAt: "2026-10-16T18:10:00.000Z",
+            },
+            {
+              action: "redaction",
+              actorId: "privacy-manager-id",
+              reason: "Remove private note",
+              recordedAt: "2026-10-16T18:15:00.000Z",
+            },
+          ],
+        }],
+        cleaningEvents: [{
+          eventId: 90,
+          recordedAt: "2026-10-16T18:20:00.000Z",
+          method: "deep",
+          startedAt: "2026-10-16T18:00:00.000Z",
+          endedAt: "2026-10-16T18:10:00.000Z",
+          note: "[redacted]",
+          verification: {
+            status: "recorded",
+            recordedAt: "2026-10-16T18:30:00.000Z",
+            note: null,
+            auditDetails: [{
+              action: "redaction",
+              actorId: "verification-manager-id",
+              reason: "Remove verification note",
+              recordedAt: "2026-10-16T18:35:00.000Z",
+            }],
+          },
+          corrected: true,
+          redactedFields: ["payload.note"],
+          auditDetails: [{
+            action: "correction",
+            actorId: "qc-manager-id",
+            reason: "Correct the cleaning method",
+            recordedAt: "2026-10-16T18:25:00.000Z",
+          }],
+        }],
+      }],
+    } as typeof qcMocks.activity.data;
+
+    renderTab({ canManageQc: true });
+    fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
+    expect(screen.getByText("Correct the allergen review")).toBeTruthy();
+    expect(screen.getByText("Correct the cleaning method")).toBeTruthy();
+    expect(screen.getByText("Remove verification note")).toBeTruthy();
+    expect(document.body.textContent?.match(/qc-manager-id/g)).toHaveLength(2);
+    expect(document.body.textContent).toContain("verification-manager-id");
+    expect(document.body.textContent).toContain("[redacted]");
+    expect(screen.queryByText("Original private note")).toBeNull();
+
+    cleanup();
+    renderTab();
+    fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
+    expect(screen.queryByText("Correct the allergen review")).toBeNull();
+    expect(screen.queryByText("Correct the cleaning method")).toBeNull();
+    expect(screen.queryByText("Remove verification note")).toBeNull();
   });
 
   it("keeps unknown allergen and staging states visible and shows not-evaluated targets", () => {

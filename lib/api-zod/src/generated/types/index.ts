@@ -527,6 +527,8 @@ export * from './profileNameLinkCleanupSummary';
 export * from './profileNameLinkCleanupSummaryRemovedStubs';
 export * from './putSyncToday200';
 export * from './putSyncTodayParams';
+export * from './qcActivityAuditDetail';
+export * from './qcActivityAuditDetailAction';
 export * from './qcActivitySourceStatus';
 export * from './qcActivitySourceStatusStatus';
 export * from './qcAllergenActivityResponse';

@@ -3131,6 +3131,16 @@ describe("QC workflows", () => {
         scope: "sandbox",
         operationId: randomUUID(),
         recordId: randomUUID(),
+        eventType: "redaction",
+        runId,
+        relatedEventId: String(review!.id),
+        actorId: SANDBOX,
+        payload: { reason: "Cross-facility audit secret", fields: ["payload.note"] },
+      },
+      {
+        scope: "sandbox",
+        operationId: randomUUID(),
+        recordId: randomUUID(),
         eventType: "allergen-review",
         runId,
         actorId: SANDBOX,
@@ -3201,8 +3211,15 @@ describe("QC workflows", () => {
         runId: string; label: string; source: string;
         manualAllergen: { status: string; value: string | null };
         derivedReviewState: string;
-        allergenReviews: Array<{ state: string; allergens: string[] | null; note: string | null; corrected: boolean; redactedFields: string[] }>;
-        cleaningEvents: Array<{ method: string | null; note: string | null; verification: { status: string } }>;
+        allergenReviews: Array<{
+          state: string; allergens: string[] | null; note: string | null; corrected: boolean;
+          redactedFields: string[];
+          auditDetails?: Array<{ action: string; actorId: string | null; reason: string | null; recordedAt: string }>;
+        }>;
+        cleaningEvents: Array<{
+          method: string | null; note: string | null; verification: { status: string };
+          auditDetails?: Array<{ action: string; actorId: string | null; reason: string | null; recordedAt: string }>;
+        }>;
       }>;
     };
     expect(liveReport.sources).toMatchObject({
@@ -3232,6 +3249,50 @@ describe("QC workflows", () => {
     });
     expect(JSON.stringify(liveReport)).not.toContain("Sandbox event");
     expect(JSON.stringify(liveReport)).not.toContain(QC_OPERATOR);
+    expect(JSON.stringify(liveReport)).not.toContain("Correct the recorded footprint");
+    expect(JSON.stringify(liveReport)).not.toContain("Cross-facility audit secret");
+
+    const managerResponse = await req(QC_MANAGER, "GET", `/api/qc/allergen-activity?date=${date}`);
+    expect(managerResponse.status).toBe(200);
+    const managerReport = await managerResponse.json() as typeof liveReport;
+    const managerRun = managerReport.runs[0]!;
+    expect(managerRun.allergenReviews[0]).toMatchObject({
+      note: "[redacted]",
+      auditDetails: expect.arrayContaining([
+        {
+          action: "correction",
+          actorId: QC_MANAGER,
+          reason: "Correct the recorded footprint",
+          recordedAt: expect.any(String),
+        },
+        {
+          action: "redaction",
+          actorId: QC_MANAGER,
+          reason: "Privacy request",
+          recordedAt: expect.any(String),
+        },
+      ]),
+    });
+    expect(managerRun.cleaningEvents[0]).toMatchObject({
+      note: "[redacted]",
+      auditDetails: expect.arrayContaining([
+        {
+          action: "correction",
+          actorId: QC_MANAGER,
+          reason: "Correct method",
+          recordedAt: expect.any(String),
+        },
+        {
+          action: "redaction",
+          actorId: QC_MANAGER,
+          reason: "Privacy request",
+          recordedAt: expect.any(String),
+        },
+      ]),
+    });
+    expect(JSON.stringify(managerReport)).not.toContain("Original note");
+    expect(JSON.stringify(managerReport)).not.toContain("Corrected note");
+    expect(JSON.stringify(managerReport)).not.toContain("Cross-facility audit secret");
 
     await db.update(userRolesTable).set({ role: "qc-operator" })
       .where(eq(userRolesTable.userId, SANDBOX));
@@ -3241,6 +3302,14 @@ describe("QC workflows", () => {
         label: "Sandbox Brand Cheese",
         allergenReviews: [expect.objectContaining({ allergens: ["egg"] })],
       })]);
+    await db.update(userRolesTable).set({ role: "qc-manager" })
+      .where(eq(userRolesTable.userId, SANDBOX));
+    const sandboxManagerResponse = await req(SANDBOX, "GET", `/api/qc/allergen-activity?date=${date}`);
+    const sandboxManagerReport = await sandboxManagerResponse.json() as typeof liveReport;
+    expect(sandboxManagerResponse.status).toBe(200);
+    expect(JSON.stringify(sandboxManagerReport)).not.toContain("Correct the recorded footprint");
+    expect(JSON.stringify(sandboxManagerReport)).not.toContain("Cross-facility audit secret");
+    expect(sandboxManagerReport.runs[0]?.allergenReviews[0]?.auditDetails).toBeUndefined();
 
     const today = facilityDate();
     await db.insert(dailySyncTable).values({
@@ -3491,7 +3560,7 @@ describe("QC workflows", () => {
     })).status).toBe(403);
     expect((await req(QC_MANAGER, "POST", `/api/qc/events/${originalId}/corrections`, {
       operationId: randomUUID(), reason: "Correct transcribed lot number",
-      replacement: { lotNumber: "LOT-CORRECTED" },
+      replacement: { lotNumber: "LOT-CORRECTED", note: "Corrected private note" },
     })).status).toBe(201);
     expect((await req(QC_MANAGER, "POST", `/api/qc/events/${originalId}/redactions`, {
       operationId: randomUUID(), reason: "Privacy request for free-text note",
@@ -3500,7 +3569,7 @@ describe("QC workflows", () => {
     const history = await req(QC_OPERATOR, "GET", "/api/qc/history?runId=qc-audit-run");
     const events = (await history.json() as {
       items: Array<{
-        eventType: string; actorId: string; corrected?: boolean;
+        eventType: string; actorId: string | null; corrected?: boolean;
         redactedFields?: string[]; payload: Record<string, unknown>;
       }>;
     }).items;
@@ -3511,7 +3580,99 @@ describe("QC workflows", () => {
       redactedFields: ["payload.note"],
       payload: { lotNumber: "LOT-CORRECTED", note: "[redacted]" },
     });
-    expect(events.filter((event) => event.actorId === QC_MANAGER)).toHaveLength(2);
+    const operatorAuditRows = events.filter((event) =>
+      event.eventType === "correction" || event.eventType === "redaction",
+    );
+    expect(operatorAuditRows).toHaveLength(2);
+    expect(operatorAuditRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: "correction", actorId: null, payload: {} }),
+      expect.objectContaining({ eventType: "redaction", actorId: null, payload: {} }),
+    ]));
+    expect(JSON.stringify(operatorAuditRows)).not.toContain("Correct transcribed lot number");
+    expect(JSON.stringify(operatorAuditRows)).not.toContain("Privacy request for free-text note");
+    expect(JSON.stringify(operatorAuditRows)).not.toContain("LOT-CORRECTED");
+    const managerHistory = await req(QC_MANAGER, "GET", "/api/qc/history?runId=qc-audit-run");
+    const managerAuditRows = ((await managerHistory.json()) as {
+      items: Array<{ eventType: string; actorId: string | null; payload: Record<string, unknown> }>;
+    }).items.filter((event) =>
+      event.eventType === "correction" || event.eventType === "redaction",
+    );
+    expect(managerAuditRows).toHaveLength(2);
+    expect(managerAuditRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventType: "correction",
+        actorId: QC_MANAGER,
+        payload: { reason: "Correct transcribed lot number" },
+      }),
+      expect.objectContaining({
+        eventType: "redaction",
+        actorId: QC_MANAGER,
+        payload: { reason: "Privacy request for free-text note" },
+      }),
+    ]));
+    expect(JSON.stringify(managerAuditRows)).not.toContain("Corrected private note");
+    const operatorRun = await req(QC_OPERATOR, "GET", "/api/qc/runs/qc-audit-run");
+    const operatorRunAuditRows = ((await operatorRun.json()) as {
+      items: Array<{ eventType: string; actorId: string | null; payload: Record<string, unknown> }>;
+    }).items.filter((event) => event.eventType === "correction" || event.eventType === "redaction");
+    expect(operatorRunAuditRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: "correction", actorId: null, payload: {} }),
+      expect.objectContaining({ eventType: "redaction", actorId: null, payload: {} }),
+    ]));
+    const managerRun = await req(QC_MANAGER, "GET", "/api/qc/runs/qc-audit-run");
+    const managerRunAuditRows = ((await managerRun.json()) as {
+      items: Array<{ eventType: string; actorId: string | null; payload: Record<string, unknown> }>;
+    }).items.filter((event) => event.eventType === "correction" || event.eventType === "redaction");
+    expect(managerRunAuditRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventType: "correction",
+        actorId: QC_MANAGER,
+        payload: { reason: "Correct transcribed lot number" },
+      }),
+      expect.objectContaining({
+        eventType: "redaction",
+        actorId: QC_MANAGER,
+        payload: { reason: "Privacy request for free-text note" },
+      }),
+    ]));
+    expect(JSON.stringify(managerRunAuditRows)).not.toContain("Corrected private note");
+    const managerCsv = await req(QC_MANAGER, "GET", "/api/qc/history.csv?runId=qc-audit-run");
+    const managerCsvText = await managerCsv.text();
+    expect(managerCsv.status).toBe(200);
+    expect(managerCsvText).toContain("Correct transcribed lot number");
+    expect(managerCsvText).toContain("Privacy request for free-text note");
+    expect(managerCsvText).toContain("[redacted]");
+    expect(managerCsvText).not.toContain("Free-text note");
+    expect(managerCsvText).not.toContain("Corrected private note");
+    const [sandboxTarget] = await db.insert(qcWorkflowEventsTable).values({
+      scope: "sandbox",
+      operationId: randomUUID(),
+      recordId: randomUUID(),
+      eventType: "lot",
+      runId: "qc-audit-run",
+      actorId: QC_OPERATOR,
+      payload: { lotNumber: "SANDBOX-LOT" },
+    }).returning({ id: qcWorkflowEventsTable.id });
+    await db.insert(qcWorkflowEventsTable).values({
+      scope: "sandbox",
+      operationId: randomUUID(),
+      recordId: randomUUID(),
+      eventType: "correction",
+      runId: "qc-audit-run",
+      relatedEventId: String(sandboxTarget!.id),
+      actorId: QC_MANAGER,
+      payload: { reason: "Sandbox-only correction reason", replacement: { lotNumber: "SANDBOX-CORRECTED" } },
+    });
+    await db.update(userRolesTable).set({ role: "qc-manager" })
+      .where(eq(userRolesTable.userId, SANDBOX));
+    const sandboxManagerHistory = await req(SANDBOX, "GET", "/api/qc/history?runId=qc-audit-run");
+    const sandboxAuditRows = ((await sandboxManagerHistory.json()) as {
+      items: Array<{ eventType: string; actorId: string | null; payload: Record<string, unknown> }>;
+    }).items.filter((event) => event.eventType === "correction" || event.eventType === "redaction");
+    expect(sandboxAuditRows).toEqual([
+      expect.objectContaining({ eventType: "correction", actorId: null, payload: {} }),
+    ]);
+    expect(JSON.stringify(sandboxAuditRows)).not.toContain("Sandbox-only correction reason");
     const updateError = await db.update(qcWorkflowEventsTable).set({ actorId: MANAGER })
       .where(eq(qcWorkflowEventsTable.id, originalId))
       .then(() => null, (error: unknown) => error);

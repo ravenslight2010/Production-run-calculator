@@ -696,7 +696,10 @@ export default function QcWorkflowTab({
       </header>
 
       {showDailyActivity ? (
-        <QcAllergenActivityReport canRead={canRecordQc || canManageQc} />
+        <QcAllergenActivityReport
+          canRead={canRecordQc || canManageQc}
+          canManageQc={canManageQc}
+        />
       ) : (
       <>
       {!canRecordQc && !canManageQc ? (

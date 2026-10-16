@@ -51,13 +51,46 @@ function RecordedAt({ value }: { value: string }) {
   );
 }
 
-export default function QcAllergenActivityReport({ canRead }: { canRead: boolean }) {
+type AuditDetail = {
+  action: "correction" | "redaction";
+  actorId: string | null;
+  reason: string | null;
+  recordedAt: string;
+};
+
+function AuditDetails({ entries }: { entries: AuditDetail[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <ul className="mt-2 space-y-2 border-l-2 border-amber-400/70 pl-3" aria-label="Correction and redaction audit details">
+      {entries.map((entry, index) => (
+        <li key={`${entry.action}-${entry.recordedAt}-${index}`} className="text-xs">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold text-amber-900 dark:text-amber-100">
+            <span>{entry.action === "correction" ? "Correction reason" : "Redaction reason"}</span>
+            <RecordedAt value={entry.recordedAt} />
+          </div>
+          <p className="mt-1 whitespace-pre-wrap break-words">{entry.reason || "No reason recorded"}</p>
+          <p className="mt-1 break-all text-[11px] text-muted-foreground">
+            Recorded by: {entry.actorId || "Actor unavailable"}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default function QcAllergenActivityReport({
+  canRead,
+  canManageQc,
+}: {
+  canRead: boolean;
+  canManageQc: boolean;
+}) {
   const [selectedDate, setSelectedDate] = useState("");
   const params: GetQcAllergenActivityParams = selectedDate ? { date: selectedDate } : {};
   const query = useGetQcAllergenActivity(params, {
     query: {
       enabled: canRead,
-      queryKey: getGetQcAllergenActivityQueryKey(params),
+      queryKey: [...getGetQcAllergenActivityQueryKey(params), canManageQc ? "manager-audit" : "staff"],
     },
   });
   const report = query.data;
@@ -168,6 +201,7 @@ export default function QcAllergenActivityReport({ canRead }: { canRead: boolean
                               {review.redactedFields.length > 0 ? "Redaction applied" : ""}
                             </p>
                           )}
+                          {canManageQc && review.auditDetails && <AuditDetails entries={review.auditDetails} />}
                         </li>
                       ))}
                     </ul>
@@ -206,6 +240,7 @@ export default function QcAllergenActivityReport({ canRead }: { canRead: boolean
                                 : "No verification event recorded"}
                             </p>
                             {event.verification.note && <p className="mt-1 break-words text-xs text-muted-foreground">Verification note: {event.verification.note}</p>}
+                            {canManageQc && event.verification.auditDetails && <AuditDetails entries={event.verification.auditDetails} />}
                             {(event.corrected || event.redactedFields.length > 0) && (
                               <p className="mt-2 text-[10px] font-semibold text-amber-800 dark:text-amber-200">
                                 {event.corrected ? "Audited correction applied" : ""}
@@ -213,6 +248,7 @@ export default function QcAllergenActivityReport({ canRead }: { canRead: boolean
                                 {event.redactedFields.length > 0 ? "Redaction applied" : ""}
                               </p>
                             )}
+                            {canManageQc && event.auditDetails && <AuditDetails entries={event.auditDetails} />}
                           </li>
                         ))}
                       </ul>

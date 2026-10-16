@@ -32,6 +32,12 @@ const MAX_RUN_WEIGHT_CHECK_EVENTS = 5_000;
 const MAX_ALLERGEN_ACTIVITY_RUNS = 600;
 const MAX_ALLERGEN_ACTIVITY_EVENTS = 5_000;
 const MAX_EXPORT_PAGE = 500;
+type QcAuditDetail = {
+  action: "correction" | "redaction";
+  actorId: string | null;
+  reason: string | null;
+  recordedAt: string;
+};
 const UNIT = z.enum(["oz", "g", "lb", "kg"]);
 const STATION = z.enum(["dough", "sauce", "frontline", "warehouse", "packaging", "other"]);
 const CHECK_TYPE = z.enum(["pre-run", "30-minute"]);
@@ -486,7 +492,22 @@ function csvCell(value: unknown): string {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-async function hydrateEvents(rows: QcWorkflowEventRow[]) {
+function projectAuditActionForReader<
+  T extends { eventType: string; actorId: string | null; payload: Record<string, unknown> },
+>(event: T, includeAuditDetails: boolean): T {
+  if (event.eventType !== "correction" && event.eventType !== "redaction") return event;
+  if (!includeAuditDetails) {
+    return { ...event, actorId: null, payload: {} } as T;
+  }
+  return {
+    ...event,
+    payload: typeof event.payload.reason === "string"
+      ? { reason: event.payload.reason }
+      : {},
+  } as T;
+}
+
+async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = false) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.id));
   const overlays = await db.select().from(qcWorkflowEventsTable).where(and(
@@ -496,9 +517,23 @@ async function hydrateEvents(rows: QcWorkflowEventRow[]) {
   const corrections = new Map<string, Record<string, unknown>>();
   const correctedStations = new Map<string, string>();
   const redactions = new Map<string, Set<string>>();
+  const auditDetails = new Map<string, QcAuditDetail[]>();
   for (const overlay of overlays) {
     const target = overlay.relatedEventId;
     if (!target) continue;
+    if (
+      includeAuditDetails &&
+      (overlay.eventType === "correction" || overlay.eventType === "redaction")
+    ) {
+      const details = auditDetails.get(target) ?? [];
+      details.push({
+        action: overlay.eventType,
+        actorId: overlay.actorId,
+        reason: typeof overlay.payload.reason === "string" ? overlay.payload.reason : null,
+        recordedAt: overlay.createdAt.toISOString(),
+      });
+      auditDetails.set(target, details);
+    }
     if (overlay.eventType === "correction") {
       const replacement = overlay.payload.replacement;
       if (replacement && typeof replacement === "object" && !Array.isArray(replacement)) {
@@ -526,6 +561,7 @@ async function hydrateEvents(rows: QcWorkflowEventRow[]) {
       payload: Record<string, unknown>;
       redactedFields?: string[];
       corrected?: boolean;
+      auditDetails?: QcAuditDetail[];
     };
     const replacement = corrections.get(String(row.id));
     if (replacement) {
@@ -557,6 +593,8 @@ async function hydrateEvents(rows: QcWorkflowEventRow[]) {
     if (fields?.has("payload.note")) output.payload = { ...output.payload, note: "[redacted]" };
     if (fields?.has("payload.lotNumber")) output.payload = { ...output.payload, lotNumber: "[redacted]" };
     if (fields?.size) output.redactedFields = [...fields];
+    const details = auditDetails.get(String(row.id));
+    if (details?.length) output.auditDetails = details;
     return output;
   });
 }
@@ -840,7 +878,11 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
       ));
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
-    const items = await hydrateEvents(pageRows);
+    const includeAuditRows =
+      scope === "live" && req.capabilities?.includes("manage-qc") === true;
+    const items = (await hydrateEvents(pageRows)).map((event) =>
+      projectAuditActionForReader(event, includeAuditRows),
+    );
     const weightCheckEventsComplete = weightRows.length <= MAX_RUN_WEIGHT_CHECK_EVENTS;
     const hydratedWeightRows = await hydrateEvents(weightRows.slice(0, MAX_RUN_WEIGHT_CHECK_EVENTS));
     const weightCheckEvents = hydratedWeightRows.flatMap((event) => {
@@ -891,6 +933,7 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
   const date = parsed.data.date ?? facilityDate();
   const today = facilityDate();
   const scope = currentScope();
+  const includeAuditDetails = scope === "live" && req.capabilities?.includes("manage-qc") === true;
   try {
     const [completionRows, activeRows] = await Promise.all([
       db.select().from(completedRunHistoryTable).where(and(
@@ -984,7 +1027,7 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
         eventsStatus = "unavailable";
         eventsReason = "event-limit-exceeded";
       } else {
-        activityEvents = await hydrateEvents(eventRows);
+        activityEvents = await hydrateEvents(eventRows, includeAuditDetails);
       }
     }
 
@@ -999,6 +1042,7 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
             ...review,
             corrected: event.corrected === true,
             redactedFields: event.redactedFields ?? [],
+            ...(event.auditDetails ? { auditDetails: event.auditDetails } : {}),
           };
         })
         : [];
@@ -1019,9 +1063,11 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
               status: verification ? "recorded" as const : "not-recorded" as const,
               recordedAt: verification?.createdAt ?? null,
               note: typeof verification?.payload.note === "string" ? verification.payload.note : null,
+              ...(verification?.auditDetails ? { auditDetails: verification.auditDetails } : {}),
             },
             corrected: event.corrected === true,
             redactedFields: event.redactedFields ?? [],
+            ...(event.auditDetails ? { auditDetails: event.auditDetails } : {}),
           };
         })
         : [];
@@ -1254,7 +1300,8 @@ router.get("/qc/history", requireCapability("record-qc"), async (req, res) => {
     return;
   }
   try {
-    const conditions = [eq(qcWorkflowEventsTable.scope, currentScope())];
+    const scope = currentScope();
+    const conditions = [eq(qcWorkflowEventsTable.scope, scope)];
     if (filters.runId) conditions.push(eq(qcWorkflowEventsTable.runId, filters.runId));
     if (filters.ingredientId) conditions.push(eq(qcWorkflowEventsTable.ingredientId, filters.ingredientId));
     if (filters.station) conditions.push(eq(qcWorkflowEventsTable.station, filters.station));
@@ -1267,8 +1314,13 @@ router.get("/qc/history", requireCapability("record-qc"), async (req, res) => {
       .limit(filters.limit + 1);
     const hasMore = rows.length > filters.limit;
     const pageRows = rows.slice(0, filters.limit);
+    const hydratedEvents = await hydrateEvents(pageRows);
+    const includeAuditRows =
+      scope === "live" && req.capabilities?.includes("manage-qc") === true;
     res.json({
-      items: await hydrateEvents(pageRows),
+      items: hydratedEvents.map((event) =>
+        projectAuditActionForReader(event, includeAuditRows),
+      ),
       hasMore,
       nextCursor: hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null,
     });
@@ -1301,6 +1353,8 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
       "payload",
     ].join(",") + "\r\n");
     let cursor: number | undefined;
+    const includeAuditDetails =
+      currentScope() === "live" && req.capabilities?.includes("manage-qc") === true;
     for (;;) {
       const conditions = [eq(qcWorkflowEventsTable.scope, currentScope())];
       if (filters.runId) conditions.push(eq(qcWorkflowEventsTable.runId, filters.runId));
@@ -1315,7 +1369,8 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
         .limit(MAX_EXPORT_PAGE);
       if (rows.length === 0) break;
       const hydrated = await hydrateEvents(rows);
-      for (const event of hydrated) {
+      for (const hydratedEvent of hydrated) {
+        const event = projectAuditActionForReader(hydratedEvent, includeAuditDetails);
         res.write([
           event.id,
           event.eventType,

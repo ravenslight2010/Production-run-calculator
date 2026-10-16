@@ -3335,6 +3335,29 @@ export const QcAllergenActivityResponseRunsItemAllergenReviewsItemState = {
   unknown: 'unknown',
 } as const;
 
+export type QcActivityAuditDetailAction = typeof QcActivityAuditDetailAction[keyof typeof QcActivityAuditDetailAction];
+
+
+export const QcActivityAuditDetailAction = {
+  correction: 'correction',
+  redaction: 'redaction',
+} as const;
+
+export interface QcActivityAuditDetail {
+  action: QcActivityAuditDetailAction;
+  /**
+     * Server-recorded actor ID for the audit action
+     * @nullable
+     */
+  actorId: string | null;
+  /**
+     * Reason recorded with the audit action
+     * @nullable
+     */
+  reason: string | null;
+  recordedAt: string;
+}
+
 export type QcAllergenActivityResponseRunsItemAllergenReviewsItem = {
   eventId: number;
   recordedAt: string;
@@ -3349,6 +3372,8 @@ export type QcAllergenActivityResponseRunsItemAllergenReviewsItem = {
   note: string | null;
   corrected: boolean;
   redactedFields: string[];
+  /** Present only for live-scope QC managers; contains no replacement or redacted source values. */
+  auditDetails?: QcActivityAuditDetail[];
 };
 
 export type QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus = typeof QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus[keyof typeof QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus];
@@ -3365,6 +3390,8 @@ export type QcAllergenActivityResponseRunsItemCleaningEventsItemVerification = {
   recordedAt: string | null;
   /** @nullable */
   note: string | null;
+  /** Present only for live-scope QC managers; contains no replacement or redacted source values. */
+  auditDetails?: QcActivityAuditDetail[];
 };
 
 export type QcAllergenActivityResponseRunsItemCleaningEventsItem = {
@@ -3381,6 +3408,8 @@ export type QcAllergenActivityResponseRunsItemCleaningEventsItem = {
   verification: QcAllergenActivityResponseRunsItemCleaningEventsItemVerification;
   corrected: boolean;
   redactedFields: string[];
+  /** Present only for live-scope QC managers; contains no replacement or redacted source values. */
+  auditDetails?: QcActivityAuditDetail[];
 };
 
 export type QcAllergenActivityResponseRunsItem = {
