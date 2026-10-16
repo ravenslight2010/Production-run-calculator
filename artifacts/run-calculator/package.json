@@ -146,6 +146,7 @@
     "@workspace/downtime-trends": "workspace:*",
     "@workspace/factory-constants": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
+    "@workspace/field-check-contract": "workspace:*",
     "@workspace/formula-guard": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/ingredient-catalog": "workspace:*",

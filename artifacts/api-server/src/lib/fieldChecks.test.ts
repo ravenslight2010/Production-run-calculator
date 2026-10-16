@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD,
+  FIELD_CHECK_MAX_CLOCK_SKEW_MS,
   deriveFieldCheckStatus,
   deriveFieldCheckCoverage,
   HARDWARE_CHECK_VERSION,
@@ -23,6 +24,38 @@ const validObservation = {
 };
 
 describe("field-check contract", () => {
+  it("preserves the inclusive ±clock-skew acceptance boundary", () => {
+    const now = Date.parse("2026-10-16T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const validateAtOffset = (offsetMs: number) => validateFieldCheckBatch({
+        observations: [{
+          ...validObservation,
+          observedAt: new Date(now + offsetMs).toISOString(),
+        }],
+      }).ok;
+
+      expect(validateAtOffset(-FIELD_CHECK_MAX_CLOCK_SKEW_MS)).toBe(true);
+      expect(validateAtOffset(FIELD_CHECK_MAX_CLOCK_SKEW_MS)).toBe(true);
+      expect(validateAtOffset(-FIELD_CHECK_MAX_CLOCK_SKEW_MS - 1)).toBe(false);
+      expect(validateAtOffset(FIELD_CHECK_MAX_CLOCK_SKEW_MS + 1)).toBe(false);
+
+      const validateHardwareAtOffset = (offsetMs: number) => validateHardwareConfirmation({
+        checkName: "touch-accuracy",
+        checkVersion: HARDWARE_CHECK_VERSION,
+        outcome: "success",
+        observedAt: new Date(now + offsetMs).toISOString(),
+        deviceCategory: "android-tablet",
+      }).ok;
+      expect(validateHardwareAtOffset(-FIELD_CHECK_MAX_CLOCK_SKEW_MS)).toBe(true);
+      expect(validateHardwareAtOffset(FIELD_CHECK_MAX_CLOCK_SKEW_MS)).toBe(true);
+      expect(validateHardwareAtOffset(FIELD_CHECK_MAX_CLOCK_SKEW_MS + 1)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("accepts only bounded exact scalar report filters", () => {
     for (const filters of [{}, { appBuild: "local" }, { appBuild: "x".repeat(100), deviceCategory: "mobile-safari" }]) {
       expect(fieldCheckFiltersSchema.safeParse(filters).success).toBe(true);

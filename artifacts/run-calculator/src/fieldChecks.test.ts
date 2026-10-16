@@ -148,11 +148,80 @@ describe("field-check observer", () => {
     expect(getFieldCheckQueueStatus(now)).toEqual({
       available: true,
       count: 2,
-      retryableCount: 1,
-      expiredCount: 1,
+      retryableCount: 2,
+      expiredCount: 0,
       displacedCount: 0,
       oldestAgeMs: FIELD_CHECK_QUEUE_MAX_AGE_MS,
     });
+  });
+
+  it("matches the server's inclusive clock-window boundary in both directions", () => {
+    const now = Date.now();
+    const makeObservation = (offsetMs: number, observationId: string) => ({
+      observationId,
+      checkName: "startup",
+      checkVersion: "3",
+      outcome: "success",
+      observedAt: new Date(now + offsetMs).toISOString(),
+      appBuild: "test-build",
+      deviceCategory: "desktop-chrome",
+      metrics: {},
+    });
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify([
+      makeObservation(-FIELD_CHECK_QUEUE_MAX_AGE_MS, "client:past-boundary"),
+      makeObservation(FIELD_CHECK_QUEUE_MAX_AGE_MS, "client:future-boundary"),
+      makeObservation(-FIELD_CHECK_QUEUE_MAX_AGE_MS - 1, "client:past-outside"),
+      makeObservation(FIELD_CHECK_QUEUE_MAX_AGE_MS + 1, "client:future-outside"),
+    ]));
+
+    expect(getFieldCheckQueueStatus(now)).toMatchObject({
+      count: 4,
+      retryableCount: 2,
+      expiredCount: 2,
+    });
+  });
+
+  it("never submits queued diagnostics outside the server's clock window", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const outOfWindow = [
+      {
+        observationId: "client:past-outside",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now - FIELD_CHECK_QUEUE_MAX_AGE_MS - 1).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      },
+      {
+        observationId: "client:future-outside",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now + FIELD_CHECK_QUEUE_MAX_AGE_MS + 1).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      },
+    ];
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify(outOfWindow));
+    let stop = () => {};
+
+    try {
+      stop = createFieldCheckObserver("test-build");
+      await vi.advanceTimersByTimeAsync(0);
+
+      const submittedIds = submit.mock.calls.flatMap((call) => call[0])
+        .map((item: { observationId: string }) => item.observationId);
+      expect(submittedIds).not.toContain("client:past-outside");
+      expect(submittedIds).not.toContain("client:future-outside");
+      expect(getFieldCheckQueueStatus()).toMatchObject({ expiredCount: 2 });
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the local queue bounded and reports observations displaced by its cap", () => {
@@ -301,7 +370,7 @@ describe("field-check observer", () => {
     vi.useRealTimers();
   });
 
-  it("stops retrying at the timestamp-validity boundary but keeps expired evidence locally", async () => {
+  it("retries through the inclusive timestamp boundary and keeps expired evidence locally", async () => {
     vi.useFakeTimers();
     const now = Date.now();
     const stop = createFieldCheckObserver("test-build");
@@ -322,7 +391,7 @@ describe("field-check observer", () => {
     ]));
 
     // First attempt occurs on the observer's two-minute interval. Its retry
-    // then runs once before expiry, and the next timer lands at expiry.
+    // runs before expiry; the following timer retries at the inclusive boundary.
     await vi.advanceTimersByTimeAsync(120_000);
     expect(submit).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(30_000);
@@ -330,7 +399,7 @@ describe("field-check observer", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.advanceTimersByTimeAsync(5 * 60_000);
 
-    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenCalledTimes(3);
     expect(getFieldCheckQueueStatus()).toMatchObject({
       available: true,
       count: 1,

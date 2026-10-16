@@ -1,4 +1,8 @@
 import { useEffect } from "react";
+import {
+  FIELD_CHECK_MAX_CLOCK_SKEW_MS,
+  isFieldCheckTimestampOutsideClockWindow,
+} from "@workspace/field-check-contract";
 import { submitFieldCheckObservations } from "./inventoryShared";
 import { useAuth } from "./useAuth";
 import { AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS, PERFORMANCE_BUDGETS } from "./performanceDiagnostics";
@@ -67,9 +71,8 @@ const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
 const defaultRetryMs = 30_000;
-// Keep telemetry retries within the server's accepted ±24-hour observation
-// timestamp window. Expired rows stay local and visible, but are never resent.
-export const FIELD_CHECK_QUEUE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Expired rows stay local and visible, but are never resent.
+export const FIELD_CHECK_QUEUE_MAX_AGE_MS = FIELD_CHECK_MAX_CLOCK_SKEW_MS;
 const workflowChecks = new Set<CheckName>([
   "production-run-save-sync",
   "spec-import-review-commit",
@@ -184,7 +187,7 @@ function isFieldCheckObservationExpired(
   now: number,
 ): boolean {
   const observedAt = Date.parse(observation.observedAt);
-  return !Number.isFinite(observedAt) || now - observedAt >= FIELD_CHECK_QUEUE_MAX_AGE_MS;
+  return !Number.isFinite(observedAt) || isFieldCheckTimestampOutsideClockWindow(observedAt, now);
 }
 
 function getQueueDisplacementCount(): number {

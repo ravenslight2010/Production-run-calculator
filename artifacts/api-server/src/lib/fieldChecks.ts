@@ -8,6 +8,10 @@ import {
 } from "@workspace/db";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import {
+  FIELD_CHECK_MAX_CLOCK_SKEW_MS,
+  isFieldCheckTimestampOutsideClockWindow,
+} from "@workspace/field-check-contract";
 import { currentScope } from "./requestScope";
 
 export const FIELD_CHECK_VERSION = "3";
@@ -17,7 +21,7 @@ export const FIELD_CHECK_MAX_BATCH = 20;
 export const FIELD_CHECK_MAX_METRICS = 8;
 export const FIELD_CHECK_MAX_OBSERVATION_BYTES = 24_000;
 export const FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD = 3;
-export const FIELD_CHECK_MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+export { FIELD_CHECK_MAX_CLOCK_SKEW_MS };
 export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
 
 export const FIELD_CHECK_CATALOG = [
@@ -277,7 +281,7 @@ export function validateHardwareConfirmation(body: unknown): {
   const parsed = hardwareConfirmationSchema.safeParse(body);
   if (!parsed.success) return { ok: false, error: "Invalid hardware-check confirmation" };
   const observedAt = Date.parse(parsed.data.observedAt);
-  if (Math.abs(Date.now() - observedAt) > FIELD_CHECK_MAX_CLOCK_SKEW_MS) {
+  if (isFieldCheckTimestampOutsideClockWindow(observedAt, Date.now())) {
     return { ok: false, error: "Observation timestamp is outside the accepted clock window" };
   }
   return { ok: true, data: parsed.data };
@@ -324,7 +328,7 @@ export function validateFieldCheckBatch(body: unknown): {
   const now = Date.now();
   if (parsed.data.some((observation) => {
     const observedAt = Date.parse(observation.observedAt);
-    return Math.abs(now - observedAt) > FIELD_CHECK_MAX_CLOCK_SKEW_MS;
+    return isFieldCheckTimestampOutsideClockWindow(observedAt, now);
   })) {
     return { ok: false, error: "Observation timestamp is outside the accepted clock window" };
   }

@@ -26,6 +26,9 @@
       "path": "../../lib/day-summary"
     },
     {
+      "path": "../../lib/field-check-contract"
+    },
+    {
       "path": "../../lib/db"
     },
     {

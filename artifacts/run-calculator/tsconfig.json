@@ -49,6 +49,9 @@
       "path": "../../lib/factory-constants"
     },
     {
+      "path": "../../lib/field-check-contract"
+    },
+    {
       "path": "../../lib/freezer-pull"
     },
     {

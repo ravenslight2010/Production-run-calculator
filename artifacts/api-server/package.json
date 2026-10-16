@@ -40,6 +40,7 @@
     "@workspace/cycle-count": "workspace:*",
     "@workspace/day-summary": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/field-check-contract": "workspace:*",
     "@workspace/factory-constants": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/incident-cluster": "workspace:*",
