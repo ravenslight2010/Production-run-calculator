@@ -363,9 +363,13 @@ function FieldChecksPanel({
           </span>
         )}
       </div>
-      <p className="text-xs text-muted-foreground" aria-label="This browser's pending field-check delivery">
+      <p className="text-xs text-muted-foreground" aria-label="This browser's local field-check delivery queue">
         This browser only: {localQueue.available
-          ? `${localQueue.count} observation${localQueue.count === 1 ? "" : "s"} queued${localQueue.oldestAgeMs === null ? "" : ` · oldest ${queueAgeLabel(localQueue.oldestAgeMs)}`}. This is not a facility-wide delivery status.`
+          ? `${localQueue.count} observation${localQueue.count === 1 ? "" : "s"} retained locally · ${localQueue.retryableCount} eligible for delivery${localQueue.expiredCount > 0
+            ? ` · ${localQueue.expiredCount} expired, still unconfirmed, and not retried`
+            : ""}${localQueue.displacedCount > 0
+            ? ` · ${localQueue.displacedCount} earlier observation${localQueue.displacedCount === 1 ? "" : "s"} displaced by the browser queue limit; delivery is unconfirmed`
+            : ""}${localQueue.oldestAgeMs === null ? "" : ` · oldest ${queueAgeLabel(localQueue.oldestAgeMs)}`}. This is not a facility-wide delivery status.`
           : "queue status unavailable; delivery is unconfirmed."}
       </p>
       <FieldEvidenceFilters filters={filters} onApply={onApplyFilters} />

@@ -5,6 +5,7 @@ import {
   FIELD_CHECK_SIGNAL_EVENT,
   FIELD_CHECK_QUEUE_EVENT,
   getFieldCheckQueueStatus,
+  FIELD_CHECK_QUEUE_MAX_AGE_MS,
   FIELD_CHECK_CATALOG,
   productionRunSaveFailureLabel,
   PRODUCTION_RUN_SAVE_FAILURE_CODES,
@@ -133,8 +134,55 @@ describe("field-check observer", () => {
         deviceCategory: "desktop-chrome",
         metrics: {},
       },
+      {
+        observationId: "client:sync:expired",
+        checkName: "sync-acknowledgment",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now - FIELD_CHECK_QUEUE_MAX_AGE_MS).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      },
     ]));
-    expect(getFieldCheckQueueStatus(now)).toEqual({ available: true, count: 1, oldestAgeMs: 90_000 });
+    expect(getFieldCheckQueueStatus(now)).toEqual({
+      available: true,
+      count: 2,
+      retryableCount: 1,
+      expiredCount: 1,
+      displacedCount: 0,
+      oldestAgeMs: FIELD_CHECK_QUEUE_MAX_AGE_MS,
+    });
+  });
+
+  it("keeps the local queue bounded and reports observations displaced by its cap", () => {
+    const now = Date.now();
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify(
+      Array.from({ length: 80 }, (_, index) => ({
+        observationId: `client:startup:${index}`,
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now - index * 1_000).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      })),
+    ));
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+
+    const stop = createFieldCheckObserver("test-build");
+    const stored = JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]");
+
+    expect(stored).toHaveLength(80);
+    expect(stored.some((item: { observationId: string }) => item.observationId === "client:startup:0")).toBe(false);
+    expect(getFieldCheckQueueStatus()).toMatchObject({
+      available: true,
+      count: 80,
+      displacedCount: 1,
+    });
+
+    stop();
   });
 
   it("announces queue changes and confirms recovery only after a different-build authenticated startup", async () => {
@@ -248,6 +296,90 @@ describe("field-check observer", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(submit).toHaveBeenCalledOnce();
     expect(getFieldCheckQueueStatus()).toMatchObject({ available: true, count: 1 });
+
+    stop();
+    vi.useRealTimers();
+  });
+
+  it("stops retrying at the timestamp-validity boundary but keeps expired evidence locally", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const stop = createFieldCheckObserver("test-build");
+    await vi.advanceTimersByTimeAsync(0);
+
+    submit.mockReset().mockRejectedValue(new Error("delivery confirmation unavailable"));
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify([
+      {
+        observationId: "client:startup:near-expiry",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now - FIELD_CHECK_QUEUE_MAX_AGE_MS + 3 * 60_000).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      },
+    ]));
+
+    // First attempt occurs on the observer's two-minute interval. Its retry
+    // then runs once before expiry, and the next timer lands at expiry.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(submit).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(submit).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(getFieldCheckQueueStatus()).toMatchObject({
+      available: true,
+      count: 1,
+      retryableCount: 0,
+      expiredCount: 1,
+    });
+    expect(JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]"))
+      .toEqual([expect.objectContaining({ observationId: "client:startup:near-expiry" })]);
+
+    stop();
+    vi.useRealTimers();
+  });
+
+  it("recovers delivery for an old but still-valid queued observation", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify([
+      {
+        observationId: "client:startup:still-valid",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "success",
+        observedAt: new Date(now - FIELD_CHECK_QUEUE_MAX_AGE_MS + 60_000).toISOString(),
+        appBuild: "test-build",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      },
+    ]));
+    submit.mockRejectedValue(new Error("temporary delivery failure"));
+    const stop = createFieldCheckObserver("test-build");
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(submit).toHaveBeenCalledOnce();
+    submit.mockImplementation(async (observations: unknown[]) => ({
+      accepted: observations.length,
+      duplicate: 0,
+    }));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls[1][0]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ observationId: "client:startup:still-valid" }),
+    ]));
+    expect(getFieldCheckQueueStatus()).toMatchObject({
+      available: true,
+      count: 0,
+      retryableCount: 0,
+      expiredCount: 0,
+    });
 
     stop();
     vi.useRealTimers();

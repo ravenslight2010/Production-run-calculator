@@ -60,12 +60,16 @@ type Signal = {
 };
 
 const queueKey = "run-calc-field-check-queue";
+const queueDisplacementKey = "run-calc-field-check-queue-displacements-v1";
 const clientKey = "run-calc-field-check-client";
 const dedupKey = "run-calc-field-check-dedup-v3";
 const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
 const defaultRetryMs = 30_000;
+// Keep telemetry retries within the server's accepted ±24-hour observation
+// timestamp window. Expired rows stay local and visible, but are never resent.
+export const FIELD_CHECK_QUEUE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const workflowChecks = new Set<CheckName>([
   "production-run-save-sync",
   "spec-import-review-commit",
@@ -175,6 +179,34 @@ function loadQueue(): Array<{
   }
 }
 
+function isFieldCheckObservationExpired(
+  observation: { observedAt: string },
+  now: number,
+): boolean {
+  const observedAt = Date.parse(observation.observedAt);
+  return !Number.isFinite(observedAt) || now - observedAt >= FIELD_CHECK_QUEUE_MAX_AGE_MS;
+}
+
+function getQueueDisplacementCount(): number {
+  try {
+    const count = Number(localStorage.getItem(queueDisplacementKey));
+    return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function recordQueueDisplacement(): void {
+  try {
+    localStorage.setItem(
+      queueDisplacementKey,
+      String(Math.min(Number.MAX_SAFE_INTEGER, getQueueDisplacementCount() + 1)),
+    );
+  } catch {
+    // Queue accounting is best-effort telemetry and must never affect operations.
+  }
+}
+
 function saveQueue(queue: ReturnType<typeof loadQueue>): void {
   try {
     localStorage.setItem(queueKey, JSON.stringify(queue.slice(-maxQueue)));
@@ -186,7 +218,12 @@ function saveQueue(queue: ReturnType<typeof loadQueue>): void {
 
 export type FieldCheckQueueStatus = {
   available: boolean;
+  /** All retained entries, including expired entries that remain unconfirmed. */
   count: number;
+  retryableCount: number;
+  expiredCount: number;
+  /** Cumulative entries displaced by the local queue cap; delivery is unconfirmed. */
+  displacedCount: number;
   oldestAgeMs: number | null;
 };
 
@@ -196,6 +233,7 @@ export function getFieldCheckQueueStatus(now = Date.now()): FieldCheckQueueStatu
     // for a confirmed empty queue.
     localStorage.getItem(queueKey);
     const queue = loadQueue();
+    const retryableCount = queue.filter((item) => !isFieldCheckObservationExpired(item, now)).length;
     const oldest = queue
       .map((item) => Date.parse(item.observedAt))
       .filter(Number.isFinite)
@@ -203,10 +241,20 @@ export function getFieldCheckQueueStatus(now = Date.now()): FieldCheckQueueStatu
     return {
       available: true,
       count: queue.length,
+      retryableCount,
+      expiredCount: queue.length - retryableCount,
+      displacedCount: getQueueDisplacementCount(),
       oldestAgeMs: oldest === null ? null : Math.min(30 * 24 * 60 * 60 * 1000, Math.max(0, now - oldest)),
     };
   } catch {
-    return { available: false, count: 0, oldestAgeMs: null };
+    return {
+      available: false,
+      count: 0,
+      retryableCount: 0,
+      expiredCount: 0,
+      displacedCount: 0,
+      oldestAgeMs: null,
+    };
   }
 }
 
@@ -247,6 +295,7 @@ function queueSignal(signal: Signal, appBuild: string): void {
   const id = `${localClientId()}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
   const queue = loadQueue();
   if (queue.some((item) => item.observationId === id)) return;
+  if (queue.length >= maxQueue) recordQueueDisplacement();
   queue.push({
     observationId: id,
     checkName: signal.checkName,
@@ -278,7 +327,8 @@ export function createFieldCheckObserver(appBuild: string): () => void {
 
   const flush = async () => {
     if (stopped || flushInFlight || retryTimer !== null || !navigator.onLine) return;
-    const queued = loadQueue();
+    const now = Date.now();
+    const queued = loadQueue().filter((item) => !isFieldCheckObservationExpired(item, now));
     if (queued.length === 0) return;
     const batch = queued.slice(0, 20);
     flushInFlight = submitFieldCheckObservations(batch)
@@ -292,10 +342,14 @@ export function createFieldCheckObserver(appBuild: string): () => void {
           ? Math.min(120_000, Math.max(1_000, requestedDelay))
           : defaultRetryMs;
         if (!stopped && retryTimer === null) {
+          const nextExpiration = queued
+            .map((item) => Date.parse(item.observedAt) + FIELD_CHECK_QUEUE_MAX_AGE_MS)
+            .reduce((earliest, expiration) => Math.min(earliest, expiration), Number.POSITIVE_INFINITY);
+          const boundedDelay = Math.min(delay, Math.max(0, nextExpiration - Date.now()));
           retryTimer = window.setTimeout(() => {
             retryTimer = null;
             void flush();
-          }, delay);
+          }, boundedDelay);
         }
       })
       .finally(() => {
