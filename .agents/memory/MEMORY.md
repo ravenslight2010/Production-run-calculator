@@ -120,6 +120,7 @@
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [PWA cache](pwa-offline-eventsource-fixtures.md) + [deferred cache](pwa-deferred-cache-policy.md) — close owned SSE on outages; lazy loading alone does not warrant excluding precache.
+- [PWA update prompts](pwa-update-prompts.md) — worker updates and stale-client recovery remain opt-in or gated by explicit safe-state proof.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.

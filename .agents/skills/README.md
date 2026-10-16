@@ -62,6 +62,23 @@ changes to secondary or platform-managed content.
   evidence. `writing-quality-editor` may revise wording only after claim support and editing
   authority are clear; neither replaces release or security decisions.
 
+## App workflow routing
+
+Use this map to find the existing owner for a workflow. Memory links record settled
+product and implementation decisions; they do not replace the named skill's checks.
+
+| Work area | Start with | Boundary / supporting decision |
+|---|---|---|
+| Production runs, timers, counters, and live form state | `state-accuracy-check` | Use `operational-browser-verification` for run switching, reload, or startup journeys; see [run progress](../memory/press-done-model.md). |
+| Recipe, spec, and customer imports | `import-bug-investigation` and `spec-import-guard` | Use `customer-import-audit` for a new customer, and add `data-heal-playbook` only when incorrect values are already persisted. |
+| Inventory and scheduling | `test-gap-triage`, then the applicable API, sync, or state specialist | There is no single inventory/scheduling skill; use focused decisions such as [inventory substitutions](../memory/temp-substitutions.md), [scheduled runs](../memory/multi-sheet-schedule-import.md), and [warehouse vs. inventory](../memory/warehouse-inventory-boundary.md). |
+| Cross-device sync, offline writes, and stale updates | `sync-invariant-check` | Add `operational-browser-verification` for visible reload/handoff evidence; see [sync safety](../memory/sync-snapshot-identity.md). |
+| API, authorization, and database changes | `api-design`, `error-handling`, and `db-schema-change` | Existing-table fields use `schema-change-checklist`; preserve auth/session boundaries in [auth and sessions](../memory/daily-reset-auth-boundary.md). |
+| PWA updates, stale chunks, and offline recovery | `error-handling` | Follow the exact worker and stale-client contract in [PWA update prompts](../memory/pwa-update-prompts.md); do not invent a generic reload policy. |
+| QC and allergen workflow | [QC/allergen Phase 1 decision](../memory/qc-allergen-phase1-decisions.md) | This is an approved, record-first, non-blocking Phase 1 boundary; later blocking or label behavior needs separate approval. |
+| Shipping and production readiness | `review-before-shipping`, then `release-checklist`; use `production-go` for the final decision | These roles compose; a risk review or passing check is not itself a production GO. |
+| Task intake, execution, and closure | `task-execution-rules` | Repository guidance/checks govern task authoring and agent conduct, not platform scheduling, task state, or already-running task copies. |
+
 When maintaining skills, preserve these boundaries and existing safety
 requirements. Do not rewrite descriptions based on unavailable model
 benchmarks, provider failures, or lexical trigger signals.
