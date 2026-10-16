@@ -81,9 +81,7 @@
 - [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
 - [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve units and fail closed on unsupported layouts.
 - [Apply-source retention](apply-source-evidence-retention.md) — formula and cached-result text stays review-only; do not send formula-cell results with Apply evidence.
-- [Release gates](release-check-shard-budget.md) + [browser](browser-release-case-contract.md) + [evidence](release-evidence.md) — bound checks and proof to the source revision.
-- [Release identity](production-evidence-revision-binding.md) + [CI](ci-pinned-evidence.md) + [retry/cancel](release-finalization-retry.md) — bind proof to revisions; preserve structured outcomes.
-- [Readiness](readiness-evidence.md) + [WebKit](webkit-compatibility-lane-boundary.md) + [DB](release-db-readiness.md) — use deployment-bound allowlists; keep synthetic recovery separate.
+- [Release evidence and readiness](release-evidence-index.md) — revision binding, bounded gates, browser proof, retry/cancel outcomes and deployment-bound readiness.
 - [Source](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to its DB, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
@@ -137,11 +135,7 @@
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
-- [Release runner lock history](release-runner-lock-history.md) — keep local contention evidence private and bounded; it is not platform task-runner history.
-- [Pinned Node in Nix](pinned-node-nix-runner.md) — use the exact installed Node version when release-runner provisioning fails.
-- [Release-runner loopback probes](release-runner-loopback-probes.md) — Playwright readiness needs loopback-only HTTP; keep external HTTP and HTTPS downgrade guards intact.
-- [Local browser suite routing](local-browser-suite-routing.md) — keep npm installs offline while routing isolated browser probes through the loopback-only exception.
-- [OpenSSL test CA](openssl-test-ca-subject-uniqueness.md) — use unique subjects when a temporary CA signs multiple fixture certificates.
+- [Local validation runtime](local-validation-runtime-index.md) — runner locks, pinned Node, loopback-only browser probes, offline installs and unique test certificates.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [SSE topology](sse-topology-choice.md) + [publish](production-publish-workflow.md) — derive DB peaks from samples; provider metrics stay manual; peer SSE unsupported.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
@@ -157,3 +151,4 @@
 - [WebKit GIO TLS](webkit-gio-tls-runtime.md) + [IPv6 loopback](ipv6-loopback-test-environment.md) — keep trust enabled; load Nix TLS modules and block unsupported AF_INET6 identity checks.
 - [Local production graph builds](local-production-graph-build.md) — use development identity mode for local bundle analysis; keep publish-source identity changes in release workflows.
 - [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
+- [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.

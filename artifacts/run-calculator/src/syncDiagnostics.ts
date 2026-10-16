@@ -18,6 +18,7 @@ export type SyncDiagnosticKind =
 export type SyncDiagnosticFieldCheck = {
   checkName: "sync-acknowledgment";
   outcome: "success" | "failure";
+  metrics?: { failureCode: number };
 };
 export type SyncDiagnostic = {
   id: string;
@@ -202,7 +203,7 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
     // Diagnostics must never interfere with production persistence.
   }
   if (event.fieldCheck) {
-    emitFieldCheckSignal(event.fieldCheck.checkName, event.fieldCheck.outcome);
+    emitFieldCheckSignal(event.fieldCheck.checkName, event.fieldCheck.outcome, event.fieldCheck.metrics);
   } else if (event.kind === "peer" || event.kind === "merge") {
     emitFieldCheckSignal("cross-device-convergence", "success");
   }

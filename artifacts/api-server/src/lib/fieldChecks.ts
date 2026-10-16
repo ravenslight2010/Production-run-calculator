@@ -10,7 +10,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { currentScope } from "./requestScope";
 
-export const FIELD_CHECK_VERSION = "1";
+export const FIELD_CHECK_VERSION = "3";
 export const HARDWARE_CHECK_VERSION = "2026-09";
 export const FIELD_CHECK_RETENTION_DAYS = 30;
 export const FIELD_CHECK_MAX_BATCH = 20;
@@ -189,6 +189,9 @@ const observationSchema = z.object({
   if (!catalogByName.has(value.checkName as FieldCheckName)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkName"], message: "Unsupported field check" });
   }
+  if (["sync-acknowledgment", "performance"].includes(value.checkName) && !["1", "2", "3"].includes(value.checkVersion)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkVersion"], message: "Unsupported diagnostic observation version" });
+  }
   if (value.metrics && Object.keys(value.metrics).length > FIELD_CHECK_MAX_METRICS) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Too many metrics" });
   }
@@ -196,6 +199,19 @@ const observationSchema = z.object({
     if (!metricKey.test(key)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics", key], message: "Invalid metric name" });
     }
+  }
+  if (value.checkVersion === "3" && value.checkName === "sync-acknowledgment") {
+    const keys = Object.keys(value.metrics);
+    const valid = value.outcome === "failure"
+      ? keys.length === 1 && Number.isInteger(value.metrics.failureCode) && [1, 2, 3].includes(value.metrics.failureCode!)
+      : keys.length === 0;
+    if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected an approved sync failure category only" });
+  }
+  if (value.checkVersion === "3" && value.checkName === "performance") {
+    const valid = Object.keys(value.metrics).length === 2 &&
+      Object.hasOwn(value.metrics, "durationMs") &&
+      Number.isInteger(value.metrics.sourceCode) && [1, 2, 3, 4].includes(value.metrics.sourceCode!);
+    if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected bounded durationMs and an approved performance source only" });
   }
   if (workflowCheckNames.has(value.checkName as FieldCheckName)) {
     const metrics = value.metrics ?? {};

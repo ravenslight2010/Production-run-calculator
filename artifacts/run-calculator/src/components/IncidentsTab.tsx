@@ -27,7 +27,7 @@ import {
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
-import { productionRunSaveFailureLabel } from "../fieldChecks";
+import { fieldCheckDiagnosticLabel, productionRunSaveFailureLabel } from "../fieldChecks";
 import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
@@ -416,6 +416,12 @@ function FieldChecksPanel({
                         ? ` · ${productionRunSaveFailureLabel(failure.metrics.failureCode)}`
                         : ""}
                     </p>
+                    {fieldCheckDiagnosticLabel(check.name, failure.metrics) && (
+                      <p className="mt-1 text-muted-foreground">{fieldCheckDiagnosticLabel(check.name, failure.metrics)}</p>
+                    )}
+                    {failure.appBuild === "local" && (
+                      <p className="text-muted-foreground">Unidentified local build; not release verification evidence.</p>
+                    )}
                     <p className="text-muted-foreground">
                       {check.observedBy === "browser" ? "Browser-observed" : "Guided hardware"} evidence only; measurements are bounded and contain no production payload.
                     </p>
@@ -456,6 +462,8 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
           productionRunSaveFailureLabel(check.recentFailures[0].metrics.failureCode)
             ? ` · ${productionRunSaveFailureLabel(check.recentFailures[0].metrics.failureCode)}`
             : ""}
+          {fieldCheckDiagnosticLabel(check.name, check.recentFailures[0].metrics)
+            ? ` · ${fieldCheckDiagnosticLabel(check.name, check.recentFailures[0].metrics)}` : ""}
         </p>
       )}
       {check.status === "needs-review" && (

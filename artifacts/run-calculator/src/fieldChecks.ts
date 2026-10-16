@@ -1,8 +1,11 @@
 import { useEffect } from "react";
 import { submitFieldCheckObservations } from "./inventoryShared";
 import { useAuth } from "./useAuth";
+import { AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS, PERFORMANCE_BUDGETS } from "./performanceDiagnostics";
+import { PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
+export { fieldCheckDiagnosticLabel, PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
 
-export const FIELD_CHECK_VERSION = "2";
+export const FIELD_CHECK_VERSION = "3";
 export const FIELD_CHECK_SIGNAL_EVENT = "calculator-field-check-signal";
 export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
 
@@ -55,6 +58,7 @@ type Signal = {
 
 const queueKey = "run-calc-field-check-queue";
 const clientKey = "run-calc-field-check-client";
+const dedupKey = "run-calc-field-check-dedup-v3";
 const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
@@ -103,6 +107,17 @@ function safeMetrics(
   metrics: Record<string, number> | undefined,
 ): Record<string, number> {
   if (!metrics) return {};
+  if (checkName === "sync-acknowledgment") {
+    return outcome === "failure" && Number.isInteger(metrics.failureCode) &&
+      Object.values(SYNC_ACK_FAILURE_CODES).includes(metrics.failureCode as 1 | 2 | 3)
+      ? { failureCode: metrics.failureCode! } : {};
+  }
+  if (checkName === "performance") {
+    if (!Number.isFinite(metrics.durationMs) || metrics.durationMs! < 0 ||
+      !Number.isInteger(metrics.sourceCode) || !Object.values(PERFORMANCE_SOURCE_CODES).includes(metrics.sourceCode as 1 | 2 | 3 | 4)) return {};
+    // Preserve very slow failures as a saturated measurement, not a missing sample.
+    return { durationMs: Math.round(Math.min(metrics.durationMs!, 10_000_000) * 100) / 100, sourceCode: metrics.sourceCode! };
+  }
   if (workflowChecks.has(checkName)) {
     const durationMs = metrics.durationMs;
     if (!Number.isFinite(durationMs) || durationMs! < 0 || durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS) {
@@ -174,8 +189,31 @@ export function emitFieldCheckSignal(checkName: CheckName, outcome: Outcome, met
 function queueSignal(signal: Signal, appBuild: string): void {
   const metrics = safeMetrics(signal.checkName, signal.outcome, signal.metrics);
   if (workflowChecks.has(signal.checkName) && metrics.durationMs === undefined) return;
+  if (signal.checkName === "performance" && metrics.sourceCode === undefined) return;
+  if (signal.checkName === "sync-acknowledgment" && signal.outcome === "failure" && metrics.failureCode === undefined) return;
   const now = Date.now();
-  const id = `${localClientId()}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${Math.floor(now / bucketMs)}:${signal.outcome}`;
+  // Separate builds and bounded causes/sources without retaining event names or URLs.
+  let buildHash = 2166136261;
+  for (const char of appBuild) buildHash = Math.imul(buildHash ^ char.charCodeAt(0), 16777619);
+  const category = metrics.sourceCode ?? metrics.failureCode ?? 0;
+  const bucket = `${(buildHash >>> 0).toString(16)}:${signal.checkName}:${Math.floor(now / bucketMs)}:${metrics.sourceCode ?? 0}`;
+  const state = `${signal.outcome}:${category}`;
+  // Keep repeated samples deduplicated even after delivery, but do not hide a
+  // new failure following recovery in the same bucket. This is telemetry state,
+  // wholly separate from sync persistence and retry state.
+  let dedup: Array<{ bucket: string; state: string; sequence: number }> = [];
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(dedupKey) ?? "[]");
+    if (Array.isArray(parsed)) dedup = parsed.filter((item) =>
+      item && typeof item.bucket === "string" && item.bucket.length <= 100 &&
+      /^(success|failure|incomplete):[0-4]$/.test(item.state) &&
+      Number.isSafeInteger(item.sequence) && item.sequence >= 0,
+    ).slice(-maxQueue);
+  } catch {}
+  const previous = dedup.find((item) => item.bucket === bucket);
+  if (previous?.state === state) return;
+  const sequence = (previous?.sequence ?? -1) + 1;
+  const id = `${localClientId()}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
   const queue = loadQueue();
   if (queue.some((item) => item.observationId === id)) return;
   queue.push({
@@ -189,6 +227,14 @@ function queueSignal(signal: Signal, appBuild: string): void {
     metrics,
   });
   saveQueue(queue);
+  try {
+    localStorage.setItem(dedupKey, JSON.stringify([
+      ...dedup.filter((item) => item.bucket !== bucket),
+      { bucket, state, sequence },
+    ].slice(-maxQueue)));
+  } catch {
+    // A storage failure may duplicate diagnostics, never affect operational writes.
+  }
 }
 
 export function createFieldCheckObserver(appBuild: string): () => void {
@@ -230,6 +276,7 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   const onSignal = (event: Event) => {
     const signal = (event as CustomEvent<Signal>).detail;
     if (!signal || !FIELD_CHECK_CATALOG.some((check) => check.name === signal.checkName && check.observedBy === "browser")) return;
+    if (!["success", "failure", "incomplete"].includes(signal.outcome)) return;
     queueSignal(signal, appBuild);
     void flush();
   };
@@ -249,10 +296,17 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   const onOffline = () => { wasOffline = true; };
   const onPerformance = (event: Event) => {
     const entry = (event as CustomEvent<{ name?: string; durationMs?: number }>).detail;
-    if (!entry?.name || !Number.isFinite(entry.durationMs)) return;
-    if (entry.name === "startup:home-chunk-load" || entry.name === "browser:navigation-to-load" || entry.name.startsWith("api-failure:")) {
-      emitFieldCheckSignal("performance", entry.durationMs! > 1500 ? "failure" : "success", { durationMs: entry.durationMs! });
-    }
+    if (typeof entry?.name !== "string" || !Number.isFinite(entry.durationMs) || entry.durationMs! < 0) return;
+    const sourceCode = entry.name === "startup:home-chunk-load" ? PERFORMANCE_SOURCE_CODES.homeChunkLoad
+      : entry.name === "browser:navigation-to-load" ? PERFORMANCE_SOURCE_CODES.navigationLoad
+        : entry.name.startsWith("api-failure:") && entry.name.endsWith(":timeout") ? PERFORMANCE_SOURCE_CODES.apiTimeout
+          : entry.name.startsWith("api-failure:") && entry.name.endsWith(":network") ? PERFORMANCE_SOURCE_CODES.apiNetwork
+            : undefined;
+    if (sourceCode === undefined) return;
+    const budget = sourceCode === PERFORMANCE_SOURCE_CODES.homeChunkLoad
+      ? AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs : PERFORMANCE_BUDGETS.initialLoadMs;
+    emitFieldCheckSignal("performance", entry.durationMs! > budget ? "failure" : "success",
+      { durationMs: entry.durationMs!, sourceCode });
   };
 
   window.addEventListener(FIELD_CHECK_SIGNAL_EVENT, onSignal);

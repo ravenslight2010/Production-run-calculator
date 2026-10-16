@@ -6,7 +6,10 @@ import {
   FIELD_CHECK_CATALOG,
   productionRunSaveFailureLabel,
   PRODUCTION_RUN_SAVE_FAILURE_CODES,
+  SYNC_ACK_FAILURE_CODES,
+  fieldCheckDiagnosticLabel,
 } from "./fieldChecks";
+import { recordPerformance } from "./performanceDiagnostics";
 
 const submit = vi.hoisted(() => vi.fn().mockResolvedValue({ accepted: 1, duplicate: 0 }));
 vi.mock("./inventoryShared", () => ({ submitFieldCheckObservations: submit }));
@@ -31,7 +34,7 @@ describe("field-check observer", () => {
       item.checkName === "sync-acknowledgment",
     );
     expect(syncObservations).toHaveLength(1);
-    expect(syncObservations[0].metrics.latencyMs).toBeCloseTo(12.345, 2);
+    expect(syncObservations[0].metrics).toEqual({});
     stop();
   });
 
@@ -89,7 +92,7 @@ describe("field-check observer", () => {
       durationMs: 80.13,
       failureCode: PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite,
     });
-    expect(saveFailure?.observationId).toContain(":production-run-save-sync:v2:");
+    expect(saveFailure?.observationId).toContain(":production-run-save-sync:v3:");
     const saveSuccess = observations.find((item: { checkName: string; outcome: string }) =>
       item.checkName === "production-run-save-sync" && item.outcome === "success",
     );
@@ -108,6 +111,74 @@ describe("field-check observer", () => {
     for (const name of ["orientation-layout", "safe-area-clearance", "camera-file-selection", "update-handoff"]) {
       expect(FIELD_CHECK_CATALOG.find((check) => check.name === name)?.observedBy).toBe("hardware");
     }
+  });
+
+  it("retains distinct sync causes, recovery and builds, without raw diagnostics", async () => {
+    const stop = createFieldCheckObserver("local");
+    for (const failureCode of Object.values(SYNC_ACK_FAILURE_CODES)) {
+      emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode, runId: 123, response: 403 });
+      emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode });
+    }
+    emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode: 99 });
+    emitFieldCheckSignal("sync-acknowledgment", "success");
+    emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode: 3 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stop();
+    const stopNextBuild = createFieldCheckObserver("identified-build");
+    emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stopNextBuild();
+    const sync = submit.mock.calls.flatMap((call) => call[0])
+      .filter((item: { checkName: string }) => item.checkName === "sync-acknowledgment");
+    expect(sync).toHaveLength(6);
+    expect(sync.slice(0, 3).map((item: { metrics: unknown }) => item.metrics)).toEqual([
+      { failureCode: 1 }, { failureCode: 2 }, { failureCode: 3 },
+    ]);
+    expect(sync[3].outcome).toBe("success");
+    expect(sync[4].metrics).toEqual({ failureCode: 3 });
+    expect(sync[4].observationId).not.toBe(sync[2].observationId);
+    expect(sync[5].appBuild).toBe("identified-build");
+    expect(new Set(sync.map((item: { observationId: string }) => item.observationId)).size).toBe(6);
+    expect(JSON.stringify(sync)).not.toMatch(/runId|response/);
+  });
+
+  it("classifies selected timings at their existing budgets and separates safe sources", async () => {
+    const stop = createFieldCheckObserver("local");
+    recordPerformance("startup:home-chunk-load", 10_000, "load");
+    recordPerformance("startup:home-chunk-load", 10_001, "load");
+    recordPerformance("browser:navigation-to-load", 1500, "load");
+    recordPerformance("browser:navigation-to-load", 1501, "load");
+    recordPerformance("api-failure:/api/private-run-id:timeout", 2000, "api");
+    recordPerformance("api-failure:/api/private-run-id:network", 2001, "api");
+    recordPerformance("api-failure:/api/private-run-id:unknown", 3000, "api");
+    recordPerformance("hmr:update", 5000, "hmr");
+    emitFieldCheckSignal("performance", "failure", { durationMs: 10, sourceCode: 99 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stop();
+    const samples = submit.mock.calls.flatMap((call) => call[0])
+      .filter((item: { checkName: string }) => item.checkName === "performance");
+    expect(samples.map((item: { outcome: string; metrics: unknown }) => [item.outcome, item.metrics])).toEqual([
+      ["success", { durationMs: 10_000, sourceCode: 1 }],
+      ["failure", { durationMs: 10_001, sourceCode: 1 }],
+      ["success", { durationMs: 1500, sourceCode: 2 }],
+      ["failure", { durationMs: 1501, sourceCode: 2 }],
+      ["failure", { durationMs: 2000, sourceCode: 3 }],
+      ["failure", { durationMs: 2001, sourceCode: 4 }],
+    ]);
+    expect(JSON.stringify(samples)).not.toContain("private-run-id");
+    expect(fieldCheckDiagnosticLabel("performance", {})).toContain("older evidence");
+    expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 2 })).toContain("stale/reset");
+  });
+
+  it("retains a very slow event as a capped duration instead of dropping its failure", async () => {
+    const stop = createFieldCheckObserver("local");
+    recordPerformance("browser:navigation-to-load", 10_000_001, "load");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stop();
+    const sample = submit.mock.calls.flatMap((call) => call[0])
+      .find((item: { checkName: string }) => item.checkName === "performance");
+    expect(sample).toMatchObject({ outcome: "failure", metrics: { durationMs: 10_000_000, sourceCode: 2 } });
+    expect(fieldCheckDiagnosticLabel("performance", sample.metrics)).toContain("≥10000000 ms");
   });
 
   it("backs off a failed delivery instead of retrying in a hot loop", async () => {

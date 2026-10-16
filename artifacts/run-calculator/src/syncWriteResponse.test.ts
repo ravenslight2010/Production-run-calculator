@@ -17,13 +17,14 @@ import {
 
 describe("consumeSyncWriteResponse", () => {
   it.each([
-    ["authorization rejection", { ok: false, status: 403 }],
-    ["reset-stale rejection", { ok: true, status: 200, stale: true }],
-    ["exhausted retry", { ok: false, status: 0, retriesExhausted: true }],
-  ])("classifies %s as a failed sync acknowledgment", (_label, input) => {
+    ["authorization rejection", { ok: false, status: 403 }, 1],
+    ["reset-stale rejection", { ok: true, status: 200, stale: true }, 2],
+    ["exhausted retry", { ok: false, status: 0, retriesExhausted: true }, 3],
+  ])("classifies %s as a failed sync acknowledgment", (_label, input, failureCode) => {
     expect(syncWriteFieldCheck(input)).toEqual({
       checkName: "sync-acknowledgment",
       outcome: "failure",
+      metrics: { failureCode },
     });
   });
 

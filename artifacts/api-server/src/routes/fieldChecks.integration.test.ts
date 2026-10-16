@@ -11,7 +11,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
-import { FIELD_CHECK_RETENTION_DAYS } from "../lib/fieldChecks";
+import type { FieldChecksReport } from "../lib/fieldChecks";
+let FIELD_CHECK_RETENTION_DAYS: number;
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -58,6 +59,8 @@ beforeAll(async () => {
   }
 
   process.env.DATABASE_URL = testUrlString;
+  // Import only after selecting the disposable DB: fieldChecks imports the DB pool.
+  ({ FIELD_CHECK_RETENTION_DAYS } = await import("../lib/fieldChecks"));
   const dbModule = await import("@workspace/db");
   // This suite's historical disposable schema can predate additive lifecycle
   // columns when drizzle's push cache is reused. Keep the fixture explicitly
@@ -186,6 +189,49 @@ function syncAcknowledgmentObservation(
 }
 
 describe("field-check evidence from two authenticated clients", () => {
+  it("retains v3 allowlisted causes and sources through deduplication and recovery", async () => {
+    const inputs = [
+      ...[1, 2, 3].map((failureCode) => ({
+        checkName: "sync-acknowledgment", metrics: { failureCode },
+      })),
+      ...[1, 2, 3, 4].map((sourceCode) => ({
+        checkName: "performance", metrics: { sourceCode, durationMs: 20_000 + sourceCode },
+      })),
+    ].map((input, index) => ({
+      ...input, observationId: `v3-diagnostic-fixture-${index}`,
+      checkVersion: "3", outcome: "failure", observedAt: new Date(Date.now() - 1000).toISOString(),
+      appBuild: "local", deviceCategory: "mobile-chrome",
+    }));
+    const first = await request(PHONE_USER, "POST", "/api/field-checks/observations", { observations: inputs });
+    expect(first.status).toBe(202);
+    expect(await first.json()).toEqual({ accepted: 7, duplicate: 0 });
+    const replay = await request(TABLET_USER, "POST", "/api/field-checks/observations", { observations: inputs });
+    expect(await replay.json()).toEqual({ accepted: 0, duplicate: 7 });
+    for (const metrics of [{ failureCode: 99 }, { failureCode: 1, runId: 123 }]) {
+      const invalid = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [{ ...inputs[0], observationId: "v3-invalid-diagnostic", metrics }],
+      });
+      expect(invalid.status).toBe(400);
+    }
+    const report = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    const sync = report.checks.find((check: { name: string }) => check.name === "sync-acknowledgment");
+    const perf = report.checks.find((check: { name: string }) => check.name === "performance");
+    if (!sync || !perf) throw new Error("Expected both diagnostic checks in the fixture report");
+    expect(sync).toMatchObject({ failureCount: 3, actionable: true, status: "needs-review" });
+    expect(sync.recentFailures.map((failure: { metrics: unknown }) => failure.metrics))
+      .toEqual(expect.arrayContaining([{ failureCode: 1 }, { failureCode: 2 }, { failureCode: 3 }]));
+    expect(perf.recentFailures.map((failure: { metrics: unknown }) => failure.metrics))
+      .toEqual(expect.arrayContaining(inputs.slice(3).map((input) => input.metrics)));
+    await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...inputs[0], observationId: "v3-sync-recovered", outcome: "success",
+        metrics: {}, observedAt: new Date().toISOString(),
+      }],
+    });
+    const recovered = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(recovered.checks.find((check: { name: string }) => check.name === "sync-acknowledgment"))
+      .toMatchObject({ status: "healthy", actionable: false, failureCount: 3, recentFailures: expect.arrayContaining(sync.recentFailures) });
+  });
   it("persists bounded workflow outcomes and exposes only their duration summary", async () => {
     const observation = {
       observationId: "browser-spec-import:spec-import-review-commit:1:success",

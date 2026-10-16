@@ -21,6 +21,28 @@ const validObservation = {
 };
 
 describe("field-check contract", () => {
+  it("validates v3 diagnostic allowlists while accepting queued legacy evidence", () => {
+    const accepts = (checkName: string, metrics: Record<string, number>, outcome = "failure", checkVersion = "3") =>
+      validateFieldCheckBatch({ observations: [{ ...validObservation, checkName, checkVersion, outcome, metrics }] }).ok;
+    for (const failureCode of [1, 2, 3]) expect(accepts("sync-acknowledgment", { failureCode })).toBe(true);
+    expect(accepts("sync-acknowledgment", {})).toBe(false);
+    expect(accepts("sync-acknowledgment", { failureCode: 4 })).toBe(false);
+    expect(accepts("sync-acknowledgment", { failureCode: 1.5 })).toBe(false);
+    expect(accepts("sync-acknowledgment", { failureCode: 1, runId: 123 })).toBe(false);
+    expect(accepts("sync-acknowledgment", { failureCode: 1 }, "success")).toBe(false);
+    expect(accepts("sync-acknowledgment", {}, "success")).toBe(true);
+    for (const sourceCode of [1, 2, 3, 4]) expect(accepts("performance", { sourceCode, durationMs: 1501 })).toBe(true);
+    const invalidMetrics: Array<Record<string, number>> = [
+      { sourceCode: 99, durationMs: 1 }, { sourceCode: 1 }, { sourceCode: 1, durationMs: -1 },
+      { sourceCode: 1, durationMs: 10_000_001 }, { sourceCode: 1, durationMs: 1, url: 1 },
+    ];
+    for (const metrics of invalidMetrics) {
+      expect(accepts("performance", metrics)).toBe(false);
+    }
+    expect(accepts("sync-acknowledgment", {}, "failure", "2")).toBe(true);
+    expect(accepts("performance", { durationMs: 2000 }, "failure", "2")).toBe(true);
+    expect(accepts("sync-acknowledgment", { failureCode: 99 }, "failure", "4")).toBe(false);
+  });
   it("accepts bounded browser observations and rejects unknown checks", () => {
     expect(validateFieldCheckBatch({ observations: [validObservation] }).ok).toBe(true);
     expect(validateFieldCheckBatch({

@@ -6,6 +6,7 @@ import {
   isValidSyncSnapshotId,
 } from "@workspace/sync-contract";
 import type { SyncPayload } from "./types";
+import { SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
 
 export { isValidSyncSnapshotId };
 
@@ -32,6 +33,7 @@ export type PartialSyncEnvelope = {
 export type SyncWriteFieldCheck = {
   checkName: "sync-acknowledgment";
   outcome: "success" | "failure";
+  metrics?: { failureCode: number };
 };
 
 /**
@@ -46,7 +48,10 @@ export function syncWriteFieldCheck(input: {
   retriesExhausted?: boolean;
 }): SyncWriteFieldCheck | undefined {
   if (input.stale || input.retriesExhausted || input.status === 401 || input.status === 403) {
-    return { checkName: "sync-acknowledgment", outcome: "failure" };
+    const failureCode = input.stale ? SYNC_ACK_FAILURE_CODES.staleOrResetWrite
+      : input.status === 401 || input.status === 403 ? SYNC_ACK_FAILURE_CODES.authenticationRejected
+        : SYNC_ACK_FAILURE_CODES.retriesExhausted;
+    return { checkName: "sync-acknowledgment", outcome: "failure", metrics: { failureCode } };
   }
   if (input.ok) {
     return { checkName: "sync-acknowledgment", outcome: "success" };
