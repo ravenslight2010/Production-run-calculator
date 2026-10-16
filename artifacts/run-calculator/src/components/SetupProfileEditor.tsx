@@ -30,13 +30,12 @@ import {
   normalizeAllergen,
 } from "@workspace/allergen";
 import {
-  IngredientSelect,
   CheesePickCard,
   MixRecipeCard,
   DoughRecipeCard,
   FrontlineRecipeCard,
-  TypeDropdown,
 } from "../pages/home";
+import { IngredientSelect, TypeDropdown } from "./SetupPickerControls";
 import { NumField } from "./NumField";
 import { useMixes } from "../hooks/useMixes";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";

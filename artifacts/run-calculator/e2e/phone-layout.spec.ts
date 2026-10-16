@@ -2047,6 +2047,12 @@ test.describe("phone layout smoke", () => {
           app2Type: "Mix",
           app2CheeseRecipeName: mixName,
           app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+          app3Type: "Cheese",
+          app3CheeseRecipeName: cheeseName,
+          app3CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+          app4Type: "Mix",
+          app4CheeseRecipeName: mixName,
+          app4CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
         };
 
         await fixtures.seedNamedRecipe("dough", account, {

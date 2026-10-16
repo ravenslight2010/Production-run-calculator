@@ -46,8 +46,12 @@ vi.mock("@workspace/name-match", () => ({
   brandTagLabels: () => new Map(),
 }));
 
-vi.mock("../pages/home", () => ({
+vi.mock("./SetupPickerControls", () => ({
   IngredientSelect: () => null,
+  TypeDropdown: () => null,
+}));
+
+vi.mock("../pages/home", () => ({
   CheesePickCard: () => null,
   MixRecipeCard: () => null,
   DoughRecipeCard: () => null,
@@ -60,7 +64,6 @@ vi.mock("../pages/home", () => ({
   }) => recipePickerTestId ? (
     <div data-testid={recipePickerTestId} aria-label={recipePickerLabel} />
   ) : null,
-  TypeDropdown: () => null,
 }));
 
 import SetupProfileEditor from "./SetupProfileEditor";
