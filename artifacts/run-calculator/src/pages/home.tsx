@@ -20655,7 +20655,7 @@ function FloorModeView() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Keep running</AlertDialogCancel>
-                    <AlertDialogAction data-testid="floor-confirm-complete-run" className="bg-red-700 hover:bg-red-600" onClick={() => endRun(currentRun?.id)}>
+                    <AlertDialogAction data-testid="floor-confirm-complete-run" className="min-h-11 bg-red-700 hover:bg-red-600" onClick={() => endRun(currentRun?.id)}>
                       Complete run
                     </AlertDialogAction>
                   </AlertDialogFooter>

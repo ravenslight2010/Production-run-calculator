@@ -1315,3 +1315,18 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: 4 CI checks failed on the first merged run (Typecheck, Unit tests, API Postgres, rollback rehearsal) — every failure traced to Replit-integration artifacts (evidence staleness, catalog/ID mismatch, workflow syntax), not to our app behavior.
 
 **Verification**: root typecheck + api-server typecheck green; workflow lint (actionlint 1.7.12) passes all 8 files; local api-server units 586/586 (DB tests skip). Full CI authority: run 35138904564 -> fixed in follow-up run.
+
+## Run action touch-target coverage
+
+**Date**: 2026-10-16
+**Files changed**:
+- `artifacts/run-calculator/e2e/phone-layout.spec.ts`
+- `artifacts/run-calculator/src/pages/home.tsx`
+
+**What was wrong**: Run action journeys did not measure every requested hit area or require the controls to remain fully inside the viewport. The focused responsive check found the Floor Mode Complete Run confirmation was only 38 CSS pixels tall.
+
+**What the fix was**: Added 44×44 CSS-pixel and viewport-bound assertions for Start/Stop, Log Stoppage, case corrections, Skid Done, and both Complete Run controls across phone portrait/landscape, tablet portrait/landscape, and desktop Chromium viewports. Set the undersized confirmation action to a 44-pixel minimum height without changing its behavior.
+
+**Why it was needed**: A rendered hit-area check catches undersized actions that visibility and clickability checks miss, reducing missed production actions on compact screens.
+
+**Verification**: Focused isolated Chromium browser run passed all five viewports; Run Calculator typecheck passed.

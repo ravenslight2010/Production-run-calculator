@@ -354,6 +354,25 @@ async function assertOverlayActionHitTargets(
   expect(failures, `Overlay action hit targets in ${area}`).toEqual([]);
 }
 
+async function assertRunActionTouchTarget(
+  page: Page,
+  control: Locator,
+  name: string,
+): Promise<void> {
+  await expect(control, `${name} should be visible`).toBeVisible();
+  await control.scrollIntoViewIfNeeded();
+  const box = await control.boundingBox();
+  const viewport = page.viewportSize();
+
+  expect(box, `${name} should have a rendered box`).not.toBeNull();
+  expect(box?.width, `${name} width`).toBeGreaterThanOrEqual(44);
+  expect(box?.height, `${name} height`).toBeGreaterThanOrEqual(44);
+  expect(box?.x, `${name} left edge`).toBeGreaterThanOrEqual(-1);
+  expect((box?.x ?? 0) + (box?.width ?? 0), `${name} right edge`).toBeLessThanOrEqual((viewport?.width ?? 0) + 1);
+  expect(box?.y, `${name} top edge`).toBeGreaterThanOrEqual(-1);
+  expect((box?.y ?? 0) + (box?.height ?? 0), `${name} bottom edge`).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
+}
+
 async function assertFocusedFieldIsKeyboardSafe(
   page: Page,
   field: Locator,
@@ -896,6 +915,7 @@ test.describe("phone layout smoke", () => {
     { width: 375, height: 812 },
     { width: 568, height: 320 },
     { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
     { width: 1280, height: 800 },
   ] as const) {
     test(`Floor Mode remains opaque and closable at ${viewport.width}x${viewport.height}`, async ({
@@ -905,6 +925,11 @@ test.describe("phone layout smoke", () => {
       await signInToSandbox(page);
       await page.getByTestId("tab-run").click();
       const startRun = page.getByTestId("button-start-run");
+      await assertRunActionTouchTarget(
+        page,
+        startRun,
+        `Start Run at ${viewport.width}x${viewport.height}`,
+      );
       for (let attempt = 0; attempt < 2 && await startRun.isVisible(); attempt += 1) {
         await startRun.click();
         await page.waitForTimeout(500);
@@ -913,6 +938,16 @@ test.describe("phone layout smoke", () => {
       await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible({
         timeout: 20_000,
       });
+      await assertRunActionTouchTarget(
+        page,
+        page.getByRole("button", { name: /^stop run$/i }),
+        `Stop Run at ${viewport.width}x${viewport.height}`,
+      );
+      await assertRunActionTouchTarget(
+        page,
+        page.getByTestId("button-log-stoppage"),
+        `Log Stoppage at ${viewport.width}x${viewport.height}`,
+      );
 
       // New accounts start with Floor Mode disabled, but enabling it here
       // exercises the account-backed setting and the real header launch path.
@@ -944,6 +979,11 @@ test.describe("phone layout smoke", () => {
       await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
       await expect(page.getByTestId("floor-skid-done")).toBeVisible();
       await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+      await assertRunActionTouchTarget(
+        page,
+        overlay.getByRole("button", { name: /log stop/i }),
+        `Floor Mode Log Stoppage at ${viewport.width}x${viewport.height}`,
+      );
       await assertOverlayActionHitTargets(overlay, "Floor Mode controls");
       for (const testId of [
         "floor-pause-run",
@@ -956,6 +996,18 @@ test.describe("phone layout smoke", () => {
         expect(box?.height, `${testId} height at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
         expect(box?.width, `${testId} width at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
       }
+      for (const [testId, label] of [
+        ["floor-cases-minus", "Correct cases down"],
+        ["floor-cases-plus", "Correct cases up"],
+        ["floor-skid-done", "Skid Done"],
+        ["floor-complete-run", "Complete Run"],
+      ]) {
+        await assertRunActionTouchTarget(
+          page,
+          page.getByTestId(testId),
+          `${label} at ${viewport.width}x${viewport.height}`,
+        );
+      }
 
       await pause.click();
       await expect(pause).toBeHidden({ timeout: 15_000 });
@@ -966,6 +1018,11 @@ test.describe("phone layout smoke", () => {
       await page.getByTestId("floor-complete-run").click();
       const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
       await expect(completeDialog).toBeVisible();
+      await assertRunActionTouchTarget(
+        page,
+        completeDialog.getByTestId("floor-confirm-complete-run"),
+        `Confirm Complete Run at ${viewport.width}x${viewport.height}`,
+      );
       await assertOverlayActionHitTargets(completeDialog, "Floor Mode completion dialog");
       if (viewport.width === 1280) {
         await completeDialog.getByTestId("floor-confirm-complete-run").click();
