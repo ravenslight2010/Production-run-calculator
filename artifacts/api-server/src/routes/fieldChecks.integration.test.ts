@@ -12,6 +12,7 @@ import pg from "pg";
 import { eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import type { FieldChecksReport } from "../lib/fieldChecks";
+let FIELD_CHECK_MAX_CLOCK_SKEW_MS: number;
 let FIELD_CHECK_RETENTION_DAYS: number;
 
 type DbModule = typeof import("@workspace/db");
@@ -60,7 +61,7 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = testUrlString;
   // Import only after selecting the disposable DB: fieldChecks imports the DB pool.
-  ({ FIELD_CHECK_RETENTION_DAYS } = await import("../lib/fieldChecks"));
+  ({ FIELD_CHECK_MAX_CLOCK_SKEW_MS, FIELD_CHECK_RETENTION_DAYS } = await import("../lib/fieldChecks"));
   const dbModule = await import("@workspace/db");
   // This suite's historical disposable schema can predate additive lifecycle
   // columns when drizzle's push cache is reused. Keep the fixture explicitly
@@ -189,6 +190,34 @@ function syncAcknowledgmentObservation(
 }
 
 describe("field-check evidence from two authenticated clients", () => {
+  it("rejects observations outside the clock window without persisting them", async () => {
+    const now = Date.now();
+    const invalidObservations = [
+      {
+        ...observation("clock-window-too-old", "success", "mobile-chrome"),
+        observedAt: new Date(now - FIELD_CHECK_MAX_CLOCK_SKEW_MS - 60_000).toISOString(),
+      },
+      {
+        ...observation("clock-window-in-the-future", "success", "mobile-chrome"),
+        observedAt: new Date(now + FIELD_CHECK_MAX_CLOCK_SKEW_MS + 60_000).toISOString(),
+      },
+    ];
+
+    for (const invalidObservation of invalidObservations) {
+      const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [invalidObservation],
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "Observation timestamp is outside the accepted clock window",
+      });
+    }
+
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
   it("reports never-observed, stale, and no-success coverage with bounded receipt delay", async () => {
     const now = Date.now();
     const observedAt = new Date(now - 30_000);
