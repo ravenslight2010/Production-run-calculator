@@ -27,6 +27,8 @@ let fieldCheckIssuesTable: DbModule["fieldCheckIssuesTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let seedRoles: () => Promise<void>;
 let clearSandboxCache: () => void;
+let createFieldChecksRouter: typeof import("./fieldChecks").createFieldChecksRouter;
+let requireAuth: typeof import("../middlewares/requireAuth").requireAuth;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -74,6 +76,8 @@ beforeAll(async () => {
     ADD COLUMN IF NOT EXISTS session_revoked_at TIMESTAMPTZ
   `);
   const router = (await import("./index")).default;
+  ({ createFieldChecksRouter } = await import("./fieldChecks"));
+  ({ requireAuth } = await import("../middlewares/requireAuth"));
   db = dbModule.db;
   pool = dbModule.pool;
   usersTable = dbModule.usersTable;
@@ -346,6 +350,120 @@ describe("field-check evidence from two authenticated clients", () => {
 
     expect(await db.select().from(fieldCheckObservationsTable)).toHaveLength(observationsBeforeRejection.length);
     expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBeforeRejection);
+  });
+
+  it("shares the production observation limit across independently created route instances", async () => {
+    const rateLimitedUserId = `field-check-cross-instance-${randomUUID()}`;
+    await db.insert(usersTable).values({
+      id: rateLimitedUserId,
+      username: rateLimitedUserId,
+      passwordHash: "x",
+    });
+    // Create the legacy test token before switching NODE_ENV; production router
+    // construction below still exercises the production store selection.
+    const authorization = `Bearer ${signLegacyTokenForTests(rateLimitedUserId)}`;
+    const originalNodeEnv = process.env.NODE_ENV;
+    let productionRouters: ReturnType<typeof createFieldChecksRouter>[];
+    try {
+      process.env.NODE_ENV = "production";
+      productionRouters = [createFieldChecksRouter(), createFieldChecksRouter()];
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    const instanceServers: Server[] = [];
+    try {
+      for (const router of productionRouters) {
+        const app: Express = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+          req.log = {
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+          } as unknown as typeof req.log;
+          next();
+        });
+        app.use(requireAuth);
+        app.use("/api", router);
+        await new Promise<void>((resolve) => {
+          const instanceServer = app.listen(0, () => {
+            instanceServers.push(instanceServer);
+            resolve();
+          });
+        });
+      }
+
+      const urls = instanceServers.map(
+        (instanceServer) => `http://127.0.0.1:${(instanceServer.address() as AddressInfo).port}`,
+      );
+      const limit = 60;
+      for (let index = 0; index < limit; index += 1) {
+        const response = await fetch(`${urls[index % urls.length]}/api/field-checks/observations`, {
+          method: "POST",
+          headers: {
+            authorization,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            observations: [
+              observation(
+                `cross-instance-rate-limit-${String(index).padStart(2, "0")}`,
+                "failure",
+                "mobile-chrome",
+              ),
+            ],
+          }),
+        });
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ accepted: 1, duplicate: 0 });
+      }
+
+      const observationsBeforeRejection = await db.select().from(fieldCheckObservationsTable);
+      const issuesBeforeRejection = await db.select().from(fieldCheckIssuesTable);
+      expect(observationsBeforeRejection).toHaveLength(limit);
+      expect(issuesBeforeRejection).toHaveLength(1);
+      expect(issuesBeforeRejection[0]).toMatchObject({
+        checkName: "cross-device-convergence",
+        failureCount: limit,
+      });
+
+      const rejected = await fetch(`${urls[1]}/api/field-checks/observations`, {
+        method: "POST",
+        headers: {
+          authorization,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          observations: [
+            observation("cross-instance-rate-limit-rejected", "failure", "mobile-chrome"),
+          ],
+        }),
+      });
+      expect(rejected.status).toBe(429);
+      expect(rejected.headers.get("content-type")).toMatch(/application\/json/u);
+      expect(rejected.headers.get("ratelimit-limit")).toBe(String(limit));
+      expect(Number(rejected.headers.get("retry-after"))).toBeGreaterThan(0);
+      expect(await rejected.json()).toEqual({
+        error: "Too many requests. Please wait a moment and try again.",
+      });
+
+      expect(await db.select().from(fieldCheckObservationsTable)).toHaveLength(
+        observationsBeforeRejection.length,
+      );
+      expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBeforeRejection);
+    } finally {
+      for (const instanceServer of instanceServers) {
+        instanceServer.closeAllConnections?.();
+      }
+      await Promise.all(
+        instanceServers.map(
+          (instanceServer) => new Promise<void>((resolve) => instanceServer.close(() => resolve())),
+        ),
+      );
+    }
   });
 
   it("rejects observations outside the clock window without persisting them", async () => {
