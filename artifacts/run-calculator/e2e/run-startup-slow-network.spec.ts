@@ -151,6 +151,7 @@ test.afterAll(async () => {
 
 test("Run controls work before delayed optional station panels finish loading", async ({
   page,
+  browserName,
 }, testInfo) => {
   const optionalChunks = getOptionalPanelChunks();
   const requestedChunks: string[] = [];
@@ -172,7 +173,17 @@ test("Run controls work before delayed optional station panels finish loading", 
     });
   }
 
-  const restoreNetwork = await throttleToSlow3G(page);
+  // CDP throttling is Chromium-only. The exact optional chunk routes below
+  // provide the same deterministic hold point in WebKit without CDP.
+  const restoreNetwork =
+    browserName === "chromium"
+      ? await throttleToSlow3G(page)
+      : async () => {};
+
+  const delayStrategy =
+    browserName === "chromium"
+      ? "Chromium CDP Slow 3G plus exact optional chunk request holds"
+      : "exact optional chunk request holds";
   const releaseAllOptionalChunks = () => {
     for (const chunk of optionalChunks) chunk.release();
   };
@@ -257,16 +268,25 @@ test("Run controls work before delayed optional station panels finish loading", 
     const runTab = page.getByTestId("tab-run");
     await expect(runTab).toBeAttached({ timeout: 60_000 });
     await runTab.click();
-    await expect(
-      page.getByText("Confirmed server baseline", { exact: true }),
-    ).toBeVisible({ timeout: 60_000 });
-
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
     const targetCases = page.getByTestId("input-casesNeeded");
     await expect(targetCases).toHaveValue("10");
     const startRun = page.getByTestId("button-start-run");
     await expect(startRun).toBeEnabled();
+    await expectReachableInViewport(page, startRun, "start control");
     await startRun.click();
-    await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true })).toBeVisible();
+    await expect.poll(() => readRunStartedAt(page, runOne)).toEqual(
+      expect.any(Number),
+    );
+    const selectRunOne = page.getByRole("button", { name: "Select run 1" });
+    await expect(selectRunOne).toBeEnabled();
+    await expectReachableInViewport(page, selectRunOne, "Run 1 selection");
+    await selectRunOne.click();
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true }))
+      .toBeVisible({ timeout: 20_000 });
 
     const elapsed = page.getByTestId("elapsed-card-value");
     await expect(elapsed).toBeVisible();
@@ -299,12 +319,24 @@ test("Run controls work before delayed optional station panels finish loading", 
     await expectReachableInViewport(page, completedCases, "production counter");
     await pauseRun.click();
     const resumeRun = page.getByRole("button", { name: "RESUME RUN", exact: true });
-    await expect(resumeRun).toBeEnabled();
+    await expect(resumeRun).toBeEnabled({ timeout: 20_000 });
     await expectReachableInViewport(page, resumeRun, "resume control");
+    await resumeRun.click();
+    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
+    await expectReachableInViewport(page, pauseRun, "pause control after resume");
     const nextRun = page.getByRole("button", { name: /^Next .*Next – Test$/ });
     await expect(nextRun).toBeEnabled();
     await expectReachableInViewport(page, nextRun, "run switch");
+    const selectRunTwo = page.getByRole("button", { name: "Select run 2" });
+    await expect(selectRunTwo).toBeEnabled();
+    await expectReachableInViewport(page, selectRunTwo, "Run 2 selection");
+    await selectRunTwo.click();
+    await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+    await expect(startRun).toBeEnabled();
+    await selectRunOne.click();
     await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
+    await expectReachableInViewport(page, pauseRun, "pause control after run switch");
     await expect(completedCases).toHaveText("0");
     const startedAtBeforeRelease = await readRunStartedAt(page, runOne);
     expect(startedAtBeforeRelease).toEqual(expect.any(Number));
@@ -322,8 +354,11 @@ test("Run controls work before delayed optional station panels finish loading", 
     await page.getByTestId("tab-packaging").click();
     await expect(page.getByTestId("text-skidsCompleted")).toBeVisible();
     await page.getByTestId("tab-run").click();
-    await expect(resumeRun).toBeEnabled();
-    await expectReachableInViewport(page, resumeRun, "resume control");
+    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
+    await expectReachableInViewport(page, pauseRun, "pause control after panels load");
+    await expect(elapsed).toBeVisible();
+    await expectReachableInViewport(page, elapsed, "running timer after panels load");
+    await expectReachableInViewport(page, completedCases, "production counter after panels load");
     await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
     await expect(targetCases).toHaveValue(casesNeededBeforeRelease);
     await expect(completedCases).toHaveText(completedCasesBeforeRelease);
@@ -337,19 +372,24 @@ test("Run controls work before delayed optional station panels finish loading", 
     expect(pageErrors).toEqual([]);
 
     const viewport = page.viewportSize();
+    const viewportEmulation = testInfo.project.name.includes("chromium-emulation");
     await testInfo.attach(`run-startup-slow-network-${testInfo.project.name}.json`, {
       body: JSON.stringify({
-        browser: "Chromium",
+        browserEngine: browserName,
         project: testInfo.project.name,
-        viewportEmulation: true,
+        delayStrategy,
+        viewportEmulation,
         physicalDeviceTested: false,
         viewport: viewport ? { width: viewport.width, height: viewport.height } : null,
         touchPoints: await page.evaluate(() => navigator.maxTouchPoints),
-        networkProfile: {
-          latencyMs: 400,
-          downloadKbps: 500,
-          uploadKbps: 500,
-        },
+        networkProfile:
+          browserName === "chromium"
+            ? {
+                latencyMs: 400,
+                downloadKbps: 500,
+                uploadKbps: 500,
+              }
+            : null,
         optionalChunks: optionalChunks.map(({ file }) => file),
         requestedChunks,
         loadedChunks,
@@ -358,14 +398,16 @@ test("Run controls work before delayed optional station panels finish loading", 
           casesNeeded: casesNeededBeforeRelease,
           completedCases: completedCasesBeforeRelease,
           startedAt: startedAtBeforeRelease,
-          status: "paused",
+          elapsed: elapsedBeforePanelRequests,
+          status: "running",
         },
         runStateAfterRelease: {
           selectedRun: "Run 1 of 2",
           casesNeeded: await targetCases.inputValue(),
           completedCases: await completedCases.innerText(),
           startedAt: await readRunStartedAt(page, runOne),
-          status: "paused",
+          elapsed: await elapsed.innerText(),
+          status: "running",
         },
         controlsWhileChunksWereHeld: {
           timerAndProductionCounterReachable: true,

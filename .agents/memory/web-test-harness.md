@@ -67,3 +67,17 @@ the same name and fail strict-mode checks without detecting a product defect.
 
 **How to apply:** Select the review card collection by its stable semantic or
 test-ID boundary, then narrow to the named entity and assert within that card.
+
+## Run startup state in browser journeys
+
+For slow-start journeys, verify the selected run's lifecycle state directly and
+reselect that run before asserting its controls. The operational-state badge is
+not a synchronization acknowledgement and may remain provisional while the
+run's controls are usable.
+
+**Why:** Treating the badge as a readiness gate caused false failures in the
+isolated WebKit fixture; the run-specific `startedAt` and selected-run controls
+were the reliable evidence.
+
+**How to apply:** Before releasing held optional panels, wait for the target
+run's start state, select it explicitly, and verify pause/resume plus counters.

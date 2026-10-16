@@ -179,6 +179,12 @@ export RELEASE_BROWSER_API_PORT="$API_PORT"
 export RELEASE_BROWSER_WEB_PORT="$WEB_PORT"
 export PLAYWRIGHT_BASE_URL="http://127.0.0.1:${WEB_PORT}"
 export PLAYWRIGHT_API_BASE_URL="http://127.0.0.1:${API_PORT}"
+# The HTTPS-only release proxy must not receive this runner's local HTTP
+# readiness probes. Keep loopback bypass scoped to this disposable browser job.
+loopback_no_proxy="${NO_PROXY:-${no_proxy:-}}"
+loopback_no_proxy="${loopback_no_proxy:+${loopback_no_proxy},}127.0.0.1,localhost,::1"
+export NO_PROXY="$loopback_no_proxy"
+export no_proxy="$loopback_no_proxy"
 if [[ -z "${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-}" ]]; then
   PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$(
     command -v chromium ||

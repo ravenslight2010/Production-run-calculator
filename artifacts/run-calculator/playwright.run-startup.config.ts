@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
+import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 import {
   releaseBrowserBaseUrl,
   releaseBrowserWebServers,
@@ -42,6 +43,13 @@ export default defineConfig({
     {
       name: "desktop-chromium",
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "desktop-webkit",
+      use: {
+        ...devices["Desktop Safari"],
+        launchOptions: webkitLaunchOptions(),
+      },
     },
     {
       name: "phone-portrait-chromium-emulation",
