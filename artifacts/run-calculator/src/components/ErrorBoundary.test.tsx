@@ -186,6 +186,35 @@ describe("ErrorBoundary recovery actions", () => {
     },
   );
 
+  it("continues worker-update recovery and reload when CacheStorage is unavailable", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("caches", undefined);
+    const reload = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    const registration = {
+      waiting: undefined as ServiceWorker | undefined,
+      update: vi.fn().mockRejectedValue(new Error("worker unavailable")),
+    };
+    const onUpdateAndReload = (canReload?: () => boolean) =>
+      updateAndReload(registration, undefined, reload, canReload);
+
+    render(
+      <ErrorBoundary onUpdateAndReload={onUpdateAndReload}>
+        <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+      </ErrorBoundary>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Update and reload" }));
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+
+    expect(registration.update).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
   it("schedules one stale-chunk recovery only when the captured app state is safe", async () => {
     const updateAndReload = vi.fn().mockResolvedValue(undefined);
     let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;

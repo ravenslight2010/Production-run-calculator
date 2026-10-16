@@ -99,6 +99,10 @@ describe("stale-asset recovery evidence", () => {
 });
 
 describe("clearStaleAppShellCaches", () => {
+  it("resolves safely when CacheStorage is unavailable", async () => {
+    await expect(clearStaleAppShellCaches(undefined)).resolves.toBeUndefined();
+  });
+
   it("removes precached app shells without deleting unrelated runtime caches", async () => {
     const remove = vi.fn().mockResolvedValue(true);
     await clearStaleAppShellCaches({
