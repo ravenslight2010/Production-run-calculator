@@ -55,6 +55,8 @@ let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
+let reconcileOperationalIntentInTransaction:
+  typeof import("../lib/operationalIntentService")["reconcileOperationalIntentInTransaction"];
 let clearServerTickDateBackoffsForTests:
   typeof import("./sync")["clearServerTickDateBackoffsForTests"];
 let clearBackgroundOperationDiagnosticsForTests:
@@ -107,6 +109,7 @@ beforeAll(async () => {
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   const syncMod = await import("./sync");
+  const operationalIntentServiceMod = await import("../lib/operationalIntentService");
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
@@ -132,6 +135,8 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
+  reconcileOperationalIntentInTransaction =
+    operationalIntentServiceMod.reconcileOperationalIntentInTransaction;
   clearServerTickDateBackoffsForTests = syncMod.clearServerTickDateBackoffsForTests;
   const backgroundOperationsMod = await import("../lib/backgroundOperations");
   clearBackgroundOperationDiagnosticsForTests =
@@ -2435,6 +2440,17 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
   });
+
+  it("rejects an intent whose production date differs from the client-local date", async () => {
+    const body = finalization("offline:wrong-date");
+    body.intent.date = "2030-03-11";
+    const response = await postFinalization(body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Invalid operational intent or production date",
+    });
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+  });
 });
 
 describe("GET /sync/operational-intents/cursor", () => {
@@ -2777,6 +2793,149 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
     expect(stale.outcome).toBe("conflicted");
     expect(stale.canonicalRevision).toBe(5);
     expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
+  });
+
+  it("serializes concurrent retries of one stable intent ID to one committed receipt", async () => {
+    const initialData = {
+      dayState: { date: DATE, runs: [{ id: RUN, startedAt: 1, metaUpdatedAt: 10 }] },
+      runValues: { [RUN]: { traysOnLine: 2 } },
+    };
+    await db.insert(dailySyncTable).values({
+      date: DATE,
+      scope: "live",
+      canonicalRevision: 4,
+      data: initialData,
+    }).onConflictDoUpdate({
+      target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { canonicalRevision: 4, data: initialData },
+    });
+    const body = intent("same-intent", `${RUN}:10`, "correction", {
+      values: { traysOnLine: 7 },
+    });
+    const [first, second] = await Promise.all([post(body), post(body)]);
+    expect([first.duplicate, second.duplicate].sort()).toEqual([false, true]);
+    expect([first.outcome, second.outcome]).toEqual(["accepted", "accepted"]);
+    expect(new Set([first.cursor, second.cursor]).size).toBe(1);
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(1);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect(stored.canonicalRevision).toBe(5);
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(7);
+  });
+});
+
+describe("operational intent service boundary", () => {
+  it("reconciles a validated command under a caller-owned transaction without Express", async () => {
+    const date = "2030-03-10";
+    const runId = "service-run";
+    const storedData = {
+      dayState: { date, runs: [{ id: runId, startedAt: 1, metaUpdatedAt: 10 }] },
+      runValues: { [runId]: { traysOnLine: 2 } },
+    };
+    await db.insert(dailySyncTable).values({
+      date,
+      scope: "live",
+      canonicalRevision: 4,
+      data: storedData,
+    }).onConflictDoUpdate({
+      target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { canonicalRevision: 4, data: storedData },
+    });
+    await db.insert(dataResetTable).values({ scope: "live", epoch: 0, resetAt: new Date() });
+
+    const result = await db.transaction((tx) => reconcileOperationalIntentInTransaction(tx, {
+      scope: "live",
+      now: Date.now(),
+      command: {
+        actorId: USER,
+        deviceId: "service-test",
+        baseRevision: 4,
+        actionData: { action: "correction", runId, values: { traysOnLine: 7 } },
+      },
+      intent: {
+        version: 1,
+        id: "offline:service-test",
+        date,
+        runId,
+        observedGeneration: `${runId}:10`,
+        resetEpoch: 0,
+        effectiveAt: Date.now(),
+        action: "correction",
+        values: { traysOnLine: 7 },
+      },
+      consumeRun: async () => ({ applied: false, consumed: 0 }),
+    }));
+
+    expect(result).toMatchObject({
+      outcome: "accepted",
+      duplicate: false,
+      canonicalRevision: 5,
+    });
+    expect(result.cursor).toBeTypeOf("number");
+    expect(result.data.runValues[runId].traysOnLine).toBe(7);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, date),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[runId].traysOnLine).toBe(7);
+  });
+
+  it("leaves state and receipts unchanged when an in-transaction side effect fails", async () => {
+    const date = "2030-03-10";
+    const runId = "service-failure-run";
+    const data = {
+      dayState: { date, runs: [{ id: runId, startedAt: 1, metaUpdatedAt: 10 }] },
+      runValues: {},
+    };
+    await db.insert(dailySyncTable).values({
+      date,
+      scope: "live",
+      canonicalRevision: 4,
+      data,
+    }).onConflictDoUpdate({
+      target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { canonicalRevision: 4, data },
+    });
+    await db.insert(dataResetTable).values({
+      scope: "live", epoch: 0, resetAt: new Date(),
+    }).onConflictDoNothing();
+
+    await expect(db.transaction((tx) => reconcileOperationalIntentInTransaction(tx, {
+      scope: "live",
+      now: Date.now(),
+      command: {
+        actorId: USER,
+        deviceId: "service-test",
+        baseRevision: 4,
+        actionData: { action: "lifecycle", lifecycle: "end", runId },
+      },
+      intent: {
+        version: 1,
+        id: "offline:service-failure",
+        date,
+        runId,
+        observedGeneration: `${runId}:10`,
+        resetEpoch: 0,
+        effectiveAt: Date.now(),
+        action: "lifecycle",
+        lifecycle: "end",
+        inventoryLines: [],
+      },
+      consumeRun: async () => {
+        throw new Error("injected transactional side-effect failure");
+      },
+    }))).rejects.toThrow("injected transactional side-effect failure");
+
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, date),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect(stored.canonicalRevision).toBe(4);
+    expect((stored.data as any).dayState.runs[0].endedAt).toBeUndefined();
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(0);
   });
 });
 
