@@ -171,6 +171,7 @@ async function startOldBuildThenTriggerStaleAssetFailure(
   page: import("@playwright/test").Page,
   server: Awaited<ReturnType<typeof startVersionedServer>>,
   staleHomeChunk: string,
+  beforeStaleAssetFailure?: () => Promise<void>,
 ) {
   server.holdNextSessionResponse();
   await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
@@ -212,6 +213,7 @@ async function startOldBuildThenTriggerStaleAssetFailure(
     }
   }, staleHomeChunk);
 
+  await beforeStaleAssetFailure?.();
   server.publish("new");
   server.armStaleAssetFailure();
   server.releaseHeldSessionResponse();
@@ -272,6 +274,7 @@ async function startVersionedServer(
   let staleAssetFailureTriggered = false;
   let staleAssetRequestCount = 0;
   let sessionValid = true;
+  let snapshotHasActiveRun = !options.safeSessionSnapshot;
   let intentPermissionGranted = true;
   let temporarySessionProbeFailuresRemaining = 0;
   const sessionProbeFailuresByTestTab = new Map<string, number>();
@@ -294,6 +297,7 @@ async function startVersionedServer(
     signIns: 0,
     permissionDenied: 0,
   };
+  const sessionSnapshotReads: Array<{ date: string; activeRun: boolean }> = [];
   const fieldCheckObservations: Array<{
     observations: unknown[];
     acceptedMeResponsesAtReceipt: number;
@@ -638,11 +642,12 @@ async function startVersionedServer(
             completeness: "complete",
             dayState: {
               date,
-              runs: options.safeSessionSnapshot ? [] : [run],
+              runs: snapshotHasActiveRun ? [run] : [],
               currentIndex: 0,
             },
-            runValues: options.safeSessionSnapshot ? {} : { [run.id]: {} },
+            runValues: snapshotHasActiveRun ? { [run.id]: {} } : {},
           };
+          sessionSnapshotReads.push({ date, activeRun: snapshotHasActiveRun });
           const snapshotId = createHash("sha256")
             .update(canonicalSyncJson(canonical))
             .digest("hex");
@@ -809,6 +814,9 @@ async function startVersionedServer(
     setSessionValid(valid: boolean) {
       sessionValid = valid;
     },
+    setSnapshotActiveRun(active: boolean) {
+      snapshotHasActiveRun = active;
+    },
     setIntentPermissionGranted(granted: boolean) {
       intentPermissionGranted = granted;
     },
@@ -845,6 +853,9 @@ async function startVersionedServer(
         appliedIntentUsers: [...appliedIntentUsers],
         signedInUsers: [...signedInUsers],
       };
+    },
+    sessionSnapshotReads() {
+      return sessionSnapshotReads.map((snapshot) => ({ ...snapshot }));
     },
     fieldCheckObservations() {
       return fieldCheckObservations.map((batch) => ({
@@ -2781,6 +2792,123 @@ test.describe("PWA update handoff", () => {
         expect.objectContaining({ kind: "worker-state", state: "installed" }),
         expect.objectContaining({ kind: "worker-state", state: "activated" }),
       ]));
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("keeps the old build when a run starts during safe-idle recovery", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      {
+        sessionRecovery: true,
+        safeSessionSnapshot: true,
+        fieldCheckObservations: true,
+      },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const captureKey = "__pwa_late_run_recovery_marker_capture";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.sessionStorage && key === markerKey) {
+            const captured = JSON.parse(localStorage.getItem(captureKey) ?? "[]") as string[];
+            captured.push(value);
+            localStorage.setItem(captureKey, JSON.stringify(captured));
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+
+      let initialSnapshotDate = "";
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+        async () => {
+          const snapshot = await page.evaluate(async () => {
+            const now = new Date();
+            const today = [
+              now.getFullYear(),
+              String(now.getMonth() + 1).padStart(2, "0"),
+              String(now.getDate()).padStart(2, "0"),
+            ].join("-");
+            const response = await fetch(
+              `/api/sync/today?today=${encodeURIComponent(today)}`,
+              { cache: "no-store", credentials: "same-origin" },
+            );
+            return {
+              ok: response.ok,
+              complete: response.headers.get("X-Sync-Response"),
+              today,
+              body: await response.json() as {
+                completeness?: string;
+                dayState?: { date?: string; runs?: unknown[] };
+              },
+            };
+          });
+          expect(snapshot).toMatchObject({
+            ok: true,
+            complete: "complete",
+            body: {
+              completeness: "complete",
+              dayState: { date: snapshot.today, runs: [] },
+            },
+          });
+          initialSnapshotDate = snapshot.today;
+        },
+      );
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+
+      const snapshotsBeforeRunStarts = server.sessionSnapshotReads().length;
+      server.setSnapshotActiveRun(true);
+      await expect.poll(() => server.sessionSnapshotReads().some(
+        (snapshot, index) =>
+          index >= snapshotsBeforeRunStarts &&
+          snapshot.date === initialSnapshotDate &&
+          snapshot.activeRun,
+      )).toBe(true);
+
+      // A run started on another device after the safe snapshot. The delayed
+      // authenticated recheck must cancel recovery before worker/cache changes.
+      await expect(page.getByText(
+        /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+      )).toBeVisible();
+      await page.waitForTimeout(1_500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+      expect(await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+      expect(await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("__pwa_late_run_recovery_marker_capture") ?? "[]",
+        ) as string[],
+      )).toEqual([]);
+
+      const outcomes = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      expect(outcomes.filter((item) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toHaveLength(0);
       expect(server.staleAssetRequestCount()).toBe(1);
       expect(server.fixtureErrors()).toEqual([]);
     } finally {
