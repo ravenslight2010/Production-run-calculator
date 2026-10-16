@@ -325,6 +325,8 @@ fi
 # executable used by package scripts.
 fallback_marker_dir=$(mktemp -d "${TMPDIR:-/tmp}/run-release-node.XXXXXX")
 fallback_marker="${fallback_marker_dir}/started"
+fallback_npm_cache="${fallback_marker_dir}/npm-cache"
+mkdir -m 700 -- "$fallback_npm_cache"
 trap 'rm -rf "$fallback_marker_dir"' EXIT
 active_child_pid=""
 
@@ -379,6 +381,7 @@ fi
 NODE_OPTIONS="$guarded_node_options" \
 RELEASE_NODE_NPM_REGISTRY="$release_node_registry" \
 npm_config_registry="$release_node_registry" \
+npm_config_cache="$fallback_npm_cache" \
 RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
   python3 -c '
 import os

@@ -20,3 +20,9 @@ The Replit npm package-firewall registry may be configured as cleartext HTTP, wh
 **Why:** The HTTP registry setting caused post-merge setup to fail before dependency installation even though the pinned runtime package was available from the public HTTPS registry.
 
 **How to apply:** Keep HTTPS certificate verification and downgrade rejection enabled; scope the HTTPS registry override to Node package acquisition, and test that inherited HTTP configuration cannot override it.
+
+Concurrent task merges can launch multiple pinned-Node `npx` acquisitions against the same npm exec cache. npm may report its timed-out acquisition lock as `ECOMPROMISED`; this is not by itself proof of corrupted package contents.
+
+**Why:** Parallel post-merge hooks share the user npm cache even when each task has an isolated workspace, so one wait can exceed npm's lock deadline.
+
+**How to apply:** Give each short-lived Node bootstrap a private temporary npm cache and remove it with the bootstrap's temporary marker directory. Do not clear or mutate the shared cache to recover from a lock timeout.

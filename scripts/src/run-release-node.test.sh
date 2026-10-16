@@ -472,6 +472,13 @@ set -euo pipefail
 printf 'npx-invoked\n' >>"\$RUN_LOG"
 printf 'npx-node-options=%s\n' "\${NODE_OPTIONS:-unset}" >>"\$RUN_LOG"
 printf 'npx-registry=%s\n' "\${npm_config_registry:-unset}" >>"\$RUN_LOG"
+fallback_dir=\$(dirname "\$RELEASE_NODE_FALLBACK_MARKER")
+if [[ "\${npm_config_cache:-}" == "\$fallback_dir/npm-cache" &&
+  -d "\${npm_config_cache:-}" ]]; then
+  printf 'npx-cache-isolated=yes\n' >>"\$RUN_LOG"
+else
+  printf 'npx-cache-isolated=no\n' >>"\$RUN_LOG"
+fi
 
 args=("\$@")
   separator=-1
@@ -623,6 +630,7 @@ test_mismatching_node_uses_npx() {
   assert_contains "$events" \
     "npx-node-options=--trace-warnings --require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
   assert_contains "$events" "npx-registry=https://registry.npmjs.org/"
+  assert_contains "$events" "npx-cache-isolated=yes"
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" \
