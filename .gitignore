@@ -58,6 +58,9 @@ Thumbs.db
 
 # Replit
 .cache/
+!/.config/
+/.config/*
+!/.config/bashrc
 !/.local/
 .local/*
 !.local/custom_skills/
