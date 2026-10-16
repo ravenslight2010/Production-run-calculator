@@ -26,6 +26,12 @@ const TABLET_VIEWPORTS = [
   { width: 1024, height: 768 },
 ] as const;
 
+const TOUCH_RECIPE_PICKER_VIEWPORTS = [
+  { name: "phone", width: 390, height: 844 },
+  { name: "tablet portrait", width: 768, height: 1024 },
+  { name: "tablet landscape", width: 1024, height: 768 },
+] as const;
+
 // 568x320 is a narrow phone in landscape (and is small enough to expose
 // layouts that accidentally depend on portrait height).
 const LANDSCAPE_VIEWPORT = { width: 568, height: 320 } as const;
@@ -1997,212 +2003,302 @@ test.describe("phone layout smoke", () => {
       });
     });
   }
-  test.describe("touch recipe picker contract at compact phone viewport @focused-only", () => {
-    test.use({
-      viewport: { width: 390, height: 844 },
-      hasTouch: true,
-      isMobile: true,
-    });
+  for (const viewport of TOUCH_RECIPE_PICKER_VIEWPORTS) {
+    test.describe(`touch recipe picker contract at ${viewport.name} @focused-only`, () => {
+      test.use({
+        viewport: { width: viewport.width, height: viewport.height },
+        hasTouch: true,
+        isMobile: true,
+      });
 
-    test("keeps live Setup and Setup Profiles picker labels accessible", async ({
-      page,
-      playwright,
-    }) => {
-      test.setTimeout(120_000);
-      const fixtures = await AuthorizedBrowserFixtures.create(
+      test("keeps live Setup and Setup Profiles pickers reachable", async ({
+        page,
         playwright,
-        RECIPE_PICKER_API_BASE,
-        getSignupCode(),
-      );
+      }) => {
+        test.setTimeout(120_000);
+        const fixtures = await AuthorizedBrowserFixtures.create(
+          playwright,
+          RECIPE_PICKER_API_BASE,
+          getSignupCode(),
+        );
 
-      try {
-        const account = await fixtures.createAccount({
-          username: uniqueTestId("phone_recipe_picker_contract"),
-          password: RECIPE_PICKER_PASSWORD,
-          capabilities: DEFAULT_MANAGER_CAPABILITIES,
-          onboardingSeen: true,
-        });
-        const brand = uniqueTestId("TouchPickerBrand");
-        const flavor = uniqueTestId("TouchPickerFlavor");
-        const doughName = uniqueTestId("TouchPickerDough");
-        const sauceName = uniqueTestId("TouchPickerSauce");
-        const cheeseName = uniqueTestId("TouchPickerCheese");
-        const mixName = uniqueTestId("TouchPickerMix");
-        const runId = uniqueTestId("touch-picker-run");
-        const now = Date.now();
-        const values = {
-          casesNeeded: 1,
-          pizzasPerCase: 1,
-          casesPerSkid: 1,
-          crustsPerCycle: 1,
-          cycleSpeed: 1,
-          speedAdjustment: 1,
-          doughRecipeName: doughName,
-          doughRecipe: [{ ingredient: "Flour", lbs: 10 }],
-          frontlineRecipeName: sauceName,
-          frontlineRecipe: [{ ingredient: "Tomato", lbs: 10 }],
-          app1Type: "Cheese",
-          app1CheeseRecipeName: cheeseName,
-          app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
-          app2Type: "Mix",
-          app2CheeseRecipeName: mixName,
-          app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
-          app3Type: "Cheese",
-          app3CheeseRecipeName: cheeseName,
-          app3CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
-          app4Type: "Mix",
-          app4CheeseRecipeName: mixName,
-          app4CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
-        };
+        try {
+          const account = await fixtures.createAccount({
+            username: uniqueTestId("touch_recipe_picker_contract"),
+            password: RECIPE_PICKER_PASSWORD,
+            capabilities: DEFAULT_MANAGER_CAPABILITIES,
+            onboardingSeen: true,
+          });
+          const brand = uniqueTestId("TouchPickerBrand");
+          const flavor = uniqueTestId("TouchPickerFlavor");
+          const doughName = uniqueTestId("TouchPickerDough");
+          const sauceName = uniqueTestId("TouchPickerSauce");
+          const cheeseName = uniqueTestId("TouchPickerCheese");
+          const mixName = uniqueTestId("TouchPickerMix");
+          const runId = uniqueTestId("touch-picker-run");
+          const now = Date.now();
+          const values = {
+            casesNeeded: 1,
+            pizzasPerCase: 1,
+            casesPerSkid: 1,
+            crustsPerCycle: 1,
+            cycleSpeed: 1,
+            speedAdjustment: 1,
+            doughRecipeName: doughName,
+            doughRecipe: [{ ingredient: "Flour", lbs: 10 }],
+            frontlineRecipeName: sauceName,
+            frontlineRecipe: [{ ingredient: "Tomato", lbs: 10 }],
+            app1Type: "Cheese",
+            app1CheeseRecipeName: cheeseName,
+            app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+            app2Type: "Mix",
+            app2CheeseRecipeName: mixName,
+            app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+            app3Type: "Cheese",
+            app3CheeseRecipeName: cheeseName,
+            app3CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+            app4Type: "Mix",
+            app4CheeseRecipeName: mixName,
+            app4CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+          };
 
-        await fixtures.seedNamedRecipe("dough", account, {
-          id: uniqueTestId("touch-picker-dough"),
-          name: doughName,
-          components: [{ ingredient: "Flour", lbs: 10 }],
-        });
-        await fixtures.seedNamedRecipe("sauce", account, {
-          id: uniqueTestId("touch-picker-sauce"),
-          name: sauceName,
-          components: [{ ingredient: "Tomato", lbs: 10 }],
-        });
-        await fixtures.seedCheeseRecipe(account, {
-          id: uniqueTestId("touch-picker-cheese"),
-          name: cheeseName,
-          components: [{ ingredient: "Cheese", lbs: 10 }],
-        });
-        await fixtures.seedMix(account, {
-          id: uniqueTestId("touch-picker-mix"),
-          name: mixName,
-          components: [{ ingredient: "Blend", perPizza: 1 }],
-        });
-        await fixtures.seedBrandProfile(account, {
-          brand,
-          flavor,
-          values,
-          updatedAt: now,
-        });
-        await fixtures.seedTodaySync({
-          token: account.token,
-          senderId: uniqueTestId("touch-picker-sender"),
-          payload: {
-            dayState: {
-              date: new Date().toISOString().slice(0, 10),
-              runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
-              currentIndex: 0,
-              resetAt: 0,
-              substitutions: [],
-              substitutionLog: [],
-              stagedItems: {},
+          await fixtures.seedNamedRecipe("dough", account, {
+            id: uniqueTestId("touch-picker-dough"),
+            name: doughName,
+            components: [{ ingredient: "Flour", lbs: 10 }],
+          });
+          await fixtures.seedNamedRecipe("sauce", account, {
+            id: uniqueTestId("touch-picker-sauce"),
+            name: sauceName,
+            components: [{ ingredient: "Tomato", lbs: 10 }],
+          });
+          await fixtures.seedCheeseRecipe(account, {
+            id: uniqueTestId("touch-picker-cheese"),
+            name: cheeseName,
+            components: [{ ingredient: "Cheese", lbs: 10 }],
+          });
+          await fixtures.seedMix(account, {
+            id: uniqueTestId("touch-picker-mix"),
+            name: mixName,
+            components: [{ ingredient: "Blend", perPizza: 1 }],
+          });
+          await fixtures.seedBrandProfile(account, {
+            brand,
+            flavor,
+            values,
+            updatedAt: now,
+          });
+          await fixtures.seedTodaySync({
+            token: account.token,
+            senderId: uniqueTestId("touch-picker-sender"),
+            payload: {
+              dayState: {
+                date: new Date().toISOString().slice(0, 10),
+                runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
+                currentIndex: 0,
+                resetAt: 0,
+                substitutions: [],
+                substitutionLog: [],
+                stagedItems: {},
+              },
+              runValues: { [runId]: values },
+              runValuesUpdatedAt: { [runId]: now },
+              packagingProgress: {},
             },
-            runValues: { [runId]: values },
-            runValuesUpdatedAt: { [runId]: now },
-            packagingProgress: {},
-          },
-        });
+          });
 
-        await page.context().addCookies([{
-          name: "rc_auth",
-          value: account.token,
-          url: RECIPE_PICKER_API_BASE,
-        }]);
-        await page.goto("/", { waitUntil: "domcontentloaded" });
-        await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+          await page.context().addCookies([{
+            name: "rc_auth",
+            value: account.token,
+            url: RECIPE_PICKER_API_BASE,
+          }]);
+          const masterDataReady = page.waitForResponse(
+            (response) =>
+              response.request().method() === "GET"
+              && response.url().includes("/api/master-data/bootstrap")
+              && response.ok(),
+            { timeout: 25_000 },
+          );
+          await page.goto("/", { waitUntil: "domcontentloaded" });
+          await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+          await masterDataReady;
 
-        const openTouchPickerContract = async (
-          surface: Locator,
-          surfaceName: string,
-        ): Promise<void> => {
-          await assertRecipePickerContract(surface, surfaceName);
-          for (const picker of RECIPE_PICKER_CONTRACT) {
-            const trigger = surface.getByTestId(picker.testId);
-            await expect(
-              trigger,
-              `${surfaceName}: ${picker.context} picker should use the touch trigger`,
-            ).toHaveAttribute("aria-haspopup", "dialog");
-            await trigger.tap();
-            const dialog = page.getByRole("dialog", {
-              name: new RegExp(escapeRegExp(picker.label), "i"),
+          const browserCapabilities = await page.evaluate(() => ({
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            touchPoints: navigator.maxTouchPoints,
+          }));
+          expect(browserCapabilities.viewport).toEqual({
+            width: viewport.width,
+            height: viewport.height,
+          });
+          expect(browserCapabilities.touchPoints).toBeGreaterThan(0);
+
+          const assertWithinViewport = async (
+            element: Locator,
+            elementName: string,
+          ): Promise<void> => {
+            const bounds = await element.evaluate((node) => {
+              const rect = node.getBoundingClientRect();
+              return {
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+                width: rect.width,
+                height: rect.height,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+              };
             });
-            await expect(
-              dialog,
-              `${surfaceName}: ${picker.context} touch picker dialog`,
-            ).toBeVisible();
-            await expect(
-              dialog.getByRole("listbox", {
+            expect(bounds.width, `${elementName} should have rendered width`).toBeGreaterThan(0);
+            expect(bounds.height, `${elementName} should have rendered height`).toBeGreaterThan(0);
+            expect(bounds.left, `${elementName} should fit inside the viewport`).toBeGreaterThanOrEqual(-1);
+            expect(bounds.right, `${elementName} should fit inside the viewport`).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+            expect(bounds.top, `${elementName} should fit inside the viewport`).toBeGreaterThanOrEqual(-1);
+            expect(bounds.bottom, `${elementName} should fit inside the viewport`).toBeLessThanOrEqual(bounds.viewportHeight + 1);
+          };
+
+          const openTouchPickerContract = async (
+            surface: Locator,
+            surfaceName: string,
+          ): Promise<void> => {
+            await assertRecipePickerContract(surface, surfaceName);
+            let searchablePickerCount = 0;
+            for (const picker of RECIPE_PICKER_CONTRACT) {
+              const trigger = surface.getByTestId(picker.testId);
+              await expect(
+                trigger,
+                `${surfaceName}: ${picker.context} picker should use the touch trigger`,
+              ).toHaveAttribute("aria-haspopup", "dialog");
+              await trigger.scrollIntoViewIfNeeded();
+              const pageScrollBeforeOpen = await page.evaluate(() => window.scrollY);
+              await trigger.tap();
+              const dialog = page.getByRole("dialog", {
                 name: new RegExp(escapeRegExp(picker.label), "i"),
-              }),
-              `${surfaceName}: ${picker.context} touch picker options`,
-            ).toBeVisible();
-            await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
-            await expect(dialog).toBeHidden();
-            await expect(trigger).toBeFocused();
+              });
+              await expect(
+                dialog,
+                `${surfaceName}: ${picker.context} touch picker dialog`,
+              ).toBeVisible();
+              await dialog.evaluate(async (element) => {
+                await Promise.all(
+                  element.getAnimations().map((animation) =>
+                    animation.finished.catch(() => undefined),
+                  ),
+                );
+              });
+              await assertWithinViewport(dialog, `${surfaceName}: ${picker.context} dialog`);
+              const search = dialog.getByRole("textbox");
+              if (await search.count()) {
+                searchablePickerCount += 1;
+                await expect(
+                  search,
+                  `${surfaceName}: ${picker.context} search should be visible`,
+                ).toBeVisible();
+                await assertWithinViewport(search, `${surfaceName}: ${picker.context} search`);
+              }
+              const listbox = dialog.getByRole("listbox", {
+                name: new RegExp(escapeRegExp(picker.label), "i"),
+              });
+              await expect(
+                listbox,
+                `${surfaceName}: ${picker.context} options`,
+              ).toBeVisible();
+              await assertWithinViewport(listbox, `${surfaceName}: ${picker.context} options`);
+              const firstOption = listbox.getByRole("option").first();
+              await expect(
+                firstOption,
+                `${surfaceName}: ${picker.context} should expose an option`,
+              ).toBeVisible();
+              await assertWithinViewport(firstOption, `${surfaceName}: ${picker.context} first option`);
+              const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+              await expect(cancel).toBeVisible();
+              await assertWithinViewport(cancel, `${surfaceName}: ${picker.context} cancel`);
+              const scrollState = await page.evaluate(() => ({
+                scrollY: window.scrollY,
+                bodyOverflow: getComputedStyle(document.body).overflow,
+              }));
+              expect(scrollState.scrollY, `${surfaceName}: opening ${picker.context} should not scroll the page`)
+                .toBe(pageScrollBeforeOpen);
+              expect(scrollState.bodyOverflow, `${surfaceName}: picker should lock background scrolling`)
+                .toBe("hidden");
+              await cancel.tap();
+              await expect(dialog).toBeHidden();
+              await expect(trigger).toBeFocused();
+              await expect.poll(() => page.evaluate(() => window.scrollY))
+                .toBe(pageScrollBeforeOpen);
+            }
+            expect(
+              searchablePickerCount,
+              `${surfaceName}: at least one recipe picker should expose a reachable search field`,
+            ).toBeGreaterThan(0);
+          };
+
+          await page.getByRole("button", { name: /^More/ }).click();
+          await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+          const liveSurface = page.getByTestId("setup-recipes-fieldset");
+          await expect(liveSurface).toBeVisible();
+          await liveSurface.getByText("Sauce & Applicator Weights", { exact: true }).click();
+          await openTouchPickerContract(liveSurface, "touch live Setup tab");
+
+          await page.getByRole("button", { name: /^More/ }).click();
+          await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+          const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+          await expect(settings).toBeVisible();
+          await settings.getByRole("button", { name: "Tools", exact: true }).click();
+          await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+          await settings
+            .getByRole("button", { name: "Open Setup Profiles Editor", exact: true })
+            .click();
+
+          const profileSurface = page.getByRole("dialog", { name: "Setup Profiles" });
+          await expect(profileSurface).toBeVisible();
+          const brandPicker = profileSurface.getByRole("button", {
+            name: "Pick or add a brand…",
+            exact: true,
+          });
+          await brandPicker.tap();
+          const brandPickerDialog = page.getByRole("dialog", {
+            name: /Select pick or add a brand/i,
+          });
+          await expect(brandPickerDialog).toBeVisible();
+          await brandPickerDialog.getByPlaceholder("Search or add…").fill(brand);
+          const existingBrand = brandPickerDialog.getByRole("button", { name: brand, exact: true });
+          if (await existingBrand.count()) {
+            await existingBrand.tap();
+          } else {
+            await brandPickerDialog
+              .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(brand)}.*$`) })
+              .tap();
           }
-        };
-
-        await page.getByRole("button", { name: /^More/ }).click();
-        await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
-        const liveSurface = page.getByTestId("setup-recipes-fieldset");
-        await expect(liveSurface).toBeVisible();
-        await liveSurface.getByText("Sauce & Applicator Weights", { exact: true }).click();
-        await openTouchPickerContract(liveSurface, "touch live Setup tab");
-
-        await page.getByRole("button", { name: /^More/ }).click();
-        await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-        const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
-        await expect(settings).toBeVisible();
-        await settings.getByRole("button", { name: "Tools", exact: true }).click();
-        await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
-        await settings
-          .getByRole("button", { name: "Open Setup Profiles Editor", exact: true })
-          .click();
-
-        const profileSurface = page.getByRole("dialog", { name: "Setup Profiles" });
-        await expect(profileSurface).toBeVisible();
-        const brandPicker = profileSurface.getByRole("button", {
-          name: "Pick or add a brand…",
-          exact: true,
-        });
-        await brandPicker.tap();
-        const brandPickerDialog = page.getByRole("dialog", {
-          name: /Select pick or add a brand/i,
-        });
-        await expect(brandPickerDialog).toBeVisible();
-        await brandPickerDialog.getByPlaceholder("Search or add…").fill(brand);
-        const existingBrand = brandPickerDialog.getByRole("button", { name: brand, exact: true });
-        if (await existingBrand.count()) {
-          await existingBrand.tap();
-        } else {
-          await brandPickerDialog
-            .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(brand)}.*$`) })
-            .tap();
+          await expect(brandPickerDialog).toBeHidden();
+          const flavorPicker = profileSurface.getByRole("button", {
+            name: "Pick or add a flavor…",
+            exact: true,
+          });
+          await flavorPicker.tap();
+          const flavorPickerDialog = page.getByRole("dialog", {
+            name: /Select pick or add a flavor/i,
+          });
+          await expect(flavorPickerDialog).toBeVisible();
+          await flavorPickerDialog.getByPlaceholder("Search or add…").fill(flavor);
+          const existingFlavor = flavorPickerDialog.getByRole("button", { name: flavor, exact: true });
+          if (await existingFlavor.count()) {
+            await existingFlavor.tap();
+          } else {
+            await flavorPickerDialog
+              .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(flavor)}.*$`) })
+              .tap();
+          }
+          await expect(flavorPickerDialog).toBeHidden();
+          await expect(profileSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
+          await openTouchPickerContract(profileSurface, "touch Setup Profiles editor");
+        } finally {
+          await fixtures.cleanup();
         }
-        await expect(brandPickerDialog).toBeHidden();
-        const flavorPicker = profileSurface.getByRole("button", {
-          name: "Pick or add a flavor…",
-          exact: true,
-        });
-        await flavorPicker.tap();
-        const flavorPickerDialog = page.getByRole("dialog", {
-          name: /Select pick or add a flavor/i,
-        });
-        await expect(flavorPickerDialog).toBeVisible();
-        await flavorPickerDialog.getByPlaceholder("Search or add…").fill(flavor);
-        const existingFlavor = flavorPickerDialog.getByRole("button", { name: flavor, exact: true });
-        if (await existingFlavor.count()) {
-          await existingFlavor.tap();
-        } else {
-          await flavorPickerDialog
-            .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(flavor)}.*$`) })
-            .tap();
-        }
-        await expect(flavorPickerDialog).toBeHidden();
-        await expect(profileSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
-        await openTouchPickerContract(profileSurface, "touch Setup Profiles editor");
-      } finally {
-        await fixtures.cleanup();
-      }
+      });
     });
-  });
+  }
 });
 
 async function prepareGuideReviewForCommit(

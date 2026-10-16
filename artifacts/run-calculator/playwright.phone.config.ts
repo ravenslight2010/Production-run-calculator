@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { releaseBrowserWebServers } from "./playwright.release-servers";
 
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
@@ -12,6 +13,7 @@ const realMobileBrowserWsEndpoint =
  * isolated, newly-created test accounts, so they need no shared-data reset.
  */
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: [
     "live-sauce-dough-phone.spec.ts",
