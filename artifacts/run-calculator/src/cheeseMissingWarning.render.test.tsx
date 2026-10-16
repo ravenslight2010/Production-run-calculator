@@ -17,7 +17,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { CheesePickCard } from "./pages/home";
+import { CheesePickCard } from "./components/RecipeCards";
 import { ReadOnlyRecipeCard } from "./components/live-stations/stationShared";
 
 afterEach(() => {

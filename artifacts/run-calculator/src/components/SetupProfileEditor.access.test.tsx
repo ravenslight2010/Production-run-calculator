@@ -51,7 +51,7 @@ vi.mock("./SetupPickerControls", () => ({
   TypeDropdown: () => null,
 }));
 
-vi.mock("../pages/home", () => ({
+vi.mock("./RecipeCards", () => ({
   CheesePickCard: () => null,
   MixRecipeCard: () => null,
   DoughRecipeCard: () => null,

@@ -34,7 +34,7 @@ import {
   MixRecipeCard,
   DoughRecipeCard,
   FrontlineRecipeCard,
-} from "../pages/home";
+} from "./RecipeCards";
 import { IngredientSelect, TypeDropdown } from "./SetupPickerControls";
 import { NumField } from "./NumField";
 import { useMixes } from "../hooks/useMixes";
