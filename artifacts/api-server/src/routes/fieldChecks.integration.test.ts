@@ -244,6 +244,25 @@ describe("field-check evidence from two authenticated clients", () => {
     expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
   });
 
+  it("rejects a mixed-validity batch without persisting any observations or issues", async () => {
+    const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [
+        observation("mixed-validity-valid-failure", "failure", "mobile-chrome"),
+        {
+          ...observation("mixed-validity-invalid-failure", "failure", "tablet-browser"),
+          outcome: "not-an-outcome",
+        },
+      ],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Invalid field-check observation",
+    });
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
   it("reports never-observed, stale, and no-success coverage with bounded receipt delay", async () => {
     const now = Date.now();
     const observedAt = new Date(now - 30_000);

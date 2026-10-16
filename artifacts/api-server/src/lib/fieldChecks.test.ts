@@ -98,6 +98,20 @@ describe("field-check contract", () => {
     }).ok).toBe(false);
   });
 
+  it("rejects a mixed-validity batch as a whole", () => {
+    const validation = validateFieldCheckBatch({
+      observations: [
+        { ...validObservation, outcome: "failure" },
+        { ...validObservation, observationId: "browser-invalid:startup:1:failure", metrics: { stack: "not-allowed" } },
+      ],
+    });
+
+    expect(validation).toEqual({
+      ok: false,
+      error: "Invalid field-check observation",
+    });
+  });
+
   it("rejects free-form or oversized metrics", () => {
     expect(validateFieldCheckBatch({
       observations: [{
