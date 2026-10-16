@@ -53,6 +53,7 @@ import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
+import { executeAutoTrackClaim } from "../lib/autoTrackClaimService";
 import {
   buildNetSecondServerClaims,
   buildWallClockServerClaims,
@@ -2179,180 +2180,26 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
     res.status(400).json({ error: "Invalid or oversized automatic command" });
     return;
   }
+  const rawEpoch = req.query.epoch;
+  const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
+  const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
   try {
-    let result:
-      | (ReturnType<typeof applyAutoTrackClaim> & {
-        canonicalRevision: number;
-        serverTime: number;
-        duplicate: boolean;
-        resetStale?: number;
-      })
-      | undefined;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        result = await db.transaction(async (tx) => {
-          const serverTime = Date.now();
-          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(serverTime) })
-            .onConflictDoNothing();
-          const [reset] = await tx.select().from(dataResetTable)
-            .where(eq(dataResetTable.scope, scope)).for("update");
-          const [existing] = await tx
-            .select()
-            .from(dailySyncTable)
-            .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
-            .for("update");
-          const commandId = `auto-track:${claim.eventId}`;
-          const [seen] = await tx.select().from(operationalIntentLedgerTable)
-            .where(and(
-              eq(operationalIntentLedgerTable.scope, scope),
-              eq(operationalIntentLedgerTable.date, date),
-              eq(operationalIntentLedgerTable.intentId, commandId),
-            ))
-            .for("update");
-          if (seen) {
-            const snapshot = (seen.snapshot ?? existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
-            const state = ((snapshot as any).autoTrackCoordination?.runs?.[claim.runId]?.[claim.channel] ?? {
-              generation: claim.generation,
-              sequence: claim.sequence,
-              nextDueAt: claim.nextDueAt,
-              updatedAt: seen.serverReceivedAt.getTime(),
-            }) as ReturnType<typeof applyAutoTrackClaim>["channelState"];
-            const values = ((snapshot as any).runValues?.[claim.runId] ?? {}) as Record<string, unknown>;
-            return {
-              data: snapshot,
-              outcome: (seen.outcome === "accepted" ? "duplicate" : seen.outcome) as ReturnType<typeof applyAutoTrackClaim>["outcome"],
-              channelState: state,
-              values,
-              canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
-              serverTime: seen.serverReceivedAt.getTime(),
-              duplicate: true,
-              ...(seen.outcome === "stale" ? { resetStale: reset?.epoch ?? 0 } : {}),
-            };
-          }
-          const rawEpoch = req.query.epoch;
-          const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
-          if (!Number.isSafeInteger(suppliedEpoch) || suppliedEpoch < 0
-            || (reset?.epoch ?? 0) !== suppliedEpoch) {
-            const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
-            const snapshot = (existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
-            if (existing) {
-              await tx.update(dailySyncTable)
-                .set({ canonicalRevision, updatedAt: new Date(serverTime) })
-                .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-            } else {
-              await tx.insert(dailySyncTable).values({
-                scope,
-                date,
-                data: snapshot as any,
-                canonicalRevision,
-                updatedAt: new Date(serverTime),
-              });
-            }
-            await tx.insert(operationalIntentLedgerTable).values({
-              scope,
-              date,
-              intentId: commandId,
-              outcome: "stale",
-              snapshot: snapshot as any,
-              commandType: "auto-track",
-              actorId: command.actorId,
-              deviceId: command.deviceId,
-              baseRevision: command.baseRevision,
-              canonicalRevision,
-              actionData: command.actionData,
-              serverReceivedAt: new Date(serverTime),
-            });
-            return {
-              data: snapshot,
-              outcome: "stale" as const,
-              channelState: {
-                generation: claim.generation,
-                sequence: 0,
-                nextDueAt: claim.nextDueAt,
-                updatedAt: serverTime,
-              },
-              values: {},
-              canonicalRevision,
-              serverTime,
-              duplicate: false,
-              resetStale: reset?.epoch ?? 0,
-            };
-          }
-          const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
-          if (applied.outcome === "accepted" && /^app[1-4]-batch$/.test(claim.channel)) {
-            const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
-            if (mutation) {
-              await appendAutomaticApplicatorEvidence(tx, {
-                scope,
-                date,
-                runId: claim.runId,
-                slot: Number(claim.channel[3]),
-                observedTotal: mutation.to,
-                eventId: claim.eventId,
-              });
-            }
-          }
-          if (applied.outcome === "accepted") {
-             if (applied.inventoryConsumption?.kind === "sauce-barrel") {
-               const consumption = applied.inventoryConsumption;
-               await consumeSauceBarrelInTransaction(
-                 tx,
-                 consumption.runId,
-                 consumption.barrelIndex,
-                 consumption.itemKey,
-                 consumption.qty,
-                 true,
-                 consumption.eventId,
-               );
-             }
-          }
-          const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
-          if (existing) {
-            await tx.update(dailySyncTable)
-              .set({ data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) })
-              .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-          } else {
-            await tx.insert(dailySyncTable)
-              .values({ date, scope, data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) });
-          }
-          await tx.insert(operationalIntentLedgerTable).values({
-            scope,
-            date,
-            intentId: commandId,
-            outcome: applied.outcome,
-            snapshot: applied.data as any,
-            commandType: "auto-track",
-            actorId: command.actorId,
-            deviceId: command.deviceId,
-            baseRevision: command.baseRevision,
-            canonicalRevision,
-            actionData: command.actionData,
-            serverReceivedAt: new Date(serverTime),
-          });
-          if (applied.outcome === "accepted") {
-            await appendSyncOutboxEvent(tx, {
-              kind: "day-state",
-              scope,
-              date,
-              senderId: typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "",
-              canonicalRevision,
-            });
-          }
-          return { ...applied, canonicalRevision, serverTime, duplicate: false };
-        });
-        break;
-      } catch (error) {
-        if (isUniqueViolation(error) && attempt < 3) continue;
-        throw error;
-      }
-    }
-    if (!result) throw new Error("Auto-track claim did not complete");
+    const result = await executeAutoTrackClaim({
+      scope,
+      date,
+      claim,
+      suppliedEpoch,
+      command,
+      senderId,
+    }, {
+      appendAutomaticApplicatorEvidence,
+      consumeSauceBarrelInTransaction,
+    });
     if (result.resetStale !== undefined) {
       res.setHeader("X-Sync-Response", "stale");
       res.json(await staleEpochResponse(scope, result.resetStale));
       return;
     }
-    const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
     if (result.outcome === "accepted") {
       broadcast(result.data, senderId, scope, date, result);
     }

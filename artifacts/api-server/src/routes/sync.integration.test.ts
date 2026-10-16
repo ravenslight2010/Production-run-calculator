@@ -15,6 +15,8 @@ import {
   legacySyncReadinessSnapshot,
 } from "../lib/capacityTelemetry";
 import { applySyncDeltaData } from "@workspace/sync-contract";
+import type { AutoTrackClaim } from "../lib/autoTrackCoordination";
+import type { AutoTrackClaimServiceDependencies } from "../lib/autoTrackClaimService";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
   dayState: { date, runs: [] },
@@ -70,6 +72,8 @@ let getSharedAutoTrackDeferredDiagnostic:
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
 let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
+let executeAutoTrackClaim: typeof import("../lib/autoTrackClaimService")["executeAutoTrackClaim"];
+let autoTrackClaimDependencies: AutoTrackClaimServiceDependencies;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -109,6 +113,9 @@ beforeAll(async () => {
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   const syncMod = await import("./sync");
+  const autoTrackClaimServiceMod = await import("../lib/autoTrackClaimService");
+  const applicatorEvidenceMod = await import("./applicatorBatchEvidence");
+  const inventoryMod = await import("./inventory");
   const operationalIntentServiceMod = await import("../lib/operationalIntentService");
   db = dbMod.db;
   pool = dbMod.pool;
@@ -148,6 +155,11 @@ beforeAll(async () => {
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
   derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
+  executeAutoTrackClaim = autoTrackClaimServiceMod.executeAutoTrackClaim;
+  autoTrackClaimDependencies = {
+    appendAutomaticApplicatorEvidence: applicatorEvidenceMod.appendAutomaticApplicatorEvidence,
+    consumeSauceBarrelInTransaction: inventoryMod.consumeSauceBarrelInTransaction,
+  };
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -2977,6 +2989,23 @@ describe("POST /sync/auto-track/claim", () => {
     headers: { ...authHeaders(), "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  const executeDirect = (
+    body: ReturnType<typeof event>,
+    suppliedEpoch = 0,
+    dependencies = autoTrackClaimDependencies,
+  ) => executeAutoTrackClaim({
+    scope: "live",
+    date: DATE,
+    claim: body.claim as AutoTrackClaim,
+    suppliedEpoch,
+    command: {
+      actorId: USER,
+      deviceId: body.senderId,
+      baseRevision: 0,
+      actionData: { claim: body.claim },
+    },
+    senderId: body.senderId,
+  }, dependencies);
 
   beforeEach(async () => {
     await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
@@ -3017,6 +3046,88 @@ describe("POST /sync/auto-track/claim", () => {
     expect(new Set(receipts.map((receipt) => receipt.deviceId))).toEqual(new Set(["tab-a", "tab-b"]));
   });
 
+  it("direct service serializes competing claims and returns the accepted retry as a duplicate", async () => {
+    const a = event("service-a", "service-a:tray:1");
+    const b = event("service-b", "service-b:tray:1");
+    const [first, second] = await Promise.all([executeDirect(a), executeDirect(b)]);
+
+    expect([first.outcome, second.outcome].sort()).toEqual(["accepted", "stale"]);
+    expect(first.values.traysOnLine).toBe(9);
+    expect(second.values.traysOnLine).toBe(9);
+
+    const accepted = first.outcome === "accepted" ? a : b;
+    const duplicate = await executeDirect(accepted);
+    expect(duplicate).toMatchObject({ outcome: "duplicate", duplicate: true });
+    expect(duplicate.values.traysOnLine).toBe(9);
+  });
+
+  it("direct service rejects an outdated lifecycle generation without changing the run values", async () => {
+    const staleGeneration = event("service-stale", "service-stale:tray:1");
+    staleGeneration.claim.generation = `${RUN}:old`;
+
+    const result = await executeDirect(staleGeneration);
+
+    expect(result.outcome).toBe("stale");
+    expect(result.values.traysOnLine).toBe(10);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(10);
+  });
+
+  it("direct service records an outdated reset epoch without applying the claim", async () => {
+    await db.update(dataResetTable).set({ epoch: 3 }).where(eq(dataResetTable.scope, "live"));
+    const result = await executeDirect(event("service-reset", "service-reset:tray:1"), 0);
+
+    expect(result).toMatchObject({ outcome: "stale", resetStale: 3, duplicate: false });
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(10);
+    const [receipt] = await db.select().from(operationalIntentLedgerTable);
+    expect(receipt.outcome).toBe("stale");
+  });
+
+  it("direct service rolls back a claim when its transactional evidence write fails", async () => {
+    const appClaim = {
+      senderId: "service-failure",
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "app1-batch",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId: "service-failure:app1:1",
+        dueAt: 60,
+        nextDueAt: 120,
+        baseUpdatedAt: 1,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "app1BatchesMade", from: 0, to: 1 },
+          { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
+          { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    };
+    const dependencies: AutoTrackClaimServiceDependencies = {
+      ...autoTrackClaimDependencies,
+      appendAutomaticApplicatorEvidence: async () => {
+        throw new Error("injected evidence write failure");
+      },
+    };
+
+    await expect(executeDirect(appClaim, 0, dependencies)).rejects.toThrow("injected evidence write failure");
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].app1BatchesMade).toBeUndefined();
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
+  });
+
   it("returns duplicate for an accepted retry and rejects a stale-base event after manual correction", async () => {
     const body = event("tab-a", "tab-a:retryable:1");
     const first = await (await post(body)).json() as { outcome: string };
@@ -3045,6 +3156,20 @@ describe("POST /sync/auto-track/claim", () => {
     // pending automatic event is rejected as stale before value comparison.
     expect(staleBase.outcome).toBe("stale");
     expect(staleBase.values.traysOnLine).toBe(14);
+  });
+
+  it("returns the established stale response when the claim epoch is behind the server reset", async () => {
+    await db.update(dataResetTable).set({ epoch: 4 }).where(eq(dataResetTable.scope, "live"));
+
+    const response = await post(event("reset-peer", "reset-peer:tray:1"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Sync-Response")).toBe("stale");
+    expect(await response.json()).toMatchObject({ ok: true, stale: true, epoch: 4 });
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(10);
   });
 
   it("records a conflict under its event ID so clients must rebase with a fresh identity", async () => {
