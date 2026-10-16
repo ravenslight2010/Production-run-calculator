@@ -531,13 +531,18 @@ run_launcher() {
   local path_value="$3"
   local output_path="${workspace}/output"
   local -a node_options_env=(-u NODE_OPTIONS)
+  local -a registry_env=()
   if (( $# >= 4 )); then
     node_options_env=("NODE_OPTIONS=$4")
+  fi
+  if (( $# >= 5 )); then
+    registry_env=("RELEASE_NODE_NPM_REGISTRY=$5")
   fi
 
   set +e
   env "${node_options_env[@]}" \
     npm_config_registry="http://package-firewall.replit.internal/npm/" \
+    "${registry_env[@]}" \
     SSL_CERT_FILE="${workspace}/missing-ca.pem" \
     SSL_CERT_DIR="${workspace}/missing-ca-dir" \
     RUN_LOG="$log_path" PATH="$path_value" \
@@ -630,37 +635,83 @@ test_invalid_npx_registry_fails_before_package_acquisition() {
   local workspace
   local log_path
   local status
+  local invalid_registry
+  local -a invalid_registries=(
+    "http://registry.example.test/"
+    "https://[not-ipv6]:443/"
+    "https://[::1/"
+    "https://::1:443/"
+    "https://[::1]suffix/"
+    "https://[::1]:not-a-port/"
+    "https://[::::]/"
+  )
   workspace=$(make_workspace invalid-npx-registry)
-  log_path="${workspace}/events"
 
   write_node "${workspace}/bin/node" "24.19.0"
   write_pinned_npx "${workspace}/bin/npx" "${workspace}/pinned-bin"
 
-  set +e
-  env \
-    -u NODE_OPTIONS \
-    npm_config_registry="http://package-firewall.replit.internal/npm/" \
-    RELEASE_NODE_NPM_REGISTRY="http://registry.example.test/" \
-    RUN_LOG="$log_path" \
-    PATH="${workspace}/bin:${PATH}" \
-    bash "${workspace}/scripts/src/run-release-node.sh" release-child \
-    >"${workspace}/output" 2>&1
-  status=$?
-  set -e
+  for invalid_registry in "${invalid_registries[@]}"; do
+    log_path="${workspace}/events-${#invalid_registry}"
+    set +e
+    env \
+      -u NODE_OPTIONS \
+      npm_config_registry="http://package-firewall.replit.internal/npm/" \
+      RELEASE_NODE_NPM_REGISTRY="$invalid_registry" \
+      RUN_LOG="$log_path" \
+      PATH="${workspace}/bin:${PATH}" \
+      bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+      >"${workspace}/output" 2>&1
+    status=$?
+    set -e
 
-  [[ "$status" -ne 0 ]] || {
-    printf 'Cleartext Node-acquisition registry unexpectedly succeeded.\n' >&2
-    cat "${workspace}/output" >&2
-    return 1
-  }
-  assert_contains "$(cat "${workspace}/output")" \
-    "Release runner requires a valid HTTPS npm registry for pinned Node acquisition."
-  [[ ! -s "$log_path" ]] || {
-    printf 'Invalid npm registry reached npx package acquisition.\n' >&2
-    cat "$log_path" >&2
-    return 1
-  }
-  echo "PASS: invalid cleartext registry is rejected before npx package acquisition"
+    [[ "$status" -ne 0 ]] || {
+      printf 'Invalid Node-acquisition registry unexpectedly succeeded: %s\n' \
+        "$invalid_registry" >&2
+      cat "${workspace}/output" >&2
+      return 1
+    }
+    assert_contains "$(cat "${workspace}/output")" \
+      "Release runner requires a valid HTTPS npm registry for pinned Node acquisition."
+    [[ ! -s "$log_path" ]] || {
+      printf 'Invalid npm registry reached npx package acquisition: %s\n' \
+        "$invalid_registry" >&2
+      cat "$log_path" >&2
+      return 1
+    }
+  done
+  echo "PASS: cleartext and malformed registries are rejected before npx package acquisition"
+}
+
+test_ipv6_npx_registry_url_is_forwarded() {
+  local workspace
+  local log_path
+  local registry_url
+  local -a registry_urls=(
+    "https://[2001:db8::1]/registry/"
+    "https://[::1]:8443/npm/registry/"
+  )
+  workspace=$(make_workspace ipv6-npx-registry-url)
+  log_path="${workspace}/events"
+
+  write_node "${workspace}/bin/node" "24.19.0"
+  write_node "${workspace}/pinned-bin/node" "$REQUIRED_NODE_VERSION"
+  write_pinned_npx "${workspace}/bin/npx" "${workspace}/pinned-bin"
+
+  for registry_url in "${registry_urls[@]}"; do
+    : >"$log_path"
+    run_launcher "$workspace" "$log_path" \
+      "${workspace}/bin:${PATH}" "" "$registry_url"
+
+    [[ "$RUN_STATUS" -eq 0 ]] || {
+      printf 'Pinned Node launcher rejected valid IPv6 registry URL %s:\n%s\n' \
+        "$registry_url" "$RUN_OUTPUT" >&2
+      return 1
+    }
+    assert_contains "$(cat "$log_path")" "npx-registry=${registry_url}"
+    assert_contains "$(cat "$log_path")" \
+      "child-node=v${REQUIRED_NODE_VERSION}"
+  done
+  echo "PASS: pinned Node launcher forwards bracketed IPv6 HTTPS registry URLs with and without ports"
 }
 
 test_wrong_fallback_node_version_fails_before_release_commands() {
@@ -889,7 +940,9 @@ test_release_runner_verifies_local_tls_certificates() {
   local expired_certificate_url
   local future_certificate_url
   local ipv6_url
+  local ipv6_path_url
   local mismatched_ipv6_url
+  local mismatched_ipv6_path_url
   local ipv6_proxy_url
   local attempt
   local status
@@ -1161,7 +1214,11 @@ const registryServer = https.createServer(
     fs.appendFileSync(requestLogPath, `${request.method} ${request.url}\n`);
     const requestUrl = new URL(request.url, "https://127.0.0.1");
 
-    if (request.method === "GET" && requestUrl.pathname === `/${packageName}`) {
+    if (
+      request.method === "GET" &&
+      (requestUrl.pathname === `/${packageName}` ||
+        requestUrl.pathname === `/npm/${packageName}`)
+    ) {
       const integrity =
         "sha512-" +
         crypto.createHash("sha512").update(packageTarball).digest("base64");
@@ -1265,7 +1322,11 @@ const futureServer = https.createServer(futureTlsOptions, (_request, response) =
 const ipv6Server = https.createServer(ipv6TlsOptions, (request, response) => {
   fs.appendFileSync(requestLogPath, `${request.method} ${request.url}\n`);
   const requestUrl = new URL(request.url, "https://[::1]");
-  if (request.method === "GET" && requestUrl.pathname === `/${packageName}`) {
+  if (
+    request.method === "GET" &&
+    (requestUrl.pathname === `/${packageName}` ||
+      requestUrl.pathname === `/npm/${packageName}`)
+  ) {
     const integrity =
       "sha512-" +
       crypto.createHash("sha512").update(packageTarball).digest("base64");
@@ -1496,7 +1557,9 @@ EOF
   expired_certificate_url="https://expired-name.invalid:$(cat "$expired_port_file")/"
   future_certificate_url="https://future-name.invalid:$(cat "$future_port_file")/"
   ipv6_url="https://[::1]:$(cat "$ipv6_port_file")/"
+  ipv6_path_url="https://[::1]:$(cat "$ipv6_port_file")/npm/"
   mismatched_ipv6_url="https://[::2]:$(cat "$ipv6_port_file")/"
+  mismatched_ipv6_path_url="https://[::2]:$(cat "$ipv6_port_file")/npm/"
   ipv6_proxy_url="http://127.0.0.1:$(cat "$ipv6_proxy_port_file")"
 
   set +e
@@ -1902,7 +1965,7 @@ EOF
   set +e
   run_local_npx "${cert_dir}/test-ca.pem" \
     "${workspace}/ipv6-npx-cache" "$ipv6_npx_output" \
-    "$ipv6_url" "$ipv6_proxy_url"
+    "$ipv6_path_url" "$ipv6_proxy_url"
   status=$?
   set -e
   if [[ "$status" -ne 0 ]] ||
@@ -1912,7 +1975,7 @@ EOF
     cat "$ipv6_npx_output" >&2
     return 1
   fi
-  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$registry_requests")" "GET /npm/${package_name}"
   assert_contains "$(cat "$ipv6_proxy_requests")" \
     "[::1]:$(cat "$ipv6_port_file")"
 
@@ -1921,7 +1984,7 @@ EOF
   set +e
   run_local_npx "${cert_dir}/test-ca.pem" \
     "${workspace}/ipv6-npx-mismatch-cache" "$ipv6_npx_mismatch_output" \
-    "$mismatched_ipv6_url" "$ipv6_proxy_url"
+    "$mismatched_ipv6_path_url" "$ipv6_proxy_url"
   status=$?
   set -e
   local ipv6_npx_mismatch_result
@@ -3537,6 +3600,7 @@ EOF
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
 test_invalid_npx_registry_fails_before_package_acquisition
+test_ipv6_npx_registry_url_is_forwarded
 test_wrong_fallback_node_version_fails_before_release_commands
 test_npx_package_resolution_failure_fails_before_release_commands
 test_missing_node_selector_fails_before_release_commands

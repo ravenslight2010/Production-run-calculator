@@ -307,7 +307,14 @@ fi
 # and use the public HTTPS registry unless a caller explicitly supplies a
 # different HTTPS registry (for example, the local TLS fixture in tests).
 release_node_registry="${RELEASE_NODE_NPM_REGISTRY:-https://registry.npmjs.org/}"
-if [[ ! "$release_node_registry" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then
+registry_url_pattern='^https://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]+)?(/[^[:space:]]*)?$'
+if [[ ! "$release_node_registry" =~ $registry_url_pattern ]]; then
+  printf 'Release runner requires a valid HTTPS npm registry for pinned Node acquisition.\n' >&2
+  exit 1
+fi
+if [[ "$release_node_registry" =~ ^https://\[([0-9A-Fa-f:.]+)\] ]] &&
+  ! python3 -c 'import ipaddress, sys; ipaddress.IPv6Address(sys.argv[1])' \
+    "${BASH_REMATCH[1]}" 2>/dev/null; then
   printf 'Release runner requires a valid HTTPS npm registry for pinned Node acquisition.\n' >&2
   exit 1
 fi
