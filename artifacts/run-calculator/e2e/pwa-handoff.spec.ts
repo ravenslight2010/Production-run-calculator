@@ -299,6 +299,11 @@ async function startVersionedServer(
   const appliedIntentUsers: string[] = [];
   const signedInUsers: string[] = [];
   const fixtureErrors: string[] = [];
+  const factoryDataRequests: Array<{
+    method: string;
+    origin: string | null;
+    status: number;
+  }> = [];
   let releaseIntentAuthResponse: (() => void) | undefined;
   const intentAuthResponseGate = new Promise<void>((resolve) => {
     releaseIntentAuthResponse = resolve;
@@ -377,15 +382,32 @@ async function startVersionedServer(
           .end(JSON.stringify(sessionUsers.get(activeSessionUserId)));
         return;
       }
-      if (
-        options.sessionRecovery
-        && requestPath === "api/factory-data"
-        && request.method === "GET"
-      ) {
-        response
-          .writeHead(200, { "content-type": "application/json; charset=utf-8" })
-          .end(JSON.stringify({ data: {} }));
-        return;
+      if (options.sessionRecovery && requestPath === "api/factory-data") {
+        if (request.method === "GET") {
+          factoryDataRequests.push({
+            method: "GET",
+            origin: request.headers.origin ?? null,
+            status: 200,
+          });
+          response
+            .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ data: {} }));
+          return;
+        }
+        if (request.method === "PUT") {
+          // The fixture operator has no manage-factory-settings capability.
+          // Match the real endpoint instead of falling through to the generic
+          // API 404; this does not relax the application authorization rule.
+          factoryDataRequests.push({
+            method: "PUT",
+            origin: request.headers.origin ?? null,
+            status: 403,
+          });
+          response
+            .writeHead(403, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Forbidden" }));
+          return;
+        }
       }
       if (
         options.sessionRecovery
@@ -584,6 +606,13 @@ async function startVersionedServer(
         return;
       }
       if (requestPath === "api" || requestPath.startsWith("api/")) {
+        if (options.sessionRecovery && requestPath === "api/factory-data") {
+          factoryDataRequests.push({
+            method: request.method ?? "GET",
+            origin: request.headers.origin ?? null,
+            status: 404,
+          });
+        }
         response
           .writeHead(404, { "content-type": "application/json; charset=utf-8" })
           .end(JSON.stringify({ error: "API endpoint not found" }));
@@ -728,6 +757,9 @@ async function startVersionedServer(
     },
     fixtureErrors() {
       return [...fixtureErrors];
+    },
+    factoryDataRequests() {
+      return factoryDataRequests.map((request) => ({ ...request }));
     },
     releaseIntentAuthResponse() {
       releaseIntentAuthResponse?.();
@@ -1968,6 +2000,19 @@ test.describe("PWA update handoff", () => {
         intentRequestIds: [blockedIntentId, blockedIntentId],
         appliedIntentIds: [blockedIntentId],
       });
+      expect(server.factoryDataRequests()).toContainEqual({
+        method: "GET",
+        origin: null,
+        status: 200,
+      });
+      expect(
+        server.factoryDataRequests().some((request) => request.method === "OPTIONS"),
+      ).toBe(false);
+      expect(
+        server.factoryDataRequests()
+          .filter((request) => request.method === "PUT")
+          .every((request) => request.status === 403),
+      ).toBe(true);
       await expect.poll(() => page.evaluate((id) => {
         const raw = localStorage.getItem(
           `run-calculator:operational-intent-outbox:v1:terminal:${id}`,

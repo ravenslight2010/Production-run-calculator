@@ -99,3 +99,22 @@ another.
 still pending before reload, assert the original `startedAt` immediately after
 reload, and compare post-release state with a snapshot taken before release.
 Pause/resume may adjust `startedAt` to exclude paused time.
+
+## Same-origin request diagnostics
+
+**Rule:** Determine cross-origin behavior from the request URL and page origin,
+not from the mere presence of an `Origin` header. Same-origin `GET` requests
+often omit it, while same-origin `PUT` requests can include it; neither alone
+proves a CORS failure. Capture the method, URL origin, safe header names,
+response status, and browser failure separately, and redact cookie,
+authorization, and client-ID values.
+
+**Why:** A browser can report a failed request near a fixture API route even
+when the intended same-origin `GET` succeeded. Distinguishing methods and
+responses exposed a fixture's generic `404` on an operator `PUT`, rather than
+a cross-origin or preflight problem.
+
+**How to apply:** For WebKit/PWA fixture errors, first check whether `OPTIONS`
+was actually sent and whether the browser reached the fixture handler. Model
+the endpoint's real authorization status for unsupported fixture writes;
+do not add permissive CORS headers to make the test pass.
