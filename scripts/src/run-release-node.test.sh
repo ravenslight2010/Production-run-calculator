@@ -839,6 +839,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local tarball_port_file="${server_dir}/tarball-port"
   local expired_port_file="${server_dir}/expired-port"
   local ipv6_port_file="${server_dir}/ipv6-port"
+  local ipv6_proxy_port_file="${server_dir}/ipv6-proxy-port"
   local future_port_file="${server_dir}/future-port"
   local http_tarball_port_file="${server_dir}/http-tarball-port"
   local server_output="${server_dir}/output"
@@ -861,10 +862,15 @@ test_release_runner_verifies_local_tls_certificates() {
   local release_install_npm_output="${workspace}/release-install-npm-output"
   local release_downgrade_npm_output="${workspace}/release-downgrade-npm-output"
   local lifecycle_redirected_npm_output="${workspace}/lifecycle-redirected-npm-output"
+  local ipv6_npx_output="${workspace}/ipv6-npx-output"
+  local ipv6_npx_mismatch_output="${workspace}/ipv6-npx-mismatch-output"
+  local ipv6_npm_output="${workspace}/ipv6-npm-output"
+  local ipv6_npm_mismatch_output="${workspace}/ipv6-npm-mismatch-output"
   local lifecycle_control_marker="${workspace}/lifecycle-control-marker"
   local lifecycle_rejected_marker="${workspace}/lifecycle-rejected-marker"
   local lifecycle_redirected_marker="${workspace}/lifecycle-redirected-marker"
   local registry_requests="${workspace}/registry-requests"
+  local ipv6_proxy_requests="${workspace}/ipv6-proxy-requests"
   local tarball_requests="${workspace}/tarball-requests"
   local http_tarball_requests="${workspace}/http-tarball-requests"
   local redirect_mode_file="${workspace}/redirect-mode"
@@ -884,6 +890,7 @@ test_release_runner_verifies_local_tls_certificates() {
   local future_certificate_url
   local ipv6_url
   local mismatched_ipv6_url
+  local ipv6_proxy_url
   local attempt
   local status
 
@@ -1091,13 +1098,16 @@ EOF
   : >"$registry_requests"
   : >"$tarball_requests"
   : >"$http_tarball_requests"
+  : >"$ipv6_proxy_requests"
   : >"${workspace}/empty-user.npmrc"
   : >"${workspace}/empty-global.npmrc"
 
   cat >"${server_dir}/https-server.cjs" <<'EOF'
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const http = require("node:http");
 const https = require("node:https");
+const net = require("node:net");
 
 const [
   keyPath,
@@ -1112,6 +1122,8 @@ const [
   futureKeyPath,
   httpTarballPortPath,
   ipv6CertPath,
+  ipv6ProxyPortPath,
+  ipv6ProxyRequestLogPath,
   packageTarballPath,
   alteredPackageTarballPath,
   packageManifestPath,
@@ -1250,12 +1262,70 @@ const futureServer = https.createServer(futureTlsOptions, (_request, response) =
   response.writeHead(200, { "content-type": "text/plain" });
   response.end("future-dated TLS fixture");
 });
-const ipv6Server = https.createServer(ipv6TlsOptions, (_request, response) => {
-  response.writeHead(200, { "content-type": "text/plain" });
-  response.end("verified local TLS fixture");
+const ipv6Server = https.createServer(ipv6TlsOptions, (request, response) => {
+  fs.appendFileSync(requestLogPath, `${request.method} ${request.url}\n`);
+  const requestUrl = new URL(request.url, "https://[::1]");
+  if (request.method === "GET" && requestUrl.pathname === `/${packageName}`) {
+    const integrity =
+      "sha512-" +
+      crypto.createHash("sha512").update(packageTarball).digest("base64");
+    const shasum = crypto.createHash("sha1").update(packageTarball).digest("hex");
+    const metadata = {
+      name: packageName,
+      "dist-tags": { latest: packageVersion },
+      versions: {
+        [packageVersion]: {
+          ...packageManifest,
+          dist: {
+            tarball: `https://127.0.0.1:${registryServer.address().port}/fixture.tgz`,
+            shasum,
+            integrity,
+          },
+        },
+      },
+    };
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(metadata));
+    return;
+  }
+  if (request.method === "GET" && requestUrl.pathname === "/") {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("verified local TLS fixture");
+    return;
+  }
+  response.writeHead(404, { "content-type": "text/plain" });
+  response.end("not found");
+});
+const ipv6ProxyServer = http.createServer();
+ipv6ProxyServer.on("connect", (request, clientSocket, head) => {
+  fs.appendFileSync(ipv6ProxyRequestLogPath, `${request.url}\n`);
+  const ipv6Target = /^\[(::1|::2)\]:(\d+)$/.exec(request.url ?? "");
+  const ipv4Target = /^127\.0\.0\.1:(\d+)$/.exec(request.url ?? "");
+  const targetPort = Number(ipv6Target?.[2] ?? ipv4Target?.[1]);
+  if (
+    !targetPort ||
+    (ipv6Target && targetPort !== ipv6Server.address()?.port) ||
+    (ipv4Target && targetPort !== registryServer.address()?.port) ||
+    (!ipv6Target && !ipv4Target)
+  ) {
+    clientSocket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    return;
+  }
+
+  const upstream = net.connect(
+    { host: ipv6Target ? "::1" : "127.0.0.1", port: targetPort },
+    () => {
+      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length > 0) upstream.write(head);
+      clientSocket.pipe(upstream);
+      upstream.pipe(clientSocket);
+    },
+  );
+  upstream.on("error", () => clientSocket.destroy());
+  clientSocket.on("error", () => upstream.destroy());
 });
 
-const httpTarballServer = require("node:http").createServer((request, response) => {
+const httpTarballServer = http.createServer((request, response) => {
   fs.appendFileSync(httpTarballRequestLogPath, `${request.method} ${request.url}\n`);
   if (
     request.method === "GET" &&
@@ -1284,6 +1354,12 @@ httpTarballServer.listen(0, "127.0.0.1", () => {
           fs.writeFileSync(futurePortPath, String(futureServer.address().port));
           ipv6Server.listen(0, "::1", () => {
             fs.writeFileSync(ipv6PortPath, String(ipv6Server.address().port));
+            ipv6ProxyServer.listen(0, "127.0.0.1", () => {
+              fs.writeFileSync(
+                ipv6ProxyPortPath,
+                String(ipv6ProxyServer.address().port),
+              );
+            });
           });
         });
       });
@@ -1386,6 +1462,7 @@ EOF
     "${cert_dir}/server-future.pem" "${cert_dir}/server-future.key" \
     "$http_tarball_port_file" \
     "${cert_dir}/server-ipv6.pem" \
+    "$ipv6_proxy_port_file" "$ipv6_proxy_requests" \
     "$package_tarball" "$altered_package_tarball" \
     "${package_root}/package.json" "$tarball_mode_file" \
     "$redirect_mode_file" "$metadata_mode_file" \
@@ -1395,7 +1472,8 @@ EOF
   for ((attempt = 0; attempt < 100; attempt++)); do
     [[ -s "$registry_port_file" && -s "$tarball_port_file" &&
       -s "$expired_port_file" && -s "$future_port_file" &&
-      -s "$http_tarball_port_file" && -s "$ipv6_port_file" ]] && break
+      -s "$http_tarball_port_file" && -s "$ipv6_port_file" &&
+      -s "$ipv6_proxy_port_file" ]] && break
     if ! kill -0 "$TLS_SERVER_PID" 2>/dev/null; then
       printf 'Local HTTPS fixture server exited before becoming ready.\n' >&2
       cat "$server_output" >&2
@@ -1405,7 +1483,8 @@ EOF
   done
   if [[ ! -s "$registry_port_file" || ! -s "$tarball_port_file" ||
     ! -s "$expired_port_file" || ! -s "$future_port_file" ||
-    ! -s "$http_tarball_port_file" || ! -s "$ipv6_port_file" ]]; then
+    ! -s "$http_tarball_port_file" || ! -s "$ipv6_port_file" ||
+    ! -s "$ipv6_proxy_port_file" ]]; then
     printf 'Local HTTPS fixture server did not become ready in time.\n' >&2
     cat "$server_output" >&2
     return 1
@@ -1418,6 +1497,7 @@ EOF
   future_certificate_url="https://future-name.invalid:$(cat "$future_port_file")/"
   ipv6_url="https://[::1]:$(cat "$ipv6_port_file")/"
   mismatched_ipv6_url="https://[::2]:$(cat "$ipv6_port_file")/"
+  ipv6_proxy_url="http://127.0.0.1:$(cat "$ipv6_proxy_port_file")"
 
   set +e
   env \
@@ -1652,12 +1732,14 @@ EOF
     local cafile="$1"
     local cache_dir="$2"
     local output_path="$3"
+    local registry_url="${4:-$url}"
+    local https_proxy_url="${5:-}"
     local -a npm_environment=(
       "PATH=${REAL_NODE_BIN_DIR}:$(dirname "$REAL_NPX_BIN"):/usr/bin:/bin"
       "HOME=${workspace}/home"
       "TMPDIR=${workspace}/tmp"
       "XDG_CONFIG_HOME=${workspace}/xdg-config"
-      "npm_config_registry=${url}"
+      "npm_config_registry=${registry_url}"
       "npm_config_cache=${cache_dir}"
       "npm_config_userconfig=${workspace}/empty-user.npmrc"
       "npm_config_globalconfig=${workspace}/empty-global.npmrc"
@@ -1676,6 +1758,12 @@ EOF
     if [[ -n "$cafile" ]]; then
       npm_environment+=("npm_config_cafile=${cafile}")
     fi
+    if [[ -n "$https_proxy_url" ]]; then
+      npm_environment+=(
+        "npm_config_https_proxy=${https_proxy_url}"
+        "npm_config_noproxy=none.invalid"
+      )
+    fi
 
     (
       cd "$workspace"
@@ -1691,12 +1779,14 @@ EOF
     local cache_dir="$2"
     local output_path="$3"
     local preinstall_marker="$4"
+    local registry_url="${5:-$url}"
+    local https_proxy_url="${6:-}"
     local -a npm_environment=(
       "PATH=${REAL_NODE_BIN_DIR}:$(dirname "$REAL_NPM_BIN"):/usr/bin:/bin"
       "HOME=${workspace}/home"
       "TMPDIR=${workspace}/tmp"
       "XDG_CONFIG_HOME=${workspace}/xdg-config"
-      "npm_config_registry=${url}"
+      "npm_config_registry=${registry_url}"
       "npm_config_cache=${cache_dir}"
       "npm_config_userconfig=${workspace}/empty-user.npmrc"
       "npm_config_globalconfig=${workspace}/empty-global.npmrc"
@@ -1712,6 +1802,12 @@ EOF
       "SSL_CERT_FILE=${workspace}/missing-ca.pem"
       "SSL_CERT_DIR=${workspace}/missing-ca-dir"
     )
+    if [[ -n "$https_proxy_url" ]]; then
+      npm_environment+=(
+        "npm_config_https_proxy=${https_proxy_url}"
+        "npm_config_noproxy=none.invalid"
+      )
+    fi
 
     mkdir -p "$project_dir"
     cat >"${project_dir}/package.json" <<'EOF'
@@ -1800,6 +1896,91 @@ EOF
     cat "$trusted_npx_output" >&2
     return 1
   fi
+
+  : >"$registry_requests"
+  : >"$ipv6_proxy_requests"
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/ipv6-npx-cache" "$ipv6_npx_output" \
+    "$ipv6_url" "$ipv6_proxy_url"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ "$(cat "$ipv6_npx_output")" != *"local npx package resolved over verified TLS"* ]]; then
+    printf 'Installed npx did not accept the matching IPv6 registry certificate (status %s):\n' \
+      "$status" >&2
+    cat "$ipv6_npx_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$ipv6_proxy_requests")" \
+    "[::1]:$(cat "$ipv6_port_file")"
+
+  : >"$registry_requests"
+  : >"$ipv6_proxy_requests"
+  set +e
+  run_local_npx "${cert_dir}/test-ca.pem" \
+    "${workspace}/ipv6-npx-mismatch-cache" "$ipv6_npx_mismatch_output" \
+    "$mismatched_ipv6_url" "$ipv6_proxy_url"
+  status=$?
+  set -e
+  local ipv6_npx_mismatch_result
+  ipv6_npx_mismatch_result=$(cat "$ipv6_npx_mismatch_output")
+  if [[ "$status" -eq 0 ]] ||
+    [[ "$ipv6_npx_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
+    printf 'Installed npx did not reject the mismatched IPv6 registry certificate by identity (status %s):\n%s\n' \
+      "$status" "$ipv6_npx_mismatch_result" >&2
+    return 1
+  fi
+  assert_not_contains "$ipv6_npx_mismatch_result" "ECONNREFUSED"
+  assert_not_contains "$ipv6_npx_mismatch_result" "ECONNRESET"
+  assert_contains "$(cat "$ipv6_proxy_requests")" \
+    "[::2]:$(cat "$ipv6_port_file")"
+  assert_not_contains "$(cat "$registry_requests")" "GET /${package_name}"
+
+  : >"$registry_requests"
+  : >"$ipv6_proxy_requests"
+  set +e
+  run_local_npm_install \
+    "${workspace}/ipv6-npm-project" \
+    "${workspace}/ipv6-npm-cache" "$ipv6_npm_output" \
+    "${workspace}/ipv6-npm-marker" "$ipv6_url" "$ipv6_proxy_url"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] ||
+    [[ ! -f "${workspace}/ipv6-npm-project/node_modules/${package_name}/package.json" ]]; then
+    printf 'Installed npm did not accept the matching IPv6 registry certificate (status %s):\n' \
+      "$status" >&2
+    cat "$ipv6_npm_output" >&2
+    return 1
+  fi
+  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_contains "$(cat "$ipv6_proxy_requests")" \
+    "[::1]:$(cat "$ipv6_port_file")"
+
+  : >"$registry_requests"
+  : >"$ipv6_proxy_requests"
+  set +e
+  run_local_npm_install \
+    "${workspace}/ipv6-npm-mismatch-project" \
+    "${workspace}/ipv6-npm-mismatch-cache" "$ipv6_npm_mismatch_output" \
+    "${workspace}/ipv6-npm-mismatch-marker" "$mismatched_ipv6_url" \
+    "$ipv6_proxy_url"
+  status=$?
+  set -e
+  local ipv6_npm_mismatch_result
+  ipv6_npm_mismatch_result=$(cat "$ipv6_npm_mismatch_output")
+  if [[ "$status" -eq 0 ]] ||
+    [[ "$ipv6_npm_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
+    printf 'Installed npm did not reject the mismatched IPv6 registry certificate by identity (status %s):\n%s\n' \
+      "$status" "$ipv6_npm_mismatch_result" >&2
+    return 1
+  fi
+  assert_not_contains "$ipv6_npm_mismatch_result" "ECONNREFUSED"
+  assert_not_contains "$ipv6_npm_mismatch_result" "ECONNRESET"
+  assert_contains "$(cat "$ipv6_proxy_requests")" \
+    "[::2]:$(cat "$ipv6_port_file")"
+  assert_not_contains "$(cat "$registry_requests")" "GET /${package_name}"
 
   set +e
   run_local_npx "" \
@@ -2073,7 +2254,7 @@ EOF
   kill "$TLS_SERVER_PID" 2>/dev/null || true
   wait "$TLS_SERVER_PID" 2>/dev/null || true
   TLS_SERVER_PID=""
-  echo "PASS: Node TLS identity checks accept matching IPv4/IPv6 IP SANs and reject mismatches; Node and package managers verify trusted TLS; untrusted, mismatched, invalid, expired, and future-dated certificates are rejected; HTTPS-to-HTTP tarball downgrades are blocked with fresh caches; altered bytes, including direct, redirected, and shasum-only npm cases, are rejected before package lifecycle hooks"
+  echo "PASS: Node TLS identity checks accept matching IPv4/IPv6 IP SANs and reject mismatches; npm and npx accept matching IPv6 registry certificates and reject mismatches; Node and package managers verify trusted TLS; untrusted, mismatched, invalid, expired, and future-dated certificates are rejected; HTTPS-to-HTTP tarball downgrades are blocked with fresh caches; altered bytes, including direct, redirected, and shasum-only npm cases, are rejected before package lifecycle hooks"
 }
 
 ISOLATED_BROWSER_RUNNER="${SCRIPT_DIR}/run-isolated-browser-suite.sh"
