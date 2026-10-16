@@ -17,6 +17,7 @@ import urllib.error
 import urllib.request
 
 import local_model_eval_proxy as proxy
+import local_model_eval_startup_report as startup_report
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 EVAL_HOME = proxy.EVAL_HOME
@@ -465,7 +466,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("setup", "serve", "start", "health", "smoke", "stop", "remove"),
+        choices=(
+            "setup",
+            "serve",
+            "start",
+            "health",
+            "measure-startups",
+            "smoke",
+            "stop",
+            "remove",
+        ),
+    )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=startup_report.DEFAULT_RUNS,
+        help=(
+            "number of repeated evaluator starts for measure-startups "
+            f"({startup_report.MIN_RUNS}-{startup_report.MAX_RUNS})"
+        ),
     )
     args = parser.parse_args(argv)
     try:
@@ -490,6 +509,25 @@ def main(argv: list[str] | None = None) -> int:
             _run_helper("start")
         elif args.action == "health":
             print(json.dumps(_health(), sort_keys=True))
+        elif args.action == "measure-startups":
+            startup_report.validate_run_count(args.runs)
+            resources = inspect_resources()
+            check_resources(resources)
+            if not _ownership_marker_is_valid() or not _valid_runtime() or not _valid_model_files():
+                raise SetupError(
+                    "Install and verify the pinned evaluator before measuring startup."
+                )
+            _report_path, successful = startup_report.run_startup_measurements(
+                run_count=args.runs,
+                command=(sys.executable, str(Path(__file__).resolve()), "serve"),
+                workspace_root=WORKSPACE_ROOT,
+            )
+            print(
+                "Saved private startup report "
+                f"({args.runs} requested starts; "
+                f"{'all started and stopped cleanly' if successful else 'one or more starts need review'})."
+            )
+            return 0 if successful else 1
         elif args.action == "smoke":
             _health()
             result = subprocess.run(
@@ -506,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
             _remove_owned_cache()
             print("Removed only the marked local evaluation cache.")
         return 0
-    except SetupError as error:
+    except (SetupError, startup_report.StartupReportError) as error:
         print(str(error), file=sys.stderr)
         return 1
 

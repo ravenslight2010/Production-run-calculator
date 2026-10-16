@@ -3,8 +3,10 @@ import os
 import pathlib
 import shlex
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -12,9 +14,10 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import urllib.error
 import urllib.request
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import local_model_eval_proxy as proxy
+import local_model_eval_startup_report as startup_report
 
 WORKSPACE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ENDPOINT_URL = "http://127.0.0.1:11434/healthz"
@@ -141,6 +144,135 @@ class LocalModelEndpointContractTests(unittest.TestCase):
             )),
             "private_api_health_timeout",
         )
+
+    def test_cgroup_report_preserves_limit_current_peak_and_oom_counters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "memory.max").write_text("17179869184\n")
+            (root / "memory.current").write_text("8589934592\n")
+            (root / "memory.peak").write_text("12884901888\n")
+            (root / "memory.events").write_text("low 0\nhigh 2\nmax 3\noom 1\noom_kill 0\n")
+
+            snapshot = startup_report.cgroup_snapshot(root)
+
+        self.assertEqual(snapshot["limitBytes"], 17_179_869_184)
+        self.assertEqual(snapshot["currentBytes"], 8_589_934_592)
+        self.assertEqual(snapshot["peakBytes"], 12_884_901_888)
+        self.assertEqual(snapshot["oomCounters"], {"oom": 1, "oom_kill": 0})
+
+    def test_binding_report_records_loopback_classification_not_raw_addresses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tcp = pathlib.Path(directory) / "tcp"
+            tcp6 = pathlib.Path(directory) / "tcp6"
+            tcp.write_text(
+                "sl local_address rem_address st\n"
+                f"0: 0100007F:{proxy.PROXY_PORT:04X} 00000000:0000 0A 0 0 0\n"
+                f"1: 00000000:{8080:04X} 00000000:0000 0A 0 0 0\n"
+            )
+            tcp6.write_text(
+                "sl local_address rem_address st\n"
+                f"0: 00000000000000000000000001000000:{proxy.MODEL_SERVER_PORT:04X} "
+                "00000000000000000000000000000000:0000 0A 0 0 0\n"
+            )
+
+            bindings = startup_report.listener_summary((tcp, tcp6))
+
+        self.assertEqual(
+            bindings["privateApi"],
+            {"listening": True, "loopbackOnly": True, "boundSocketCount": 1},
+        )
+        self.assertEqual(
+            bindings["modelServer"],
+            {"listening": True, "loopbackOnly": True, "boundSocketCount": 1},
+        )
+        self.assertEqual(
+            bindings["applicationApi"],
+            {"listening": True, "loopbackOnly": False, "boundSocketCount": 1},
+        )
+        self.assertNotIn("0100007F", json.dumps(bindings))
+
+    def test_health_report_keeps_only_status_and_bounded_readiness_count(self):
+        summary = startup_report._health_summary(
+            200,
+            {
+                "status": "ok",
+                "checks": {"database": "ok", "auditProtection": "ok"},
+                "correlationId": "must-not-be-retained",
+                "diagnostics": {"sensitive": "must-not-be-retained"},
+            },
+        )
+
+        self.assertEqual(
+            summary,
+            {"httpStatus": 200, "healthy": True, "readinessCheckCount": 2},
+        )
+        self.assertNotIn("must-not-be-retained", json.dumps(summary))
+
+    def test_private_startup_report_has_private_directory_and_file_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = pathlib.Path(directory)
+            evaluator_home = workspace / ".local" / "share" / "local-ai-eval"
+            evaluator_home.mkdir(parents=True)
+            report = {"schemaVersion": 1, "runs": [{"status": "ready"}]}
+            with patch.object(startup_report.proxy, "EVAL_HOME", evaluator_home):
+                path = startup_report.write_private_report(
+                    report,
+                    workspace_root=workspace,
+                )
+
+            self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(json.loads(path.read_text()), report)
+
+    def test_startup_report_run_count_is_bounded_before_any_process_launch(self):
+        with self.assertRaisesRegex(startup_report.StartupReportError, "between 2 and 5"):
+            startup_report.run_startup_measurements(
+                run_count=1,
+                command=("/unused",),
+                workspace_root=WORKSPACE_ROOT,
+            )
+
+    def test_single_start_records_process_to_model_and_private_api_readiness(self):
+        stopped = {
+            name: {"listening": False, "loopbackOnly": False, "boundSocketCount": 0}
+            for name in startup_report.OBSERVED_PORTS
+        }
+        listening = {
+            name: {"listening": name in startup_report.EVALUATOR_PORTS,
+                   "loopbackOnly": name in startup_report.EVALUATOR_PORTS,
+                   "boundSocketCount": int(name in startup_report.EVALUATOR_PORTS)}
+            for name in startup_report.OBSERVED_PORTS
+        }
+        cgroup = {
+            "limitBytes": 100,
+            "currentBytes": 10,
+            "peakBytes": 20,
+            "oomCounters": {"oom": 0, "oom_kill": 0},
+        }
+        process = Mock()
+        process.poll.return_value = None
+        with (
+            patch.object(startup_report, "listener_summary", side_effect=(stopped, listening, stopped)),
+            patch.object(startup_report, "cgroup_snapshot", side_effect=(cgroup, cgroup, cgroup, cgroup)),
+            patch.object(startup_report, "application_api_health", return_value={"healthy": True}),
+            patch.object(startup_report, "_model_server_ready", return_value=(True, 200)),
+            patch.object(startup_report, "_private_api_ready", return_value=(True, 200)),
+            patch.object(startup_report, "_stop_process", return_value=True),
+            patch.object(startup_report.time, "monotonic", return_value=100),
+            patch.object(startup_report.time, "monotonic_ns", side_effect=(1_000, 12_346_000, 23_457_000)),
+            patch.object(startup_report.subprocess, "Popen", return_value=process) as popen,
+        ):
+            result = startup_report._measure_one_start(1, ("/synthetic/evaluator",), object())
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["processToModelServerReadyMs"], 12.345)
+        self.assertEqual(result["privateApiReadyFromProcessStartMs"], 23.456)
+        self.assertEqual(result["modelServerHealthHttpStatus"], 200)
+        self.assertEqual(result["privateApiHealthHttpStatus"], 200)
+        self.assertTrue(result["shutdown"]["processExited"])
+        self.assertTrue(result["shutdown"]["evaluatorListenersClosed"])
+        self.assertEqual(popen.call_args.kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(popen.call_args.kwargs["stderr"], subprocess.DEVNULL)
 
     def test_workflow_probe_reports_starting_until_the_private_api_is_ready(self):
         proxy.WORKFLOW_READY.clear()

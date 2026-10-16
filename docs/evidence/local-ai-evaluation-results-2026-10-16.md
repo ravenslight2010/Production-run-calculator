@@ -153,3 +153,31 @@ development startup script was run through the pinned Node runner; its
 `status: ok` and all six readiness checks `ok`. The API remained healthy during
 the measured API-backed evaluator restart. The API process was stopped after
 verification.
+
+## Reusable repeated-start report
+
+To collect comparable startup and memory evidence on a later session, run:
+
+```sh
+python3 scripts/local_model_eval_setup.py measure-startups --runs 3
+```
+
+This performs a bounded series of 2–5 evaluator starts (3 by default), stops
+each started evaluator before continuing, and stores sanitized JSON metadata in
+the ignored private directory
+`.local/share/local-ai-eval/startup-reports/`. The report records process-to-
+model-server and process-to-private-API readiness times, API health summaries
+before and after each start, cgroup limit/current/peak and OOM counters,
+sampled current-memory high-water, and whether the observed listeners are
+loopback-only. The report directory is mode `0700`; each report file is mode
+`0600`.
+
+The command requires already-installed, verified evaluator artifacts and
+refuses to run beside an existing evaluator. It does not clear caches or remove
+model artifacts. The first row is labeled `firstInSeries`; later rows are
+`repeatedRestart`. These labels describe run order only and do not prove that
+the first start was a cold-cache start. `memory.peak` remains the cgroup's
+cumulative high-water mark; compare it with the before/after values rather
+than treating it as a per-run reset measurement. The report contains no
+prompts, completions, response bodies, request identifiers, or raw listener
+addresses.
