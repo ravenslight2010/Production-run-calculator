@@ -135,6 +135,7 @@
 - [Workspace and typecheck setup](declaration-compatibility-dependencies.md) + [API route isolation](api-route-typecheck-isolation.md) + [secret refresh](secret-refresh-shell.md) + [Replit config](replit-config-validator.md) — account for link, environment, and config validation boundaries.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
 - [Release runner setup](release-runner-lock-history.md) + [pinned Node](pinned-node-nix-runner.md) — keep local contention evidence bounded and use the installed runtime when provisioning fails.
+- [Local browser suite routing](local-browser-suite-routing.md) — run offline isolated browser journeys outside the HTTPS-only proxy so loopback HTTP works without package downloads.
 - [OpenSSL test CA](openssl-test-ca-subject-uniqueness.md) — use unique subjects when a temporary CA signs multiple fixture certificates.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [SSE topology](sse-topology-choice.md) + [publish](production-publish-workflow.md) — derive DB peaks from samples; provider metrics stay manual; peer SSE unsupported.

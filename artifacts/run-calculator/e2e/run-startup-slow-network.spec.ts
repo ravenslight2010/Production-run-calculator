@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -54,6 +54,29 @@ async function readRunStartedAt(page: Page, runId: string): Promise<number | nul
     };
     return state.runs?.find((run) => run.id === id)?.startedAt ?? null;
   }, runId);
+}
+
+async function expectReachableInViewport(
+  page: Page,
+  locator: Locator,
+  description: string,
+): Promise<void> {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize();
+
+  expect(box, `${description} should have a rendered target`).not.toBeNull();
+  expect(viewport, "the browser project should define a viewport").not.toBeNull();
+  expect(box!.x, `${description} left edge should be on-screen`).toBeGreaterThanOrEqual(-1);
+  expect(box!.y, `${description} top edge should be on-screen`).toBeGreaterThanOrEqual(-1);
+  expect(
+    box!.x + box!.width,
+    `${description} right edge should be on-screen`,
+  ).toBeLessThanOrEqual(viewport!.width + 1);
+  expect(
+    box!.y + box!.height,
+    `${description} bottom edge should be on-screen`,
+  ).toBeLessThanOrEqual(viewport!.height + 1);
 }
 
 function getOptionalPanelChunks(): DeferredChunk[] {
@@ -234,6 +257,9 @@ test("Run controls work before delayed optional station panels finish loading", 
     const runTab = page.getByTestId("tab-run");
     await expect(runTab).toBeAttached({ timeout: 60_000 });
     await runTab.click();
+    await expect(
+      page.getByText("Confirmed server baseline", { exact: true }),
+    ).toBeVisible({ timeout: 60_000 });
 
     const targetCases = page.getByTestId("input-casesNeeded");
     await expect(targetCases).toHaveValue("10");
@@ -244,9 +270,15 @@ test("Run controls work before delayed optional station panels finish loading", 
 
     const elapsed = page.getByTestId("elapsed-card-value");
     await expect(elapsed).toBeVisible();
+    await expectReachableInViewport(page, elapsed, "running timer");
     const elapsedBeforePanelRequests = await elapsed.innerText();
     const completedCases = page.getByTestId("tile-cases-completed");
     await expect(completedCases).toBeVisible();
+    await expectReachableInViewport(page, completedCases, "production counter");
+    await testInfo.attach(`run-timer-counter-before-optional-panels-${testInfo.project.name}.png`, {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
 
     await page.getByTestId("tab-sauce").click();
     await expect(page.getByText("Loading Sauce…", { exact: true })).toBeVisible();
@@ -257,26 +289,29 @@ test("Run controls work before delayed optional station panels finish loading", 
     await expect.poll(() => requestedChunks).toContain(optionalChunks[1]!.file);
 
     await page.getByTestId("tab-run").click();
-    await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true })).toBeEnabled();
+    const pauseRun = page.getByRole("button", { name: "PAUSE RUN", exact: true });
+    await expect(pauseRun).toBeEnabled();
+    await expectReachableInViewport(page, pauseRun, "pause control");
     await expect(targetCases).toHaveValue("10");
     await expect(completedCases).toHaveText("0");
     await expect(elapsed).toBeVisible();
-    await page.getByRole("button", { name: "PAUSE RUN", exact: true }).click();
-    await expect(page.getByRole("button", { name: "RESUME RUN", exact: true })).toBeEnabled();
-    await page.getByRole("button", { name: "RESUME RUN", exact: true }).click();
-    await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "Select run 2" })).toBeEnabled();
-    await page.getByRole("button", { name: "Select run 2" }).click();
-    await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("button-start-run")).toBeEnabled();
-    await page.getByRole("button", { name: "Select run 1" }).click();
-    await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true })).toBeEnabled();
-    await expect(page.getByTestId("elapsed-card-value")).toBeVisible();
-    await expect(page.getByTestId("tile-cases-completed")).toHaveText("0");
+    await expectReachableInViewport(page, elapsed, "running timer");
+    await expectReachableInViewport(page, completedCases, "production counter");
+    await pauseRun.click();
+    const resumeRun = page.getByRole("button", { name: "RESUME RUN", exact: true });
+    await expect(resumeRun).toBeEnabled();
+    await expectReachableInViewport(page, resumeRun, "resume control");
+    const nextRun = page.getByRole("button", { name: /^Next .*Next – Test$/ });
+    await expect(nextRun).toBeEnabled();
+    await expectReachableInViewport(page, nextRun, "run switch");
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await expect(completedCases).toHaveText("0");
     const startedAtBeforeRelease = await readRunStartedAt(page, runOne);
     expect(startedAtBeforeRelease).toEqual(expect.any(Number));
+    const casesNeededBeforeRelease = await targetCases.inputValue();
+    const completedCasesBeforeRelease = await completedCases.innerText();
 
-    await testInfo.attach("run-controls-before-optional-panels.png", {
+    await testInfo.attach(`run-controls-before-optional-panels-${testInfo.project.name}.png`, {
       body: await page.screenshot(),
       contentType: "image/png",
     });
@@ -287,8 +322,11 @@ test("Run controls work before delayed optional station panels finish loading", 
     await page.getByTestId("tab-packaging").click();
     await expect(page.getByTestId("text-skidsCompleted")).toBeVisible();
     await page.getByTestId("tab-run").click();
-    await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true })).toBeEnabled();
-    await expect(page.getByTestId("tile-cases-completed")).toHaveText("0");
+    await expect(resumeRun).toBeEnabled();
+    await expectReachableInViewport(page, resumeRun, "resume control");
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await expect(targetCases).toHaveValue(casesNeededBeforeRelease);
+    await expect(completedCases).toHaveText(completedCasesBeforeRelease);
     expect(await readRunStartedAt(page, runOne)).toBe(startedAtBeforeRelease);
     expect(requestedChunks.sort()).toEqual(optionalChunks.map(({ file }) => file).sort());
     expect(loadedChunks).toEqual(
@@ -298,8 +336,15 @@ test("Run controls work before delayed optional station panels finish loading", 
     );
     expect(pageErrors).toEqual([]);
 
-    await testInfo.attach("run-startup-slow-network.json", {
+    const viewport = page.viewportSize();
+    await testInfo.attach(`run-startup-slow-network-${testInfo.project.name}.json`, {
       body: JSON.stringify({
+        browser: "Chromium",
+        project: testInfo.project.name,
+        viewportEmulation: true,
+        physicalDeviceTested: false,
+        viewport: viewport ? { width: viewport.width, height: viewport.height } : null,
+        touchPoints: await page.evaluate(() => navigator.maxTouchPoints),
         networkProfile: {
           latencyMs: 400,
           downloadKbps: 500,
@@ -310,15 +355,23 @@ test("Run controls work before delayed optional station panels finish loading", 
         loadedChunks,
         runStateBeforeRelease: {
           selectedRun: "Run 1 of 2",
-          casesNeeded: 10,
-          completedCases: 0,
+          casesNeeded: casesNeededBeforeRelease,
+          completedCases: completedCasesBeforeRelease,
           startedAt: startedAtBeforeRelease,
-          elapsed: elapsedBeforePanelRequests,
+          status: "paused",
         },
         runStateAfterRelease: {
+          selectedRun: "Run 1 of 2",
           casesNeeded: await targetCases.inputValue(),
           completedCases: await completedCases.innerText(),
-          elapsed: await page.getByTestId("elapsed-card-value").innerText(),
+          startedAt: await readRunStartedAt(page, runOne),
+          status: "paused",
+        },
+        controlsWhileChunksWereHeld: {
+          timerAndProductionCounterReachable: true,
+          pauseControlReachable: true,
+          resumeControlReachable: true,
+          runSwitchReachable: true,
         },
         pageErrors,
       }, null, 2),

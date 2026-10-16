@@ -43,5 +43,36 @@ export default defineConfig({
       name: "desktop-chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "phone-portrait-chromium-emulation",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
+    {
+      name: "tablet-portrait-chromium-emulation",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 820, height: 1180 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
+    {
+      name: "tablet-landscape-chromium-emulation",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1180, height: 820 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
   ],
+  metadata: {
+    browserEvidence:
+      "Phone and tablet results are Chromium viewport emulation only; no physical Android or iOS devices were tested.",
+  },
 });
