@@ -26,6 +26,7 @@ let fieldCheckObservationsTable: DbModule["fieldCheckObservationsTable"];
 let fieldCheckIssuesTable: DbModule["fieldCheckIssuesTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let seedRoles: () => Promise<void>;
+let clearSandboxCache: () => void;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -36,6 +37,7 @@ let baseUrl: string;
 const PHONE_USER = "field-phone-user";
 const TABLET_USER = "field-tablet-user";
 const MANAGER = "field-manager";
+const SANDBOX_MANAGER = "field-sandbox-manager";
 const SUPERVISOR = "field-supervisor";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -81,6 +83,7 @@ beforeAll(async () => {
   fieldCheckIssuesTable = dbModule.fieldCheckIssuesTable;
   dailySyncTable = dbModule.dailySyncTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
+  clearSandboxCache = (await import("../lib/sandbox")).clearSandboxCache;
 
   const app: Express = express();
   app.use(express.json());
@@ -116,6 +119,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  clearSandboxCache();
   await db.execute(sql`
     TRUNCATE
       ${fieldCheckObservationsTable},
@@ -131,12 +135,14 @@ beforeEach(async () => {
     { id: PHONE_USER, username: PHONE_USER, passwordHash: "x" },
     { id: TABLET_USER, username: TABLET_USER, passwordHash: "x" },
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
+    { id: SANDBOX_MANAGER, username: SANDBOX_MANAGER, passwordHash: "x", sandbox: true },
     { id: SUPERVISOR, username: SUPERVISOR, passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: PHONE_USER, role: "operator" },
     { userId: TABLET_USER, role: "operator" },
     { userId: MANAGER, role: "manager" },
+    { userId: SANDBOX_MANAGER, role: "manager" },
     { userId: SUPERVISOR, role: "supervisor" },
   ]);
 });
@@ -215,6 +221,88 @@ describe("field-check evidence from two authenticated clients", () => {
     expect(response.headers.get("x-correlation-id")).toBe(body.correlationId);
     expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
     expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
+  it("keeps identical observation IDs and reports isolated between live and sandbox scopes", async () => {
+    const observationId = "same-live-sandbox-observation";
+    const liveObservation = {
+      ...observation(observationId, "failure", "mobile-chrome"),
+      appBuild: "live-scope-build",
+    };
+    const sandboxObservation = {
+      ...observation(observationId, "failure", "tablet-browser"),
+      appBuild: "sandbox-scope-build",
+    };
+
+    for (const [userId, input] of [
+      [MANAGER, liveObservation],
+      [SANDBOX_MANAGER, sandboxObservation],
+    ] as const) {
+      const accepted = await request(userId, "POST", "/api/field-checks/observations", {
+        observations: [input],
+      });
+      expect(accepted.status).toBe(202);
+      expect(await accepted.json()).toEqual({ accepted: 1, duplicate: 0 });
+
+      const replay = await request(userId, "POST", "/api/field-checks/observations", {
+        observations: [input],
+      });
+      expect(replay.status).toBe(202);
+      expect(await replay.json()).toEqual({ accepted: 0, duplicate: 1 });
+    }
+
+    const observationRows = await db.select().from(fieldCheckObservationsTable)
+      .where(eq(fieldCheckObservationsTable.observationId, observationId));
+    expect(observationRows).toHaveLength(2);
+    expect(observationRows.map(({ scope, appBuild, deviceCategory }) => ({
+      scope,
+      appBuild,
+      deviceCategory,
+    }))).toEqual(expect.arrayContaining([
+      { scope: "live", appBuild: "live-scope-build", deviceCategory: "mobile-chrome" },
+      { scope: "sandbox", appBuild: "sandbox-scope-build", deviceCategory: "tablet-browser" },
+    ]));
+
+    const issueRows = await db.select().from(fieldCheckIssuesTable)
+      .where(eq(fieldCheckIssuesTable.checkName, "cross-device-convergence"));
+    expect(issueRows).toHaveLength(2);
+    expect(issueRows.map(({ scope, failureCount, incompleteCount, status }) => ({
+      scope,
+      failureCount,
+      incompleteCount,
+      status,
+    }))).toEqual(expect.arrayContaining([
+      { scope: "live", failureCount: 1, incompleteCount: 0, status: "open" },
+      { scope: "sandbox", failureCount: 1, incompleteCount: 0, status: "open" },
+    ]));
+
+    const liveResponse = await request(MANAGER, "GET", "/api/field-checks");
+    expect(liveResponse.status).toBe(200);
+    expect(liveResponse.headers.get("content-type")).toMatch(/application\/json/u);
+    const liveReport = await liveResponse.json() as FieldChecksReport;
+    expect(liveReport.checks.find((check) => check.name === "cross-device-convergence"))
+      .toMatchObject({
+        failureCount: 1,
+        issueStatus: "open",
+        recentFailures: [expect.objectContaining({
+          appBuild: "live-scope-build",
+          deviceCategory: "mobile-chrome",
+        })],
+      });
+
+    const sandboxResponse = await request(SANDBOX_MANAGER, "GET", "/api/field-checks");
+    expect(sandboxResponse.status).toBe(200);
+    expect(sandboxResponse.headers.get("content-type")).toMatch(/application\/json/u);
+    const sandboxReport = await sandboxResponse.json() as FieldChecksReport;
+    expect(sandboxReport.checks.find((check) => check.name === "cross-device-convergence"))
+      .toMatchObject({
+        failureCount: 1,
+        issueStatus: "open",
+        recentFailures: [expect.objectContaining({
+          appBuild: "sandbox-scope-build",
+          deviceCategory: "tablet-browser",
+        })],
+      });
   });
 
   it("rate limits repeated authenticated observation uploads without persisting rejected evidence", async () => {
