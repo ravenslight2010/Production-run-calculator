@@ -3107,6 +3107,152 @@ test.describe("PWA update handoff", () => {
     }
   });
 
+  test("opens Home when day-state storage stays unavailable without recovering a stale chunk", async ({
+    page,
+  }) => {
+    const homeServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+    const staleChunkServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: homeServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const dayStateKey = "run-calc-day";
+        const evidence = { readFailures: 0, writeFailures: 0 };
+        Object.defineProperty(window, "__pwaPersistentDayStateFailureEvidence", {
+          value: evidence,
+        });
+
+        const originalGetItem = Storage.prototype.getItem;
+        Storage.prototype.getItem = function (key: string) {
+          if (this === window.localStorage && key === dayStateKey) {
+            evidence.readFailures += 1;
+            throw new DOMException("Storage is blocked", "SecurityError");
+          }
+          return originalGetItem.call(this, key);
+        };
+
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const captureKey = "__pwa_recovery_marker_capture";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.localStorage && key === dayStateKey) {
+            evidence.writeFailures += 1;
+            throw new DOMException("Storage is blocked", "SecurityError");
+          }
+          if (this === window.sessionStorage && key === markerKey) {
+            const captured = JSON.parse(localStorage.getItem(captureKey) ?? "[]") as string[];
+            captured.push(value);
+            localStorage.setItem(captureKey, JSON.stringify(captured));
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+
+      await page.goto(homeServer.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      const homeStorageEvidence = await page.evaluate(() => {
+        const evidence = (
+          window as Window & {
+            __pwaPersistentDayStateFailureEvidence?: {
+              readFailures: number;
+              writeFailures: number;
+            };
+          }
+        ).__pwaPersistentDayStateFailureEvidence;
+        let writeProbeRejected = false;
+        try {
+          localStorage.setItem("run-calc-day", "{}");
+        } catch {
+          writeProbeRejected = true;
+        }
+        return { ...evidence, writeProbeRejected };
+      });
+      expect(homeStorageEvidence?.readFailures).toBeGreaterThan(0);
+      expect(homeStorageEvidence?.writeFailures).toBeGreaterThan(0);
+      expect(homeStorageEvidence?.writeProbeRejected).toBe(true);
+      expect(homeServer.sessionRecoveryRequests().acceptedMeResponses).toBeGreaterThan(0);
+
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: staleChunkServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        staleChunkServer,
+        fixture.staleHomeChunk,
+      );
+      await expect(page.getByText(
+        /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+      )).toBeVisible();
+
+      const blockedStorageEvidence = await page.evaluate(() => {
+        const evidence = (
+          window as Window & {
+            __pwaPersistentDayStateFailureEvidence?: {
+              readFailures: number;
+              writeFailures: number;
+            };
+          }
+        ).__pwaPersistentDayStateFailureEvidence;
+        let writeProbeRejected = false;
+        try {
+          localStorage.setItem("run-calc-day", "{}");
+        } catch {
+          writeProbeRejected = true;
+        }
+        return { ...evidence, writeProbeRejected };
+      });
+      expect(blockedStorageEvidence?.readFailures).toBeGreaterThan(0);
+      expect(blockedStorageEvidence?.writeFailures).toBeGreaterThan(0);
+      expect(blockedStorageEvidence?.writeProbeRejected).toBe(true);
+
+      // Persistent day-state failures keep pre-Home safety unknown; elapsed
+      // idle time must not turn that unknown state into an automatic reload.
+      await page.waitForTimeout(1_500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+      expect(await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+      expect(await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_marker_capture") ?? "[]") as string[],
+      )).toEqual([]);
+
+      const observations = staleChunkServer.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      expect(observations.filter((item) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toHaveLength(0);
+      expect(staleChunkServer.staleAssetRequestCount()).toBe(1);
+      expect(homeServer.fixtureErrors()).toEqual([]);
+      expect(staleChunkServer.fixtureErrors()).toEqual([]);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await homeServer.close();
+      await staleChunkServer.close();
+    }
+  });
+
   test("opens Home after a pre-Home safety timeout without automatically recovering a stale chunk", async ({
     page,
   }) => {
