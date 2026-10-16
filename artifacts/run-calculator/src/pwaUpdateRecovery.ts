@@ -13,6 +13,7 @@ type ActivateWaitingWorker = (
   canReload?: CanReload,
 ) => Promise<void> | void;
 
+export const WORKER_UPDATE_TIMEOUT_MS = 5_000;
 export const WORKER_INSTALL_TIMEOUT_MS = 5_000;
 export const STALE_ASSET_RELOAD_FALLBACK_MS = WORKER_INSTALL_TIMEOUT_MS + 1_000;
 const STALE_ASSET_RECOVERY_PREFIX = "run-calc:stale-asset-recovery:";
@@ -155,6 +156,8 @@ function waitForInstalledWorker(
     };
 
     const inspect = () => {
+      if (settled) return;
+
       if (registration.waiting) {
         finish(true);
         return;
@@ -173,6 +176,11 @@ function waitForInstalledWorker(
       if (installing?.state === "installed") {
         finish(true);
       } else if (updateFinished) {
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+          timeoutId = undefined;
+        }
+
         if (!installing || installing.state === "redundant") {
           finish(false);
         } else if (timeoutId === undefined) {
@@ -188,6 +196,10 @@ function waitForInstalledWorker(
 
     const onUpdateFound = () => inspect();
     registration.addEventListener?.("updatefound", onUpdateFound);
+    timeoutId = setTimeout(
+      () => finish(Boolean(registration.waiting)),
+      WORKER_UPDATE_TIMEOUT_MS,
+    );
 
     void updatePromise.then(
       () => {

@@ -6,6 +6,7 @@ import {
   consumeStaleAssetRecoveryAttempt,
   recordStaleAssetRecoveryAttempt,
   STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS,
+  WORKER_UPDATE_TIMEOUT_MS,
   WORKER_INSTALL_TIMEOUT_MS,
   updateAndReload,
 } from "./pwaUpdateRecovery";
@@ -236,6 +237,90 @@ describe("updateAndReload", () => {
       expect(stateListeners.size).toBe(0);
       expect(registration.removeEventListener).toHaveBeenCalledOnce();
       expect(registration.removeEventListener).toHaveBeenCalledWith("updatefound", expect.any(Function));
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to reload when the update check never settles and cleans up recovery listeners", async () => {
+    vi.useFakeTimers();
+    try {
+      let finishUpdate: (() => void) | undefined;
+      const reload = vi.fn();
+      const activateWaitingWorker = vi.fn();
+      const updateFoundListeners = new Set<() => void>();
+      const registration = {
+        waiting: undefined as ServiceWorker | undefined,
+        addEventListener: vi.fn((_type: "updatefound", listener: () => void) => {
+          updateFoundListeners.add(listener);
+        }),
+        removeEventListener: vi.fn((_type: "updatefound", listener: () => void) => {
+          updateFoundListeners.delete(listener);
+        }),
+        update: vi.fn(() => new Promise<void>((resolve) => {
+          finishUpdate = resolve;
+        })),
+      };
+
+      const recovery = updateAndReload(registration, activateWaitingWorker, reload);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(vi.getTimerCount()).toBe(1);
+      expect(updateFoundListeners.size).toBe(1);
+      expect(reload).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(WORKER_UPDATE_TIMEOUT_MS);
+      await recovery;
+
+      expect(activateWaitingWorker).not.toHaveBeenCalled();
+      expect(reload).toHaveBeenCalledOnce();
+      expect(updateFoundListeners.size).toBe(0);
+      expect(registration.removeEventListener).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+
+      finishUpdate?.();
+      await Promise.resolve();
+
+      expect(reload).toHaveBeenCalledOnce();
+      expect(updateFoundListeners.size).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reload if recovery becomes unsafe while the update check is pending", async () => {
+    vi.useFakeTimers();
+    try {
+      let safeToReload = true;
+      const reload = vi.fn();
+      const updateFoundListeners = new Set<() => void>();
+      const registration = {
+        waiting: undefined as ServiceWorker | undefined,
+        addEventListener: (_type: "updatefound", listener: () => void) => {
+          updateFoundListeners.add(listener);
+        },
+        removeEventListener: (_type: "updatefound", listener: () => void) => {
+          updateFoundListeners.delete(listener);
+        },
+        update: vi.fn(() => new Promise<void>(() => undefined)),
+      };
+
+      const recovery = updateAndReload(
+        registration,
+        vi.fn(),
+        reload,
+        () => safeToReload,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      safeToReload = false;
+
+      await vi.advanceTimersByTimeAsync(WORKER_UPDATE_TIMEOUT_MS);
+      await recovery;
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(updateFoundListeners.size).toBe(0);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
