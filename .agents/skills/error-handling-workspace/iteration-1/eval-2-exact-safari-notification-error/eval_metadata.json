@@ -1,0 +1,11 @@
+{
+  "eval_id": 2,
+  "eval_name": "exact-safari-notification-error",
+  "prompt": "On an older cached Safari/iPad build, startup shows exactly `Can't find variable: Notification`. Nothing in the report confirms whether a run is active. Should we auto-refresh, match all ReferenceErrors, or offer a recovery action? Tell me what staff should see.",
+  "assertions": [
+    "The response routes this exact Safari Notification reference error to .agents/memory/pwa-update-prompts.md or explicitly identifies the PWA update policy as the source.",
+    "The response limits the recovery action to the exact message `Can't find variable: Notification` and offers an explicit staff-clicked `Update and reload` action.",
+    "The response says worker checking/activation happens only after the staff member clicks, with ordinary reload as the fallback when no waiting worker can be activated.",
+    "The response rejects automatic reload and broad ReferenceError matching."
+  ]
+}

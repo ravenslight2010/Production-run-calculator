@@ -50,8 +50,10 @@ not hide errors with silent fallbacks or invent a new error shape in one route.
 - Rendering error boundaries handle render failures only; they do not replace event,
   request, mutation, or asynchronous error handling.
 - For PWA update, stale lazy-chunk, or stale-client recovery, follow the exact safety
-  contract in [PWA update prompts](../../memory/pwa-update-prompts.md). Do not add a
-  generic automatic reload or broaden a narrowly scoped stale-client match here.
+  contract in [PWA update prompts](../../memory/pwa-update-prompts.md). When giving
+  recovery advice, state the applicable opt-in and safe-state gates explicitly rather
+  than compressing them to “when safe.” Do not add a generic automatic reload or
+  broaden a narrowly scoped stale-client match here.
 
 ## Retries and timeouts
 

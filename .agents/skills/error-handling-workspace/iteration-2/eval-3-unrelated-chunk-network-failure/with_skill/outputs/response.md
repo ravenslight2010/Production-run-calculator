@@ -1,0 +1,3 @@
+Retry the failed alerts-panel load after the connection is stable; do not use “Update and reload.” A 503 during a brief network interruption is a transient chunk-load failure, while the build ID matches and the specific `Notification` error required for stale-client recovery is absent. If the app offers a retry, use it once (respecting any stated wait time) and keep the page open so your unsaved form input is not discarded. If the retry fails again, stop and contact support rather than reloading with unsaved input.
+
+Sources consulted: `.agents/skills/error-handling/SKILL.md`; `.agents/memory/pwa-update-prompts.md`.

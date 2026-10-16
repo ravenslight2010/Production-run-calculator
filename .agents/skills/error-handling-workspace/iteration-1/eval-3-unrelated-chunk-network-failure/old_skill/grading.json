@@ -1,0 +1,25 @@
+{
+  "expectations": [
+    {
+      "text": "The response does not misclassify the 503 as the exact Safari Notification stale-client case or recommend the special Update and reload path.",
+      "passed": true,
+      "evidence": "503 is not routed to the special stale-client Update and reload path."
+    },
+    {
+      "text": "The response rejects an automatic or blind reload and preserves the unsaved form input.",
+      "passed": true,
+      "evidence": "Unsaved input is preserved and reload is avoided."
+    },
+    {
+      "text": "The response gives a bounded, non-destructive diagnostic or retry next step appropriate to a transient network/chunk failure.",
+      "passed": true,
+      "evidence": "Response gives a bounded retry or diagnostic next step."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 0,
+    "total": 3,
+    "pass_rate": 1.0
+  }
+}
