@@ -11,10 +11,11 @@ import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
-import { signLegacyTokenForTests } from "../lib/auth";
 import type { FieldChecksReport } from "../lib/fieldChecks";
 let FIELD_CHECK_MAX_CLOCK_SKEW_MS: number;
 let FIELD_CHECK_RETENTION_DAYS: number;
+let signLegacyTokenForTests: typeof import("../lib/auth").signLegacyTokenForTests;
+let enhancedErrorMessages: typeof import("../middlewares/errorMessagesEnhanced").enhancedErrorMessages;
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -66,6 +67,8 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = testUrlString;
   // Import only after selecting the disposable DB: fieldChecks imports the DB pool.
+  ({ signLegacyTokenForTests } = await import("../lib/auth"));
+  ({ enhancedErrorMessages } = await import("../middlewares/errorMessagesEnhanced"));
   ({ FIELD_CHECK_MAX_CLOCK_SKEW_MS, FIELD_CHECK_RETENTION_DAYS } = await import("../lib/fieldChecks"));
   const dbModule = await import("@workspace/db");
   // This suite's historical disposable schema can predate additive lifecycle
@@ -101,6 +104,7 @@ beforeAll(async () => {
     next();
   });
   app.use("/api", router);
+  app.use(enhancedErrorMessages);
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
   });
@@ -511,6 +515,64 @@ describe("field-check evidence from two authenticated clients", () => {
     });
     expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
     expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
+  it("rolls back observations and issue rollups when an issue write fails mid-batch", async () => {
+    const seed = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [observation("transaction-seed-failure", "failure", "mobile-chrome")],
+    });
+    expect(seed.status).toBe(202);
+
+    const observationsBefore = await db.select().from(fieldCheckObservationsTable);
+    const issuesBefore = await db.select().from(fieldCheckIssuesTable);
+    expect(issuesBefore).toHaveLength(1);
+    expect(issuesBefore[0]).toMatchObject({
+      checkName: "cross-device-convergence",
+      failureCount: 1,
+      status: "open",
+    });
+
+    await db.execute(sql`
+      CREATE FUNCTION fail_field_check_issue_write_for_test()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.check_name = 'startup' THEN
+          RAISE EXCEPTION 'injected field-check persistence failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await db.execute(sql`
+      CREATE TRIGGER fail_field_check_issue_write_for_test
+      BEFORE INSERT ON field_check_issues
+      FOR EACH ROW
+      EXECUTE FUNCTION fail_field_check_issue_write_for_test()
+    `);
+
+    try {
+      const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [
+          observation("transaction-batch-recover-existing", "success", "mobile-chrome"),
+          {
+            ...observation("transaction-batch-fail-new-issue", "failure", "tablet-browser"),
+            checkName: "startup",
+          },
+        ],
+      });
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("content-type")).toMatch(/application\/json/u);
+      expect(await response.json()).toEqual({
+        error: "Something went wrong on the server. Our team has been notified. Please try again later.",
+      });
+
+      expect(await db.select().from(fieldCheckObservationsTable)).toEqual(observationsBefore);
+      expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBefore);
+    } finally {
+      await db.execute(sql`DROP TRIGGER IF EXISTS fail_field_check_issue_write_for_test ON field_check_issues`);
+      await db.execute(sql`DROP FUNCTION IF EXISTS fail_field_check_issue_write_for_test()`);
+    }
   });
 
   it("reports never-observed, stale, and no-success coverage with bounded receipt delay", async () => {
