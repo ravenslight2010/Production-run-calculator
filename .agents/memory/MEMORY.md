@@ -23,6 +23,7 @@
 - [Old-schema fixtures](isolated-db-may-predate-migrations.md) + [session fixtures](session-boundary-integration-fixtures.md) — databases may predate migrations; create sessions after test DB setup.
 - [Pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve dynamic imports, workflow roles, and writable sockets.
 - [Browser](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) — isolate state, model permission gates, diagnose requests, and stabilize offline tests.
+- [Browser storage availability](browser-localstorage-availability.md) — localStorage is optional cache; guard method calls, property reads, migrations, and async startup work.
 - [Visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate data; keep tests stable.
 - [Phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — isolate inputs and guard missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.

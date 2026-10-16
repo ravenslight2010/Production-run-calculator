@@ -651,12 +651,17 @@ function scheduleManualRetry(record: PendingManualSection & { attempts?: number 
   }, delay));
 }
 export async function retryPendingManualSections(): Promise<void> {
-  if (typeof localStorage === "undefined") return;
   const pending: Array<Record<string, any>> = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key?.startsWith(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`)) continue;
-    try { pending.push(JSON.parse(localStorage.getItem(key) ?? "null")); } catch {}
+  try {
+    if (typeof localStorage === "undefined") return;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`)) continue;
+      try { pending.push(JSON.parse(localStorage.getItem(key) ?? "null")); } catch {}
+    }
+  } catch {
+    noteStorageFailure("unavailable");
+    return;
   }
   for (const item of pending) if (item?.id && !["retry-exhausted", "auth-required"].includes(item.deliveryState)) await submitManualSection(item as any);
 }

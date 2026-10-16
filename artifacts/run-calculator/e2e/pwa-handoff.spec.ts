@@ -172,6 +172,7 @@ async function startOldBuildThenTriggerStaleAssetFailure(
   server: Awaited<ReturnType<typeof startVersionedServer>>,
   staleHomeChunk: string,
   beforeStaleAssetFailure?: () => Promise<void>,
+  trackWorkerLifecycle = true,
 ) {
   server.holdNextSessionResponse();
   await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
@@ -180,25 +181,27 @@ async function startOldBuildThenTriggerStaleAssetFailure(
     const registration = await navigator.serviceWorker.ready;
     return registration.active?.state === "activated";
   });
-  await page.evaluate(async (missingHomeChunk) => {
+  await page.evaluate(async ({ missingHomeChunk, trackWorkerLifecycle }) => {
     const registration = await navigator.serviceWorker.ready;
-    const traceKey = "__pwa_recovery_worker_lifecycle";
-    const record = (entry: { kind: string; state?: string }) => {
-      const entries = JSON.parse(localStorage.getItem(traceKey) ?? "[]") as typeof entry[];
-      entries.push(entry);
-      localStorage.setItem(traceKey, JSON.stringify(entries));
-    };
-    registration.addEventListener("updatefound", () => {
-      const worker = registration.installing;
-      if (!worker) return;
-      record({ kind: "installing", state: worker.state });
-      worker.addEventListener("statechange", () => {
-        record({ kind: "worker-state", state: worker.state });
+    if (trackWorkerLifecycle) {
+      const traceKey = "__pwa_recovery_worker_lifecycle";
+      const record = (entry: { kind: string; state?: string }) => {
+        const entries = JSON.parse(localStorage.getItem(traceKey) ?? "[]") as typeof entry[];
+        entries.push(entry);
+        localStorage.setItem(traceKey, JSON.stringify(entries));
+      };
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        record({ kind: "installing", state: worker.state });
+        worker.addEventListener("statechange", () => {
+          record({ kind: "worker-state", state: worker.state });
+        });
       });
-    });
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      record({ kind: "controllerchange" });
-    });
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        record({ kind: "controllerchange" });
+      });
+    }
     // The stale Home chunk is deliberately absent from the network's new
     // version. Remove only this cached old response so the request reaches the
     // versioned server instead of being masked by the installed worker cache.
@@ -211,7 +214,7 @@ async function startOldBuildThenTriggerStaleAssetFailure(
         }
       }
     }
-  }, staleHomeChunk);
+  }, { missingHomeChunk: staleHomeChunk, trackWorkerLifecycle });
 
   await beforeStaleAssetFailure?.();
   server.publish("new");
@@ -3234,6 +3237,200 @@ test.describe("PWA update handoff", () => {
       expect(await page.evaluate(() =>
         JSON.parse(localStorage.getItem("__pwa_recovery_marker_capture") ?? "[]") as string[],
       )).toEqual([]);
+
+      const observations = staleChunkServer.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      expect(observations.filter((item) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toHaveLength(0);
+      expect(staleChunkServer.staleAssetRequestCount()).toBe(1);
+      expect(homeServer.fixtureErrors()).toEqual([]);
+      expect(staleChunkServer.fixtureErrors()).toEqual([]);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await homeServer.close();
+      await staleChunkServer.close();
+    }
+  });
+
+  test("opens Home when every localStorage operation is blocked without stale-app recovery", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    const homeServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true },
+    );
+    const staleChunkServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: homeServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const failures = {
+          getItem: 0,
+          setItem: 0,
+          removeItem: 0,
+          clear: 0,
+          key: 0,
+          length: 0,
+          unhandledRejections: [] as string[],
+          staleRecoveryMarkers: [] as string[],
+        };
+        Object.defineProperty(window, "__pwaWholeLocalStorageFailureEvidence", {
+          value: failures,
+        });
+        window.addEventListener("unhandledrejection", (event) => {
+          const reason = event.reason as { message?: unknown; stack?: unknown } | null;
+          failures.unhandledRejections.push(
+            `${String(reason?.message ?? reason)}\n${String(reason?.stack ?? "")}`,
+          );
+        });
+
+        const failLocalStorage = (
+          operation: "getItem" | "setItem" | "removeItem" | "clear" | "key" | "length",
+        ) => {
+          failures[operation] += 1;
+          const error = new Error("All localStorage operations are blocked");
+          error.name = "SecurityError";
+          throw error;
+        };
+        const methods = ["getItem", "setItem", "removeItem", "clear", "key"] as const;
+        for (const method of methods) {
+          const original = Storage.prototype[method];
+          Storage.prototype[method] = function (...args) {
+            if (this === window.localStorage) {
+              failLocalStorage(method);
+            }
+            return original.apply(this, args);
+          } as typeof original;
+        }
+
+        const lengthDescriptor = Object.getOwnPropertyDescriptor(Storage.prototype, "length");
+        if (!lengthDescriptor?.get) {
+          throw new Error("Storage.length cannot be instrumented by the PWA fixture");
+        }
+        Object.defineProperty(Storage.prototype, "length", {
+          configurable: true,
+          enumerable: lengthDescriptor.enumerable,
+          get() {
+            if (this === window.localStorage) failLocalStorage("length");
+            return lengthDescriptor.get!.call(this);
+          },
+        });
+
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const originalSessionSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.sessionStorage && key === markerKey) {
+            failures.staleRecoveryMarkers.push(value);
+          }
+          return originalSessionSetItem.call(this, key, value);
+        };
+      });
+
+      await page.goto(homeServer.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      expect(homeServer.sessionRecoveryRequests().acceptedMeResponses).toBeGreaterThan(0);
+      const startupStorageEvidence = await page.evaluate(() => {
+        const evidence = (
+          window as Window & {
+            __pwaWholeLocalStorageFailureEvidence?: {
+              getItem: number;
+              setItem: number;
+              removeItem: number;
+              clear: number;
+              key: number;
+              length: number;
+              unhandledRejections: string[];
+            };
+          }
+        ).__pwaWholeLocalStorageFailureEvidence;
+        const probe = (run: () => unknown) => {
+          try {
+            run();
+            return false;
+          } catch {
+            return true;
+          }
+        };
+        return {
+          ...evidence,
+          probesRejected: {
+            getItem: probe(() => localStorage.getItem("unrelated-startup-key")),
+            setItem: probe(() => localStorage.setItem("unrelated-startup-key", "fixture")),
+            removeItem: probe(() => localStorage.removeItem("unrelated-startup-key")),
+            clear: probe(() => localStorage.clear()),
+            key: probe(() => localStorage.key(0)),
+            length: probe(() => localStorage.length),
+          },
+        };
+      });
+      expect(startupStorageEvidence.getItem).toBeGreaterThan(0);
+      expect(startupStorageEvidence.setItem).toBeGreaterThan(0);
+      expect(startupStorageEvidence.probesRejected).toEqual({
+        getItem: true,
+        setItem: true,
+        removeItem: true,
+        clear: true,
+        key: true,
+        length: true,
+      });
+      expect(pageErrors).toEqual([]);
+      expect(startupStorageEvidence.unhandledRejections).toEqual([]);
+
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: staleChunkServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        staleChunkServer,
+        fixture.staleHomeChunk,
+        undefined,
+        false,
+      );
+      await expect(page.getByText(
+        /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+      )).toBeVisible();
+
+      await page.waitForTimeout(1_500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+      const blockedStorageEvidence = await page.evaluate(() => (
+        window as Window & {
+          __pwaWholeLocalStorageFailureEvidence?: {
+            getItem: number;
+            setItem: number;
+            removeItem: number;
+            clear: number;
+            key: number;
+            length: number;
+            staleRecoveryMarkers: string[];
+          };
+        }
+      ).__pwaWholeLocalStorageFailureEvidence);
+      expect(blockedStorageEvidence?.getItem).toBeGreaterThan(0);
+      expect(blockedStorageEvidence?.setItem).toBeGreaterThan(0);
+      expect(blockedStorageEvidence?.staleRecoveryMarkers).toEqual([]);
+      expect(pageErrors).toEqual([]);
 
       const observations = staleChunkServer.fieldCheckObservations()
         .flatMap((batch) => batch.observations) as Array<{

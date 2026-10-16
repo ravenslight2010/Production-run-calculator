@@ -2917,6 +2917,17 @@ function emitProductionRunSaveOutcome(
   });
 }
 
+function loadCachedSupervisorPin(): string | null {
+  try {
+    return typeof window === "undefined"
+      ? null
+      : localStorage.getItem(SUPERVISOR_PIN_KEY);
+  } catch {
+    // The server-backed preference still works when this offline cache is blocked.
+    return null;
+  }
+}
+
 export default function Home() {
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const specImportOperationRef = useRef<string | null>(null);
@@ -5385,9 +5396,7 @@ export default function Home() {
   const resolvedPin =
     typeof serverPin === "string"
       ? serverPin
-      : (typeof window !== "undefined"
-          ? localStorage.getItem(SUPERVISOR_PIN_KEY)
-          : null);
+      : loadCachedSupervisorPin();
   const noFacilityPin = resolvedPin === "";
   const isSupervisor =
     isManager ||
@@ -12243,9 +12252,16 @@ export default function Home() {
   useEffect(() => {
     if (screenMode !== null) return;
     const MARKER = "run-calc-tunnel-pre-post-default-v1";
-    const alreadyHealed = !!localStorage.getItem(MARKER);
+    let alreadyHealed = false;
+    try {
+      alreadyHealed = !!localStorage.getItem(MARKER);
+    } catch {
+      // The marker is a local optimization, not a prerequisite for Home.
+    }
     if (!alreadyHealed && canManageProfiles) {
-      localStorage.setItem(MARKER, "1");
+      try { localStorage.setItem(MARKER, "1"); } catch {
+        // Retry the safe, idempotent heal on a later boot if storage returns.
+      }
 
     const toHeal: { brand: string; flavor: string }[] = [];
     for (const suffix of cachedProfileKeys()) {
