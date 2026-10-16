@@ -263,6 +263,7 @@ async function startVersionedServer(
   options: {
     sessionRecovery?: boolean;
     sessionRecoveryIntentOutbox?: boolean;
+    safeSessionSnapshot?: boolean;
     fieldCheckObservations?: boolean;
   } = {},
 ) {
@@ -293,7 +294,10 @@ async function startVersionedServer(
     signIns: 0,
     permissionDenied: 0,
   };
-  const fieldCheckObservations: Array<{ observations: unknown[] }> = [];
+  const fieldCheckObservations: Array<{
+    observations: unknown[];
+    acceptedMeResponsesAtReceipt: number;
+  }> = [];
   const intentRequestIds: string[] = [];
   const intentRequestUsers: string[] = [];
   const appliedIntentIds: string[] = [];
@@ -490,6 +494,7 @@ async function startVersionedServer(
         const payload = JSON.parse(rawBody || "{}") as { observations?: unknown[] };
         fieldCheckObservations.push({
           observations: Array.isArray(payload.observations) ? payload.observations : [],
+          acceptedMeResponsesAtReceipt: sessionRecoveryRequests.acceptedMeResponses,
         });
         response.writeHead(202, {
           "content-type": "application/json; charset=utf-8",
@@ -610,8 +615,12 @@ async function startVersionedServer(
           const canonical = {
             syncVersion: 1,
             completeness: "complete",
-            dayState: { date, runs: [run], currentIndex: 0 },
-            runValues: { [run.id]: {} },
+            dayState: {
+              date,
+              runs: options.safeSessionSnapshot ? [] : [run],
+              currentIndex: 0,
+            },
+            runValues: options.safeSessionSnapshot ? {} : { [run.id]: {} },
           };
           const snapshotId = createHash("sha256")
             .update(canonicalSyncJson(canonical))
@@ -757,7 +766,7 @@ async function startVersionedServer(
   }
 
   return {
-    baseUrl: `http://127.0.0.1:${address.port}`,
+    baseUrl: `http://localhost:${address.port}`,
     publish(version: Version) {
       currentVersion = version;
       staleAssetFailureTriggered = true;
@@ -811,6 +820,7 @@ async function startVersionedServer(
     fieldCheckObservations() {
       return fieldCheckObservations.map((batch) => ({
         observations: [...batch.observations],
+        acceptedMeResponsesAtReceipt: batch.acceptedMeResponsesAtReceipt,
       }));
     },
     fixtureErrors() {
@@ -2556,6 +2566,174 @@ test.describe("PWA update handoff", () => {
         (message) => !message.includes("fonts.googleapis.com/css2"),
       );
       expect(unexpectedPageErrors).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("automatically confirms stale-app recovery after safe idle authenticated startup", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      {
+        sessionRecovery: true,
+        safeSessionSnapshot: true,
+        fieldCheckObservations: true,
+      },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const captureKey = "__pwa_recovery_marker_capture";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.sessionStorage && key === markerKey) {
+            const captured = JSON.parse(localStorage.getItem(captureKey) ?? "[]") as string[];
+            captured.push(value);
+            localStorage.setItem(captureKey, JSON.stringify(captured));
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+      const authenticatedStartsBeforeRecovery =
+        server.sessionRecoveryRequests().acceptedMeResponses;
+
+      // Do not tap the error screen's manual recovery button. Safe-idle recovery
+      // must install the new worker and reload this authenticated session itself.
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
+        timeout: 30_000,
+      });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(authenticatedStartsBeforeRecovery);
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated" &&
+          Boolean(navigator.serviceWorker.controller);
+      });
+
+      await expect.poll(() => server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations)
+        .filter((observation) =>
+          (observation as { checkName?: string; outcome?: string }).checkName ===
+            "stale-deployment-recovery" &&
+          (observation as { outcome?: string }).outcome === "success",
+        ).length).toBe(1);
+
+      const batches = server.fieldCheckObservations();
+      const recoveryObservations = batches.flatMap((batch) =>
+        batch.observations.map((observation) => ({
+          observation: observation as {
+            checkName?: string;
+            outcome?: string;
+            appBuild?: string;
+            metrics?: Record<string, unknown>;
+          },
+          acceptedMeResponsesAtReceipt: batch.acceptedMeResponsesAtReceipt,
+        })),
+      ).filter(({ observation }) =>
+        observation.checkName === "stale-deployment-recovery",
+      );
+      expect(recoveryObservations).toHaveLength(1);
+      expect(recoveryObservations[0]).toMatchObject({
+        observation: {
+          outcome: "success",
+          appBuild: "pwa-new-build",
+          metrics: {},
+        },
+      });
+      expect(recoveryObservations[0].acceptedMeResponsesAtReceipt)
+        .toBeGreaterThan(authenticatedStartsBeforeRecovery);
+
+      const markerSnapshots = await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_marker_capture") ?? "[]") as string[],
+      );
+      expect(markerSnapshots).toHaveLength(1);
+      const marker = JSON.parse(markerSnapshots[0]);
+      expect(Object.keys(marker).sort()).toEqual(["attemptedAt", "fromBuild"]);
+      expect(marker).toMatchObject({
+        fromBuild: expect.stringMatching(/^[a-f0-9]{1,8}$/),
+        attemptedAt: expect.any(Number),
+      });
+      expect(markerSnapshots[0]).not.toMatch(/https?:|old-build/);
+      const lifecycle = await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_worker_lifecycle") ?? "[]") as
+          Array<{ kind: string; state?: string }>,
+      );
+      expect(lifecycle).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "worker-state", state: "installed" }),
+        expect.objectContaining({ kind: "worker-state", state: "activated" }),
+      ]));
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("does not automatically reload a stale app while a production run is active", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+      await expect(page.getByText(
+        /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+      )).toBeVisible();
+
+      // The fixture snapshot contains an active run, so waiting past the
+      // shortened idle interval must not trigger the automatic path.
+      await page.waitForTimeout(1_500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+      expect(await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+      const outcomes = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      expect(outcomes.filter((item) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toHaveLength(0);
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
     } finally {
       await server.close();
     }

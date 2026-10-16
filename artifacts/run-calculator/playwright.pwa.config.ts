@@ -3,6 +3,27 @@ import { resolveChromiumExecutable } from "./e2e/chromium";
 import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 
 const webkitOptions = webkitLaunchOptions();
+const webkitLocalBypass = ["localhost", "127.0.0.1", "::1"];
+const webkitNoProxy = [
+  ...webkitLocalBypass,
+  ...(webkitOptions?.env.NO_PROXY ?? "").split(","),
+  ...(webkitOptions?.env.no_proxy ?? "").split(","),
+].map((host) => host.trim()).filter(Boolean).filter((host, index, hosts) => (
+  hosts.indexOf(host) === index
+)).join(",");
+const pwaWebkitOptions = webkitOptions
+  ? {
+      ...webkitOptions,
+      // The release runner forces browser traffic through an HTTPS-only proxy.
+      // Keep that proxy for public HTTPS checks while sending the local PWA
+      // fixture directly to its loopback server.
+      env: {
+        ...webkitOptions.env,
+        NO_PROXY: webkitNoProxy,
+        no_proxy: webkitNoProxy,
+      },
+    }
+  : undefined;
 const appShellInstallSmoke =
   /serves app shell and declared install assets|blocks an offline intent after session revocation|keeps an authentication-blocked offline intent private across account switches|keeps a permission-blocked offline intent until explicit retry|rechecks an open run after reconnect|recovers from a temporary session check failure after offline startup|keeps startup retry available after session checks time out|keeps a valid session through normal online run recovery/;
 const chromiumLaunchOptions =
@@ -41,7 +62,7 @@ export default defineConfig({
       name: "webkit",
       use: {
         ...devices["Desktop Safari"],
-        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+        ...(pwaWebkitOptions ? { launchOptions: pwaWebkitOptions } : {}),
       },
     },
     {
@@ -76,7 +97,7 @@ export default defineConfig({
       grep: appShellInstallSmoke,
       use: {
         ...devices["iPhone 13"],
-        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+        ...(pwaWebkitOptions ? { launchOptions: pwaWebkitOptions } : {}),
       },
     },
     {
@@ -84,7 +105,7 @@ export default defineConfig({
       grep: appShellInstallSmoke,
       use: {
         ...devices["iPad (gen 7)"],
-        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+        ...(pwaWebkitOptions ? { launchOptions: pwaWebkitOptions } : {}),
       },
     },
     {
@@ -92,7 +113,7 @@ export default defineConfig({
       grep: appShellInstallSmoke,
       use: {
         ...devices["iPad (gen 7) landscape"],
-        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+        ...(pwaWebkitOptions ? { launchOptions: pwaWebkitOptions } : {}),
       },
     },
   ],

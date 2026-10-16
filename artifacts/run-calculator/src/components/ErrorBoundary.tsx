@@ -10,7 +10,11 @@ import {
   STALE_ASSET_RELOAD_FALLBACK_MS,
 } from "../pwaUpdateRecovery";
 import { emitFieldCheckSignal } from "../fieldChecks";
-import { getAutomaticUpdateReloadSafety } from "../updateReloadSafety";
+import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
+import {
+  getAutomaticUpdateReloadSafety,
+  reportAutomaticUpdateReloadSafety,
+} from "../updateReloadSafety";
 
 type Props = {
   children: ReactNode;
@@ -112,6 +116,15 @@ export default class ErrorBoundary extends Component<Props, State> {
       !canReload() ||
       !claimStaleAssetRecoveryAttempt(WEB_BUILD_ID)
     ) return;
+
+    const safeNow = await checkPreHomeReloadSafety();
+    if (!canReload()) return;
+    if (!safeNow) {
+      reportAutomaticUpdateReloadSafety(false);
+      this.setState({ safeAtFailure: false });
+      return;
+    }
+    reportAutomaticUpdateReloadSafety(true);
 
     this.staleAssetRecoveryStarted = true;
     this.recordRecoveryAttempt();

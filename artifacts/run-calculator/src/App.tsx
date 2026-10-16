@@ -34,10 +34,12 @@ import { WEB_BUILD_ID } from "./buildIdentity";
 import { installBrowserFailureCapture } from "./browserIncidentCapture";
 import {
   getAutomaticUpdateReloadSafety,
+  reportAutomaticUpdateReloadSafety,
   scheduleSafeIdleAutomaticRecovery,
   startUpdateReloadIdleTracking,
   subscribeAutomaticUpdateReloadSafety,
 } from "./updateReloadSafety";
+import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 
 const queryClient = new QueryClient();
 registerMasterDataQueryClient(queryClient);
@@ -68,9 +70,11 @@ const LazyHome = lazy(() => {
 function AppLoadingSurface({
   error,
   onRetry,
+  message,
 }: {
   error?: string;
   onRetry?: () => void;
+  message?: string;
 }) {
   return (
     <main
@@ -92,7 +96,7 @@ function AppLoadingSurface({
           {error ? "Unable to open Run Calculator" : "Opening Run Calculator"}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          {error ?? "Confirming your staff session…"}
+          {error ?? message ?? "Confirming your staff session…"}
         </p>
         {error && onRetry ? (
           <button
@@ -113,14 +117,41 @@ function AppLoadingSurface({
 // sign-in CTA for everyone else (no auto-redirect into the sign-in form).
 function HomeGate() {
   const {
+    me,
     isAuthenticated,
     isLoading,
     startupError,
     retryStartup,
   } = useAuth();
+  const [preHomeSafetyUserId, setPreHomeSafetyUserId] = useState<string | null>(null);
+  const userId = isAuthenticated ? me?.userId ?? null : null;
+
+  useEffect(() => {
+    if (!userId) {
+      reportAutomaticUpdateReloadSafety(false);
+      setPreHomeSafetyUserId(null);
+      return;
+    }
+    let current = true;
+    setPreHomeSafetyUserId(null);
+    reportAutomaticUpdateReloadSafety(false);
+    void checkPreHomeReloadSafety().then((safe) => {
+      if (!current) return;
+      reportAutomaticUpdateReloadSafety(safe);
+      setPreHomeSafetyUserId(userId);
+    });
+    return () => {
+      current = false;
+      reportAutomaticUpdateReloadSafety(false);
+    };
+  }, [userId]);
+
   if (isLoading) return <AppLoadingSurface />;
   if (startupError) {
     return <AppLoadingSurface error={startupError} onRetry={retryStartup} />;
+  }
+  if (isAuthenticated && userId && preHomeSafetyUserId !== userId) {
+    return <AppLoadingSurface message="Checking current production state…" />;
   }
   return isAuthenticated ? (
     <MasterDataPolling>

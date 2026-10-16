@@ -8,9 +8,13 @@ import ErrorBoundary, {
 } from "./ErrorBoundary";
 import { reportIncident } from "../inventoryShared";
 import { reportAutomaticUpdateReloadSafety } from "../updateReloadSafety";
+import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
 
 vi.mock("../inventoryShared", () => ({
   reportIncident: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../pwaStartupSafety", () => ({
+  checkPreHomeReloadSafety: vi.fn().mockResolvedValue(true),
 }));
 
 function ThrowError({ error }: { error: Error }): never {
@@ -155,11 +159,40 @@ describe("ErrorBoundary recovery actions", () => {
 
     expect(scheduleSafeIdleRecovery).toHaveBeenCalledOnce();
     expect(updateAndReload).not.toHaveBeenCalled();
+    vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(true);
     await recoverWhenSafe?.(() => false);
     expect(updateAndReload).not.toHaveBeenCalled();
     await recoverWhenSafe?.(() => true);
     expect(updateAndReload).toHaveBeenCalledOnce();
     expect(updateAndReload).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("blocks stale-chunk recovery when the fresh pre-Home safety check is unsafe", async () => {
+    const updateAndReload = vi.fn().mockResolvedValue(undefined);
+    let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;
+    const scheduleSafeIdleRecovery = vi.fn((_safeAtFailure, recover) => {
+      recoverWhenSafe = recover;
+      return vi.fn();
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(false);
+    reportAutomaticUpdateReloadSafety(true);
+
+    render(
+      <ErrorBoundary
+        onUpdateAndReload={updateAndReload}
+        scheduleSafeIdleRecovery={scheduleSafeIdleRecovery}
+      >
+        <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+      </ErrorBoundary>,
+    );
+
+    await recoverWhenSafe?.(() => true);
+    expect(updateAndReload).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1")).toBeNull();
+    expect(await screen.findByText(
+      /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+    )).not.toBeNull();
   });
 
   it("keeps the ordinary reload experience for unrelated errors", () => {
