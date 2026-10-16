@@ -268,6 +268,7 @@ async function startVersionedServer(
     safeSessionSnapshot?: boolean;
     preHomeSafetyTimeout?: boolean;
     fieldCheckObservations?: boolean;
+    initialUserId?: string;
   } = {},
 ) {
   let currentVersion: Version = "old";
@@ -304,6 +305,8 @@ async function startVersionedServer(
     observations: unknown[];
     acceptedMeResponsesAtReceipt: number;
   }> = [];
+  const fieldCheckRequests: Array<{ userId: string; sandbox: boolean; status: number }> = [];
+  let fieldCheckFailuresRemaining = 0;
   const intentRequestIds: string[] = [];
   const intentRequestUsers: string[] = [];
   const appliedIntentIds: string[] = [];
@@ -349,8 +352,17 @@ async function startVersionedServer(
   const sessionUsers = new Map([
     [sessionUser.userId, sessionUser],
     ["pwa-session-user-b", { ...sessionUser, userId: "pwa-session-user-b", name: "PWA Session B" }],
+    ["pwa-sandbox-user", {
+      ...sessionUser,
+      userId: "pwa-sandbox-user",
+      name: "PWA Sandbox",
+      role: "manager",
+      capabilities: ["manage-factory-settings"],
+      sandbox: true,
+    }],
     [managerSessionUser.userId, managerSessionUser],
   ]);
+  activeSessionUserId = options.initialUserId ?? activeSessionUserId;
   const oldIndex = await readFile(path.join(versionDirs.old, "index.html"), "utf8");
   const entryScript = oldIndex.match(/<script[^>]+src="\/?([^"]+\.js)"/)?.[1];
   if (!entryScript) throw new Error("The PWA fixture could not find the entry script");
@@ -516,6 +528,23 @@ async function startVersionedServer(
         let rawBody = "";
         for await (const chunk of request) rawBody += chunk;
         const payload = JSON.parse(rawBody || "{}") as { observations?: unknown[] };
+        if (fieldCheckFailuresRemaining > 0) {
+          fieldCheckFailuresRemaining -= 1;
+          fieldCheckRequests.push({
+            userId: activeSessionUserId,
+            sandbox: sessionUsers.get(activeSessionUserId)?.sandbox ?? false,
+            status: 503,
+          });
+          response.writeHead(503, {
+            "content-type": "application/json; charset=utf-8",
+          }).end(JSON.stringify({ error: "Temporary fixture failure" }));
+          return;
+        }
+        fieldCheckRequests.push({
+          userId: activeSessionUserId,
+          sandbox: sessionUsers.get(activeSessionUserId)?.sandbox ?? false,
+          status: 202,
+        });
         fieldCheckObservations.push({
           observations: Array.isArray(payload.observations) ? payload.observations : [],
           acceptedMeResponsesAtReceipt: sessionRecoveryRequests.acceptedMeResponses,
@@ -526,6 +555,14 @@ async function startVersionedServer(
           accepted: fieldCheckObservations.at(-1)?.observations.length ?? 0,
           duplicate: 0,
         }));
+        return;
+      }
+      if (options.sessionRecovery && requestPath === "api/auth/sign-out" && request.method === "POST") {
+        sessionValid = false;
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "set-cookie": "rc_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
+        }).end(JSON.stringify({ ok: true }));
         return;
       }
       if (options.sessionRecoveryIntentOutbox && requestPath === "api/auth/sign-in") {
@@ -823,6 +860,9 @@ async function startVersionedServer(
     setSessionValid(valid: boolean) {
       sessionValid = valid;
     },
+    failNextFieldCheckObservations(count = 1) {
+      fieldCheckFailuresRemaining = count;
+    },
     setSnapshotActiveRun(active: boolean) {
       snapshotHasActiveRun = active;
     },
@@ -871,6 +911,9 @@ async function startVersionedServer(
         observations: [...batch.observations],
         acceptedMeResponsesAtReceipt: batch.acceptedMeResponsesAtReceipt,
       }));
+    },
+    fieldCheckRequests() {
+      return fieldCheckRequests.map((request) => ({ ...request }));
     },
     fixtureErrors() {
       return [...fixtureErrors];
@@ -3153,6 +3196,127 @@ test.describe("PWA update handoff", () => {
       if (!page.isClosed()) await page.context().setOffline(false);
       await homeServer.close();
       await staleChunkServer.close();
+    }
+  });
+
+  test("keeps offline field-check evidence with its live or sandbox account", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      {
+        sessionRecovery: true,
+        sessionRecoveryIntentOutbox: true,
+        fieldCheckObservations: true,
+        initialUserId: "pwa-session-manager",
+      },
+    );
+
+    try {
+      await page.route("https://fonts.googleapis.com/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/css", body: "" }),
+      );
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("button-start-run")).toBeVisible();
+      await expect.poll(() => server.fieldCheckObservations().length).toBeGreaterThan(0);
+
+      server.failNextFieldCheckObservations();
+      await page.context().setOffline(true);
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent(
+        "calculator-field-check-signal",
+        { detail: { checkName: "offline-queue-replay", outcome: "failure" } },
+      )));
+      const queuedLiveObservationId = await page.evaluate(async () => {
+        const findQueuedObservation = () => {
+          const queue = JSON.parse(
+            localStorage.getItem("run-calc-field-check-queue") ?? "[]",
+          ) as Array<{ observationId?: string; checkName?: string; originScope?: string }>;
+          return queue.find((item) => item.checkName === "offline-queue-replay") ?? null;
+        };
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          const item = findQueuedObservation();
+          if (item) return item;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return null;
+      });
+      expect(queuedLiveObservationId).toMatchObject({
+        checkName: "offline-queue-replay",
+        originScope: "live:pwa-session-manager",
+      });
+      await page.context().setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+      await expect.poll(() => server.fieldCheckRequests().filter((request) =>
+        request.status === 503,
+      ).length).toBe(1);
+
+      await page.evaluate(async () => {
+        const response = await fetch("/api/auth/sign-out", { method: "POST" });
+        if (!response.ok) throw new Error(`Sign-out failed (${response.status})`);
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await page.getByLabel("Username").fill("pwa-sandbox-user");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect(page.getByText(
+        "Sandbox mode — changes here are isolated and never affect live data.",
+      )).toBeVisible();
+      await expect.poll(() => server.fieldCheckRequests().some((request) =>
+        request.userId === "pwa-sandbox-user" && request.sandbox && request.status === 202,
+      )).toBe(true);
+
+      const observationsBeforeReturningLive = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{ observationId: string }>;
+      expect(observationsBeforeReturningLive.some((item) =>
+        item.observationId === queuedLiveObservationId?.observationId,
+      )).toBe(false);
+      expect(await page.evaluate((observationId) => {
+        const queue = JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]") as
+          Array<{ observationId?: string; originScope?: string }>;
+        return queue.find((item) => item.observationId === observationId) ?? null;
+      }, queuedLiveObservationId?.observationId)).toMatchObject({
+        observationId: queuedLiveObservationId?.observationId,
+        originScope: "live:pwa-session-manager",
+      });
+
+      await page.evaluate(async () => {
+        const response = await fetch("/api/auth/sign-out", { method: "POST" });
+        if (!response.ok) throw new Error(`Sign-out failed (${response.status})`);
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await page.getByLabel("Username").fill("pwa-session-manager");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect.poll(() => server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations)
+        .some((item) =>
+          (item as { observationId?: string }).observationId ===
+          queuedLiveObservationId?.observationId,
+        )).toBe(true);
+      expect(server.fieldCheckRequests().some((request) =>
+        request.userId === "pwa-session-manager" && !request.sandbox && request.status === 202,
+      )).toBe(true);
+      expect(pageErrors).toEqual([]);
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await server.close();
     }
   });
 

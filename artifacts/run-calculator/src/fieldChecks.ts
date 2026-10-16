@@ -97,6 +97,17 @@ function localClientId(): string {
   }
 }
 
+function hashScope(scope: string): string {
+  let first = 2166136261;
+  let second = 0x811c9dc5;
+  for (let index = 0; index < scope.length; index += 1) {
+    const code = scope.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ (code + index), 16777619);
+  }
+  return `${(first >>> 0).toString(16)}${(second >>> 0).toString(16)}`;
+}
+
 function deviceCategory(): "desktop-chrome" | "desktop-safari" | "desktop-firefox" | "mobile-chrome" | "mobile-safari" | "tablet-browser" | "other-browser" {
   if (typeof navigator === "undefined") return "other-browser";
   const ua = navigator.userAgent.toLowerCase();
@@ -158,6 +169,7 @@ function safeMetrics(
 
 function loadQueue(): Array<{
   observationId: string;
+  originScope?: string | null;
   checkName: CheckName;
   checkVersion: string;
   outcome: Outcome;
@@ -176,7 +188,14 @@ function loadQueue(): Array<{
       (item.outcome === "success" || item.outcome === "failure" || item.outcome === "incomplete") &&
       typeof item.observedAt === "string" && typeof item.appBuild === "string" &&
       typeof item.deviceCategory === "string" && item.metrics && typeof item.metrics === "object",
-    ).slice(-maxQueue);
+    ).slice(-maxQueue).map((item) => ({
+      ...item,
+      // Older queue entries have no trustworthy account origin. Keep them
+      // visible locally, but never attribute them to a later sign-in.
+      originScope: typeof item.originScope === "string" && item.originScope.length <= 120
+        ? item.originScope
+        : null,
+    }));
   } catch {
     return [];
   }
@@ -268,7 +287,7 @@ export function emitFieldCheckSignal(checkName: CheckName, outcome: Outcome, met
   }));
 }
 
-function queueSignal(signal: Signal, appBuild: string): void {
+function queueSignal(signal: Signal, appBuild: string, originScope: string): void {
   const metrics = safeMetrics(signal.checkName, signal.outcome, signal.metrics);
   if (workflowChecks.has(signal.checkName) && metrics.durationMs === undefined) return;
   if (signal.checkName === "performance" && metrics.sourceCode === undefined) return;
@@ -278,7 +297,7 @@ function queueSignal(signal: Signal, appBuild: string): void {
   let buildHash = 2166136261;
   for (const char of appBuild) buildHash = Math.imul(buildHash ^ char.charCodeAt(0), 16777619);
   const category = metrics.sourceCode ?? metrics.failureCode ?? 0;
-  const bucket = `${(buildHash >>> 0).toString(16)}:${signal.checkName}:${Math.floor(now / bucketMs)}:${metrics.sourceCode ?? 0}`;
+  const bucket = `${originScope}:${(buildHash >>> 0).toString(16)}:${signal.checkName}:${Math.floor(now / bucketMs)}:${metrics.sourceCode ?? 0}`;
   const state = `${signal.outcome}:${category}`;
   // Keep repeated samples deduplicated even after delivery, but do not hide a
   // new failure following recovery in the same bucket. This is telemetry state,
@@ -287,7 +306,7 @@ function queueSignal(signal: Signal, appBuild: string): void {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(dedupKey) ?? "[]");
     if (Array.isArray(parsed)) dedup = parsed.filter((item) =>
-      item && typeof item.bucket === "string" && item.bucket.length <= 100 &&
+      item && typeof item.bucket === "string" && item.bucket.length <= 220 &&
       /^(success|failure|incomplete):[0-4]$/.test(item.state) &&
       Number.isSafeInteger(item.sequence) && item.sequence >= 0,
     ).slice(-maxQueue);
@@ -295,12 +314,13 @@ function queueSignal(signal: Signal, appBuild: string): void {
   const previous = dedup.find((item) => item.bucket === bucket);
   if (previous?.state === state) return;
   const sequence = (previous?.sequence ?? -1) + 1;
-  const id = `${localClientId()}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
+  const id = `${localClientId()}:${hashScope(originScope)}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
   const queue = loadQueue();
   if (queue.some((item) => item.observationId === id)) return;
   if (queue.length >= maxQueue) recordQueueDisplacement();
   queue.push({
     observationId: id,
+    originScope,
     checkName: signal.checkName,
     checkVersion: FIELD_CHECK_VERSION,
     outcome: signal.outcome,
@@ -320,7 +340,7 @@ function queueSignal(signal: Signal, appBuild: string): void {
   }
 }
 
-export function createFieldCheckObserver(appBuild: string): () => void {
+export function createFieldCheckObserver(appBuild: string, originScope: string): () => void {
   if (typeof window === "undefined" || typeof document === "undefined") return () => {};
   let stopped = false;
   let wasHidden = document.visibilityState === "hidden";
@@ -331,10 +351,17 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   const flush = async () => {
     if (stopped || flushInFlight || retryTimer !== null || !navigator.onLine) return;
     const now = Date.now();
-    const queued = loadQueue().filter((item) => !isFieldCheckObservationExpired(item, now));
+    const queued = loadQueue().filter((item) =>
+      item.originScope === originScope && !isFieldCheckObservationExpired(item, now),
+    );
     if (queued.length === 0) return;
     const batch = queued.slice(0, 20);
-    flushInFlight = submitFieldCheckObservations(batch)
+    const payload = batch.map((item) => {
+      const observation = { ...item };
+      delete observation.originScope;
+      return observation;
+    });
+    flushInFlight = submitFieldCheckObservations(payload)
       .then(() => {
         const sent = new Set(batch.map((item) => item.observationId));
         saveQueue(loadQueue().filter((item) => !sent.has(item.observationId)));
@@ -365,7 +392,7 @@ export function createFieldCheckObserver(appBuild: string): () => void {
     const signal = (event as CustomEvent<Signal>).detail;
     if (!signal || !FIELD_CHECK_CATALOG.some((check) => check.name === signal.checkName && check.observedBy === "browser")) return;
     if (!["success", "failure", "incomplete"].includes(signal.outcome)) return;
-    queueSignal(signal, appBuild);
+    queueSignal(signal, appBuild, originScope);
     void flush();
   };
   const onVisibility = () => {
@@ -402,12 +429,12 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("calculator-performance", onPerformance);
-  queueSignal({ checkName: "startup", outcome: "success" }, appBuild);
+  queueSignal({ checkName: "startup", outcome: "success" }, appBuild, originScope);
   if (consumeStaleAssetRecoveryAttempt(appBuild)) {
-    queueSignal({ checkName: "stale-deployment-recovery", outcome: "success" }, appBuild);
+    queueSignal({ checkName: "stale-deployment-recovery", outcome: "success" }, appBuild, originScope);
   }
   const navigation = performance.getEntriesByType("navigation").at(-1) as PerformanceNavigationTiming | undefined;
-  if (navigation?.type === "reload") queueSignal({ checkName: "reload-persistence", outcome: "success" }, appBuild);
+  if (navigation?.type === "reload") queueSignal({ checkName: "reload-persistence", outcome: "success" }, appBuild, originScope);
   const interval = window.setInterval(() => void flush(), 120_000);
   void flush();
 
@@ -424,10 +451,11 @@ export function createFieldCheckObserver(appBuild: string): () => void {
 }
 
 export function FieldVerificationObserver({ appBuild }: { appBuild: string }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, me } = useAuth();
   useEffect(() => {
-    if (isLoading || !isAuthenticated) return;
-    return createFieldCheckObserver(appBuild);
-  }, [appBuild, isAuthenticated, isLoading]);
+    if (isLoading || !isAuthenticated || !me) return;
+    const originScope = `${me.sandbox ? "sandbox" : "live"}:${me.userId}`;
+    return createFieldCheckObserver(appBuild, originScope);
+  }, [appBuild, isAuthenticated, isLoading, me]);
   return null;
 }

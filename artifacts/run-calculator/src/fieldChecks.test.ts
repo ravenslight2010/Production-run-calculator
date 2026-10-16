@@ -16,6 +16,7 @@ import { recordPerformance } from "./performanceDiagnostics";
 import { recordStaleAssetRecoveryAttempt } from "./pwaUpdateRecovery";
 
 const submit = vi.hoisted(() => vi.fn().mockResolvedValue({ accepted: 1, duplicate: 0 }));
+const TEST_SCOPE = "live:test-user";
 vi.mock("./inventoryShared", () => ({ submitFieldCheckObservations: submit }));
 
 describe("field-check observer", () => {
@@ -30,7 +31,7 @@ describe("field-check observer", () => {
   });
 
   it("records naturally occurring signals without duplicating a ten-minute bucket", async () => {
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
     emitFieldCheckSignal("sync-acknowledgment", "success", { latencyMs: 12.345 });
     emitFieldCheckSignal("sync-acknowledgment", "success", { latencyMs: 12.345 });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -38,6 +39,7 @@ describe("field-check observer", () => {
     const observations = submit.mock.calls.flatMap((call) => call[0]);
     expect(observations).toHaveLength(2);
     expect(observations.every((item: { appBuild: string }) => item.appBuild === "test-build")).toBe(true);
+    expect(observations.every((item: { originScope?: string }) => item.originScope === undefined)).toBe(true);
     const syncObservations = observations.filter((item: { checkName: string }) =>
       item.checkName === "sync-acknowledgment",
     );
@@ -46,8 +48,77 @@ describe("field-check observer", () => {
     stop();
   });
 
+  it("keeps offline observations with their originating account across a scope switch", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    const stopLive = createFieldCheckObserver("test-build", "live:account-a");
+    emitFieldCheckSignal("offline-queue-replay", "failure");
+    const liveQueue = JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]");
+    const queuedLiveId = liveQueue.find((item: { checkName: string }) =>
+      item.checkName === "offline-queue-replay",
+    )?.observationId;
+    expect(queuedLiveId).toBeTruthy();
+    expect(liveQueue.find((item: { observationId: string }) =>
+      item.observationId === queuedLiveId,
+    )).toMatchObject({ originScope: "live:account-a" });
+    stopLive();
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const stopSandbox = createFieldCheckObserver("test-build", "sandbox:account-b");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const sandboxUploads = submit.mock.calls.flatMap((call) => call[0]);
+    expect(sandboxUploads.length).toBeGreaterThan(0);
+    expect(sandboxUploads.some((item: { observationId: string }) =>
+      item.observationId === queuedLiveId,
+    )).toBe(false);
+    expect(JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]"))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          observationId: queuedLiveId,
+          originScope: "live:account-a",
+        }),
+      ]));
+    stopSandbox();
+
+    submit.mockClear();
+    const stopLiveAgain = createFieldCheckObserver("test-build", "live:account-a");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const liveUploads = submit.mock.calls.flatMap((call) => call[0]);
+    expect(liveUploads.some((item: { observationId: string }) =>
+      item.observationId === queuedLiveId,
+    )).toBe(true);
+    expect(getFieldCheckQueueStatus()).toMatchObject({ count: 0 });
+    stopLiveAgain();
+  });
+
+  it("retains pre-scope queued evidence without sending it under a later account", async () => {
+    const now = Date.now();
+    localStorage.setItem("run-calc-field-check-queue", JSON.stringify([{
+      observationId: "client:startup:legacy-unscoped",
+      checkName: "startup",
+      checkVersion: "3",
+      outcome: "success",
+      observedAt: new Date(now).toISOString(),
+      appBuild: "older-build",
+      deviceCategory: "desktop-chrome",
+      metrics: {},
+    }]));
+
+    const stop = createFieldCheckObserver("test-build", "sandbox:account-b");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const submittedIds = submit.mock.calls.flatMap((call) => call[0])
+      .map((item: { observationId: string }) => item.observationId);
+    expect(submittedIds).not.toContain("client:startup:legacy-unscoped");
+    expect(getFieldCheckQueueStatus()).toMatchObject({ count: 1, retryableCount: 1 });
+    expect(JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]"))
+      .toEqual([expect.objectContaining({
+        observationId: "client:startup:legacy-unscoped",
+      })]);
+    stop();
+  });
+
   it("does not collect unsupported hardware checks", () => {
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
     emitFieldCheckSignal("touch-accuracy", "success");
     expect(window.dispatchEvent).toBeDefined();
     expect(localStorage.getItem("run-calc-field-check-queue")).not.toContain("touch-accuracy");
@@ -63,7 +134,7 @@ describe("field-check observer", () => {
   });
 
   it("keeps workflow metrics bounded and includes only allowlisted save failure causes", async () => {
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
     emitFieldCheckSignal("spec-import-review-commit", "incomplete", {
       durationMs: 12.345,
       fileCount: 2,
@@ -210,7 +281,7 @@ describe("field-check observer", () => {
     let stop = () => {};
 
     try {
-      stop = createFieldCheckObserver("test-build");
+      stop = createFieldCheckObserver("test-build", TEST_SCOPE);
       await vi.advanceTimersByTimeAsync(0);
 
       const submittedIds = submit.mock.calls.flatMap((call) => call[0])
@@ -240,7 +311,7 @@ describe("field-check observer", () => {
     ));
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
 
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
     const stored = JSON.parse(localStorage.getItem("run-calc-field-check-queue") ?? "[]");
 
     expect(stored).toHaveLength(80);
@@ -258,7 +329,7 @@ describe("field-check observer", () => {
     const changed = vi.fn();
     window.addEventListener(FIELD_CHECK_QUEUE_EVENT, changed);
     recordStaleAssetRecoveryAttempt("old-build", sessionStorage, Date.now() - 1000);
-    const stop = createFieldCheckObserver("new-build");
+    const stop = createFieldCheckObserver("new-build", TEST_SCOPE);
     await new Promise((resolve) => setTimeout(resolve, 0));
     stop();
     window.removeEventListener(FIELD_CHECK_QUEUE_EVENT, changed);
@@ -301,7 +372,7 @@ describe("field-check observer", () => {
 
       let stop = () => {};
       try {
-        stop = createFieldCheckObserver("new-build");
+        stop = createFieldCheckObserver("new-build", TEST_SCOPE);
         await new Promise((resolve) => setTimeout(resolve, 0));
       } finally {
         stop();
@@ -320,7 +391,7 @@ describe("field-check observer", () => {
   );
 
   it("retains distinct sync causes, recovery and builds, without raw diagnostics", async () => {
-    const stop = createFieldCheckObserver("local");
+    const stop = createFieldCheckObserver("local", TEST_SCOPE);
     for (const failureCode of Object.values(SYNC_ACK_FAILURE_CODES)) {
       emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode, runId: 123, response: 403 });
       emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode });
@@ -330,7 +401,7 @@ describe("field-check observer", () => {
     emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode: 3 });
     await new Promise((resolve) => setTimeout(resolve, 0));
     stop();
-    const stopNextBuild = createFieldCheckObserver("identified-build");
+    const stopNextBuild = createFieldCheckObserver("identified-build", TEST_SCOPE);
     emitFieldCheckSignal("sync-acknowledgment", "failure", { failureCode: 1 });
     await new Promise((resolve) => setTimeout(resolve, 0));
     stopNextBuild();
@@ -349,7 +420,7 @@ describe("field-check observer", () => {
   });
 
   it("classifies selected timings at their existing budgets and separates safe sources", async () => {
-    const stop = createFieldCheckObserver("local");
+    const stop = createFieldCheckObserver("local", TEST_SCOPE);
     recordPerformance("startup:home-chunk-load", 10_000, "load");
     recordPerformance("startup:home-chunk-load", 10_001, "load");
     recordPerformance("browser:navigation-to-load", 1500, "load");
@@ -377,7 +448,7 @@ describe("field-check observer", () => {
   });
 
   it("retains a very slow event as a capped duration instead of dropping its failure", async () => {
-    const stop = createFieldCheckObserver("local");
+    const stop = createFieldCheckObserver("local", TEST_SCOPE);
     recordPerformance("browser:navigation-to-load", 10_000_001, "load");
     await new Promise((resolve) => setTimeout(resolve, 0));
     stop();
@@ -392,7 +463,7 @@ describe("field-check observer", () => {
     submit.mockRejectedValue(Object.assign(new Error("rate limited"), {
       retryAfterMs: 5_000,
     }));
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
 
     await vi.advanceTimersByTimeAsync(0);
     expect(submit).toHaveBeenCalledTimes(1);
@@ -408,7 +479,7 @@ describe("field-check observer", () => {
   it("keeps queued evidence when no valid delivery confirmation is available", async () => {
     vi.useFakeTimers();
     submit.mockRejectedValue(new Error("delivery confirmation unavailable"));
-    const stop = createFieldCheckObserver("unconfirmed-build");
+    const stop = createFieldCheckObserver("unconfirmed-build", TEST_SCOPE);
 
     await vi.advanceTimersByTimeAsync(0);
     expect(submit).toHaveBeenCalledOnce();
@@ -421,13 +492,14 @@ describe("field-check observer", () => {
   it("retries through the inclusive timestamp boundary and keeps expired evidence locally", async () => {
     vi.useFakeTimers();
     const now = Date.now();
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
     await vi.advanceTimersByTimeAsync(0);
 
     submit.mockReset().mockRejectedValue(new Error("delivery confirmation unavailable"));
     localStorage.setItem("run-calc-field-check-queue", JSON.stringify([
       {
         observationId: "client:startup:near-expiry",
+        originScope: TEST_SCOPE,
         checkName: "startup",
         checkVersion: "3",
         outcome: "success",
@@ -467,6 +539,7 @@ describe("field-check observer", () => {
     localStorage.setItem("run-calc-field-check-queue", JSON.stringify([
       {
         observationId: "client:startup:still-valid",
+        originScope: TEST_SCOPE,
         checkName: "startup",
         checkVersion: "3",
         outcome: "success",
@@ -477,7 +550,7 @@ describe("field-check observer", () => {
       },
     ]));
     submit.mockRejectedValue(new Error("temporary delivery failure"));
-    const stop = createFieldCheckObserver("test-build");
+    const stop = createFieldCheckObserver("test-build", TEST_SCOPE);
 
     await vi.advanceTimersByTimeAsync(0);
     expect(submit).toHaveBeenCalledOnce();

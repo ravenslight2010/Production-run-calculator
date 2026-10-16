@@ -25,7 +25,7 @@ const pwaWebkitOptions = webkitOptions
     }
   : undefined;
 const appShellInstallSmoke =
-  /serves app shell and declared install assets|blocks an offline intent after session revocation|keeps an authentication-blocked offline intent private across account switches|keeps a permission-blocked offline intent until explicit retry|rechecks an open run after reconnect|recovers from a temporary session check failure after offline startup|keeps startup retry available after session checks time out|keeps a valid session through normal online run recovery/;
+  /serves app shell and declared install assets|blocks an offline intent after session revocation|keeps an authentication-blocked offline intent private across account switches|keeps a permission-blocked offline intent until explicit retry|keeps offline field-check evidence with its live or sandbox account|rechecks an open run after reconnect|recovers from a temporary session check failure after offline startup|keeps startup retry available after session checks time out|keeps a valid session through normal online run recovery/;
 const chromiumLaunchOptions =
   process.env.CI &&
   !process.env.REPLIT_DEV_DOMAIN &&
