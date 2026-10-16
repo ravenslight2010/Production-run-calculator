@@ -2,6 +2,7 @@
 // clients. The test uses a disposable database and imports the router only after
 // DATABASE_URL points at it.
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
@@ -214,6 +215,49 @@ describe("field-check evidence from two authenticated clients", () => {
     expect(response.headers.get("x-correlation-id")).toBe(body.correlationId);
     expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
     expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
+  it("rate limits repeated authenticated observation uploads without persisting rejected evidence", async () => {
+    const rateLimitedUserId = `field-check-rate-limit-${randomUUID()}`;
+    await db.insert(usersTable).values({
+      id: rateLimitedUserId,
+      username: rateLimitedUserId,
+      passwordHash: "x",
+    });
+
+    const limit = 60;
+    for (let index = 0; index < limit; index += 1) {
+      const response = await request(rateLimitedUserId, "POST", "/api/field-checks/observations", {
+        observations: [
+          observation(`rate-limit-observation-${String(index).padStart(2, "0")}`, "failure", "mobile-chrome"),
+        ],
+      });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: 1, duplicate: 0 });
+    }
+
+    const observationsBeforeRejection = await db.select().from(fieldCheckObservationsTable);
+    const issuesBeforeRejection = await db.select().from(fieldCheckIssuesTable);
+    expect(observationsBeforeRejection).toHaveLength(limit);
+    expect(issuesBeforeRejection).toHaveLength(1);
+    expect(issuesBeforeRejection[0]).toMatchObject({
+      checkName: "cross-device-convergence",
+      failureCount: limit,
+    });
+
+    const rejected = await request(rateLimitedUserId, "POST", "/api/field-checks/observations", {
+      observations: [observation("rate-limit-rejected-observation", "failure", "mobile-chrome")],
+    });
+    expect(rejected.status).toBe(429);
+    expect(rejected.headers.get("content-type")).toMatch(/application\/json/u);
+    expect(rejected.headers.get("ratelimit-limit")).toBe(String(limit));
+    expect(Number(rejected.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await rejected.json()).toEqual({
+      error: "Too many requests. Please wait a moment and try again.",
+    });
+
+    expect(await db.select().from(fieldCheckObservationsTable)).toHaveLength(observationsBeforeRejection.length);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBeforeRejection);
   });
 
   it("rejects observations outside the clock window without persisting them", async () => {
