@@ -68,6 +68,29 @@ const qcMocks = vi.hoisted(() => ({
     isFetching: false,
     refetch: vi.fn(),
   },
+  activity: {
+    data: {
+      date: "2026-10-16",
+      sources: {
+        endedRuns: { status: "available", reason: null, count: 0 },
+        activeRuns: { status: "available", reason: null, count: 1 },
+        qcEvents: { status: "available", reason: null, count: 0 },
+      },
+      runs: [{
+        runId: "run-1",
+        label: "A Plain",
+        source: "active-day-state",
+        manualAllergen: { status: "recorded", value: "none" },
+        derivedReviewState: "no-review",
+        allergenReviews: [],
+        cleaningEvents: [],
+      }],
+    },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  },
   mutation: {
     mutateAsync: vi.fn(),
     error: null,
@@ -78,10 +101,12 @@ const qcMocks = vi.hoisted(() => ({
 vi.mock("@workspace/api-client-react", () => ({
   exportQcHistoryCsv: vi.fn(),
   getGetQcHistoryQueryKey: (...args: unknown[]) => ["qc-history", ...args],
+  getGetQcAllergenActivityQueryKey: (...args: unknown[]) => ["qc-allergen-activity", ...args],
   getGetQcRunQueryKey: (...args: unknown[]) => ["qc-run", ...args],
   getGetQcTargetsQueryKey: (...args: unknown[]) => ["qc-targets", ...args],
   useCorrectQcEvent: () => qcMocks.mutation,
   useGetQcHistory: () => qcMocks.history,
+  useGetQcAllergenActivity: () => qcMocks.activity,
   useGetQcRun: (runId: string) => (qcMocks.runs[runId] as typeof qcMocks.run | undefined) ?? qcMocks.run,
   useGetQcTargets: () => qcMocks.targets,
   useRecordQcAllergenReview: () => qcMocks.mutation,
@@ -198,6 +223,18 @@ function renderTab(options: RenderOptions = {}) {
 }
 
 describe("QC workflow UI", () => {
+  it("shows a read-only daily report with separate manual and derived states", () => {
+    renderTab();
+    fireEvent.click(screen.getByTestId("button-toggle-allergen-activity"));
+
+    expect(screen.getByRole("heading", { name: "Daily allergen activity" })).toBeTruthy();
+    expect(screen.getByTestId("text-manual-allergen-run-1").textContent).toContain("none · recorded");
+    expect(screen.getByTestId("text-derived-review-run-1").textContent).toBe("No review recorded");
+    expect(screen.getByText(/does not establish cleaning between runs/)).toBeTruthy();
+    expect(screen.queryByText("No derived-footprint review event was recorded for this run."))
+      .toBeTruthy();
+  });
+
   it("keeps unknown allergen and staging states visible and shows not-evaluated targets", () => {
     renderTab();
 

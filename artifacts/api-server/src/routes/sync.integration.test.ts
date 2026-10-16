@@ -1243,6 +1243,16 @@ describe("factory purge retains QC history", () => {
         scope: "sandbox", operationId: "purge-sandbox-qc", recordId: "purge-sandbox-qc-record",
         eventType: "lot", runId: "purge-run", actorId: SANDBOX, payload: { lotNumber: "Sandbox QC retained" },
       },
+      {
+        scope: "live", operationId: "purge-live-allergen", recordId: "purge-live-allergen-record",
+        eventType: "allergen-review", runId: "purge-run", actorId: MANAGER,
+        payload: { footprintReviewed: true, footprint: { status: "complete", allergens: [], unknownIngredients: [], missingComponents: [] } },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-allergen", recordId: "purge-sandbox-allergen-record",
+        eventType: "allergen-review", runId: "purge-run", actorId: SANDBOX,
+        payload: { footprintReviewed: true, footprint: { status: "incomplete", allergens: [], unknownIngredients: ["Unknown"], missingComponents: [] } },
+      },
     ]);
     await db.insert(inventoryItemsTable).values([
       { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
@@ -1261,8 +1271,10 @@ describe("factory purge retains QC history", () => {
     expect(checks.map((row) => row.summary).sort()).toEqual(["Live retained check", "Sandbox retained check"]);
     expect(checks.map((row) => row.reviewerId).sort()).toEqual([MANAGER, SANDBOX].sort());
     const workflowEvents = await db.select().from(qcWorkflowEventsTable);
-    expect(workflowEvents.map((row) => row.payload.lotNumber).sort())
+    expect(workflowEvents.filter((row) => row.eventType === "lot").map((row) => row.payload.lotNumber).sort())
       .toEqual(["Live QC retained", "Sandbox QC retained"]);
+    expect(workflowEvents.filter((row) => row.eventType === "allergen-review").map((row) => row.scope).sort())
+      .toEqual(["live", "sandbox"]);
     const items = await db.select().from(inventoryItemsTable);
     expect(items.map((row) => row.scope)).toEqual([scope === "live" ? "sandbox" : "live"]);
   });

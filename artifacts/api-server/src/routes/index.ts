@@ -126,7 +126,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/inventory/quality-checks",
   ]),
   ...reads(["record-qc"], "all", "scoped", [
-    "/qc/targets", "/qc/runs/:runId", "/qc/history",
+    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity",
   ]),
   ...reads(["manage-qc"], "all", "scoped", ["/qc/history.csv"]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [

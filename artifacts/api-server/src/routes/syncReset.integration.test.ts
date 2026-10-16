@@ -272,6 +272,16 @@ describe("POST /sync/reset", () => {
         scope: "sandbox", operationId: "reset-retention-sandbox", recordId: "sandbox-qc-record",
         eventType: "lot", runId: "reset-run", actorId: MANAGER, payload: { lotNumber: "SANDBOX-RETAINED" },
       },
+      {
+        scope: "live", operationId: "reset-retention-live-allergen", recordId: "live-allergen-record",
+        eventType: "allergen-review", runId: "reset-run", actorId: MANAGER,
+        payload: { footprintReviewed: true, footprint: { status: "complete", allergens: [], unknownIngredients: [], missingComponents: [] } },
+      },
+      {
+        scope: "sandbox", operationId: "reset-retention-sandbox-allergen", recordId: "sandbox-allergen-record",
+        eventType: "allergen-review", runId: "reset-run", actorId: MANAGER,
+        payload: { footprintReviewed: true, footprint: { status: "incomplete", allergens: [], unknownIngredients: ["Unknown"], missingComponents: [] } },
+      },
     ]);
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
@@ -286,8 +296,10 @@ describe("POST /sync/reset", () => {
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
     expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1, rollover: false });
     const qcEvents = await db.select().from(qcWorkflowEventsTable);
-    expect(qcEvents.map((event) => event.payload.lotNumber).sort())
+    expect(qcEvents.filter((event) => event.eventType === "lot").map((event) => event.payload.lotNumber).sort())
       .toEqual(["LIVE-RETAINED", "SANDBOX-RETAINED"]);
+    expect(qcEvents.filter((event) => event.eventType === "allergen-review").map((event) => event.scope).sort())
+      .toEqual(["live", "sandbox"]);
   });
 
   it("increments the epoch on each reset", async () => {

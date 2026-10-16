@@ -64,6 +64,7 @@ import {
   hasConfiguredQcWeightReminderTarget,
   QC_WEIGHT_CHECK_OVERDUE_GRACE_MS,
 } from "../qcWeightCheckSchedule";
+import QcAllergenActivityReport from "./QcAllergenActivityReport";
 import QualityHistoryTab from "./QualityHistoryTab";
 
 export type QcWorkflowTabProps = {
@@ -266,6 +267,7 @@ export default function QcWorkflowTab({
 }: QcWorkflowTabProps) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewName>("lots");
+  const [showDailyActivity, setShowDailyActivity] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [selectedIngredient, setSelectedIngredient] = useState("");
   const [lotNumber, setLotNumber] = useState("");
@@ -679,9 +681,24 @@ export default function QcWorkflowTab({
               <p className="truncate font-mono text-xs font-semibold" data-testid="text-qc-run-id">{runId || "No run selected"}</p>
             </div>
           </div>
+          {(canRecordQc || canManageQc) && (
+            <button
+              type="button"
+              className={quietButtonClass}
+              aria-pressed={showDailyActivity}
+              onClick={() => setShowDailyActivity((current) => !current)}
+              data-testid="button-toggle-allergen-activity"
+            >
+              {showDailyActivity ? "Back to run QC" : "Daily allergen activity"}
+            </button>
+          )}
         </div>
       </header>
 
+      {showDailyActivity ? (
+        <QcAllergenActivityReport canRead={canRecordQc || canManageQc} />
+      ) : (
+      <>
       {!canRecordQc && !canManageQc ? (
         <div className={`${panelClass} flex items-start gap-3 p-5`}>
           <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -1234,6 +1251,8 @@ export default function QcWorkflowTab({
           </div>
           <QualityHistoryTab />
         </section>
+      )}
+      </>
       )}
     </div>
   );

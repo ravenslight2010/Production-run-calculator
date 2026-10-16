@@ -5,13 +5,22 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import * as z from "zod";
 import {
   brandProfilesTable,
+  completedRunHistoryTable,
+  dailySyncTable,
   db,
   ingredientsTable,
   qcWorkflowEventsTable,
   type QcWorkflowEventRow,
 } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
+import { facilityDate } from "../lib/facilityTime";
 import { requireCapability } from "../middlewares/requireCapability";
+import {
+  projectActivitySnapshot,
+  projectAllergenReview,
+  type ActivityRunSource,
+  type ActivitySnapshotRun,
+} from "./qcAllergenActivity";
 
 const router: IRouter = Router();
 const MAX_NOTE = 1_000;
@@ -20,6 +29,8 @@ const MAX_PROFILE_KEY = 400;
 const MAX_HISTORY_PAGE = 100;
 const MAX_RUN_PAGE = 200;
 const MAX_RUN_WEIGHT_CHECK_EVENTS = 5_000;
+const MAX_ALLERGEN_ACTIVITY_RUNS = 600;
+const MAX_ALLERGEN_ACTIVITY_EVENTS = 5_000;
 const MAX_EXPORT_PAGE = 500;
 const UNIT = z.enum(["oz", "g", "lb", "kg"]);
 const STATION = z.enum(["dough", "sauce", "frontline", "warehouse", "packaging", "other"]);
@@ -42,6 +53,13 @@ const ALLERGEN = z.enum([
 
 const operationIdSchema = z.string().uuid();
 const runIdSchema = z.string().trim().min(1).max(MAX_RUN_ID);
+const activityDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, "Invalid calendar date");
+const allergenActivityQuerySchema = z.object({
+  date: activityDateSchema.optional(),
+}).strict();
 const profileKeySchema = z.string().trim().min(1).max(MAX_PROFILE_KEY);
 const ingredientIdSchema = z.string().trim().min(1).max(200);
 const noteSchema = z.string().trim().max(MAX_NOTE).optional().default("");
@@ -219,6 +237,16 @@ function eventToApi(row: QcWorkflowEventRow) {
     actorId: row.actorId,
     payload: row.payload,
     createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function unavailableRun(runId: string, source: ActivityRunSource = "unavailable"): ActivitySnapshotRun {
+  return {
+    runId,
+    label: "Production run",
+    source,
+    manualAllergen: { status: "unavailable", value: null },
+    ended: source === "completed-snapshot",
   };
 }
 
@@ -851,6 +879,184 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
     });
   } catch (error) {
     reportRouteError(req, res, "failed to load QC run records", error);
+  }
+});
+
+router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, res) => {
+  const parsed = allergenActivityQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    safeError(res, 400, "A valid production date is required");
+    return;
+  }
+  const date = parsed.data.date ?? facilityDate();
+  const today = facilityDate();
+  const scope = currentScope();
+  try {
+    const [completionRows, activeRows] = await Promise.all([
+      db.select().from(completedRunHistoryTable).where(and(
+        eq(completedRunHistoryTable.scope, scope),
+        eq(completedRunHistoryTable.date, date),
+      )).orderBy(completedRunHistoryTable.completedAt).limit(MAX_ALLERGEN_ACTIVITY_RUNS + 1),
+      date === today
+        ? db.select().from(dailySyncTable).where(and(
+          eq(dailySyncTable.scope, scope),
+          eq(dailySyncTable.date, date),
+        )).limit(2)
+        : Promise.resolve([]),
+    ]);
+
+    const completionRunIds = new Set(completionRows.map((row) => row.runId));
+    const endedRuns: ActivitySnapshotRun[] = [];
+    let endedStatus: "available" | "unavailable" = "available";
+    let endedReason: string | null = null;
+    if (completionRows.length > MAX_ALLERGEN_ACTIVITY_RUNS) {
+      endedStatus = "unavailable";
+      endedReason = "run-limit-exceeded";
+    } else if (completionRows.length === 0) {
+      endedStatus = "unavailable";
+      endedReason = "no-completed-run-snapshots";
+    } else if (completionRunIds.size !== completionRows.length) {
+      endedStatus = "unavailable";
+      endedReason = "duplicate-completed-run";
+    } else {
+      const projected = completionRows.map((row) => {
+        const result = projectActivitySnapshot(row.snapshot, date, "completed-snapshot");
+        if (result.status !== "available") return null;
+        const match = result.runs.find((run) => run.runId === row.runId);
+        return match ? { ...match, ended: true } : null;
+      });
+      if (projected.some((run) => run === null)) {
+        endedStatus = "unavailable";
+        endedReason = "invalid-completed-run-snapshot";
+      } else {
+        endedRuns.push(...projected.filter((run): run is ActivitySnapshotRun => run !== null));
+      }
+    }
+    if (endedStatus === "unavailable" && completionRows.length <= MAX_ALLERGEN_ACTIVITY_RUNS) {
+      endedRuns.push(...completionRows.map((row) => unavailableRun(row.runId, "unavailable")));
+    }
+
+    let activeStatus: "available" | "unavailable" | "not-applicable" =
+      date === today ? "unavailable" : "not-applicable";
+    let activeReason: string | null = date === today ? "missing-current-day-snapshot" : null;
+    const activeRuns: ActivitySnapshotRun[] = [];
+    if (date === today) {
+      if (activeRows.length > 1) {
+        activeReason = "ambiguous-current-day-snapshot";
+      } else if (activeRows.length === 1) {
+        const projected = projectActivitySnapshot(activeRows[0]!.data, date, "active-day-state");
+        if (projected.status !== "available") {
+          activeReason = `invalid-current-day-${projected.reason}`;
+        } else {
+          activeStatus = "available";
+          activeReason = null;
+          for (const run of projected.runs) {
+            if (completionRunIds.has(run.runId)) continue;
+            if (run.ended) {
+              activeStatus = "unavailable";
+              activeReason = "ended-run-snapshot-missing";
+              activeRuns.push(unavailableRun(run.runId, "unavailable"));
+            } else {
+              activeRuns.push(run);
+            }
+          }
+        }
+      }
+    }
+
+    const projectedRuns = [...endedRuns, ...activeRuns];
+    const runIds = [...new Set(projectedRuns.map((run) => run.runId))];
+    let eventsStatus: "available" | "unavailable" = "available";
+    let eventsReason: string | null = null;
+    let activityEvents: Awaited<ReturnType<typeof hydrateEvents>> = [];
+    if (runIds.length === 0) {
+      eventsStatus = "unavailable";
+      eventsReason = "run-identities-unavailable";
+    } else {
+      const eventRows = await db.select().from(qcWorkflowEventsTable).where(and(
+        eq(qcWorkflowEventsTable.scope, scope),
+        inArray(qcWorkflowEventsTable.runId, runIds),
+        inArray(qcWorkflowEventsTable.eventType, [
+          "allergen-review", "cleaning", "cleaning-verification",
+        ]),
+      )).orderBy(qcWorkflowEventsTable.id).limit(MAX_ALLERGEN_ACTIVITY_EVENTS + 1);
+      if (eventRows.length > MAX_ALLERGEN_ACTIVITY_EVENTS) {
+        eventsStatus = "unavailable";
+        eventsReason = "event-limit-exceeded";
+      } else {
+        activityEvents = await hydrateEvents(eventRows);
+      }
+    }
+
+    const runs = projectedRuns.map((run) => {
+      const runEvents = activityEvents.filter((event) => event.runId === run.runId);
+      const reviews = eventsStatus === "available"
+        ? runEvents.filter((event) => event.eventType === "allergen-review").map((event) => {
+          const review = projectAllergenReview(event.payload);
+          return {
+            eventId: event.id,
+            recordedAt: event.createdAt,
+            ...review,
+            corrected: event.corrected === true,
+            redactedFields: event.redactedFields ?? [],
+          };
+        })
+        : [];
+      const cleaningEvents = eventsStatus === "available"
+        ? runEvents.filter((event) => event.eventType === "cleaning").map((event) => {
+          const verification = runEvents.find((candidate) =>
+            candidate.eventType === "cleaning-verification"
+            && candidate.relatedEventId === String(event.id),
+          );
+          return {
+            eventId: event.id,
+            recordedAt: event.createdAt,
+            method: typeof event.payload.method === "string" ? event.payload.method : null,
+            startedAt: typeof event.payload.startedAt === "string" ? event.payload.startedAt : null,
+            endedAt: typeof event.payload.endedAt === "string" ? event.payload.endedAt : null,
+            note: typeof event.payload.note === "string" ? event.payload.note : null,
+            verification: {
+              status: verification ? "recorded" as const : "not-recorded" as const,
+              recordedAt: verification?.createdAt ?? null,
+              note: typeof verification?.payload.note === "string" ? verification.payload.note : null,
+            },
+            corrected: event.corrected === true,
+            redactedFields: event.redactedFields ?? [],
+          };
+        })
+        : [];
+      const latestReview = reviews[reviews.length - 1];
+      return {
+        runId: run.runId,
+        label: run.label,
+        source: run.source,
+        manualAllergen: run.manualAllergen,
+        derivedReviewState: eventsStatus === "unavailable"
+          ? "unavailable"
+          : latestReview?.state ?? "no-review",
+        allergenReviews: reviews,
+        cleaningEvents,
+      };
+    });
+    res.json({
+      date,
+      sources: {
+        endedRuns: { status: endedStatus, reason: endedReason, count: endedStatus === "available" ? endedRuns.length : null },
+        activeRuns: {
+          status: activeStatus,
+          reason: activeReason,
+          count: activeStatus === "available" ? activeRuns.length : null,
+        },
+        qcEvents: {
+          status: eventsStatus,
+          reason: eventsReason,
+          count: eventsStatus === "available" ? activityEvents.length : null,
+        },
+      },
+      runs,
+    });
+  } catch (error) {
+    reportRouteError(req, res, "failed to load daily allergen activity", error);
   }
 });
 

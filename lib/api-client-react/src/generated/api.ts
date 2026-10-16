@@ -102,6 +102,7 @@ import type {
   GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
+  GetQcAllergenActivityParams,
   GetQcHistoryParams,
   GetQcTargetsParams,
   GetShiftHandoffDigestParams,
@@ -192,6 +193,7 @@ import type {
   ProfileDataHealthApplyResult,
   PutSyncToday200,
   PutSyncTodayParams,
+  QcAllergenActivityResponse,
   QcAllergenReviewInput,
   QcCleaningInput,
   QcCorrectionInput,
@@ -4584,6 +4586,115 @@ export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetQcRunQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetQcAllergenActivityUrl = (params?: GetQcAllergenActivityParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/allergen-activity?${stringifiedParams}` : `/api/qc/allergen-activity`
+}
+
+/**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance.
+ * @summary Read recorded allergen activity for one facility production day
+ */
+export const getQcAllergenActivity = async (params?: GetQcAllergenActivityParams, options?: Parameters<typeof customFetch>[1]): Promise<QcAllergenActivityResponse> => {
+
+  return customFetch<QcAllergenActivityResponse>(getGetQcAllergenActivityUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcAllergenActivityQueryKey = (params?: GetQcAllergenActivityParams,) => {
+    return [
+    `/api/qc/allergen-activity`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcAllergenActivityQueryOptions = <TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcAllergenActivityQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcAllergenActivity>>> = ({ signal }) => getQcAllergenActivity(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcAllergenActivityQueryResult = NonNullable<Awaited<ReturnType<typeof getQcAllergenActivity>>>
+export type GetQcAllergenActivityQueryError = ErrorType<void>
+
+
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params: undefined |  GetQcAllergenActivityParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcAllergenActivity>>,
+          TError,
+          Awaited<ReturnType<typeof getQcAllergenActivity>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcAllergenActivity>>,
+          TError,
+          Awaited<ReturnType<typeof getQcAllergenActivity>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read recorded allergen activity for one facility production day
+ */
+
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcAllergenActivityQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

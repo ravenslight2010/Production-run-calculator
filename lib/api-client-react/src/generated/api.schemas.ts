@@ -3269,6 +3269,136 @@ export interface QcHistoryResponse {
   nextCursor: number | null;
 }
 
+export type QcActivitySourceStatusStatus = typeof QcActivitySourceStatusStatus[keyof typeof QcActivitySourceStatusStatus];
+
+
+export const QcActivitySourceStatusStatus = {
+  available: 'available',
+  unavailable: 'unavailable',
+  'not-applicable': 'not-applicable',
+} as const;
+
+export interface QcActivitySourceStatus {
+  status: QcActivitySourceStatusStatus;
+  /** @nullable */
+  reason: string | null;
+  /** @nullable */
+  count: number | null;
+}
+
+export type QcAllergenActivityResponseSources = {
+  endedRuns: QcActivitySourceStatus;
+  activeRuns: QcActivitySourceStatus;
+  qcEvents: QcActivitySourceStatus;
+};
+
+export type QcAllergenActivityResponseRunsItemSource = typeof QcAllergenActivityResponseRunsItemSource[keyof typeof QcAllergenActivityResponseRunsItemSource];
+
+
+export const QcAllergenActivityResponseRunsItemSource = {
+  'completed-snapshot': 'completed-snapshot',
+  'active-day-state': 'active-day-state',
+  unavailable: 'unavailable',
+} as const;
+
+export type QcAllergenActivityResponseRunsItemManualAllergenStatus = typeof QcAllergenActivityResponseRunsItemManualAllergenStatus[keyof typeof QcAllergenActivityResponseRunsItemManualAllergenStatus];
+
+
+export const QcAllergenActivityResponseRunsItemManualAllergenStatus = {
+  recorded: 'recorded',
+  unavailable: 'unavailable',
+} as const;
+
+export type QcAllergenActivityResponseRunsItemManualAllergen = {
+  status: QcAllergenActivityResponseRunsItemManualAllergenStatus;
+  /** @nullable */
+  value: string | null;
+};
+
+export type QcAllergenActivityResponseRunsItemDerivedReviewState = typeof QcAllergenActivityResponseRunsItemDerivedReviewState[keyof typeof QcAllergenActivityResponseRunsItemDerivedReviewState];
+
+
+export const QcAllergenActivityResponseRunsItemDerivedReviewState = {
+  'no-review': 'no-review',
+  'reviewed-empty': 'reviewed-empty',
+  reviewed: 'reviewed',
+  unknown: 'unknown',
+  unavailable: 'unavailable',
+} as const;
+
+export type QcAllergenActivityResponseRunsItemAllergenReviewsItemState = typeof QcAllergenActivityResponseRunsItemAllergenReviewsItemState[keyof typeof QcAllergenActivityResponseRunsItemAllergenReviewsItemState];
+
+
+export const QcAllergenActivityResponseRunsItemAllergenReviewsItemState = {
+  'reviewed-empty': 'reviewed-empty',
+  reviewed: 'reviewed',
+  unknown: 'unknown',
+} as const;
+
+export type QcAllergenActivityResponseRunsItemAllergenReviewsItem = {
+  eventId: number;
+  recordedAt: string;
+  state: QcAllergenActivityResponseRunsItemAllergenReviewsItemState;
+  /** @nullable */
+  allergens: string[] | null;
+  /** @nullable */
+  unknownIngredients: string[] | null;
+  /** @nullable */
+  missingComponents: string[] | null;
+  /** @nullable */
+  note: string | null;
+  corrected: boolean;
+  redactedFields: string[];
+};
+
+export type QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus = typeof QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus[keyof typeof QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus];
+
+
+export const QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus = {
+  recorded: 'recorded',
+  'not-recorded': 'not-recorded',
+} as const;
+
+export type QcAllergenActivityResponseRunsItemCleaningEventsItemVerification = {
+  status: QcAllergenActivityResponseRunsItemCleaningEventsItemVerificationStatus;
+  /** @nullable */
+  recordedAt: string | null;
+  /** @nullable */
+  note: string | null;
+};
+
+export type QcAllergenActivityResponseRunsItemCleaningEventsItem = {
+  eventId: number;
+  recordedAt: string;
+  /** @nullable */
+  method: string | null;
+  /** @nullable */
+  startedAt: string | null;
+  /** @nullable */
+  endedAt: string | null;
+  /** @nullable */
+  note: string | null;
+  verification: QcAllergenActivityResponseRunsItemCleaningEventsItemVerification;
+  corrected: boolean;
+  redactedFields: string[];
+};
+
+export type QcAllergenActivityResponseRunsItem = {
+  runId: string;
+  label: string;
+  source: QcAllergenActivityResponseRunsItemSource;
+  manualAllergen: QcAllergenActivityResponseRunsItemManualAllergen;
+  derivedReviewState: QcAllergenActivityResponseRunsItemDerivedReviewState;
+  allergenReviews: QcAllergenActivityResponseRunsItemAllergenReviewsItem[];
+  cleaningEvents: QcAllergenActivityResponseRunsItemCleaningEventsItem[];
+};
+
+export interface QcAllergenActivityResponse {
+  date: string;
+  sources: QcAllergenActivityResponseSources;
+  runs: QcAllergenActivityResponseRunsItem[];
+}
+
 export type QcCorrectionInputReplacement = { [key: string]: unknown };
 
 export interface QcCorrectionInput {
@@ -7680,6 +7810,13 @@ export type GetQcTargetsParams = {
  * @maxLength 400
  */
 profileKey: string;
+};
+
+export type GetQcAllergenActivityParams = {
+/**
+ * Facility production date in YYYY-MM-DD form; defaults to the current facility date.
+ */
+date?: string;
 };
 
 export type GetQcHistoryParams = {

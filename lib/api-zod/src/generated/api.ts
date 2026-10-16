@@ -1962,6 +1962,72 @@ export const GetQcRunResponse = zod.object({
 
 
 /**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance.
+ * @summary Read recorded allergen activity for one facility production day
+ */
+export const GetQcAllergenActivityQueryParams = zod.object({
+  "date": zod.date().optional().describe('Facility production date in YYYY-MM-DD form; defaults to the current facility date.')
+})
+
+export const GetQcAllergenActivityResponse = zod.object({
+  "date": zod.coerce.date(),
+  "sources": zod.object({
+  "endedRuns": zod.object({
+  "status": zod.enum(['available', 'unavailable', 'not-applicable']),
+  "reason": zod.string().nullable(),
+  "count": zod.int().nullable()
+}),
+  "activeRuns": zod.object({
+  "status": zod.enum(['available', 'unavailable', 'not-applicable']),
+  "reason": zod.string().nullable(),
+  "count": zod.int().nullable()
+}),
+  "qcEvents": zod.object({
+  "status": zod.enum(['available', 'unavailable', 'not-applicable']),
+  "reason": zod.string().nullable(),
+  "count": zod.int().nullable()
+})
+}),
+  "runs": zod.array(zod.object({
+  "runId": zod.string(),
+  "label": zod.string(),
+  "source": zod.enum(['completed-snapshot', 'active-day-state', 'unavailable']),
+  "manualAllergen": zod.object({
+  "status": zod.enum(['recorded', 'unavailable']),
+  "value": zod.string().nullable()
+}),
+  "derivedReviewState": zod.enum(['no-review', 'reviewed-empty', 'reviewed', 'unknown', 'unavailable']),
+  "allergenReviews": zod.array(zod.object({
+  "eventId": zod.int(),
+  "recordedAt": zod.coerce.date(),
+  "state": zod.enum(['reviewed-empty', 'reviewed', 'unknown']),
+  "allergens": zod.array(zod.string()).nullable(),
+  "unknownIngredients": zod.array(zod.string()).nullable(),
+  "missingComponents": zod.array(zod.string()).nullable(),
+  "note": zod.string().nullable(),
+  "corrected": zod.boolean(),
+  "redactedFields": zod.array(zod.string())
+})),
+  "cleaningEvents": zod.array(zod.object({
+  "eventId": zod.int(),
+  "recordedAt": zod.coerce.date(),
+  "method": zod.string().nullable(),
+  "startedAt": zod.string().nullable(),
+  "endedAt": zod.string().nullable(),
+  "note": zod.string().nullable(),
+  "verification": zod.object({
+  "status": zod.enum(['recorded', 'not-recorded']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "note": zod.string().nullable()
+}),
+  "corrected": zod.boolean(),
+  "redactedFields": zod.array(zod.string())
+}))
+}))
+})
+
+
+/**
  * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
  * @summary Record the non-blocking pre-run allergen and staged-ingredient review
  */

@@ -29,6 +29,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import pg from "pg";
 import { signLegacyTokenForTests, verifyPassword } from "../lib/auth";
 import type { Capability } from "../lib/roles";
+import { facilityDate } from "../lib/facilityTime";
 
 // The complete capability set, mirrored locally so the test never statically
 // imports lib/roles (which would bind @workspace/db's pool before beforeAll can
@@ -92,6 +93,8 @@ let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let ingredientsTable: DbModule["ingredientsTable"];
 let brandProfilesTable: DbModule["brandProfilesTable"];
 let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
+let dailySyncTable: DbModule["dailySyncTable"];
+let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let ingredientBatchWeightsTable: DbModule["ingredientBatchWeightsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
@@ -174,6 +177,8 @@ beforeAll(async () => {
   ingredientsTable = dbMod.ingredientsTable;
   brandProfilesTable = dbMod.brandProfilesTable;
   qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
+  dailySyncTable = dbMod.dailySyncTable;
+  completedRunHistoryTable = dbMod.completedRunHistoryTable;
   ingredientBatchWeightsTable = dbMod.ingredientBatchWeightsTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
@@ -225,7 +230,7 @@ async function resetRoleFixture(): Promise<void> {
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientBatchWeightsTable}, ${qcWorkflowEventsTable}, ${brandProfilesTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientBatchWeightsTable}, ${qcWorkflowEventsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${brandProfilesTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog (manager/operator builtins + editable starters) so the
   // capability middleware can resolve each user's role to a capability set. Plus
@@ -3034,6 +3039,239 @@ async function seedQcWorkflowFixtures(): Promise<void> {
 }
 
 describe("QC workflows", () => {
+  it("serves one scoped production day from canonical snapshots and applies audited event overlays", async () => {
+    const date = "2030-03-10";
+    const runId = "qc-activity-ended-run";
+    const completedSnapshot = (brand: string, allergen: string) => ({
+      dayState: {
+        date,
+        runs: [{ id: runId, brand, flavor: "Cheese", finished: true }],
+      },
+      runValues: { [runId]: { allergen } },
+    });
+    await db.insert(completedRunHistoryTable).values([
+      {
+        id: "qc-activity-live-completed",
+        scope: "live",
+        operationId: randomUUID(),
+        runId,
+        date,
+        completedAt: new Date(`${date}T18:00:00.000Z`),
+        snapshot: completedSnapshot("Live Brand", "milk"),
+        snapshotHash: "live-snapshot-hash",
+        actorId: QC_OPERATOR,
+      },
+      {
+        id: "qc-activity-sandbox-completed",
+        scope: "sandbox",
+        operationId: randomUUID(),
+        runId,
+        date,
+        completedAt: new Date(`${date}T18:00:00.000Z`),
+        snapshot: completedSnapshot("Sandbox Brand", "egg"),
+        snapshotHash: "sandbox-snapshot-hash",
+        actorId: SANDBOX,
+      },
+      {
+        id: "qc-activity-adjacent-completed",
+        scope: "live",
+        operationId: randomUUID(),
+        runId: "qc-activity-adjacent-run",
+        date: "2030-03-11",
+        completedAt: new Date("2030-03-11T18:00:00.000Z"),
+        snapshot: {
+          dayState: { date: "2030-03-11", runs: [{ id: "qc-activity-adjacent-run" }] },
+          runValues: { "qc-activity-adjacent-run": { allergen: "soy" } },
+        },
+        snapshotHash: "adjacent-snapshot-hash",
+        actorId: QC_OPERATOR,
+      },
+    ]);
+    const [review] = await db.insert(qcWorkflowEventsTable).values({
+      scope: "live",
+      operationId: randomUUID(),
+      recordId: randomUUID(),
+      eventType: "allergen-review",
+      runId,
+      actorId: QC_OPERATOR,
+      payload: {
+        footprintReviewed: true,
+        footprint: { status: "complete", allergens: [], unknownIngredients: [], missingComponents: [] },
+        note: "Original note",
+      },
+    }).returning({ id: qcWorkflowEventsTable.id });
+    await db.insert(qcWorkflowEventsTable).values([
+      {
+        scope: "live",
+        operationId: randomUUID(),
+        recordId: randomUUID(),
+        eventType: "correction",
+        runId,
+        relatedEventId: String(review!.id),
+        actorId: QC_MANAGER,
+        payload: {
+          reason: "Correct the recorded footprint",
+          replacement: {
+            footprint: { status: "complete", allergens: ["milk"], unknownIngredients: [], missingComponents: [] },
+            note: "Corrected note",
+          },
+        },
+      },
+      {
+        scope: "live",
+        operationId: randomUUID(),
+        recordId: randomUUID(),
+        eventType: "redaction",
+        runId,
+        relatedEventId: String(review!.id),
+        actorId: QC_MANAGER,
+        payload: { reason: "Privacy request", fields: ["payload.note"] },
+      },
+      {
+        scope: "sandbox",
+        operationId: randomUUID(),
+        recordId: randomUUID(),
+        eventType: "allergen-review",
+        runId,
+        actorId: SANDBOX,
+        payload: {
+          footprintReviewed: true,
+          footprint: { status: "complete", allergens: ["egg"], unknownIngredients: [], missingComponents: [] },
+          note: "Sandbox event",
+        },
+      },
+    ]);
+    const [cleaning] = await db.insert(qcWorkflowEventsTable).values({
+      scope: "live",
+      operationId: randomUUID(),
+      recordId: randomUUID(),
+      eventType: "cleaning",
+      runId,
+      actorId: QC_OPERATOR,
+      payload: {
+        method: "standard",
+        startedAt: "2030-03-10T17:00:00.000Z",
+        endedAt: "2030-03-10T17:30:00.000Z",
+        note: "Original cleaning note",
+      },
+    }).returning({ id: qcWorkflowEventsTable.id });
+    await db.insert(qcWorkflowEventsTable).values([
+      {
+        scope: "live",
+        operationId: randomUUID(),
+        recordId: randomUUID(),
+        eventType: "correction",
+        runId,
+        relatedEventId: String(cleaning!.id),
+        actorId: QC_MANAGER,
+        payload: { reason: "Correct method", replacement: { method: "deep" } },
+      },
+      {
+        scope: "live",
+        operationId: randomUUID(),
+        recordId: randomUUID(),
+        eventType: "redaction",
+        runId,
+        relatedEventId: String(cleaning!.id),
+        actorId: QC_MANAGER,
+        payload: { reason: "Privacy request", fields: ["payload.note"] },
+      },
+      {
+        scope: "live",
+        operationId: randomUUID(),
+        recordId: cleaning!.id.toString(),
+        eventType: "cleaning-verification",
+        runId,
+        relatedEventId: String(cleaning!.id),
+        actorId: QC_MANAGER,
+        payload: { note: "Independently checked" },
+      },
+    ]);
+    const eventCountBeforeReads = (await db.select({ id: qcWorkflowEventsTable.id }).from(qcWorkflowEventsTable)).length;
+
+    expect((await req(null, "GET", `/api/qc/allergen-activity?date=${date}`)).status).toBe(401);
+    expect((await req(OPERATOR, "GET", `/api/qc/allergen-activity?date=${date}`)).status).toBe(403);
+    expect((await req(QC_OPERATOR, "GET", "/api/qc/allergen-activity?date=2030-02-30")).status).toBe(400);
+
+    const liveResponse = await req(QC_OPERATOR, "GET", `/api/qc/allergen-activity?date=${date}`);
+    expect(liveResponse.status).toBe(200);
+    const liveReport = await liveResponse.json() as {
+      sources: { endedRuns: { status: string }; activeRuns: { status: string }; qcEvents: { count: number } };
+      runs: Array<{
+        runId: string; label: string; source: string;
+        manualAllergen: { status: string; value: string | null };
+        derivedReviewState: string;
+        allergenReviews: Array<{ state: string; allergens: string[] | null; note: string | null; corrected: boolean; redactedFields: string[] }>;
+        cleaningEvents: Array<{ method: string | null; note: string | null; verification: { status: string } }>;
+      }>;
+    };
+    expect(liveReport.sources).toMatchObject({
+      endedRuns: { status: "available" },
+      activeRuns: { status: "not-applicable" },
+      qcEvents: { count: 3 },
+    });
+    expect(liveReport.runs).toHaveLength(1);
+    expect(liveReport.runs[0]).toMatchObject({
+      runId,
+      label: "Live Brand Cheese",
+      source: "completed-snapshot",
+      manualAllergen: { status: "recorded", value: "milk" },
+      derivedReviewState: "reviewed",
+      allergenReviews: [{
+        state: "reviewed",
+        allergens: ["milk"],
+        note: "[redacted]",
+        corrected: true,
+        redactedFields: ["payload.note"],
+      }],
+      cleaningEvents: [{
+        method: "deep",
+        note: "[redacted]",
+        verification: { status: "recorded" },
+      }],
+    });
+    expect(JSON.stringify(liveReport)).not.toContain("Sandbox event");
+    expect(JSON.stringify(liveReport)).not.toContain(QC_OPERATOR);
+
+    await db.update(userRolesTable).set({ role: "qc-operator" })
+      .where(eq(userRolesTable.userId, SANDBOX));
+    const sandboxResponse = await req(SANDBOX, "GET", `/api/qc/allergen-activity?date=${date}`);
+    expect((await sandboxResponse.json() as { runs: Array<{ label: string; allergenReviews: Array<{ allergens: string[] }> }> }).runs)
+      .toEqual([expect.objectContaining({
+        label: "Sandbox Brand Cheese",
+        allergenReviews: [expect.objectContaining({ allergens: ["egg"] })],
+      })]);
+
+    const today = facilityDate();
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: today,
+      data: {
+        dayState: { date: today, runs: [{ id: "qc-activity-active-run", brand: "Current", flavor: "Day" }] },
+        runValues: { "qc-activity-active-run": { allergen: "none" } },
+      },
+    });
+    const activeResponse = await req(QC_OPERATOR, "GET", `/api/qc/allergen-activity?date=${today}`);
+    const activeReport = await activeResponse.json() as {
+      sources: { activeRuns: { status: string }; endedRuns: { status: string } };
+      runs: Array<{ runId: string; source: string; manualAllergen: { value: string | null } }>;
+    };
+    expect(activeReport.sources.activeRuns.status).toBe("available");
+    expect(activeReport.runs).toContainEqual(expect.objectContaining({
+      runId: "qc-activity-active-run",
+      source: "active-day-state",
+      manualAllergen: { status: "recorded", value: "none" },
+    }));
+
+    const missing = await req(QC_OPERATOR, "GET", "/api/qc/allergen-activity?date=2030-03-12");
+    expect(await missing.json()).toMatchObject({
+      sources: { endedRuns: { status: "unavailable" } },
+      runs: [],
+    });
+    expect((await db.select({ id: qcWorkflowEventsTable.id }).from(qcWorkflowEventsTable)).length)
+      .toBe(eventCountBeforeReads);
+  });
+
   it("authorizes QC recording, appends multiple lots, and scopes reads and exports", async () => {
     await seedQcWorkflowFixtures();
     const lot = {

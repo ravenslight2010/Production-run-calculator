@@ -1152,6 +1152,34 @@ paths:
         "400": { description: Invalid run ID or page size }
         "403": { description: QC recording capability required }
 
+  /qc/allergen-activity:
+    get:
+      operationId: getQcAllergenActivity
+      tags: [inventory]
+      summary: Read recorded allergen activity for one facility production day
+      description: >-
+        Read-only and non-blocking. Ended runs use immutable completion
+        snapshots; active runs use the facility-local current-day snapshot.
+        Manual run-allergen values remain separate from stored derived-footprint
+        reviews. Missing source data is reported as unavailable, not inferred.
+        Cleaning and verification appear only as recorded events; this response
+        does not determine clearance, violations, near misses, label claims, or
+        compliance.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Facility production date in YYYY-MM-DD form; defaults to the current facility date.
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Facility-scoped recorded allergen activity and source availability
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcAllergenActivityResponse" }
+        "400": { description: Invalid date }
+        "403": { description: QC recording capability required }
+
   /qc/allergen-reviews:
     post:
       operationId: recordQcAllergenReview
@@ -8126,6 +8154,80 @@ components:
           items: { $ref: "#/components/schemas/QcEvent" }
         hasMore: { type: boolean }
         nextCursor: { type: integer, nullable: true }
+
+    QcAllergenActivityResponse:
+      type: object
+      required: [date, sources, runs]
+      properties:
+        date: { type: string, format: date }
+        sources:
+          type: object
+          required: [endedRuns, activeRuns, qcEvents]
+          properties:
+            endedRuns: { $ref: "#/components/schemas/QcActivitySourceStatus" }
+            activeRuns: { $ref: "#/components/schemas/QcActivitySourceStatus" }
+            qcEvents: { $ref: "#/components/schemas/QcActivitySourceStatus" }
+        runs:
+          type: array
+          items:
+            type: object
+            required: [runId, label, source, manualAllergen, derivedReviewState, allergenReviews, cleaningEvents]
+            properties:
+              runId: { type: string }
+              label: { type: string }
+              source: { type: string, enum: [completed-snapshot, active-day-state, unavailable] }
+              manualAllergen:
+                type: object
+                required: [status, value]
+                properties:
+                  status: { type: string, enum: [recorded, unavailable] }
+                  value: { type: string, nullable: true }
+              derivedReviewState:
+                type: string
+                enum: [no-review, reviewed-empty, reviewed, unknown, unavailable]
+              allergenReviews:
+                type: array
+                items:
+                  type: object
+                  required: [eventId, recordedAt, state, allergens, unknownIngredients, missingComponents, note, corrected, redactedFields]
+                  properties:
+                    eventId: { type: integer }
+                    recordedAt: { type: string, format: date-time }
+                    state: { type: string, enum: [reviewed-empty, reviewed, unknown] }
+                    allergens: { type: array, nullable: true, items: { type: string } }
+                    unknownIngredients: { type: array, nullable: true, items: { type: string } }
+                    missingComponents: { type: array, nullable: true, items: { type: string } }
+                    note: { type: string, nullable: true }
+                    corrected: { type: boolean }
+                    redactedFields: { type: array, items: { type: string } }
+              cleaningEvents:
+                type: array
+                items:
+                  type: object
+                  required: [eventId, recordedAt, method, startedAt, endedAt, note, verification, corrected, redactedFields]
+                  properties:
+                    eventId: { type: integer }
+                    recordedAt: { type: string, format: date-time }
+                    method: { type: string, nullable: true }
+                    startedAt: { type: string, nullable: true }
+                    endedAt: { type: string, nullable: true }
+                    note: { type: string, nullable: true }
+                    verification:
+                      type: object
+                      required: [status, recordedAt, note]
+                      properties:
+                        status: { type: string, enum: [recorded, not-recorded] }
+                        recordedAt: { type: string, format: date-time, nullable: true }
+                        note: { type: string, nullable: true }
+                    corrected: { type: boolean }
+                    redactedFields: { type: array, items: { type: string } }
+    QcActivitySourceStatus:
+      type: object
+      required: [status, reason, count]
+      properties:
+        status: { type: string, enum: [available, unavailable, not-applicable] }
+        reason: { type: string, nullable: true }
+        count: { type: integer, nullable: true }
 
     QcCorrectionInput:
       type: object
