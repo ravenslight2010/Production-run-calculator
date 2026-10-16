@@ -266,6 +266,7 @@ async function startVersionedServer(
     sessionRecovery?: boolean;
     sessionRecoveryIntentOutbox?: boolean;
     safeSessionSnapshot?: boolean;
+    preHomeSafetyTimeout?: boolean;
     fieldCheckObservations?: boolean;
   } = {},
 ) {
@@ -289,6 +290,7 @@ async function startVersionedServer(
     heldMeProbes: 0,
     closedHeldMeProbes: 0,
     syncReads: 0,
+    preHomeSafetyTimeouts: 0,
     syncWrites: 0,
     rejected: 0,
     acceptedWrites: 0,
@@ -626,6 +628,13 @@ async function startVersionedServer(
         const method = request.method ?? "GET";
         if (method === "GET") {
           sessionRecoveryRequests.syncReads += 1;
+          if (options.preHomeSafetyTimeout && sessionRecoveryRequests.preHomeSafetyTimeouts === 0) {
+            sessionRecoveryRequests.preHomeSafetyTimeouts += 1;
+            await new Promise<void>((resolve) => {
+              response.once("close", () => resolve());
+            });
+            return;
+          }
           const url = new URL(request.url ?? "/", "http://pwa-smoke.test");
           const requestedDate = url.searchParams.get("today");
           const date = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
@@ -2913,6 +2922,98 @@ test.describe("PWA update handoff", () => {
       expect(server.fixtureErrors()).toEqual([]);
     } finally {
       await server.close();
+    }
+  });
+
+  test("opens Home after a pre-Home safety timeout without automatically recovering a stale chunk", async ({
+    page,
+  }) => {
+    const homeServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true, preHomeSafetyTimeout: true },
+    );
+    const staleChunkServer = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      {
+        sessionRecovery: true,
+        preHomeSafetyTimeout: true,
+        fieldCheckObservations: true,
+      },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: homeServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.goto(homeServer.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      expect(homeServer.sessionRecoveryRequests().preHomeSafetyTimeouts).toBe(1);
+
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: staleChunkServer.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const captureKey = "__pwa_recovery_marker_capture";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.sessionStorage && key === markerKey) {
+            const captured = JSON.parse(localStorage.getItem(captureKey) ?? "[]") as string[];
+            captured.push(value);
+            localStorage.setItem(captureKey, JSON.stringify(captured));
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        staleChunkServer,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => staleChunkServer.sessionRecoveryRequests().preHomeSafetyTimeouts)
+        .toBe(1);
+      await expect.poll(() => staleChunkServer.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+      await expect(page.getByText(
+        /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+      )).toBeVisible();
+
+      // The shortened production idle timer has elapsed, but unavailable
+      // current-day safety data must not authorize an automatic reload.
+      await page.waitForTimeout(1_500);
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+      expect(await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+      expect(await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_marker_capture") ?? "[]") as string[],
+      )).toEqual([]);
+
+      const observations = staleChunkServer.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      expect(observations.filter((item) =>
+        item.checkName === "stale-deployment-recovery" && item.outcome === "success",
+      )).toHaveLength(0);
+      expect(staleChunkServer.staleAssetRequestCount()).toBe(1);
+      expect(staleChunkServer.fixtureErrors()).toEqual([]);
+    } finally {
+      if (!page.isClosed()) await page.context().setOffline(false);
+      await homeServer.close();
+      await staleChunkServer.close();
     }
   });
 
