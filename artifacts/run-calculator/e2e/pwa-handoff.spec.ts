@@ -304,7 +304,9 @@ async function startVersionedServer(
     method: string;
     origin: string | null;
     status: number;
+    userId: string;
   }> = [];
+  const factoryData = new Map<string, { value: unknown; updatedAt: string }>();
   let releaseIntentAuthResponse: (() => void) | undefined;
   const intentAuthResponseGate = new Promise<void>((resolve) => {
     releaseIntentAuthResponse = resolve;
@@ -325,10 +327,18 @@ async function startVersionedServer(
     sandboxStale: false,
     disabled: false,
   };
+  const managerSessionUser = {
+    ...sessionUser,
+    userId: "pwa-session-manager",
+    role: "manager",
+    capabilities: ["manage-factory-settings"],
+    name: "PWA Session Manager",
+  };
   let activeSessionUserId = sessionUser.userId;
   const sessionUsers = new Map([
     [sessionUser.userId, sessionUser],
     ["pwa-session-user-b", { ...sessionUser, userId: "pwa-session-user-b", name: "PWA Session B" }],
+    [managerSessionUser.userId, managerSessionUser],
   ]);
   const oldIndex = await readFile(path.join(versionDirs.old, "index.html"), "utf8");
   const entryScript = oldIndex.match(/<script[^>]+src="\/?([^"]+\.js)"/)?.[1];
@@ -393,29 +403,63 @@ async function startVersionedServer(
         return;
       }
       if (options.sessionRecovery && requestPath === "api/factory-data") {
+        const canManageFactorySettings =
+          sessionUsers.get(activeSessionUserId)?.capabilities.includes("manage-factory-settings")
+          ?? false;
+        if (!canManageFactorySettings) {
+          factoryDataRequests.push({
+            method: request.method ?? "GET",
+            origin: request.headers.origin ?? null,
+            status: 403,
+            userId: activeSessionUserId,
+          });
+          response
+            .writeHead(403, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ error: "Forbidden" }));
+          return;
+        }
         if (request.method === "GET") {
           factoryDataRequests.push({
             method: "GET",
             origin: request.headers.origin ?? null,
             status: 200,
+            userId: activeSessionUserId,
           });
           response
             .writeHead(200, { "content-type": "application/json; charset=utf-8" })
-            .end(JSON.stringify({ data: {} }));
+            .end(JSON.stringify({ data: Object.fromEntries(factoryData) }));
           return;
         }
         if (request.method === "PUT") {
-          // The fixture operator has no manage-factory-settings capability.
-          // Match the real endpoint instead of falling through to the generic
-          // API 404; this does not relax the application authorization rule.
+          let rawBody = "";
+          for await (const chunk of request) rawBody += chunk;
+          const payload = JSON.parse(rawBody || "{}") as {
+            key?: unknown;
+            value?: unknown;
+          };
+          if (typeof payload.key !== "string" || payload.key.trim().length === 0) {
+            response
+              .writeHead(400, { "content-type": "application/json; charset=utf-8" })
+              .end(JSON.stringify({ error: "key must be a non-empty string" }));
+            return;
+          }
+          if (payload.value === undefined) {
+            response
+              .writeHead(400, { "content-type": "application/json; charset=utf-8" })
+              .end(JSON.stringify({ error: "value is required" }));
+            return;
+          }
+          const updatedAt = new Date().toISOString();
+          factoryData.set(payload.key.trim(), { value: payload.value, updatedAt });
           factoryDataRequests.push({
             method: "PUT",
             origin: request.headers.origin ?? null,
-            status: 403,
+            status: 200,
+            userId: activeSessionUserId,
           });
           response
-            .writeHead(403, { "content-type": "application/json; charset=utf-8" })
-            .end(JSON.stringify({ error: "Forbidden" }));
+            .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+            .end(JSON.stringify({ updatedAt, value: payload.value }));
           return;
         }
       }
@@ -621,6 +665,7 @@ async function startVersionedServer(
             method: request.method ?? "GET",
             origin: request.headers.origin ?? null,
             status: 404,
+            userId: activeSessionUserId,
           });
         }
         response
@@ -1846,6 +1891,113 @@ test.describe("PWA update handoff", () => {
     }
   });
 
+  test("matches factory-data access to the active session capability", async ({ page }) => {
+    const pageErrors: string[] = [];
+    const expectedExternalFontErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (error.message.includes("fonts.googleapis.com/css2")) {
+        expectedExternalFontErrors.push(error.message);
+      } else {
+        pageErrors.push(error.message);
+      }
+    });
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      undefined,
+      { sessionRecovery: true, sessionRecoveryIntentOutbox: true },
+    );
+
+    try {
+      await page.route("https://fonts.googleapis.com/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/css", body: "" }),
+      );
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("heading", { name: "Production Run Calculator" }))
+        .toBeVisible();
+
+      const operatorResults = await page.evaluate(async () => {
+        const read = await fetch("/api/factory-data");
+        const write = await fetch("/api/factory-data", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key: "operator-test", value: "denied" }),
+        });
+        return { readStatus: read.status, writeStatus: write.status };
+      });
+      expect(operatorResults).toEqual({ readStatus: 403, writeStatus: 403 });
+      expect(server.factoryDataRequests()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          method: "GET",
+          status: 403,
+          userId: "pwa-session-user",
+        }),
+        expect.objectContaining({
+          method: "PUT",
+          status: 403,
+          userId: "pwa-session-user",
+        }),
+      ]));
+
+      // Expire the operator session to use the fixture's real sign-in path for
+      // the manager identity rather than granting the operator extra access.
+      server.setSessionValid(false);
+      server.dropSessionEventStreams();
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toBeVisible();
+      await page.getByLabel("Username").fill("pwa-session-manager");
+      await page.locator("#password").fill("disposable-fixture");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page.getByTestId("auth-screen")).toHaveCount(0);
+      await expect.poll(() => server.factoryDataRequests().some((request) =>
+        request.method === "GET"
+        && request.status === 200
+        && request.userId === "pwa-session-manager",
+      )).toBe(true);
+
+      const managerResults = await page.evaluate(async () => {
+        const write = await fetch("/api/factory-data", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key: "manager-test", value: "allowed" }),
+        });
+        const written = await write.json();
+        const read = await fetch("/api/factory-data");
+        return {
+          writeStatus: write.status,
+          readStatus: read.status,
+          written,
+          data: await read.json(),
+        };
+      });
+      expect(managerResults).toMatchObject({
+        writeStatus: 200,
+        readStatus: 200,
+        written: { value: "allowed" },
+        data: { data: { "manager-test": { value: "allowed" } } },
+      });
+      expect(server.factoryDataRequests()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          method: "PUT",
+          status: 200,
+          userId: "pwa-session-manager",
+        }),
+        expect.objectContaining({
+          method: "GET",
+          status: 200,
+          userId: "pwa-session-manager",
+        }),
+      ]));
+      expect(pageErrors).toEqual([]);
+      expect(server.fixtureErrors()).toEqual([]);
+      expect(expectedExternalFontErrors.every((message) =>
+        message.includes("fonts.googleapis.com/css2?family=Inter"),
+      )).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
   test("keeps a permission-blocked offline intent until explicit retry", async ({
     page,
   }) => {
@@ -2013,11 +2165,16 @@ test.describe("PWA update handoff", () => {
         intentRequestIds: [blockedIntentId, blockedIntentId],
         appliedIntentIds: [blockedIntentId],
       });
-      expect(server.factoryDataRequests()).toContainEqual({
-        method: "GET",
-        origin: null,
-        status: 200,
-      });
+      expect(
+        server.factoryDataRequests()
+          .filter((request) => request.method === "GET")
+          .length,
+      ).toBeGreaterThan(0);
+      expect(
+        server.factoryDataRequests()
+          .filter((request) => request.method === "GET")
+          .every((request) => request.status === 403),
+      ).toBe(true);
       expect(
         server.factoryDataRequests().some((request) => request.method === "OPTIONS"),
       ).toBe(false);

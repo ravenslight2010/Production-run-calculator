@@ -82,6 +82,20 @@ were the reliable evidence.
 **How to apply:** Before releasing held optional panels, wait for the target
 run's start state, select it explicitly, and verify pause/resume plus counters.
 
+## Permission-aware API fixtures
+
+**Rule:** Test API fixtures must derive protected-route responses from the
+active fixture user's capabilities, and cover both an authorized identity and
+a denied one. Do not return a successful manager-only read just to simplify
+operator startup.
+
+**Why:** A permissive fixture can make an application authorization regression
+invisible even when the production route correctly rejects the user.
+
+**How to apply:** When a browser test server stubs a capability-gated route,
+match its real status contract for reads and writes. Verify the app can still
+boot after a denied read separately from verifying the manager's access.
+
 ## Reloads with held optional chunks
 
 **Rule:** For deterministic network holds across reloads, block service workers
