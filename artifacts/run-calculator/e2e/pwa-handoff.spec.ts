@@ -273,6 +273,7 @@ async function startVersionedServer(
   let sessionValid = true;
   let intentPermissionGranted = true;
   let temporarySessionProbeFailuresRemaining = 0;
+  const sessionProbeFailuresByTestTab = new Map<string, number>();
   let sessionProbesToHold = 0;
   let sessionResponsesToPause = 0;
   let releaseSessionResponses: (() => void) | undefined;
@@ -352,8 +353,17 @@ async function startVersionedServer(
             .end(JSON.stringify({ error: "Unauthorized", reason: "session_expired" }));
           return;
         }
-        if (temporarySessionProbeFailuresRemaining > 0) {
-          temporarySessionProbeFailuresRemaining -= 1;
+        const sessionProbeUrl = new URL(request.url ?? "/", "http://pwa-smoke.test");
+        const testTab = sessionProbeUrl.searchParams.get("__pwa_test_tab");
+        const testTabFailures = testTab
+          ? sessionProbeFailuresByTestTab.get(testTab) ?? 0
+          : 0;
+        if (testTabFailures > 0 || temporarySessionProbeFailuresRemaining > 0) {
+          if (testTabFailures > 0 && testTab) {
+            sessionProbeFailuresByTestTab.set(testTab, testTabFailures - 1);
+          } else {
+            temporarySessionProbeFailuresRemaining -= 1;
+          }
           sessionRecoveryRequests.temporaryMeFailures += 1;
           response
             .writeHead(503, { "content-type": "application/json; charset=utf-8" })
@@ -721,6 +731,9 @@ async function startVersionedServer(
     },
     failNextSessionProbes(count: number) {
       temporarySessionProbeFailuresRemaining = count;
+    },
+    failNextSessionProbesForTestTab(tab: string, count: number) {
+      sessionProbeFailuresByTestTab.set(tab, count);
     },
     holdNextSessionProbes(count: number) {
       sessionProbesToHold = count;
@@ -2496,6 +2509,204 @@ test.describe("PWA update handoff", () => {
       expect(server.staleAssetRequestCount()).toBe(1);
       expect(server.fixtureErrors()).toEqual([]);
     } finally {
+      await server.close();
+    }
+  });
+
+  test("keeps stale-recovery confirmation local to the tab that attempted recovery", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+    const otherPage = await page.context().newPage();
+    const markerCaptureScript = (testTab: string) => {
+      const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+      const captureKey = "__pwa_tab_local_recovery_marker_capture";
+      const originalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (this === window.sessionStorage && key === markerKey) {
+          const captured = JSON.parse(sessionStorage.getItem(captureKey) ?? "[]") as string[];
+          captured.push(value);
+          originalSetItem.call(sessionStorage, captureKey, JSON.stringify(captured));
+        }
+        return originalSetItem.call(this, key, value);
+      };
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+        const inputUrl = input instanceof Request ? input.url : String(input);
+        const requestUrl = new URL(inputUrl, location.href);
+        if (requestUrl.pathname === "/api/me") {
+          requestUrl.searchParams.set("__pwa_test_tab", testTab);
+          return originalFetch(requestUrl.toString(), init);
+        }
+        return originalFetch(input, init);
+      }) as typeof window.fetch;
+    };
+    const primaryObservations: Array<Record<string, unknown>> = [];
+    const otherObservations: Array<Record<string, unknown>> = [];
+    let primaryAcceptedMeResponses = 0;
+    let otherAcceptedMeResponses = 0;
+    const captureAcceptedObservations = (
+      observedPage: typeof page,
+      target: Array<Record<string, unknown>>,
+    ) => {
+      observedPage.on("response", (response) => {
+        if (
+          new URL(response.url()).pathname !== "/api/field-checks/observations" ||
+          response.status() !== 202
+        ) return;
+        const payload = response.request().postDataJSON() as {
+          observations?: Array<Record<string, unknown>>;
+        } | null;
+        if (Array.isArray(payload?.observations)) target.push(...payload.observations);
+      });
+    };
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(markerCaptureScript, "recovery");
+      await otherPage.addInitScript(markerCaptureScript, "other");
+      captureAcceptedObservations(page, primaryObservations);
+      captureAcceptedObservations(otherPage, otherObservations);
+      page.on("response", (response) => {
+        if (
+          new URL(response.url()).pathname === "/api/me" &&
+          response.status() === 200
+        ) primaryAcceptedMeResponses += 1;
+      });
+      otherPage.on("response", (response) => {
+        if (
+          new URL(response.url()).pathname === "/api/me" &&
+          response.status() === 200
+        ) otherAcceptedMeResponses += 1;
+      });
+
+      // Install and control the old worker in the second tab first. It remains
+      // a distinct top-level browsing context in the same origin and browser
+      // context, so the service-worker registration is shared but sessionStorage
+      // is not.
+      await otherPage.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(otherPage.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await otherPage.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await otherPage.goto("about:blank");
+      await otherPage.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+      await expect(otherPage.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await otherPage.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+      await expect(otherPage.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => otherAcceptedMeResponses).toBeGreaterThan(0);
+
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => primaryAcceptedMeResponses).toBeGreaterThan(0);
+      await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible();
+
+      // Keep the recovery tab before authenticated startup while the second
+      // tab reloads against the already-updated worker. If marker storage were
+      // shared, that startup could consume the first tab's evidence.
+      server.failNextSessionProbesForTestTab("recovery", 2);
+      await page.getByRole("button", { name: "Update and reload" }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId("auth-startup-retry")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(
+        () => server.sessionRecoveryRequests().temporaryMeFailures,
+      ).toBe(2);
+      const primaryPendingMarker = await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      );
+      expect(primaryPendingMarker).not.toBeNull();
+      expect(Object.keys(JSON.parse(primaryPendingMarker!)).sort())
+        .toEqual(["attemptedAt", "fromBuild"]);
+
+      const otherAuthResponsesBeforeReload = otherAcceptedMeResponses;
+      await otherPage.reload({ waitUntil: "domcontentloaded" });
+      await expect(otherPage.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
+        timeout: 20_000,
+      });
+      await expect(otherPage.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => otherAcceptedMeResponses)
+        .toBeGreaterThan(otherAuthResponsesBeforeReload);
+      await expect.poll(() => otherObservations.some((observation) =>
+        observation.checkName === "startup" && observation.outcome === "success",
+      )).toBe(true);
+      expect(await otherPage.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+      expect(otherObservations.filter((observation) =>
+        observation.checkName === "stale-deployment-recovery" &&
+        observation.outcome === "success",
+      )).toEqual([]);
+      expect(primaryObservations.filter((observation) =>
+        observation.checkName === "stale-deployment-recovery" &&
+        observation.outcome === "success",
+      )).toEqual([]);
+
+      await page.getByTestId("auth-startup-retry").click();
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => primaryObservations.filter((observation) =>
+        observation.checkName === "stale-deployment-recovery" &&
+        observation.outcome === "success",
+      ).length).toBe(1);
+      expect(await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      )).toBeNull();
+
+      const primaryMarkerSnapshots = await page.evaluate(() =>
+        JSON.parse(
+          sessionStorage.getItem("__pwa_tab_local_recovery_marker_capture") ?? "[]",
+        ) as string[],
+      );
+      expect(primaryMarkerSnapshots).toHaveLength(1);
+      const marker = JSON.parse(primaryMarkerSnapshots[0]);
+      expect(Object.keys(marker).sort()).toEqual(["attemptedAt", "fromBuild"]);
+      expect(marker).toMatchObject({
+        fromBuild: expect.stringMatching(/^[a-f0-9]{1,8}$/),
+        attemptedAt: expect.any(Number),
+      });
+      expect(primaryMarkerSnapshots[0]).not.toMatch(/https?:|stack|user|device|old-build/i);
+      expect(await otherPage.evaluate(() =>
+        JSON.parse(sessionStorage.getItem("__pwa_tab_local_recovery_marker_capture") ?? "[]"),
+      )).toEqual([]);
+
+      const acceptedRecoveryObservations = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+          appBuild: string;
+          metrics: Record<string, unknown>;
+        }>;
+      const recoverySuccesses = acceptedRecoveryObservations.filter((observation) =>
+        observation.checkName === "stale-deployment-recovery" &&
+        observation.outcome === "success",
+      );
+      expect(recoverySuccesses).toHaveLength(1);
+      expect(recoverySuccesses[0]).toMatchObject({
+        appBuild: "pwa-new-build",
+        metrics: {},
+      });
+      expect(JSON.stringify(acceptedRecoveryObservations)).not.toMatch(
+        /https?:|stack|userId|clientId|deviceId|runId|errorStack|errorUrl/i,
+      );
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      if (!otherPage.isClosed()) await otherPage.close();
       await server.close();
     }
   });
