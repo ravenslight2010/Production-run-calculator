@@ -936,7 +936,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                       <button
                         type="button"
                         onClick={pauseRun}
-                        className="bg-amber-600 hover:bg-amber-500 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
+                        className="min-h-11 min-w-11 bg-amber-600 hover:bg-amber-500 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
                       >
                         <Pause className="w-5 h-5 fill-current" /> PAUSE RUN
                       </button>
@@ -1012,7 +1012,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         type="button"
                         data-testid="resume-run"
                         onClick={resumeRun}
-                        className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors"
+                        className="min-h-11 min-w-11 w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors"
                       >
                         <Play className="w-6 h-6 fill-current" /> RESUME RUN
                       </button>
@@ -1633,7 +1633,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                 <button
                   type="button"
                   onClick={() => switchToRun(dayState.currentIndex + 1)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
+                  className="min-h-11 min-w-11 flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
                 >
                   <div className="text-right min-w-0">
                     <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Next</div>

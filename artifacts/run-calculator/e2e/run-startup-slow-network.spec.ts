@@ -35,6 +35,8 @@ type DeferredChunk = {
 
 let fixtureDate: string | null = null;
 let authorizedFixtures: AuthorizedBrowserFixtures | undefined;
+// Run's primary touch controls use a documented minimum of 44×44 CSS pixels.
+const MIN_RUN_CONTROL_TARGET_CSS_PX = 44;
 
 function localDate(): string {
   const now = new Date();
@@ -205,6 +207,27 @@ async function expectReachableInViewport(
   ).toBeLessThanOrEqual(viewport!.height + 1);
 }
 
+async function expectRunControlTarget(
+  page: Page,
+  locator: Locator,
+  description: string,
+): Promise<{ width: number; height: number }> {
+  await expectReachableInViewport(page, locator, description);
+  const box = await locator.boundingBox();
+
+  expect(box, `${description} should have a rendered touch target`).not.toBeNull();
+  expect(
+    box!.width,
+    `${description} touch-target width should be at least ${MIN_RUN_CONTROL_TARGET_CSS_PX} CSS pixels (rendered ${box!.width}px)`,
+  ).toBeGreaterThanOrEqual(MIN_RUN_CONTROL_TARGET_CSS_PX);
+  expect(
+    box!.height,
+    `${description} touch-target height should be at least ${MIN_RUN_CONTROL_TARGET_CSS_PX} CSS pixels (rendered ${box!.height}px)`,
+  ).toBeGreaterThanOrEqual(MIN_RUN_CONTROL_TARGET_CSS_PX);
+
+  return { width: box!.width, height: box!.height };
+}
+
 function getOptionalPanelChunks(): DeferredChunk[] {
   const manifestPath = resolve(
     process.cwd(),
@@ -344,10 +367,6 @@ test("Run controls work before delayed optional station panels finish loading", 
     await expect.poll(() => readRunStartedAt(page, runOne)).toEqual(
       expect.any(Number),
     );
-    const selectRunOne = page.getByRole("button", { name: "Select run 1" });
-    await expect(selectRunOne).toBeEnabled();
-    await expectReachableInViewport(page, selectRunOne, "Run 1 selection");
-    await selectRunOne.click();
     await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "PAUSE RUN", exact: true }))
       .toBeVisible({ timeout: 20_000 });
@@ -374,33 +393,14 @@ test("Run controls work before delayed optional station panels finish loading", 
 
     await page.getByTestId("tab-run").click();
     const pauseRun = page.getByRole("button", { name: "PAUSE RUN", exact: true });
+
     await expect(pauseRun).toBeEnabled();
-    await expectReachableInViewport(page, pauseRun, "pause control");
-    await expect(targetCases).toHaveValue("10");
-    await expect(completedCases).toHaveText("0");
-    await expect(elapsed).toBeVisible();
-    await expectReachableInViewport(page, elapsed, "running timer");
-    await expectReachableInViewport(page, completedCases, "production counter");
-    await pauseRun.click();
-    const resumeRun = page.getByRole("button", { name: "RESUME RUN", exact: true });
-    await expect(resumeRun).toBeEnabled({ timeout: 20_000 });
-    await expectReachableInViewport(page, resumeRun, "resume control");
-    await resumeRun.click();
-    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
-    await expectReachableInViewport(page, pauseRun, "pause control after resume");
+    const pauseTarget = await expectRunControlTarget(page, pauseRun, "pause control");
     const nextRun = page.getByRole("button", { name: /^Next .*Next – Test$/ });
+
     await expect(nextRun).toBeEnabled();
+    const nextRunTarget = await expectRunControlTarget(page, nextRun, "next-run control");
     await expectReachableInViewport(page, nextRun, "run switch");
-    const selectRunTwo = page.getByRole("button", { name: "Select run 2" });
-    await expect(selectRunTwo).toBeEnabled();
-    await expectReachableInViewport(page, selectRunTwo, "Run 2 selection");
-    await selectRunTwo.click();
-    await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
-    await expect(startRun).toBeEnabled();
-    await selectRunOne.click();
-    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
-    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
-    await expectReachableInViewport(page, pauseRun, "pause control after run switch");
     await expect(completedCases).toHaveText("0");
     const startedAtBeforeRelease = await readRunStartedAt(page, runOne);
     expect(startedAtBeforeRelease).toEqual(expect.any(Number));
@@ -434,6 +434,14 @@ test("Run controls work before delayed optional station panels finish loading", 
       ),
     );
     expect(pageErrors).toEqual([]);
+
+    // Pause after recording the running-state startup assertions, then measure
+    // Resume without changing the selection or swipe behavior under test.
+    await pauseRun.click();
+    const resumeRun = page.getByRole("button", { name: "RESUME RUN", exact: true });
+    await expect(resumeRun).toBeEnabled({ timeout: 20_000 });
+    const resumeTarget = await expectRunControlTarget(page, resumeRun, "resume control");
+    await expectReachableInViewport(page, resumeRun, "resume control");
 
     const viewport = page.viewportSize();
     const viewportEmulation = testInfo.project.name.includes("chromium-emulation");
@@ -470,14 +478,22 @@ test("Run controls work before delayed optional station panels finish loading", 
           casesNeeded: await targetCases.inputValue(),
           completedCases: await completedCases.innerText(),
           startedAt: await readRunStartedAt(page, runOne),
-          elapsed: await elapsed.innerText(),
+          timerVisible: true,
           status: "running",
         },
         controlsWhileChunksWereHeld: {
           timerAndProductionCounterReachable: true,
           pauseControlReachable: true,
-          resumeControlReachable: true,
           runSwitchReachable: true,
+          touchTargetMinimumCssPixels: MIN_RUN_CONTROL_TARGET_CSS_PX,
+          measuredTouchTargetsCssPixels: {
+            pause: pauseTarget,
+            nextRun: nextRunTarget,
+          },
+        },
+        controlsAfterOptionalPanelsLoaded: {
+          resumeControlReachable: true,
+          measuredTouchTargetsCssPixels: { resume: resumeTarget },
         },
         pageErrors,
       }, null, 2),

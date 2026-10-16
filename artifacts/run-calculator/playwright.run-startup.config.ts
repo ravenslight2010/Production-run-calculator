@@ -61,6 +61,15 @@ export default defineConfig({
       },
     },
     {
+      name: "phone-landscape-chromium-emulation",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 844, height: 390 },
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
+    {
       name: "tablet-portrait-chromium-emulation",
       use: {
         ...devices["Desktop Chrome"],
