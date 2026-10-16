@@ -34,7 +34,7 @@ type DeferredChunk = {
 };
 
 let fixtureDate: string | null = null;
-let authorizedFixtures: AuthorizedBrowserFixtures;
+let authorizedFixtures: AuthorizedBrowserFixtures | undefined;
 
 function localDate(): string {
   const now = new Date();
@@ -54,6 +54,132 @@ async function readRunStartedAt(page: Page, runId: string): Promise<number | nul
     };
     return state.runs?.find((run) => run.id === id)?.startedAt ?? null;
   }, runId);
+}
+
+async function readSelectedRunId(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem("run-calc-day");
+    if (!raw) return null;
+    const state = JSON.parse(raw) as {
+      currentIndex?: number;
+      runs?: Array<{ id?: string }>;
+    };
+    return state.runs?.[state.currentIndex ?? 0]?.id ?? null;
+  });
+}
+
+async function readCanonicalRunState(
+  page: Page,
+  date: string,
+  runId: string,
+): Promise<{
+  startedAt: number | null;
+  casesNeeded: number | null;
+  skidsCompleted: number | null;
+  casesOnCurrentSkid: number | null;
+} | null> {
+  const response = await page.request.get(
+    `${API_BASE}/api/sync/today?today=${encodeURIComponent(date)}`,
+  );
+  if (!response.ok()) return null;
+  const payload = await response.json() as {
+    dayState?: { runs?: Array<{ id?: string; startedAt?: number }> };
+    runValues?: Record<string, {
+      casesNeeded?: number;
+      skidsCompleted?: number;
+      casesOnCurrentSkid?: number;
+    }>;
+  };
+  const run = payload.dayState?.runs?.find((candidate) => candidate.id === runId);
+  const values = payload.runValues?.[runId];
+  if (!run || !values) return null;
+  return {
+    startedAt: run.startedAt ?? null,
+    casesNeeded: values.casesNeeded ?? null,
+    skidsCompleted: values.skidsCompleted ?? null,
+    casesOnCurrentSkid: values.casesOnCurrentSkid ?? null,
+  };
+}
+
+async function createStartupFixture(options: {
+  casesNeeded?: number;
+  skidsCompleted?: number;
+  casesOnCurrentSkid?: number;
+} = {}): Promise<{ runOne: string; token: string }> {
+  const fixtures = authorizedFixtures;
+  if (!fixtures) throw new Error("Authorized browser fixtures are not initialized.");
+  fixtureDate = localDate();
+  const suffix = uniqueTestId("run_slow_start");
+  const runOne = `startup-run-1-${suffix}`;
+  const runTwo = `startup-run-2-${suffix}`;
+  const brand = `Startup ${suffix}`;
+  const flavor = "Test";
+  const now = Date.now();
+  const casesNeeded = options.casesNeeded ?? 10;
+  const account = await fixtures.createAccount({
+    username: `manager_${suffix}`,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
+  });
+  await fixtures.seedBrandProfile(account, {
+    brand,
+    flavor,
+    values: {
+      dieType: "8-Cut",
+      casesNeeded,
+      casesPerSkid: 10,
+      pizzasPerCase: 12,
+    },
+  });
+  const values = {
+    ...DEFAULT_VALUES,
+    casesNeeded,
+    casesPerSkid: 10,
+    casesOnCurrentSkid: options.casesOnCurrentSkid ?? 0,
+    skidsCompleted: options.skidsCompleted ?? 0,
+    pizzasPerCase: 12,
+    freezerTime: 0,
+    approxLineSpeed: 0,
+    crustsPerCycle: 0,
+    cycleSpeed: 0,
+    speedAdjustment: 1,
+  };
+  await fixtures.seedTodaySync({
+    token: account.token,
+    senderId: `run-startup-${suffix}`,
+    date: fixtureDate,
+    payload: {
+      dayState: {
+        date: fixtureDate,
+        runs: [
+          { id: runOne, brand, flavor, metaUpdatedAt: now, seeded: false },
+          {
+            id: runTwo,
+            brand: `${brand} Next`,
+            flavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+        ],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+        prepPhase: {
+          prepStartedAt: null,
+          prepBatchesDough: 0,
+          prepBatchesSauce: 0,
+          prepCarriedOver: false,
+        },
+      },
+      runValues: { [runOne]: values, [runTwo]: values },
+      runValuesUpdatedAt: { [runOne]: now, [runTwo]: now },
+      packagingProgress: {},
+    },
+  });
+
+  return { runOne, token: account.token };
 }
 
 async function expectReachableInViewport(
@@ -131,7 +257,7 @@ async function throttleToSlow3G(page: Page): Promise<() => Promise<void>> {
   };
 }
 
-test.beforeAll(async ({ playwright }) => {
+test.beforeEach(async ({ playwright }) => {
   requireIsolatedTestDatabase("Run startup under slow network e2e");
   if (!SIGNUP_CODE) {
     throw new Error("STAFF_SIGNUP_CODE must be configured for Run startup e2e.");
@@ -143,10 +269,16 @@ test.beforeAll(async ({ playwright }) => {
   );
 });
 
-test.afterAll(async () => {
-  await authorizedFixtures?.cleanup({
-    syncDates: fixtureDate ? [fixtureDate] : [],
-  });
+test.afterEach(async () => {
+  const fixtures = authorizedFixtures;
+  authorizedFixtures = undefined;
+  try {
+    await fixtures?.cleanup({
+      syncDates: fixtureDate ? [fixtureDate] : [],
+    });
+  } finally {
+    fixtureDate = null;
+  }
 });
 
 test("Run controls work before delayed optional station panels finish loading", async ({
@@ -189,79 +321,11 @@ test("Run controls work before delayed optional station panels finish loading", 
   };
 
   try {
-    fixtureDate = localDate();
-    const suffix = uniqueTestId("run_slow_start");
-    const runOne = `startup-run-1-${suffix}`;
-    const runTwo = `startup-run-2-${suffix}`;
-    const brand = `Startup ${suffix}`;
-    const flavor = "Test";
-    const now = Date.now();
-    const account = await authorizedFixtures.createAccount({
-      username: `manager_${suffix}`,
-      password: PASSWORD,
-      capabilities: DEFAULT_MANAGER_CAPABILITIES,
-    });
-    await authorizedFixtures.seedBrandProfile(account, {
-      brand,
-      flavor,
-      values: {
-        dieType: "8-Cut",
-        casesNeeded: 10,
-        casesPerSkid: 10,
-        pizzasPerCase: 12,
-      },
-    });
-    const values = {
-      ...DEFAULT_VALUES,
-      casesNeeded: 10,
-      casesPerSkid: 10,
-      casesOnCurrentSkid: 0,
-      skidsCompleted: 0,
-      pizzasPerCase: 12,
-      freezerTime: 0,
-      approxLineSpeed: 0,
-      crustsPerCycle: 0,
-      cycleSpeed: 0,
-      speedAdjustment: 1,
-    };
-    await authorizedFixtures.seedTodaySync({
-      token: account.token,
-      senderId: `run-startup-${suffix}`,
-      date: fixtureDate,
-      payload: {
-        dayState: {
-          date: fixtureDate,
-          runs: [
-            { id: runOne, brand, flavor, metaUpdatedAt: now, seeded: false },
-            {
-              id: runTwo,
-              brand: `${brand} Next`,
-              flavor,
-              metaUpdatedAt: now,
-              seeded: false,
-            },
-          ],
-          currentIndex: 0,
-          resetAt: 0,
-          substitutions: [],
-          substitutionLog: [],
-          stagedItems: {},
-          prepPhase: {
-            prepStartedAt: null,
-            prepBatchesDough: 0,
-            prepBatchesSauce: 0,
-            prepCarriedOver: false,
-          },
-        },
-        runValues: { [runOne]: values, [runTwo]: values },
-        runValuesUpdatedAt: { [runOne]: now, [runTwo]: now },
-        packagingProgress: {},
-      },
-    });
+    const { runOne, token } = await createStartupFixture();
 
     await page.context().addCookies([{
       name: "rc_auth",
-      value: account.token,
+      value: token,
       url: API_BASE,
     }]);
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -423,4 +487,197 @@ test("Run controls work before delayed optional station panels finish loading", 
     releaseAllOptionalChunks();
     await restoreNetwork();
   }
+});
+
+test.describe("started Run reload during delayed optional panel startup", () => {
+test.use({ serviceWorkers: "block" });
+
+test("reload preserves a started Run while its Sauce chunk is held in desktop WebKit", async ({
+  page,
+  browserName,
+}, testInfo) => {
+  test.skip(
+    browserName !== "webkit" || testInfo.project.name !== "desktop-webkit",
+    "Reload coverage is isolated to the desktop WebKit project.",
+  );
+
+  requireIsolatedTestDatabase("Run startup reload e2e");
+  const sauceChunk = getOptionalPanelChunks()[0]!;
+  const requestedChunks: string[] = [];
+  const loadedChunks: Array<{ file: string; status: number }> = [];
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message.slice(0, 300)));
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.endsWith(sauceChunk.file)) {
+      loadedChunks.push({ file: sauceChunk.file, status: response.status() });
+    }
+  });
+
+  let releaseChunk!: () => void;
+  const chunkGate = new Promise<void>((resolveGate) => {
+    releaseChunk = resolveGate;
+  });
+  await page.route(`**/${sauceChunk.file}`, async (route) => {
+    requestedChunks.push(sauceChunk.file);
+    await chunkGate;
+    // Reloading is expected to abort the request held before reload. Do not
+    // try to continue that canceled request after the gate is released.
+    if (route.request().failure()) return;
+    await route.continue();
+  });
+
+  try {
+    const { runOne, token } = await createStartupFixture({
+      casesNeeded: 30,
+    });
+    await page.context().addCookies([{
+      name: "rc_auth",
+      value: token,
+      url: API_BASE,
+    }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const runTab = page.getByTestId("tab-run");
+    await expect(runTab).toBeAttached({ timeout: 60_000 });
+    await runTab.click();
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    const targetCases = page.getByTestId("input-casesNeeded");
+    const completedCases = page.getByTestId("tile-cases-completed");
+    await expect(targetCases).toHaveValue("30");
+    await expect(completedCases).toHaveText("0");
+    await page.getByTestId("button-start-run").click();
+    await expect.poll(() => readRunStartedAt(page, runOne)).toEqual(
+      expect.any(Number),
+    );
+
+    // Create a nonzero, realistic completed count through the production
+    // Packaging controls: one full skid plus two cases on the next skid.
+    await page.getByTestId("tab-packaging").click();
+    const incrementCases = page.getByTestId("btn-inc-casesOnCurrentSkid");
+    await expect(incrementCases).toBeVisible({ timeout: 30_000 });
+    for (let count = 0; count < 10; count += 1) {
+      await incrementCases.click();
+    }
+    await expect(page.getByTestId("text-casesOnCurrentSkid")).toHaveText("10");
+    await page.getByTestId("btn-skid-done").click();
+    await expect(page.getByTestId("text-skidsCompleted")).toHaveText("1/3");
+    for (let count = 0; count < 2; count += 1) {
+      await incrementCases.click();
+    }
+    await expect(page.getByTestId("text-casesOnCurrentSkid")).toHaveText("2");
+    await page.getByTestId("tab-run").click();
+    await expect(completedCases).toHaveText("12");
+
+    const startedAtBeforeReload = await readRunStartedAt(page, runOne);
+    expect(startedAtBeforeReload).toEqual(expect.any(Number));
+    const startedRunCanonicalState = {
+      startedAt: startedAtBeforeReload,
+      casesNeeded: 30,
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 2,
+    };
+    await expect.poll(
+      () => readCanonicalRunState(page, fixtureDate!, runOne),
+      { timeout: 20_000, intervals: [250, 500, 1_000] },
+    ).toEqual(startedRunCanonicalState);
+
+    await page.getByTestId("tab-sauce").click();
+    await expect(page.getByText("Loading Sauce…", { exact: true })).toBeVisible();
+    await expect.poll(() => requestedChunks).toContain(sauceChunk.file);
+    expect(loadedChunks).toEqual([]);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("tab-run")).toBeAttached({ timeout: 60_000 });
+    await page.getByTestId("tab-run").click();
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(targetCases).toHaveValue("30");
+    await expect(completedCases).toHaveText("12");
+    await expect.poll(() => readSelectedRunId(page)).toBe(runOne);
+    expect(await readRunStartedAt(page, runOne)).toBe(startedAtBeforeReload);
+    await expect.poll(
+      () => readCanonicalRunState(page, fixtureDate!, runOne),
+      { timeout: 20_000, intervals: [250, 500, 1_000] },
+    ).toEqual(startedRunCanonicalState);
+    expect(loadedChunks).toEqual([]);
+
+    const pauseRun = page.getByRole("button", { name: "PAUSE RUN", exact: true });
+    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
+    await pauseRun.click();
+    const resumeRun = page.getByRole("button", { name: "RESUME RUN", exact: true });
+    await expect(resumeRun).toBeEnabled({ timeout: 20_000 });
+    await resumeRun.click();
+    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
+    await expect(targetCases).toHaveValue("30");
+    await expect(completedCases).toHaveText("12");
+    const startedAtBeforeRelease = await readRunStartedAt(page, runOne);
+    expect(startedAtBeforeRelease).toEqual(expect.any(Number));
+    const runStateBeforeRelease = {
+      ...startedRunCanonicalState,
+      startedAt: startedAtBeforeRelease,
+    };
+    await expect.poll(
+      () => readCanonicalRunState(page, fixtureDate!, runOne),
+      { timeout: 20_000, intervals: [250, 500, 1_000] },
+    ).toEqual(runStateBeforeRelease);
+
+    releaseChunk();
+    await page.getByTestId("tab-sauce").click();
+    await expect(page.getByTestId("sauce-daily-needs")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("tab-run").click();
+    await expect(pauseRun).toBeEnabled({ timeout: 20_000 });
+    await expect(page.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await expect(targetCases).toHaveValue("30");
+    await expect(completedCases).toHaveText("12");
+    expect(await readSelectedRunId(page)).toBe(runOne);
+    expect(await readRunStartedAt(page, runOne)).toBe(startedAtBeforeRelease);
+    await expect.poll(
+      () => readCanonicalRunState(page, fixtureDate!, runOne),
+      { timeout: 20_000, intervals: [250, 500, 1_000] },
+    ).toEqual(runStateBeforeRelease);
+    expect(requestedChunks).toContain(sauceChunk.file);
+    expect(loadedChunks).toEqual([{ file: sauceChunk.file, status: 200 }]);
+    expect(pageErrors).toEqual([]);
+
+    await testInfo.attach("run-startup-reload-desktop-webkit.json", {
+      body: JSON.stringify({
+        browserEngine: browserName,
+        project: testInfo.project.name,
+        viewport: page.viewportSize(),
+        physicalDeviceTested: false,
+        heldOptionalChunk: sauceChunk.file,
+        requestsWhileHeld: requestedChunks.length,
+        loadedChunks,
+        beforeReload: {
+          selectedRunId: runOne,
+          startedAt: startedAtBeforeReload,
+          casesNeeded: "30",
+          casesCompleted: "12",
+        },
+        afterReloadAndRelease: {
+          selectedRunId: await readSelectedRunId(page),
+          startedAt: await readRunStartedAt(page, runOne),
+          casesNeeded: await targetCases.inputValue(),
+          casesCompleted: await completedCases.innerText(),
+        },
+        beforeOptionalPanelRelease: {
+          selectedRunId: runOne,
+          startedAt: startedAtBeforeRelease,
+          casesNeeded: 30,
+          casesCompleted: 12,
+        },
+        pauseResumeUsable: true,
+        pageErrors,
+      }, null, 2),
+      contentType: "application/json",
+    });
+  } finally {
+    releaseChunk();
+  }
+});
 });

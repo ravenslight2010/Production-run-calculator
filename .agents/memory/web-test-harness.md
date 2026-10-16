@@ -81,3 +81,21 @@ were the reliable evidence.
 
 **How to apply:** Before releasing held optional panels, wait for the target
 run's start state, select it explicitly, and verify pause/resume plus counters.
+
+## Reloads with held optional chunks
+
+**Rule:** For deterministic network holds across reloads, block service workers
+only in the relevant Playwright test scope; a precached response can bypass
+Playwright routing. Do not change the app's service worker for this. Keep each
+browser test's date-scoped sync data isolated by cleaning it in the disposable
+database between tests and creating a fresh authorized fixture per test.
+
+**Why:** The service worker can satisfy an optional chunk after reload without
+reaching the route handler, and day-state rows are shared across fixture users
+for the same date. Suite-level cleanup lets sequential tests contaminate one
+another.
+
+**How to apply:** When testing reload with a held chunk, verify the request is
+still pending before reload, assert the original `startedAt` immediately after
+reload, and compare post-release state with a snapshot taken before release.
+Pause/resume may adjust `startedAt` to exclude paused time.
