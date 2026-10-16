@@ -31,6 +31,12 @@ const suppressPreviewReload =
 const webBuildStagePath = path.join(PROJECT_ROOT, ".local/build-identity/web-stage-start.json");
 
 function resolveWebBuildId(command: string): string {
+  const pwaHandoffBuildId = process.env.PWA_HANDOFF_BUILD_ID?.trim();
+  if (command === "build" && /^pwa-(?:old|new)-build$/.test(pwaHandoffBuildId ?? "")) {
+    // The isolated two-version PWA fixture needs genuinely distinct app IDs
+    // even when the workspace has a staged release identity.
+    return pwaHandoffBuildId!;
+  }
   if (command === "build" && existsSync(webBuildStagePath)) {
     return validateSourceRecord(readBoundedJson(webBuildStagePath)).appBuildId;
   }

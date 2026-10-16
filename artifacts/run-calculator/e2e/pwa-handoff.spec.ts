@@ -26,7 +26,6 @@ import { createServer, type ServerResponse } from "node:http";
 import { canonicalSyncJson } from "@workspace/sync-contract";
 import {
   mkdtemp,
-  cp,
   readFile,
   readdir,
   rename,
@@ -98,13 +97,22 @@ async function stampBuild(buildDir: string, version: Version) {
   );
 }
 
-async function divergeHomeChunk(buildDir: string) {
+function findHomeChunk(buildDir: string) {
+  const assetsDir = path.join(buildDir, "assets");
+  return readdir(assetsDir).then((assetNames) => {
+    const name = assetNames.find((assetName) => /^home-[\w-]+\.js$/.test(assetName));
+    if (!name) throw new Error("The PWA fixture could not find Home's lazy chunk");
+    return name;
+  });
+}
+
+async function divergeHomeChunk(buildDir: string, staleHomeChunk: string) {
   const assetsDir = path.join(buildDir, "assets");
   const assetNames = await readdir(assetsDir);
-  const oldName = assetNames.find((name) => /^home-[\w-]+\.js$/.test(name));
-  if (!oldName) throw new Error("The PWA fixture could not find Home's lazy chunk");
-  const newName = oldName.replace(/\.js$/, "-current.js");
-  await rename(path.join(assetsDir, oldName), path.join(assetsDir, newName));
+  const currentHomeChunk = assetNames.find((name) => /^home-[\w-]+\.js$/.test(name));
+  if (!currentHomeChunk) throw new Error("The PWA fixture could not find Home's lazy chunk");
+  const newName = staleHomeChunk.replace(/\.js$/, "-current.js");
+  await rename(path.join(assetsDir, currentHomeChunk), path.join(assetsDir, newName));
 
   const files = [
     path.join(buildDir, "index.html"),
@@ -115,45 +123,102 @@ async function divergeHomeChunk(buildDir: string) {
   ];
   await Promise.all(files.map(async (file) => {
     const source = await readFile(file, "utf8");
-    if (source.includes(oldName)) {
-      await writeFile(file, source.replaceAll(oldName, newName));
+    if (source.includes(currentHomeChunk)) {
+      await writeFile(file, source.replaceAll(currentHomeChunk, newName));
     }
   }));
-  return oldName;
+  return staleHomeChunk;
 }
 
 async function buildTwoVersionFixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "run-calculator-pwa-handoff-"));
   try {
-    const builtSite = path.join(root, "built");
-    // Build into this fixture's own directory. A full release browser run
-    // serves dist/public at the same time; rebuilding there can temporarily
-    // erase its JS chunks and make unrelated pages receive HTML for scripts.
-    await execFileAsync("pnpm", [
-      "exec", "vite", "build", "--config", "vite.config.ts", "--outDir", builtSite,
-    ], {
-      cwd: packageRoot,
-      // Production uses one minute. Keep the exact policy path while making this
-      // two-version browser fixture finish promptly.
-      env: { ...process.env, VITE_UPDATE_RELOAD_IDLE_MS: "1000" },
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    await Promise.all([
-      stat(path.join(builtSite, "index.html")),
-      stat(path.join(builtSite, "service-worker.js")),
-      stat(path.join(builtSite, "favicon.ico")),
-    ]);
     const oldDir = path.join(root, "old");
     const newDir = path.join(root, "new");
-    await cp(builtSite, oldDir, { recursive: true });
-    await cp(builtSite, newDir, { recursive: true });
+    // Build distinct real bundles into this fixture's own directories. A full
+    // release browser run serves dist/public at the same time; rebuilding there
+    // can temporarily erase its JS chunks and break unrelated pages.
+    for (const [version, outputDir] of [["old", oldDir], ["new", newDir]] as const) {
+      await execFileAsync("pnpm", [
+        "exec", "vite", "build", "--config", "vite.config.ts", "--outDir", outputDir,
+      ], {
+        cwd: packageRoot,
+        // Production uses one minute. Keep the exact policy path while making
+        // this two-version browser fixture finish promptly.
+        env: {
+          ...process.env,
+          PWA_HANDOFF_BUILD_ID: `pwa-${version}-build`,
+          VITE_UPDATE_RELOAD_IDLE_MS: "1000",
+        },
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      await Promise.all([
+        stat(path.join(outputDir, "index.html")),
+        stat(path.join(outputDir, "service-worker.js")),
+        stat(path.join(outputDir, "favicon.ico")),
+      ]);
+    }
     await Promise.all([stampBuild(oldDir, "old"), stampBuild(newDir, "new")]);
-    const staleHomeChunk = await divergeHomeChunk(newDir);
+    const staleHomeChunk = await divergeHomeChunk(newDir, await findHomeChunk(oldDir));
     return { root, oldDir, newDir, staleHomeChunk };
   } catch (error) {
     await rm(root, { recursive: true, force: true });
     throw error;
   }
+}
+
+async function startOldBuildThenTriggerStaleAssetFailure(
+  page: import("@playwright/test").Page,
+  server: Awaited<ReturnType<typeof startVersionedServer>>,
+  staleHomeChunk: string,
+) {
+  server.holdNextSessionResponse();
+  await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+  await page.waitForFunction(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    return registration.active?.state === "activated";
+  });
+  await page.evaluate(async (missingHomeChunk) => {
+    const registration = await navigator.serviceWorker.ready;
+    const traceKey = "__pwa_recovery_worker_lifecycle";
+    const record = (entry: { kind: string; state?: string }) => {
+      const entries = JSON.parse(localStorage.getItem(traceKey) ?? "[]") as typeof entry[];
+      entries.push(entry);
+      localStorage.setItem(traceKey, JSON.stringify(entries));
+    };
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      record({ kind: "installing", state: worker.state });
+      worker.addEventListener("statechange", () => {
+        record({ kind: "worker-state", state: worker.state });
+      });
+    });
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      record({ kind: "controllerchange" });
+    });
+    // The stale Home chunk is deliberately absent from the network's new
+    // version. Remove only this cached old response so the request reaches the
+    // versioned server instead of being masked by the installed worker cache.
+    for (const cacheName of await caches.keys()) {
+      if (!cacheName.startsWith("workbox-precache")) continue;
+      const cache = await caches.open(cacheName);
+      for (const request of await cache.keys()) {
+        if (new URL(request.url).pathname.endsWith(`/assets/${missingHomeChunk}`)) {
+          await cache.delete(request);
+        }
+      }
+    }
+  }, staleHomeChunk);
+
+  server.publish("new");
+  server.armStaleAssetFailure();
+  server.releaseHeldSessionResponse();
+  await expect.poll(() => server.staleAssetRequestCount()).toBe(1);
+  await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible({
+    timeout: 20_000,
+  });
 }
 
 async function readPrecacheInventory(buildDir: string) {
@@ -198,15 +263,20 @@ async function startVersionedServer(
   options: {
     sessionRecovery?: boolean;
     sessionRecoveryIntentOutbox?: boolean;
+    fieldCheckObservations?: boolean;
   } = {},
 ) {
   let currentVersion: Version = "old";
   let staleAssetFailureArmed = false;
+  let staleAssetFailureTriggered = false;
   let staleAssetRequestCount = 0;
   let sessionValid = true;
   let intentPermissionGranted = true;
   let temporarySessionProbeFailuresRemaining = 0;
   let sessionProbesToHold = 0;
+  let sessionResponsesToPause = 0;
+  let releaseSessionResponses: (() => void) | undefined;
+  let sessionResponsePause: Promise<void> | undefined;
   const sessionRecoveryRequests = {
     me: 0,
     acceptedMeResponses: 0,
@@ -222,6 +292,7 @@ async function startVersionedServer(
     signIns: 0,
     permissionDenied: 0,
   };
+  const fieldCheckObservations: Array<{ observations: unknown[] }> = [];
   const intentRequestIds: string[] = [];
   const intentRequestUsers: string[] = [];
   const appliedIntentIds: string[] = [];
@@ -295,6 +366,11 @@ async function startVersionedServer(
           });
           return;
         }
+        if (sessionResponsesToPause > 0 && sessionResponsePause) {
+          sessionResponsesToPause -= 1;
+          await sessionResponsePause;
+          if (response.destroyed) return;
+        }
         sessionRecoveryRequests.acceptedMeResponses += 1;
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -325,6 +401,25 @@ async function startVersionedServer(
           workaround: null,
           recurrence: null,
           aiGenerated: false,
+        }));
+        return;
+      }
+      if (
+        options.fieldCheckObservations
+        && requestPath === "api/field-checks/observations"
+        && request.method === "POST"
+      ) {
+        let rawBody = "";
+        for await (const chunk of request) rawBody += chunk;
+        const payload = JSON.parse(rawBody || "{}") as { observations?: unknown[] };
+        fieldCheckObservations.push({
+          observations: Array.isArray(payload.observations) ? payload.observations : [],
+        });
+        response.writeHead(202, {
+          "content-type": "application/json; charset=utf-8",
+        }).end(JSON.stringify({
+          accepted: fieldCheckObservations.at(-1)?.observations.length ?? 0,
+          duplicate: 0,
         }));
         return;
       }
@@ -499,13 +594,24 @@ async function startVersionedServer(
       const candidate = path.join(root, requestPath);
       const withinRoot =
         candidate === root || candidate.startsWith(`${root}${path.sep}`);
+      const oldCandidate = path.join(versionDirs.old, requestPath);
+      const withinOldRoot =
+        oldCandidate === versionDirs.old ||
+        oldCandidate.startsWith(`${versionDirs.old}${path.sep}`);
+      const oldFileAvailable =
+        withinOldRoot &&
+        requestPath !== `assets/${staleHomeChunk}` &&
+        (await stat(oldCandidate).catch(() => null))?.isFile();
       const target =
         withinRoot && (await stat(candidate).catch(() => null))?.isFile()
           ? candidate
-          : path.join(root, "index.html");
+          : oldFileAvailable
+            ? oldCandidate
+            : path.join(root, "index.html");
       const content = await readFile(target);
       if (
         staleAssetFailureArmed
+        && !staleAssetFailureTriggered
         && currentVersion === "old"
         && requestPath === entryScript
       ) {
@@ -513,6 +619,7 @@ async function startVersionedServer(
         // before its lazy Home import. The removed old Home filename now falls
         // through to new index.html with text/html, matching the production
         // failure this recovery path handles.
+        staleAssetFailureTriggered = true;
         currentVersion = "new";
       }
       if (
@@ -569,6 +676,7 @@ async function startVersionedServer(
     baseUrl: `http://127.0.0.1:${address.port}`,
     publish(version: Version) {
       currentVersion = version;
+      staleAssetFailureTriggered = true;
     },
     armStaleAssetFailure() {
       staleAssetFailureArmed = true;
@@ -588,6 +696,17 @@ async function startVersionedServer(
     holdNextSessionProbes(count: number) {
       sessionProbesToHold = count;
     },
+    holdNextSessionResponse() {
+      sessionResponsesToPause = 1;
+      sessionResponsePause = new Promise<void>((resolve) => {
+        releaseSessionResponses = resolve;
+      });
+    },
+    releaseHeldSessionResponse() {
+      releaseSessionResponses?.();
+      releaseSessionResponses = undefined;
+      sessionResponsePause = undefined;
+    },
     dropSessionEventStreams() {
       for (const stream of sessionEventStreams) stream.destroy();
       sessionEventStreams.clear();
@@ -602,6 +721,11 @@ async function startVersionedServer(
         signedInUsers: [...signedInUsers],
       };
     },
+    fieldCheckObservations() {
+      return fieldCheckObservations.map((batch) => ({
+        observations: [...batch.observations],
+      }));
+    },
     fixtureErrors() {
       return [...fixtureErrors];
     },
@@ -612,6 +736,7 @@ async function startVersionedServer(
       // Browser keep-alive sockets can otherwise keep Node's close callback
       // pending after an assertion failure.
       releaseIntentAuthResponse?.();
+      releaseSessionResponses?.();
       for (const stream of sessionEventStreams) stream.destroy();
       sessionEventStreams.clear();
       server.closeAllConnections?.();
@@ -2216,6 +2341,227 @@ test.describe("PWA update handoff", () => {
         (message) => !message.includes("fonts.googleapis.com/css2"),
       );
       expect(unexpectedPageErrors).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("confirms stale-app recovery once after the updated worker reloads into an authenticated build", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.addInitScript(() => {
+        const markerKey = "run-calc:stale-asset-recovery-pending:v1";
+        const captureKey = "__pwa_recovery_marker_capture";
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key: string, value: string) {
+          if (this === window.sessionStorage && key === markerKey) {
+            const captured = JSON.parse(localStorage.getItem(captureKey) ?? "[]") as string[];
+            captured.push(value);
+            localStorage.setItem(captureKey, JSON.stringify(captured));
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+      const authenticatedStartsBeforeReload =
+        server.sessionRecoveryRequests().acceptedMeResponses;
+
+      await page.getByRole("button", { name: "Update and reload" }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(authenticatedStartsBeforeReload);
+      await page.waitForFunction(async () => {
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated" &&
+          Boolean(navigator.serviceWorker.controller);
+      });
+
+      await expect.poll(() => server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations)
+        .filter((observation) =>
+          (observation as { checkName?: string; outcome?: string }).checkName ===
+            "stale-deployment-recovery" &&
+          (observation as { outcome?: string }).outcome === "success",
+        ).length).toBe(1);
+
+      const observations = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+          appBuild: string;
+          metrics: Record<string, unknown>;
+        }>;
+      const recoveryObservations = observations.filter(
+        (observation) => observation.checkName === "stale-deployment-recovery",
+      );
+      expect(recoveryObservations).toHaveLength(1);
+      expect(recoveryObservations[0]).toMatchObject({
+        outcome: "success",
+        appBuild: "pwa-new-build",
+        metrics: {},
+      });
+      expect(server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(authenticatedStartsBeforeReload);
+
+      const markerSnapshots = await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_marker_capture") ?? "[]") as string[],
+      );
+      expect(markerSnapshots).toHaveLength(1);
+      const marker = JSON.parse(markerSnapshots[0]);
+      expect(Object.keys(marker).sort()).toEqual(["attemptedAt", "fromBuild"]);
+      expect(marker).toMatchObject({
+        fromBuild: expect.stringMatching(/^[a-f0-9]{1,8}$/),
+        attemptedAt: expect.any(Number),
+      });
+      expect(markerSnapshots[0]).not.toMatch(/https?:|old-build/);
+      const lifecycle = await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("__pwa_recovery_worker_lifecycle") ?? "[]") as
+          Array<{ kind: string; state?: string }>,
+      );
+      expect(lifecycle).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "worker-state", state: "installed" }),
+        expect.objectContaining({ kind: "worker-state", state: "activated" }),
+      ]));
+      expect(JSON.stringify(observations)).not.toMatch(
+        /https?:|stack|userId|clientId|deviceId|runId|errorStack|errorUrl/i,
+      );
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("leaves the attempt unconfirmed when reload returns to the same build without an update", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+
+      // Revert the fixture before the update check: the worker is unavailable
+      // and the fallback reload remains on the same app build.
+      server.publish("old");
+      const sameBuildReload = page.waitForEvent("domcontentloaded");
+      await page.getByRole("button", { name: "Update and reload" }).click();
+      await sameBuildReload;
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old", {
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId("button-start-run")).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(1);
+
+      const observations = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      const recoveryOutcomes = observations.filter((item) =>
+        item.checkName === "stale-deployment-recovery",
+      ).map((item) => item.outcome);
+      expect(recoveryOutcomes).not.toContain("success");
+      expect(recoveryOutcomes).not.toContain("failure");
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("keeps recovery unconfirmed when the updated build cannot complete authenticated startup", async ({
+    page,
+  }) => {
+    const server = await startVersionedServer(
+      { old: fixture.oldDir, new: fixture.newDir },
+      fixture.staleHomeChunk,
+      { sessionRecovery: true, fieldCheckObservations: true },
+    );
+
+    try {
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(
+        page,
+        server,
+        fixture.staleHomeChunk,
+      );
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
+      server.failNextSessionProbes(2);
+
+      await page.getByRole("button", { name: "Update and reload" }).click();
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId("auth-startup-retry")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId("button-start-run")).toHaveCount(0);
+      const pendingMarker = await page.evaluate(() =>
+        sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1"),
+      );
+      expect(pendingMarker).not.toBeNull();
+      expect(Object.keys(JSON.parse(pendingMarker!)).sort())
+        .toEqual(["attemptedAt", "fromBuild"]);
+
+      const observations = server.fieldCheckObservations()
+        .flatMap((batch) => batch.observations) as Array<{
+          checkName: string;
+          outcome: string;
+        }>;
+      const recoveryOutcomes = observations.filter((item) =>
+        item.checkName === "stale-deployment-recovery",
+      ).map((item) => item.outcome);
+      expect(recoveryOutcomes).not.toContain("success");
+      expect(recoveryOutcomes).not.toContain("failure");
+      expect(server.sessionRecoveryRequests().temporaryMeFailures).toBe(2);
+      expect(server.staleAssetRequestCount()).toBe(1);
+      expect(server.fixtureErrors()).toEqual([]);
     } finally {
       await server.close();
     }
