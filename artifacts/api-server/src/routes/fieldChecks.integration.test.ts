@@ -190,6 +190,32 @@ function syncAcknowledgmentObservation(
 }
 
 describe("field-check evidence from two authenticated clients", () => {
+  it("rejects anonymous observation uploads without persisting field evidence", async () => {
+    const response = await fetch(`${baseUrl}/api/field-checks/observations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        observations: [observation("anonymous-upload", "failure", "mobile-chrome")],
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    const body = await response.json() as {
+      error: string;
+      reason: string;
+      correlationId: string;
+    };
+    expect(body).toEqual({
+      error: "Unauthorized",
+      reason: "session_expired",
+      correlationId: expect.any(String),
+    });
+    expect(response.headers.get("content-type")).toMatch(/application\/json/u);
+    expect(response.headers.get("x-correlation-id")).toBe(body.correlationId);
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
   it("rejects observations outside the clock window without persisting them", async () => {
     const now = Date.now();
     const invalidObservations = [
