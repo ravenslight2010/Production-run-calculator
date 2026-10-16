@@ -2163,29 +2163,39 @@ test.describe("phone layout smoke", () => {
           exact: true,
         });
         await brandPicker.tap();
-        await page.getByPlaceholder("Search or add…").fill(brand);
-        const existingBrand = page.getByRole("button", { name: brand, exact: true });
+        const brandPickerDialog = page.getByRole("dialog", {
+          name: /Select pick or add a brand/i,
+        });
+        await expect(brandPickerDialog).toBeVisible();
+        await brandPickerDialog.getByPlaceholder("Search or add…").fill(brand);
+        const existingBrand = brandPickerDialog.getByRole("button", { name: brand, exact: true });
         if (await existingBrand.count()) {
-          await existingBrand.last().tap();
+          await existingBrand.tap();
         } else {
-          await page
+          await brandPickerDialog
             .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(brand)}.*$`) })
             .tap();
         }
+        await expect(brandPickerDialog).toBeHidden();
         const flavorPicker = profileSurface.getByRole("button", {
           name: "Pick or add a flavor…",
           exact: true,
         });
         await flavorPicker.tap();
-        await page.getByPlaceholder("Search or add…").fill(flavor);
-        const existingFlavor = page.getByRole("button", { name: flavor, exact: true });
+        const flavorPickerDialog = page.getByRole("dialog", {
+          name: /Select pick or add a flavor/i,
+        });
+        await expect(flavorPickerDialog).toBeVisible();
+        await flavorPickerDialog.getByPlaceholder("Search or add…").fill(flavor);
+        const existingFlavor = flavorPickerDialog.getByRole("button", { name: flavor, exact: true });
         if (await existingFlavor.count()) {
-          await existingFlavor.last().tap();
+          await existingFlavor.tap();
         } else {
-          await page
+          await flavorPickerDialog
             .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(flavor)}.*$`) })
             .tap();
         }
+        await expect(flavorPickerDialog).toBeHidden();
         await expect(profileSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
         await openTouchPickerContract(profileSurface, "touch Setup Profiles editor");
       } finally {

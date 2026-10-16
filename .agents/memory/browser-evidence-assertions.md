@@ -53,3 +53,13 @@ recipe fails even when the picker works correctly.
 
 **How to apply:** Keep selector-drift checks anchored to the picker test ID
 and accessible label, then verify the chosen recipe through container text.
+
+Touch pickers live in dialogs; scope search fields and options to the active
+picker dialog instead of querying the page globally. A prior closed picker can
+leave a hidden matching search field in the DOM.
+
+**Why:** Global placeholder queries can become ambiguous when consecutive
+pickers are opened inside the same setup dialog, even though only one is active.
+
+**How to apply:** Resolve the picker dialog by its accessible title, assert it
+is visible, then query its search field and options within that dialog.

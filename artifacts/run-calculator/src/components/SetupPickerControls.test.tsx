@@ -9,6 +9,10 @@ vi.mock("../hooks/use-mobile", () => ({
 }));
 
 import { IngredientSelect, TypeDropdown } from "./SetupPickerControls";
+import {
+  IngredientSelect as LiveIngredientSelect,
+  TypeDropdown as LiveTypeDropdown,
+} from "../pages/liveTabsSupport";
 
 afterEach(() => {
   cleanup();
@@ -115,8 +119,56 @@ describe("setup picker controls", () => {
       />,
     );
 
+    expect(screen.getByText("Applicator type")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Applicator type" }));
     await user.click(await screen.findByRole("option", { name: "— None" }));
     expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("keeps live-run touch layout while using the shared picker callbacks", async () => {
+    touchState.enabled = true;
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const onAddOption = vi.fn();
+    const onTypeAddOption = vi.fn();
+
+    render(
+      <>
+        <LiveIngredientSelect
+          value=""
+          onChange={onChange}
+          options={["House Blend"]}
+          optionLabels={new Map([["House Blend", "House Blend (Northstar)"]])}
+          onAddOption={onAddOption}
+          placeholder="Choose ingredient…"
+          ariaLabel="Choose ingredient"
+        />
+        <LiveTypeDropdown
+          label="Applicator type"
+          value="House"
+          onChange={onChange}
+          options={["House", "Seasonal"]}
+          onAddOption={onTypeAddOption}
+          onRemoveOption={vi.fn()}
+          allowClear
+          ariaLabel="Applicator type"
+        />
+      </>,
+    );
+
+    expect(screen.queryByText("Applicator type")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Choose ingredient" }));
+    await user.click(await screen.findByRole("option", { name: "House Blend (Northstar)" }));
+    expect(onChange).toHaveBeenLastCalledWith("House Blend");
+
+    await user.click(screen.getByRole("button", { name: "Applicator type" }));
+    await user.click(await screen.findByRole("option", { name: "— None" }));
+    expect(onChange).toHaveBeenLastCalledWith("");
+    await user.click(screen.getByRole("button", { name: "Applicator type" }));
+    await user.type(screen.getByPlaceholderText("Search or add…"), "New Type");
+    await user.click(await screen.findByRole("button", { name: /Add.*New Type/ }));
+    expect(onTypeAddOption).toHaveBeenCalledWith("New Type");
+    expect(onChange).toHaveBeenLastCalledWith("New Type");
+    expect(onAddOption).not.toHaveBeenCalled();
   });
 });

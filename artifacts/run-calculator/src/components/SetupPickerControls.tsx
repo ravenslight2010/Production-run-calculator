@@ -172,6 +172,23 @@ export function IngredientSelect({
   );
 }
 
+export type TypeDropdownProps = {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  onAddOption: (v: string) => void;
+  onRemoveOption: (v: string) => void;
+  allowClear?: boolean;
+  ariaLabel?: string;
+  testId?: string;
+  /**
+   * Setup controls render the field label beside the touch picker. Live-run
+   * surfaces provide their label in surrounding layout, so they opt out.
+   */
+  showLabelOnTouch?: boolean;
+};
+
 export function TypeDropdown({
   label,
   value,
@@ -182,17 +199,8 @@ export function TypeDropdown({
   allowClear,
   ariaLabel,
   testId,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption: (v: string) => void;
-  onRemoveOption: (v: string) => void;
-  allowClear?: boolean;
-  ariaLabel?: string;
-  testId?: string;
-}) {
+  showLabelOnTouch = true,
+}: TypeDropdownProps) {
   const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
@@ -239,22 +247,26 @@ export function TypeDropdown({
       ...options.map((option) => ({ value: option, label: option })),
     ];
     const accessibleLabel = ariaLabel ?? label;
+    const picker = (
+      <TouchOptionPicker
+        value={value}
+        options={touchOptions}
+        onValueChange={onChange}
+        placeholder="Select…"
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+        data-testid={testId}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+    if (!showLabelOnTouch) return picker;
     return (
       <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           {label}
         </p>
-        <TouchOptionPicker
-          value={value}
-          options={touchOptions}
-          onValueChange={onChange}
-          placeholder="Select…"
-          title={accessibleLabel}
-          aria-label={accessibleLabel}
-          data-testid={testId}
-          onAddOption={onAddOption}
-          onRemoveOption={onRemoveOption}
-        />
+        {picker}
       </div>
     );
   }
