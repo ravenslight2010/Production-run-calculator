@@ -27,6 +27,14 @@ Keep Vite PWA's `registerType: "prompt"` and never let update detection itself r
 
 **How to apply:** Verify a genuine old-to-new build handoff and persistence survival. Do not recommend blanket site-data clearing as the standard remedy or infer the precise cache/lifecycle defect from this report alone.
 
+## Approved status placement
+
+Place update status and actions in a menu or normal page layout; they must not float over content or department navigation, including on small screens.
+
+**Why:** The owner reported that the persistent “Current” overlay blocked department tabs and approved moving it where it cannot block information.
+
+**How to apply:** Keep update actions discoverable and safety states visible without covering underlying controls. Attention notices must reserve layout space rather than moving the obstruction to another corner.
+
 **Update evidence boundary:** A successful fresh release-identity check is required
 before saying the app is current. Installation, activation, and a reload request
 are intermediate stages; update completion requires the next document to report
