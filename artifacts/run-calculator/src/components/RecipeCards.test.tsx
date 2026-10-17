@@ -2,11 +2,59 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DoughRecipeCard, FrontlineRecipeCard, MixRecipeCard } from "./RecipeCards";
+import { CheesePickCard, DoughRecipeCard, FrontlineRecipeCard, MixRecipeCard } from "./RecipeCards";
 
 afterEach(cleanup);
 
 describe("recipe cards", () => {
+  it("displays a temporary cheese swap without changing saved rows or invoking the caller", () => {
+    const recipe = [
+      { ingredient: "Whole Mozzarella", lbs: 40 },
+      { ingredient: "Provolone", lbs: 10 },
+    ];
+    const savedRecipe = recipe.map(row => ({ ...row }));
+    // This pick-only card exposes recipe selection, not a separate save callback.
+    const onRecipeNameChange = vi.fn();
+    const props = {
+      label: "Cheese",
+      batches: 2,
+      ozPerPizza: 4,
+      recipe,
+      recipeName: "House Blend",
+      recipeNameOptions: ["House Blend"],
+      shredderSetting: "",
+      cellulose: "",
+      onRecipeNameChange,
+    };
+    const { rerender } = render(
+      <CheesePickCard
+        {...props}
+        substitutions={[{
+          id: "temporary-mozzarella-swap",
+          action: "swap",
+          ingredient: "Whole Mozzarella",
+          substitute: "Skim Mozzarella",
+        }]}
+      />,
+    );
+
+    expect(screen.getByTestId("temporary-cheese-recipe-overlay")).toBeTruthy();
+    expect(screen.getByText("Skim Mozzarella")).toBeTruthy();
+    expect(screen.getByText("Provolone")).toBeTruthy();
+    expect(screen.queryByText("Whole Mozzarella")).toBeNull();
+    expect(recipe).toEqual(savedRecipe);
+    expect(onRecipeNameChange).not.toHaveBeenCalled();
+
+    rerender(<CheesePickCard {...props} substitutions={[]} />);
+
+    expect(screen.queryByTestId("temporary-cheese-recipe-overlay")).toBeNull();
+    expect(screen.queryByText("Skim Mozzarella")).toBeNull();
+    expect(screen.getByText("Whole Mozzarella")).toBeTruthy();
+    expect(screen.getByText("Provolone")).toBeTruthy();
+    expect(recipe).toEqual(savedRecipe);
+    expect(onRecipeNameChange).not.toHaveBeenCalled();
+  });
+
   it("passes Mix card add-row actions to the caller", async () => {
     const user = userEvent.setup();
     const onAppend = vi.fn();
