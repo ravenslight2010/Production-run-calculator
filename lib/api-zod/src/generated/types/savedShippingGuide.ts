@@ -10,9 +10,15 @@ import type { SavedShippingGuideData } from './savedShippingGuideData';
 export interface SavedShippingGuide {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;

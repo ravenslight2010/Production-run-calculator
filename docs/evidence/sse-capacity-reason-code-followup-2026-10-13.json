@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "kind": "sse-capacity-reason-code-followup",
+  "capturedAtUtc": "2026-10-13T18:38:54.000Z",
+  "environment": "production",
+  "captureMethod": [
+    "Replit deployment metadata and live /api/build-info",
+    "Event-filtered deployment-log query for database_capacity_sample after 2026-10-13T17:50:00.000Z",
+    "Allowlist-only projection of sampler fields; raw log lines were not retained"
+  ],
+  "deployment": {
+    "active": true,
+    "deploymentType": "autoscale",
+    "buildSuccessful": true,
+    "appBuildId": "app-build:a1bd8a04-45d2-4886-bd7a-4ad40f545e26",
+    "gitRevision": "6f55fe8bee7f8d0c025f4c703fc0138f8d5ff540",
+    "sourcePolicy": "production-source-v3",
+    "sourceFingerprintSha256": "3ad250858a17d31672cba6e3a6d5d1f3e5f07e14ee8a7b68f4062f184c55da1e",
+    "sampleIdentityMatchesLiveBuildInfo": true
+  },
+  "capacityObservation": {
+    "captureWindowUtc": [
+      "2026-10-13T17:55:52.959Z",
+      "2026-10-13T18:36:02.129Z"
+    ],
+    "sampleSchemaVersion": 2,
+    "sampleIntervalMs": 300000,
+    "sampleCount": 9,
+    "primaryObservedSamples": 4,
+    "unavailableSamples": 5,
+    "unavailableReasonCounts": {
+      "pool_checkout_timeout": 3,
+      "capacity_query_timeout": 2
+    },
+    "completeForRepresentativeWindow": false,
+    "representsPeakHeadroom": false,
+    "rawLogsRetained": false
+  },
+  "interpretation": "All five unavailable readings were classified as timeouts: three at pool checkout and two during the capacity query. These bounded codes identify the failure stage, not the underlying cause. This roughly 40-minute check is too short and not confirmed peak-aligned, so it does not establish complete representative coverage or peak headroom.",
+  "historicalReasonCodes": "The 2026-10-11 schema-version-1 samples predate reason-code logging and remain unclassified; they were not backfilled."
+}

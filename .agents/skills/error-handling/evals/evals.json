@@ -1,0 +1,40 @@
+{
+  "skill_name": "error-handling",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "A tablet still has an older production tab open. It fails while loading the lazy Home JavaScript chunk, before the Home screen appears. The staff member may have an active run or unsaved setup, and support cannot confirm that today's local or server snapshot is available. Should support tell them to refresh? Give safe recovery guidance.",
+      "expected_output": "Recognize the pre-Home stale-asset case, consult the PWA update policy, and explain that recovery must remain blocked until the trusted current-day safety proof and safe-idle recheck pass; do not advise a blind reload.",
+      "files": [],
+      "expectations": [
+        "The response routes the stale lazy Home failure to .agents/memory/pwa-update-prompts.md or explicitly identifies the PWA update policy as the source of its recovery rules.",
+        "The response requires both an authenticated complete current-client-day snapshot and a matching current-day local snapshot showing no active run; unknown, malformed, unavailable, or mismatched state stays unsafe.",
+        "The response retains the one-minute uninterrupted safe-idle interval and rechecks safety before worker recovery.",
+        "The response rejects a blind or generic automatic reload while safety is unknown or production work may be active."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "On an older cached Safari/iPad build, startup shows exactly `Can't find variable: Notification`. Nothing in the report confirms whether a run is active. Should we auto-refresh, match all ReferenceErrors, or offer a recovery action? Tell me what staff should see.",
+      "expected_output": "Use the exact-message-scoped, user-initiated recovery action from the PWA policy, without broad matching or automatic reload.",
+      "files": [],
+      "expectations": [
+        "The response routes this exact Safari Notification reference error to .agents/memory/pwa-update-prompts.md or explicitly identifies the PWA update policy as the source.",
+        "The response limits the recovery action to the exact message `Can't find variable: Notification` and offers an explicit staff-clicked `Update and reload` action.",
+        "The response says worker checking/activation happens only after the staff member clicks, with ordinary reload as the fallback when no waiting worker can be activated.",
+        "The response rejects automatic reload and broad ReferenceError matching."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "The current web build gets a 503 while importing an unrelated alerts-panel chunk after a brief network interruption. The build ID matches the server and there is no Notification reference error. The user has unsaved form input. Should we use the stale-client update-and-reload path or retry? Give a safe next step.",
+      "expected_output": "Treat this as an ordinary network/chunk failure, not the narrowly scoped stale-client case; preserve unsaved input and avoid broad or automatic reload advice.",
+      "files": [],
+      "expectations": [
+        "The response does not misclassify the 503 as the exact Safari Notification stale-client case or recommend the special Update and reload path.",
+        "The response rejects an automatic or blind reload and preserves the unsaved form input.",
+        "The response gives a bounded, non-destructive diagnostic or retry next step appropriate to a transient network/chunk failure."
+      ]
+    }
+  ]
+}

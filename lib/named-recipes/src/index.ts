@@ -142,6 +142,21 @@ export function normalizeNamedRecipeFlavors(input: unknown): string[] {
   return out;
 }
 
+export interface RecipeCustomerMetadata {
+  brand: string;
+  flavors: string[];
+}
+
+/** Normalize the customer tag without changing any other recipe fields. */
+export function normalizeNamedRecipeCustomerMetadata(input: unknown): RecipeCustomerMetadata {
+  const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const brand = coerceStr(raw.brand);
+  return {
+    brand,
+    flavors: brand ? normalizeNamedRecipeFlavors(raw.flavors) : [],
+  };
+}
+
 // Coerce a raw API/DB record into a clean NamedRecipe, or null if it has no
 // usable name. Numeric component pounds are clamped to >= 0; enabled defaults to
 // true; malformed components are dropped. brand/flavors default to untagged
@@ -160,7 +175,7 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
         .map(normalizeNamedRecipeComponent)
         .filter((c): c is NamedRecipeComponent => c !== null)
     : [];
-  const brand = coerceStr(raw.brand);
+  const { brand, flavors } = normalizeNamedRecipeCustomerMetadata(raw);
   const recipe: NamedRecipe = {
     id,
     name,
@@ -168,7 +183,7 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
     components,
     enabled,
     brand,
-    flavors: brand ? normalizeNamedRecipeFlavors(raw.flavors) : [],
+    flavors,
   };
   if (typeof raw.updatedAt === "string" && raw.updatedAt.trim()) {
     recipe.updatedAt = raw.updatedAt.trim();
@@ -289,7 +304,7 @@ function unionVariantCustomers(
 }
 
 /** Normalize a raw `customers` value from a DB/API record. */
-function normalizeVariantCustomers(
+export function normalizeDoughballVariantCustomers(
   raw: unknown,
 ): Array<{ brand: string; flavor: string }> {
   if (!Array.isArray(raw)) return [];
@@ -323,7 +338,7 @@ export function normalizeDoughballVariants(
     if (!label) continue;
     const weightOz = coerceNum(rec.weightOz, 0);
     const perTray = Math.round(coerceNum(rec.perTray, 0));
-    const customers = normalizeVariantCustomers(rec.customers);
+    const customers = normalizeDoughballVariantCustomers(rec.customers);
     const v: DoughballVariant = { label };
     if (weightOz > 0) v.weightOz = weightOz;
     if (perTray > 0) v.perTray = perTray;

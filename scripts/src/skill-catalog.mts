@@ -98,6 +98,7 @@ export type CatalogReport = {
   projectRoot: string;
   roots: CatalogRootReport[];
   skills: SkillRecord[];
+  memoryDecisionFindings: MemoryDecisionFinding[];
   allowedDuplicates: DuplicateAllowlistEntry[];
   managedWarningBaseline: ManagedWarningBaselineEntry[];
   managedWarningDrift: ManagedWarningDrift[];
@@ -106,6 +107,19 @@ export type CatalogReport = {
   documentedWarnings: number;
   undocumentedWarnings: number;
 };
+
+export type MemoryDecisionFinding = {
+  topicPath: string;
+  code: "missing_target" | "missing_index_link";
+};
+
+// These are the high-risk decisions called out by the app workflow map in
+// .agents/skills/README.md. Keep this set explicit; not every memory topic is
+// required to appear in the curated index.
+export const REQUIRED_MEMORY_DECISION_TOPICS = [
+  ".agents/memory/pwa-update-prompts.md",
+  ".agents/memory/qc-allergen-phase1-decisions.md",
+] as const;
 
 export type ManagedWarningBaselineEntry = {
   path: string;
@@ -315,6 +329,40 @@ function isWithin(parent: string, child: string): boolean {
   return child === parent || child.startsWith(prefix);
 }
 
+export async function checkRequiredMemoryDecisionLinks(
+  projectRoot: string,
+): Promise<MemoryDecisionFinding[]> {
+  const resolvedProjectRoot = resolve(projectRoot);
+  const memoryDirectory = resolve(resolvedProjectRoot, ".agents/memory");
+  let memoryIndex = "";
+  try {
+    memoryIndex = await readFile(resolve(memoryDirectory, "MEMORY.md"), "utf8");
+  } catch {
+    // A missing index means none of the required decisions are discoverable.
+  }
+
+  const linkedTargets = [...memoryIndex.matchAll(/\[[^\]]*]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g)]
+    .map((match) => match[1])
+    .filter((target): target is string => Boolean(target))
+    .filter((target) => !isExternalReference(target))
+    .map((target) => resolve(memoryDirectory, withoutReferenceSuffix(target)));
+
+  const findings: MemoryDecisionFinding[] = [];
+  for (const topicPath of REQUIRED_MEMORY_DECISION_TOPICS) {
+    const absoluteTopicPath = resolve(resolvedProjectRoot, topicPath);
+    try {
+      await readFile(absoluteTopicPath);
+    } catch {
+      findings.push({ topicPath, code: "missing_target" });
+    }
+
+    if (!linkedTargets.includes(absoluteTopicPath)) {
+      findings.push({ topicPath, code: "missing_index_link" });
+    }
+  }
+  return findings;
+}
+
 async function readSkill(
   projectRoot: string,
   root: SkillRoot,
@@ -431,6 +479,7 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
   const roots = options.roots ?? DEFAULT_SKILL_ROOTS;
   const duplicateAllowlist = options.duplicateAllowlist ?? DEFAULT_DUPLICATE_ALLOWLIST;
   const managedWarningBaseline = options.managedWarningBaseline ?? [];
+  const memoryDecisionFindings = await checkRequiredMemoryDecisionLinks(projectRoot);
   const rootReports: CatalogRootReport[] = [];
   const skills: SkillRecord[] = [];
 
@@ -560,7 +609,8 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
   }
 
   const failures =
-    skills.filter((skill) => skill.classification === "editable" && skill.findings.length > 0).length;
+    skills.filter((skill) => skill.classification === "editable" && skill.findings.length > 0).length +
+    memoryDecisionFindings.length;
   const warnings =
     rootReports.filter((root) => root.missing).length +
     skills.filter((skill) => skill.classification === "managed" && skill.findings.length > 0).length;
@@ -582,6 +632,7 @@ export async function scanSkillCatalog(options: ScanOptions = {}): Promise<Catal
     projectRoot,
     roots: rootReports,
     skills,
+    memoryDecisionFindings,
     allowedDuplicates,
     managedWarningBaseline,
     managedWarningDrift,
@@ -634,6 +685,13 @@ export function formatCatalogReport(report: CatalogReport): string {
     ),
     "",
   ];
+  for (const item of report.memoryDecisionFindings) {
+    const detail =
+      item.code === "missing_target"
+        ? "required decision topic target is missing"
+        : "required decision topic is not linked from .agents/memory/MEMORY.md";
+    lines.push(`FAIL ${item.topicPath}: ${detail}`);
+  }
   for (const root of report.roots) {
     if (root.missing) {
       lines.push(`WARN ${root.relativePath}: root missing`);

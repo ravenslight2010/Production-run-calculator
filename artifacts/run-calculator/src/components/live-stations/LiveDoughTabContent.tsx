@@ -21,6 +21,8 @@ import RecipeSubstitutionBadge from "../RecipeSubstitutionBadge";
 import { ReadOnlyRecipeCard, SecondsField, fmtMS } from "./stationShared";
 import { TickBar } from "../TickBar";
 import { fmtNum, fmtTime } from "../../utils";
+import { minutesUntilRunToTime } from "../../runToTime";
+import { RunToTimeControl } from "./RunToTimeControl";
 
 export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const doughLock = useManualControlLock(useHomeCtx().currentRun?.id, "dough-trays");
@@ -40,6 +42,16 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
     nextRunPrepActive, packagingDrainActive, detectPackagingSpeedDrift,
   } = useLiveRun();
+
+  const commitRunToTime = (time: string) => {
+    if (dayStateRef.current.runToTime === time && runToTime === time) return;
+    setRunToTime(time);
+    const newDayState = { ...dayStateRef.current, runToTime: time };
+    dayStateRef.current = newDayState;
+    setDayState(newDayState);
+    saveDayState(newDayState);
+    schedulePush(newDayState, 0);
+  };
 
   // ── Shift prep phase (pre-production batch tracking) ─────────────────────
   const doughPrepBatchSec = Math.max(30,
@@ -420,7 +432,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               disabled={!!doughLock}
                               onSuggest={() => { const baseline = { traysOnLine: Number(form.getValues("traysOnLine")) || 0, batchesReady: Number(form.getValues("batchesReady")) || 0 }; const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }, baseline); }}
                               onManualChange={(next, previous) => {
-                                onManual({ traysOnLine: next }, { traysOnLine: previous, batchesReady: Number(v.batchesReady) || 0 });
+                                onManual({ traysOnLine: next }, {
+                                  traysOnLine: previous,
+                                  batchesReady: Number(form.getValues("batchesReady")) || 0,
+                                });
                               }}
                             />
                             {doughSubTab !== "crusts" && (
@@ -474,7 +489,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 suggestion={!batchAutoActive ? suggestedBatches : null}
                               onSuggest={() => { const baseline = { traysOnLine: Number(form.getValues("traysOnLine")) || 0, batchesReady: Number(form.getValues("batchesReady")) || 0 }; const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }, baseline); }}
                               onManualChange={(next, previous) => {
-                                onManual({ batchesReady: next }, { traysOnLine: Number(v.traysOnLine) || 0, batchesReady: previous });
+                                 onManual({ batchesReady: next }, {
+                                   traysOnLine: Number(form.getValues("traysOnLine")) || 0,
+                                   batchesReady: previous,
+                                 });
                               }}
                               disabled={!!doughLock}
                               />
@@ -529,8 +547,11 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             skidsCompleted: packedSkids,
                             casesOnCurrentSkid: packedCasesOnSkid,
                             casesPerSkid: cps,
-                            applyProgress: (nextSkids, nextCases) => {
-                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+                            applyProgress: (nextSkids, nextCases, previousSkids, previousCases) => {
+                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases, undefined, {
+                                skidsCompleted: previousSkids,
+                                casesOnCurrentSkid: previousCases,
+                              });
                               form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                               form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                             },
@@ -622,8 +643,22 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             name="skidsCompleted"
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                            onSuggest={() => { persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={(nextSkids) => { persistManualPackagingProgress(currentRunId, nextSkids, Number(v.casesOnCurrentSkid) || 0); }}
+                            onSuggest={() => {
+                              const before = {
+                                skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                                casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                              };
+                              persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid, undefined, before);
+                              form.setValue("skidsCompleted", s!.skids, { shouldDirty: true });
+                              form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true });
+                            }}
+                            onManualChange={(nextSkids, previousSkids) => {
+                              const casesOnCurrentSkid = Number(form.getValues("casesOnCurrentSkid")) || 0;
+                              persistManualPackagingProgress(currentRunId, nextSkids, casesOnCurrentSkid, undefined, {
+                                skidsCompleted: previousSkids,
+                                casesOnCurrentSkid,
+                              });
+                            }}
                              disabled={!!packagingLock}
                           />
                           <StepperField
@@ -632,8 +667,21 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
                             max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                            onSuggest={() => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={(nextCases) => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, nextCases); }}
+                            onSuggest={() => {
+                              const before = {
+                                skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                                casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                              };
+                              persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid, undefined, before);
+                              form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true });
+                            }}
+                            onManualChange={(nextCases, previousCases) => {
+                              const skidsCompleted = Number(form.getValues("skidsCompleted")) || 0;
+                              persistManualPackagingProgress(currentRunId, skidsCompleted, nextCases, undefined, {
+                                skidsCompleted,
+                                casesOnCurrentSkid: previousCases,
+                              });
+                            }}
                              disabled={!!packagingLock}
                           />
                         </div>
@@ -731,11 +779,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 })()}
                 {/* Run to Time card — available to all roles */}
                 {doughSubTab === "dough" && (() => {
-                  const target = new Date(nowTime);
-                  const [hrs, mins] = runToTime.split(":").map(Number);
-                  target.setHours(hrs, mins, 0, 0);
-                  if (target <= nowTime) target.setDate(target.getDate() + 1);
-                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const minutesAvailable = minutesUntilRunToTime(runToTime, nowTime);
                   // Measured mixer time (low + high) beats the line-speed guess
                   // for min/batch when the operator has timed the machines.
                   const measuredSpinSec = Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0);
@@ -774,22 +818,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-4 pb-4">
-                        <div className="flex items-center gap-3 mb-3">
+                        <div className="flex flex-wrap items-center gap-3 mb-3">
                           <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
                           <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
-                          <input
-                            type="time"
-                            value={runToTime}
-                            onChange={(e: any) => {
-                              const t = e.target.value;
-                              setRunToTime(t);
-                              const newDs = { ...dayStateRef.current, runToTime: t };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              schedulePush(newDs, 0);
-                            }}
-                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          />
+                          <RunToTimeControl value={runToTime} onCommit={commitRunToTime} />
                           <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(timePerBatchMin, 1)} min/batch</span>
                         </div>
                         <div className="responsive-metric-grid">
@@ -831,11 +863,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 
                 {/* Run to Time card — crust mode */}
                 {doughSubTab === "crusts" && (() => {
-                  const target = new Date(nowTime);
-                  const [hrs, mins] = runToTime.split(":").map(Number);
-                  target.setHours(hrs, mins, 0, 0);
-                  if (target <= nowTime) target.setDate(target.getDate() + 1);
-                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const minutesAvailable = minutesUntilRunToTime(runToTime, nowTime);
                   const pizzasByTime = calc.ppm * minutesAvailable;
                   const casesToOpenByTime = v.crustsPerCase > 0 ? Math.ceil(pizzasByTime / v.crustsPerCase) : 0;
                   const stacksByTime = calc.perTray > 0 ? Math.ceil(pizzasByTime / calc.perTray) : 0;
@@ -864,22 +892,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-4 pb-4">
-                        <div className="flex items-center gap-3 mb-3">
+                        <div className="flex flex-wrap items-center gap-3 mb-3">
                           <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
                           <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
-                          <input
-                            type="time"
-                            value={runToTime}
-                            onChange={(e: any) => {
-                              const t = e.target.value;
-                              setRunToTime(t);
-                              const newDs = { ...dayStateRef.current, runToTime: t };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              schedulePush(newDs, 0);
-                            }}
-                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          />
+                          <RunToTimeControl value={runToTime} onCommit={commitRunToTime} />
                         </div>
                         <div className="responsive-metric-grid">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">

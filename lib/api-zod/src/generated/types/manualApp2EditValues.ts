@@ -10,4 +10,7 @@ export type ManualApp2EditValues = {
   app2BatchesMade?: number;
   app2BatchAnchorNetSec?: number;
   app2BatchCorrectionGeneration?: number;
+  app2StockLbs?: number;
+  app2StockAnchorNetSec?: number;
+  app2StockCorrectionGeneration?: number;
 };

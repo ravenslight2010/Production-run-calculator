@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "./aiDataBoundary";
+import {
+  AI_ROUTE_BOUNDARIES,
+  safeAiErrorMetadata,
+  validateAiRequestBoundary,
+} from "./aiDataBoundary";
 
 describe("AI operational data boundaries", () => {
   it("catalogs every retained provider route with an explicit policy", () => {
@@ -69,5 +73,40 @@ describe("AI operational data boundaries", () => {
       brandFlavors: { Known: ["Cheese"] },
       unmatchedNames: ["Known Cheese Mix"],
     })).toEqual({ ok: true });
+  });
+
+  it("keeps database error payloads out of correction-write diagnostics", () => {
+    const error = Object.assign(
+      new Error("fixture-source fixture-target"),
+      {
+        status: 500,
+        code: "23505",
+        query: "insert into ai_corrections",
+        params: ["fixture-source", "fixture-target"],
+      },
+    );
+
+    const metadata = safeAiErrorMetadata(error);
+    expect(metadata).toEqual({
+      status: 500,
+      code: "23505",
+      errorType: "Error",
+    });
+    expect(JSON.stringify(metadata)).not.toContain("fixture-source");
+    expect(JSON.stringify(metadata)).not.toContain("fixture-target");
+    expect(metadata).not.toHaveProperty("message");
+    expect(metadata).not.toHaveProperty("query");
+    expect(metadata).not.toHaveProperty("params");
+  });
+
+  it("drops non-machine-readable error fields instead of logging their text", () => {
+    const metadata = safeAiErrorMetadata({
+      name: "fixture source label",
+      status: "fixture target label",
+      code: "correction:fixture value",
+      message: "private correction text",
+    });
+
+    expect(metadata).toEqual({ errorType: "Error" });
   });
 });

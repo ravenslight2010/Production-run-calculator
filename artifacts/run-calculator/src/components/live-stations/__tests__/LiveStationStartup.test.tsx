@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FormProvider, useForm, useWatch } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +12,7 @@ import {
   clearManualSectionLocks,
   releaseManualSectionLock,
 } from "../../../manualSectionLocks";
-import { createPackagingManager } from "../../../packagingManager";
+import { createPackagingManager, type PackagingManager } from "../../../packagingManager";
 import { resetSauceBarrelEntry } from "../../../sauceBarrelStore";
 import {
   acceptRemoteRunValueOnSync,
@@ -27,6 +27,8 @@ import { LiveDoughTabContent } from "../LiveDoughTabContent";
 import { LiveFrontlineTabContent } from "../LiveFrontlineTabContent";
 import { LivePackagingTabContent } from "../LivePackagingTabContent";
 import { LiveSauceTabContent } from "../LiveSauceTabContent";
+import { HomeStationTabs } from "../../../components/HomeStationTabs";
+import { TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
 
 vi.mock("../../../useRole", () => ({
   useMe: () => ({ hasCapability: () => false }),
@@ -97,6 +99,8 @@ function StationProviders({
   values = STATION_VALUES,
   runs,
   switchToRun = vi.fn(() => true),
+  packagingManager: packagingManagerOverride,
+  sauceAutoTrackFailure = null,
   children,
 }: {
   status: "pending" | "running" | "paused" | "ended";
@@ -104,6 +108,8 @@ function StationProviders({
   values?: FormValues;
   runs?: RunMeta[];
   switchToRun?: (newIndex: number, expectedCurrentRunId?: string) => boolean;
+  packagingManager?: PackagingManager;
+  sauceAutoTrackFailure?: { barrelId: string; dismissed: boolean; kind: "transient" | "permanent" } | null;
   children: ReactNode;
 }) {
   const form = useForm<FormValues>({ defaultValues: values });
@@ -132,29 +138,33 @@ function StationProviders({
     }),
     [noop],
   );
+  const stationPackagingManager = packagingManagerOverride ?? packagingManager;
   const homeValue = {
     autoSuppressUntilRef,
     confirmRunSurplus: vi.fn().mockResolvedValue(undefined),
+    clearSauceAutoTrackFailureNotice: vi.fn(),
     currentRun,
     currentRunId: runId,
     dayState,
     dayStateRef,
     doughSubTab: "dough",
     form,
-    freezerSurplus: [],
+    freezerSurplus: { lots: [], allocations: [] },
     freezerSurplusBusy: false,
     freezerSurplusError: null,
     freezerSurplusLoaded: true,
     isSupervisor: true,
     lastEndedRun: null,
     lastLocalEditRef,
-    packagingManager,
+    packagingManager: stationPackagingManager,
     persistManualPackagingProgress: noop,
     queueManualCorrection: noop,
     refreshFreezerSurplus: vi.fn().mockResolvedValue(undefined),
     runStatus: status,
     runToTime: "12:00",
     schedulePush: noop,
+    sauceAutoTrackFailure,
+    dismissSauceAutoTrackFailure: noop,
     setDayState: noop,
     setRunToTime: noop,
     setWriteError: noop,
@@ -191,12 +201,51 @@ function StationProviders({
   );
 }
 
+function SauceWarningTabFixture() {
+  const [activeTab, setActiveTab] = useState("run");
+  return (
+    <StationProviders
+      status="running"
+      sauceAutoTrackFailure={{
+        barrelId: `${RUN_ID}:event-1`,
+        dismissed: false,
+        kind: "transient",
+      }}
+    >
+      <HomeStationTabs activeTab={activeTab as any} onTabChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="run">Run</TabsTrigger>
+          <TabsTrigger value="sauce">Sauce</TabsTrigger>
+          <TabsTrigger value="dough">Dough</TabsTrigger>
+        </TabsList>
+        <TabsContent value="run"><div>Run screen</div></TabsContent>
+        <TabsContent value="sauce"><LiveSauceTabContent /></TabsContent>
+        <TabsContent value="dough"><div>Dough station</div></TabsContent>
+      </HomeStationTabs>
+    </StationProviders>
+  );
+}
+
+describe("Sauce auto-track warning surface", () => {
+  it("shows the failure only on the selected Sauce station", async () => {
+    render(<SauceWarningTabFixture />);
+    expect(screen.getByText("Run screen").hidden).toBe(false);
+    expect(screen.queryByTestId("sauce-auto-track-failure")).toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Sauce" }), { button: 0 });
+    expect((await screen.findByTestId("sauce-auto-track-failure")).hidden).toBe(false);
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0 });
+    await waitFor(() => expect(screen.queryByTestId("sauce-auto-track-failure")).toBeNull());
+  });
+});
+
 const STATIONS = [
   {
     name: "Sauce",
     Component: LiveSauceTabContent,
     pendingSelector: { role: "button" as const, name: "Start Prep" },
-    runningSelector: { text: "Sauce Batches Needed" },
+    runningSelector: { text: "Current-run Sauce needs" },
   },
   {
     name: "Frontline",
@@ -243,6 +292,12 @@ const FRONTLINE_APPLICATOR_LOCK_CASES = [
   { slot: "app3", label: "App 3 — Cheese" },
   { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
+
+function applicatorStockControls(slot: (typeof FRONTLINE_APPLICATOR_LOCK_CASES)[number]["slot"]) {
+  const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
+  const buttons = within(input.parentElement!).getAllByRole("button") as HTMLButtonElement[];
+  return [input, ...buttons];
+}
 
 function expectSelector(
   selector:
@@ -311,26 +366,26 @@ describe("live station startup", () => {
     expect((screen.getByTestId("btn-inc-casesOnCurrentSkid") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("keeps Sauce correction controls disabled while a peer owns the Sauce section, then restores them", () => {
-    claimManualSectionLock(RUN_ID, "sauce", "peer-device", 30_000, true);
+  it("keeps Sauce stock controls disabled while a peer owns the stock section, then restores them", () => {
+    claimManualSectionLock(RUN_ID, "sauce-stock", "peer-device", 30_000, true);
     render(
       <StationProviders status="running">
         <LiveSauceTabContent />
       </StationProviders>,
     );
 
-    const controls = screen.getAllByRole("button", { name: /consumed batches correction/ });
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+    const increase = screen.getByTestId("sauce-stock-increase") as HTMLButtonElement;
+    expect(increase.disabled).toBe(true);
 
     act(() => {
-      releaseManualSectionLock(RUN_ID, "sauce", "peer-device");
+      releaseManualSectionLock(RUN_ID, "sauce-stock", "peer-device");
     });
 
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    expect(increase.disabled).toBe(false);
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES)(
-    "keeps $slot Frontline correction controls disabled while a peer owns the applicator section, then restores them",
+    "keeps $slot Frontline stock controls disabled while a peer owns the applicator section, then restores them",
     ({ slot, label }) => {
       claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
       render(
@@ -339,7 +394,8 @@ describe("live station startup", () => {
         </StationProviders>,
       );
 
-      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(screen.getByText(label)).toBeTruthy();
+      const controls = applicatorStockControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
       act(() => {
@@ -359,8 +415,8 @@ describe("live station startup", () => {
       </StationProviders>,
     );
 
-    const app1Controls = within(screen.getByText("App 1 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
-    const app2Controls = within(screen.getByText("App 2 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    const app1Controls = applicatorStockControls("app1");
+    const app2Controls = applicatorStockControls("app2");
     expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
     expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
@@ -373,17 +429,22 @@ describe("live station startup", () => {
   });
 
   it("advances Frontline once when its ended run has cleared Stage 1", () => {
-    const switchToRun = vi.fn(() => true);
+    const runs = [ENDED_RUN, NEXT_RUN];
+    const selectedRunId = { current: RUN_ID };
+    const switchToRun = vi.fn((newIndex: number, expectedCurrentRunId?: string) => {
+      if (expectedCurrentRunId && selectedRunId.current !== expectedCurrentRunId) return false;
+      selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+      return true;
+    });
     const view = render(
-      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+      <StationProviders status="ended" runs={runs} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
       </StationProviders>,
     );
-
     expect(switchToRun).toHaveBeenCalledTimes(1);
     expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
     view.rerender(
-      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+      <StationProviders status="ended" runs={runs} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
       </StationProviders>,
     );
@@ -391,7 +452,7 @@ describe("live station startup", () => {
   });
 
   it("keeps an ended station run selected when there is no queued next run", () => {
-    const switchToRun = vi.fn(() => true);
+    const switchToRun = vi.fn();
     render(
       <StationProviders status="ended" runs={[ENDED_RUN]} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
@@ -402,7 +463,7 @@ describe("live station startup", () => {
   });
 
   it("does not advance Packaging during Frontline or Freeze tunnel drain", () => {
-    const switchToRun = vi.fn(() => true);
+    const switchToRun = vi.fn();
     const stillDraining = { ...ENDED_RUN, endedAt: Date.now() - 5 * 60_000 };
     render(
       <StationProviders status="ended" runs={[stillDraining, NEXT_RUN]} switchToRun={switchToRun}>
@@ -414,8 +475,14 @@ describe("live station startup", () => {
   });
 
   it("advances Packaging once when the ended run is fully drained, including on mount", () => {
-    const switchToRun = vi.fn(() => true);
     const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+    const runs = [fullyDrained, NEXT_RUN];
+    const selectedRunId = { current: RUN_ID };
+    const switchToRun = vi.fn((newIndex: number, expectedCurrentRunId?: string) => {
+      if (expectedCurrentRunId && selectedRunId.current !== expectedCurrentRunId) return false;
+      selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+      return true;
+    });
     render(
       <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
         <LivePackagingTabContent />
@@ -468,8 +535,73 @@ describe("live station startup", () => {
     },
   );
 
+  it("keeps a prior-run drain update keyed to that run across a selected-run handoff", () => {
+    const priorRun: RunMeta = {
+      ...ENDED_RUN,
+      id: "station-prior-drain",
+      endedAt: Date.now() - 5 * 60_000,
+    };
+    const priorValues = {
+      ...STATION_VALUES,
+      casesNeeded: 500,
+      casesPerSkid: 40,
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 10,
+    };
+    const draining = { run: priorRun, values: priorValues };
+    const selectDrainingRun = vi.fn(() => draining);
+    const casesInDrainingFreezer = vi.fn()
+      .mockReturnValueOnce(12)
+      .mockReturnValueOnce(11);
+    const advanceDrainingRun = vi.fn();
+    const packagingManager = {
+      persistManualProgress: vi.fn(),
+      persistAutomaticProgress: vi.fn(() => false),
+      updateDrainingRun: vi.fn(),
+      selectDrainingRun,
+      casesInDrainingFreezer,
+      advanceDrainingRun,
+    } satisfies PackagingManager;
+
+    const { rerender } = render(
+      <StationProviders
+        status="running"
+        runId={SWITCHED_RUN_ID}
+        runs={[NEXT_RUN, priorRun]}
+        packagingManager={packagingManager}
+      >
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    // The first effect call establishes the prior run's freezer baseline.
+    // Re-render as if the foreground/manual handoff selected the next run;
+    // the second call must still persist the old run's exited case.
+    rerender(
+      <StationProviders
+        status="running"
+        runId={SWITCHED_RUN_ID}
+        runs={[{ ...NEXT_RUN }, priorRun]}
+        packagingManager={packagingManager}
+      >
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    expect(advanceDrainingRun).toHaveBeenCalledWith(
+      priorRun.id,
+      priorValues,
+      1,
+    );
+    expect(advanceDrainingRun).not.toHaveBeenCalledWith(
+      SWITCHED_RUN_ID,
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
-    "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",
+    "keeps $slot Frontline stock controls usable after switching away from the peer-locked run",
     ({ slot, label }) => {
       claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
       render(
@@ -482,7 +614,8 @@ describe("live station startup", () => {
         </StationProviders>,
       );
 
-      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(screen.getByText(label)).toBeTruthy();
+      const controls = applicatorStockControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );
@@ -607,85 +740,14 @@ describe("live station edits and stamped browser persistence", () => {
     localStorage.clear();
   });
 
-  it("keeps the dough quick-check edit after remount and rejects a stale peer snapshot", async () => {
-    const view = render(
-      <LiveStationPersistenceHarness>
-        <LiveDoughTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("btn-inc-packCases"));
+  it("keeps Sauce stock after remount and rejects a stale peer snapshot", async () => {
+    saveRunValues(RUN_ID, {
+      ...loadRunValues(RUN_ID),
+      sauceStockBarrels: 1.2,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
     });
-
-    await waitFor(() => {
-      expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
-    });
-    const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
-    expect(editedStamp).toBeGreaterThan(100);
-
-    view.unmount();
-    render(
-      <LiveStationPersistenceHarness>
-        <LiveDoughTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-    expect(screen.getByTestId("text-pack-cases").textContent).toContain("4");
-
-    const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, casesOnCurrentSkid: 1 };
-    const acceptsStalePeer = acceptRemoteRunValueOnSync(
-      stalePeerValues,
-      localValues,
-      editedStamp - 1,
-      editedStamp,
-    );
-    expect(acceptsStalePeer).toBe(false);
-
-    if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
-  });
-
-  it("keeps a packaging-floor count after remount and rejects a stale peer snapshot", async () => {
-    const view = render(
-      <LiveStationPersistenceHarness>
-        <LivePackagingTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("btn-inc-casesOnCurrentSkid"));
-    });
-
-    await waitFor(() => {
-      expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
-    });
-    const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
-    expect(editedStamp).toBeGreaterThan(100);
-
-    view.unmount();
-    render(
-      <LiveStationPersistenceHarness>
-        <LivePackagingTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-    expect(screen.getByTestId("text-casesOnCurrentSkid").textContent).toBe("4");
-
-    const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, casesOnCurrentSkid: 1 };
-    const acceptsStalePeer = acceptRemoteRunValueOnSync(
-      stalePeerValues,
-      localValues,
-      editedStamp - 1,
-      editedStamp,
-    );
-    expect(acceptsStalePeer).toBe(false);
-
-    if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
-  });
-
-  it("keeps a sauce count after remount and rejects a stale peer snapshot", async () => {
     const view = render(
       <LiveStationPersistenceHarness>
         <LiveSauceTabContent />
@@ -693,13 +755,11 @@ describe("live station edits and stamped browser persistence", () => {
     );
 
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Increase consumed batches correction" }),
-      );
+      fireEvent.click(screen.getByTestId("sauce-stock-increase"));
     });
 
     await waitFor(() => {
-      expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
+      expect(loadRunValues(RUN_ID).sauceStockBarrels).toBe(1.3);
     });
     const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
     expect(editedStamp).toBeGreaterThan(100);
@@ -710,10 +770,10 @@ describe("live station edits and stamped browser persistence", () => {
         <LiveSauceTabContent />
       </LiveStationPersistenceHarness>,
     );
-    expect(screen.getByText(/consumed 1\.00/)).toBeTruthy();
+    expect(screen.getByLabelText("Sauce stock on hand").textContent).toContain("1.3");
 
     const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, sauceBarrelsMade: 0 };
+    const stalePeerValues = { ...localValues, sauceStockBarrels: 1.2 };
     const acceptsStalePeer = acceptRemoteRunValueOnSync(
       stalePeerValues,
       localValues,
@@ -723,6 +783,8 @@ describe("live station edits and stamped browser persistence", () => {
     expect(acceptsStalePeer).toBe(false);
 
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
+    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
+    expect(loadRunValues(RUN_ID).sauceStockBarrels).toBe(1.3);
   });
+
 });

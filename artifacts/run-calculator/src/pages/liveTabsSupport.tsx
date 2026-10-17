@@ -64,6 +64,13 @@ import { LivePackagingTabContent } from "../components/live-stations/LivePackagi
 import { LiveDoughTabContent } from "../components/live-stations/LiveDoughTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
+import { TouchSelect } from "../components/TouchOptionPicker";
+import {
+  IngredientSelect,
+  TypeDropdown as SharedTypeDropdown,
+  type TypeDropdownProps,
+} from "../components/SetupPickerControls";
+export { IngredientSelect };
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
 import { useForm, useFieldArray } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
@@ -387,7 +394,6 @@ import { TickBar } from "../components/TickBar";
 import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../components/DoughRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
-import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
 import { updateSupervisorPin } from "../supervisorPinApi";
 import {
@@ -840,146 +846,6 @@ export function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   return rows;
 }
 
-export function IngredientSelect({
-  value,
-  onChange,
-  options,
-  onAddOption,
-  onRemoveOption,
-  placeholder,
-  optionLabels,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption?: (v: string) => void;
-  onRemoveOption?: (v: string) => void;
-  placeholder?: string;
-  // Optional display label per option value (e.g. brand tags for colliding
-  // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
-  optionLabels?: ReadonlyMap<string, string>;
-}) {
-  const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
-  const [open, setOpen] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [dropUp, setDropUp] = useState(false);
-  const [rect, setRect] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
-  const confirmDeleteRef = useRef<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const scrollKeep = useDropdownScrollKeeper(open);
-  const filtered = (options ?? []).filter(o =>
-    labelOf(o).toLowerCase().includes(inputVal.toLowerCase())
-  );
-
-  function openDropdown() {
-    setInputVal("");
-    setConfirmDelete(null);
-    confirmDeleteRef.current = null;
-    if (triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const dropdownH = Math.min(filtered.length * 32 + 80, 280);
-      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
-      setRect({ top: r.top, bottom: r.bottom, left: r.left, width: r.width });
-    }
-    setOpen(true);
-  }
-
-  const dropStyle: React.CSSProperties = rect
-    ? {
-        position: "fixed",
-        left: Math.max(4, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 192) - 8)),
-        width: Math.max(rect.width, 192),
-        zIndex: 9999,
-        ...(dropUp
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
-      }
-    : {};
-
-  return (
-    <div className="relative w-full">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={openDropdown}
-        className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
-      >
-        <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
-          {(value && labelOf(value)) || placeholder || "Select…"}
-        </span>
-        <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
-      </button>
-      {open && (
-        <div
-          style={dropStyle}
-          className="bg-popover border border-border rounded-md shadow-xl py-1"
-        >
-          <input
-            autoFocus
-            value={inputVal}
-            onChange={e => setInputVal(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" && inputVal.trim() && onAddOption) {
-                onAddOption(inputVal.trim());
-                onChange(inputVal.trim());
-                setOpen(false);
-              }
-              if (e.key === "Escape") setOpen(false);
-            }}
-            onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
-            placeholder="Search or add…"
-            className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
-          />
-          <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-60 overflow-y-auto overscroll-contain">
-            {filtered.map(opt =>
-              confirmDelete === opt ? (
-                <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                  <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
-                  <span className="flex gap-1 shrink-0">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
-                  </span>
-                </div>
-              ) : (
-                <div key={opt} className="flex items-center">
-                  <button
-                    type="button"
-                    className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                    onMouseDown={() => { onChange(opt); setOpen(false); }}
-                  >
-                    {labelOf(opt)}
-                  </button>
-                  {onRemoveOption && (
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              )
-            )}
-            {inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && onAddOption && (
-              <button
-                type="button"
-                className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
-              >
-                <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function CheeseRecipeCard({
   label,
   batches,
@@ -1127,6 +993,8 @@ export function CheesePickCard({
   recipeMissing,
   poolComponents,
   optionLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   batches: number;
@@ -1154,6 +1022,8 @@ export function CheesePickCard({
   recipeMissing?: boolean;
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const updateReloadBlockerId = useId();
   // A temporary substitution must be visible anywhere floor staff read the
@@ -1186,16 +1056,18 @@ export function CheesePickCard({
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <select
+      <TouchSelect
         value={recipeName}
         onChange={e => onRecipeNameChange(e.target.value)}
+        aria-label={recipePickerLabel ?? "Pick a cheese recipe"}
+        data-testid={recipePickerTestId}
         className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
       >
         <option value="">Pick a cheese recipe…</option>
         {options.map(name => (
           <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
         ))}
-      </select>
+      </TouchSelect>
     </div>
   );
 
@@ -1323,6 +1195,8 @@ export function MixRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   recipeNameLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   totalRunLbs: number;
@@ -1344,6 +1218,8 @@ export function MixRecipeCard({
   onRecipeNameChange?: (v: string) => void;
   // Optional display label per recipe name (brand tags for colliding names).
   recipeNameLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -1354,7 +1230,7 @@ export function MixRecipeCard({
     <>
       {recipeNameOptions && onRecipeNameChange && (
         <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
+          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} ariaLabel={recipePickerLabel} testId={recipePickerTestId} />
         </div>
       )}
       {fields.length === 0 ? (
@@ -1449,6 +1325,8 @@ export function DoughRecipeCard({
   onAddRecipeName,
   onRemoveRecipeName,
   onRecipeNameChange,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   batchesNeeded: number;
   fields: { id: string }[];
@@ -1468,6 +1346,8 @@ export function DoughRecipeCard({
   onAddRecipeName: (v: string) => void;
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
@@ -1494,6 +1374,8 @@ export function DoughRecipeCard({
               onAddOption={onAddRecipeName}
               onRemoveOption={onRemoveRecipeName}
               placeholder="Recipe name…"
+              ariaLabel={recipePickerLabel}
+              testId={recipePickerTestId}
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
@@ -1633,6 +1515,8 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   fields: { id: string }[];
   recipe: RecipeRow[];
@@ -1649,13 +1533,15 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
   embedded?: boolean;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" ariaLabel={recipePickerLabel} testId={recipePickerTestId} />
     </div>
   );
 
@@ -1736,157 +1622,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// useDropdownScrollKeeper lives in src/hooks/useDropdownScrollKeeper.ts
-// (moved out of home.tsx so Fast Refresh is not broken by a hook export)
-
-export function TypeDropdown({
-  label,
-  value,
-  onChange,
-  options,
-  onAddOption,
-  onRemoveOption,
-  allowClear,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption: (v: string) => void;
-  onRemoveOption: (v: string) => void;
-  allowClear?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [dropUp, setDropUp] = useState(false);
-  const [rect, setRect] = useState<{ top: number; bottom: number; right: number } | null>(null);
-  const confirmDeleteRef = useRef<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const scrollKeep = useDropdownScrollKeeper(open);
-  const filtered = options.filter(o =>
-    o.toLowerCase().includes(inputVal.toLowerCase())
-  );
-
-  const MENU_W = 176;
-  function openDropdown() {
-    setInputVal("");
-    setConfirmDelete(null);
-    confirmDeleteRef.current = null;
-    if (triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const dropdownH = Math.min(filtered.length * 32 + 80, 240);
-      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
-      setRect({ top: r.top, bottom: r.bottom, right: r.right });
-    }
-    setOpen(true);
-  }
-
-  const dropStyle: React.CSSProperties = rect
-    ? {
-        position: "fixed",
-        left: Math.max(4, Math.min(rect.right - MENU_W, window.innerWidth - MENU_W - 8)),
-        width: MENU_W,
-        zIndex: 9999,
-        ...(dropUp
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
-      }
-    : {};
-
-  return (
-    <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
-      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        {label}
-      </p>
-      <div className="relative">
-        <button
-          ref={triggerRef}
-          type="button"
-          onClick={openDropdown}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
-        >
-          <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
-            {value || "Select…"}
-          </span>
-          <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
-        </button>
-        {open && (
-          <div
-            style={dropStyle}
-            className="bg-popover border border-border rounded-md shadow-lg py-1"
-          >
-            <input
-              autoFocus
-              value={inputVal}
-              onChange={e => setInputVal(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && inputVal.trim()) {
-                  onAddOption(inputVal.trim());
-                  onChange(inputVal.trim());
-                  setOpen(false);
-                }
-                if (e.key === "Escape") setOpen(false);
-              }}
-              onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
-              placeholder="Search or add…"
-              className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
-            />
-            <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-48 overflow-y-auto overscroll-contain">
-              {allowClear && value && (
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors italic"
-                  onMouseDown={() => { onChange(""); setOpen(false); }}
-                >
-                  — None
-                </button>
-              )}
-              {filtered.map(opt =>
-                confirmDelete === opt ? (
-                  <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                    <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
-                    <span className="flex gap-1 shrink-0">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
-                    </span>
-                  </div>
-                ) : (
-                  <div key={opt} className="flex items-center">
-                    <button
-                      type="button"
-                      className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                      onMouseDown={() => { onChange(opt); setOpen(false); }}
-                    >
-                      {opt}
-                    </button>
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                )
-              )}
-              {inputVal.trim() && !options.includes(inputVal.trim()) && (
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                  onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
-                >
-                  <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+export function TypeDropdown(props: Omit<TypeDropdownProps, "showLabelOnTouch">) {
+  return <SharedTypeDropdown {...props} showLabelOnTouch={false} />;
 }
 export function NumField({
   control,
@@ -2269,16 +2006,27 @@ function FloorModeView() {
                   {(packagingLock || packagingConflict) && <p role="status" aria-live="polite" className="col-span-3 text-center text-xs text-amber-200">{packagingConflict ?? sectionLockedMessage(packagingLock)}</p>}
                   <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = Math.max(0, before.casesOnCurrentSkid - 1);
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
                   <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
                   <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = incrementFloorCaseCount(
+                        before.casesOnCurrentSkid,
+                        Number(form.getValues("casesPerSkid")) || 0,
+                      );
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock || (v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid)} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
@@ -2334,8 +2082,12 @@ function FloorModeView() {
                         () => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer,
                         () => {
                           navigator.vibrate?.(15);
-                          const nextSkids = v.skidsCompleted + 1;
-                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0);
+                          const before = {
+                            skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                            casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                          };
+                          const nextSkids = before.skidsCompleted + 1;
+                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0, undefined, before);
                           form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                           form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                         },

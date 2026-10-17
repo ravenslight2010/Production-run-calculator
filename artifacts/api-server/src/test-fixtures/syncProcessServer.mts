@@ -1,5 +1,6 @@
 import express from "express";
 import router from "../routes/index";
+import { stopSyncOutboxFanout } from "../routes/sync";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -23,9 +24,44 @@ const server = app.listen(0, "127.0.0.1", () => {
 });
 
 const close = () => {
+  stopSyncOutboxFanout();
   server.closeAllConnections?.();
   server.close(() => process.exit(0));
 };
 
 process.once("SIGTERM", close);
 process.once("SIGINT", close);
+
+process.on("message", (message: unknown) => {
+  if (
+    message
+    && typeof message === "object"
+    && (message as { type?: unknown }).type === "stop-sync-outbox-listener"
+    && typeof (message as { requestId?: unknown }).requestId === "string"
+  ) {
+    stopSyncOutboxFanout();
+    process.send?.({
+      type: "sync-outbox-stopped",
+      requestId: (message as { requestId: string }).requestId,
+    });
+    return;
+  }
+
+  if (
+    !message
+    || typeof message !== "object"
+    || (message as { type?: unknown }).type !== "run-daily-rollover"
+    || typeof (message as { requestId?: unknown }).requestId !== "string"
+  ) {
+    return;
+  }
+
+  const requestId = (message as { requestId: string }).requestId;
+  const options = (message as {
+    options?: { nowMs?: number; timeZone?: string };
+  }).options;
+  void import("../routes/sync")
+    .then(({ runDailyRollover }) => runDailyRollover("live", options))
+    .then((result) => process.send?.({ type: "operation-result", requestId, ok: true, result }))
+    .catch(() => process.send?.({ type: "operation-result", requestId, ok: false }));
+});

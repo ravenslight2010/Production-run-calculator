@@ -142,6 +142,8 @@ export function findOrBuildIngredient(
     categories: [category],
     mergedInto: null,
     enabled: true,
+    allergens: [],
+    allergensReviewed: false,
   };
 }
 
@@ -178,6 +180,8 @@ export async function captureIngredientNamesToCatalog(
         categories: [category],
         mergedInto: null,
         enabled: true,
+        allergens: [],
+        allergensReviewed: false,
       });
     }
     if (additions.length === 0) return;

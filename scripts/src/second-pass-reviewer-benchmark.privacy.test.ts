@@ -35,6 +35,7 @@ function observationsWithSensitivePayloads(): Record<string, Record<string, unkn
         materialCases: 0,
         nonMaterialCases: 0,
         providerCalls: 0,
+        providerRetries: 0,
         reviewerFailures: 0,
         duplicateWarnings: 0,
         falseWarnings: 0,
@@ -55,6 +56,7 @@ const RETAINED_OBSERVATION_FIELDS = [
   "materialCases",
   "nonMaterialCases",
   "providerCalls",
+  "providerRetries",
   "reviewerFailures",
   "duplicateWarnings",
   "falseWarnings",
@@ -134,21 +136,34 @@ describe("retained reviewer benchmark privacy boundary", () => {
     );
     const observationsPath = path.join(
       root,
-      "docs/second-pass-reviewer-live-observations-2026-09-05.json",
+      "docs/second-pass-reviewer-live-observations-2026-10-06.json",
     );
     const target = path.join(root, "retained-report.json");
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
     fs.mkdirSync(path.dirname(observationsPath), { recursive: true });
     const sourceBytes = JSON.stringify({ findings: EMPTY_FINDINGS });
+    const lockBytes = "lockfileVersion: '9.0'\n";
+    const lockSha256 = createHash("sha256").update(lockBytes).digest("hex");
     fs.writeFileSync(sourcePath, sourceBytes);
+    fs.writeFileSync(path.join(root, "pnpm-lock.yaml"), lockBytes);
     const observations = observationsWithSensitivePayloads();
     observations["parse-spec-sheet"].providerCalls =
       SYNTHETIC_BENCHMARK_PRIVACY_FIXTURES.providerPayload;
     fs.writeFileSync(
       observationsPath,
       JSON.stringify({
+        formatVersion: 2,
+        capturedAt: "2026-10-06T11:17:00.238Z",
+        environment: "candidate-workspace",
+        sourceRevision: `source-sha256:${"a".repeat(64)}`,
         sourceHash: createHash("sha256").update(sourceBytes).digest("hex"),
         model: "synthetic-provider-model",
+        evaluatorSha256: "b".repeat(64),
+        toolchain: {
+          nodeVersion: "24.21.0",
+          pnpmVersion: "12.8.1",
+          pnpmLockSha256: lockSha256,
+        },
         operations: observations,
       }),
     );

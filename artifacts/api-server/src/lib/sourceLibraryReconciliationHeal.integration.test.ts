@@ -2,6 +2,7 @@
 // Import @workspace/db only after DATABASE_URL is switched: its pool binds on
 // module evaluation.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import pg from "pg";
@@ -48,18 +49,40 @@ beforeAll(async () => {
   } = await import("./dataHeals"));
   ({ sourceLibraryReconciliationStatus } = await import("./sourceLibraryReconciliationHeal"));
 
-  // One audited automatic replacement in every pool. All begin with nonblank,
-  // conflicting data so the assertions prove this is an overwrite, not fill.
+  const report = JSON.parse(readFileSync(
+    path.join(root, "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json"),
+    "utf8",
+  )) as {
+    proposals: Array<{
+      classification: string;
+      table: string;
+      before: Record<string, any>;
+    }>;
+  };
+  const auditedBefore = (table: string, id: string): Record<string, any> => {
+    const proposal = report.proposals.find(
+      (candidate) => candidate.classification === "automatic" &&
+        candidate.table === table && candidate.before.id === id,
+    );
+    if (!proposal) throw new Error(`Missing audited before-image for ${table}:${id}`);
+    return proposal.before;
+  };
+
+  // Seed the exact, nonblank audited before-images so the repair's full-content
+  // guard accepts only the reviewed source state and still proves replacement.
   await db.insert(doughRecipesTable).values({
-    id: "dough:masa-dough", scope: "live", name: "Masa Dough",
-    components: [{ ingredient: "manager wrong", lbs: 99 }], doughballWeightOz: 99, doughballsPerTray: 99,
-  });
+    ...auditedBefore("dough_recipes", "dough:masa-dough"),
+    scope: "live",
+  } as any);
   await db.insert(sauceRecipesTable).values({
-    id: "sauce:bobo-s-buffalo-pizza-sauce", scope: "live", name: "Bobo's Buffalo Pizza Sauce",
-    components: [{ ingredient: "manager wrong", lbs: 99 }],
-  });
+    ...auditedBefore("sauce_recipes", "sauce:bobo-s-buffalo-pizza-sauce"),
+    scope: "live",
+  } as any);
   await db.insert(cheeseRecipesTable).values([
-    { id: "cheese:aldo:aldo-s-standard-cheese-mix", scope: "live", name: "Aldo's Standard Cheese Mix", components: [{ ingredient: "manager wrong", lbs: 99 }] },
+    {
+      ...auditedBefore("cheese_recipes", "cheese:aldo:aldo-s-standard-cheese-mix"),
+      scope: "live",
+    } as any,
     // An audited replacement id with a manager rename: stale id+name guard
     // must skip it rather than overwriting its nonblank components.
     { id: "cheese:basha-s-original:basha-s-original-cheese-cheese-mix", scope: "live", name: "Manager renamed replacement", components: [{ ingredient: "must survive", lbs: 7 }] },
@@ -71,9 +94,9 @@ beforeAll(async () => {
     { id: "cheese:basha-s-ultra-thin:basha-s-ultra-thin-bbq-chicken-cheese-mix", scope: "live", name: "Basha's Ultra Thin BBQ Chicken Cheese Mix", components: [{ ingredient: "canonical", lbs: 1 }] },
   ]);
   await db.insert(mixesTable).values({
-    id: "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix", scope: "live", name: "Bobo's Deluxe Veggie Mix",
-    components: [{ ingredient: "manager wrong", perPizza: 99 }], batchSize: 99,
-  });
+    ...auditedBefore("mixes", "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix"),
+    scope: "live",
+  } as any);
   await db.insert(brandProfilesTable).values([
     { key: "link__profile", scope: "live", brand: "Link", flavor: "Profile",
       values: { app1CheeseRecipeName: "Corner BBQ Chicken Cheese Mix" }, updatedAtMs: 100 },
@@ -102,7 +125,7 @@ afterAll(async () => {
 });
 
 describe("runSourceLibraryReconciliationHeal", () => {
-  it("overwrites audited pools, repoints only pending live links, and protects guarded rows", async () => {
+  it("preserves audited before-images and rejects stale or unreviewed repair rows", async () => {
     const beforeStatus = await sourceLibraryReconciliationStatus(db, "live");
     expect(beforeStatus.status).toBe("not-verified");
     expect(beforeStatus.heal.markerValid).toBe(false);
@@ -127,67 +150,88 @@ describe("runSourceLibraryReconciliationHeal", () => {
     expect(JSON.stringify(beforeStatus)).not.toContain('"values"');
 
     // Exercise the two generic stub purges that run earlier during production
-    // boot. A historical-only reference must keep its recipe alive until the
-    // reconciliation heal performs its own preservation check.
+    // boot. Audited rows with nonzero legacy `amount` components are not empty
+    // stubs and must survive until the source reconciliation can inspect them.
+    const [doughBeforePurge] = await db.select().from(doughRecipesTable)
+      .where(eq(doughRecipesTable.id, "dough:masa-dough"));
+    const [sauceBeforePurge] = await db.select().from(sauceRecipesTable)
+      .where(eq(sauceRecipesTable.id, "sauce:bobo-s-buffalo-pizza-sauce"));
+    const [cheeseBeforePurge] = await db.select().from(cheeseRecipesTable)
+      .where(eq(cheeseRecipesTable.id, "cheese:aldo:aldo-s-standard-cheese-mix"));
+    const [mixBeforePurge] = await db.select().from(mixesTable)
+      .where(eq(mixesTable.id, "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix"));
     await runProfileNameLinkStubPurge();
     await runWorkbookImportStubPurge();
+    const [doughAfterPurge] = await db.select().from(doughRecipesTable)
+      .where(eq(doughRecipesTable.id, "dough:masa-dough"));
+    const [sauceAfterPurge] = await db.select().from(sauceRecipesTable)
+      .where(eq(sauceRecipesTable.id, "sauce:bobo-s-buffalo-pizza-sauce"));
+    const [cheeseAfterPurge] = await db.select().from(cheeseRecipesTable)
+      .where(eq(cheeseRecipesTable.id, "cheese:aldo:aldo-s-standard-cheese-mix"));
+    const [mixAfterPurge] = await db.select().from(mixesTable)
+      .where(eq(mixesTable.id, "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix"));
+    expect(doughAfterPurge).toEqual(doughBeforePurge);
+    expect(sauceAfterPurge).toEqual(sauceBeforePurge);
+    expect(cheeseAfterPurge).toEqual(cheeseBeforePurge);
+    expect(mixAfterPurge).toEqual(mixBeforePurge);
     expect(await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, STUBS[1][0]))).toHaveLength(1);
-    await runSourceLibraryReconciliationHeal();
+    // This audited row is fully represented in its before-image. A live edit
+    // after that snapshot must block the repair; other rows also have after
+    // fields absent from the retained before-image and must fail closed.
+    const managerComponents = [{ ingredient: "Manager edit", lbs: 7 }];
+    await db.update(sauceRecipesTable).set({ components: managerComponents })
+      .where(and(eq(sauceRecipesTable.scope, "live"), eq(sauceRecipesTable.id, "sauce:bobo-s-buffalo-pizza-sauce")));
+    let failure: unknown;
+    try {
+      await runSourceLibraryReconciliationHeal();
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      name: "RepairExecutionError",
+      cause: expect.objectContaining({
+        message: expect.stringContaining("Source-library reconciliation conflict: 1 stale row(s), 3 unreviewed row(s) skipped"),
+      }),
+    });
+
     const [dough] = await db.select().from(doughRecipesTable).where(eq(doughRecipesTable.id, "dough:masa-dough"));
     const [sauce] = await db.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.id, "sauce:bobo-s-buffalo-pizza-sauce"));
     const [cheese] = await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, "cheese:aldo:aldo-s-standard-cheese-mix"));
     const [mix] = await db.select().from(mixesTable).where(eq(mixesTable.id, "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix"));
-    expect(dough.components).toEqual(expect.arrayContaining([expect.objectContaining({ ingredient: "ADM WHEAT FLOUR", lbs: 200 })]));
-    expect(dough.doughballWeightOz).toBe(12);
-    expect(sauce.components).toEqual([{ ingredient: "Legacy Buffalo Ranch Sauce", lbs: 400 }, { ingredient: "Frank's Red Hot Sauce", lbs: 16 }]);
-    expect(cheese.components).toHaveLength(4);
-    expect(mix.batchSize).toBe(147.4875);
-    expect((await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, "cheese:basha-s-original:basha-s-original-cheese-cheese-mix")))[0].components).toEqual([{ ingredient: "must survive", lbs: 7 }]);
-    expect((await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, "cheese:four-hands:4hands-chicken-bacon-club-cheese-mix")))[0].name).toBe("Manager renamed");
-
-    const [alias] = await db.select().from(specImportAliasesTable).where(and(
-      eq(specImportAliasesTable.scope, "live"), eq(specImportAliasesTable.kind, "appType"),
+    expect(dough.components).toEqual(doughAfterPurge.components);
+    expect(sauce.components).toEqual(managerComponents);
+    expect(cheese.components).toEqual(cheeseAfterPurge.components);
+    expect(mix.components).toEqual(mixAfterPurge.components);
+    expect(mix.batchSize).toBe(mixAfterPurge.batchSize);
+    expect(await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, HEAL))).toHaveLength(0);
+    expect(await db.select().from(specImportAliasesTable).where(and(
+      eq(specImportAliasesTable.scope, "live"),
+      eq(specImportAliasesTable.kind, "appType"),
       eq(specImportAliasesTable.externalName, "Corner BBQ Chicken Cheese Mix"),
-    ));
-    expect(alias.canonicalName).toBe("Corner Booth BBQ Chicken Cheese Mix");
-    const [profile] = await db.select().from(brandProfilesTable).where(eq(brandProfilesTable.key, "link__profile"));
-    expect((profile.values as any).app1CheeseRecipeName).toBe("Corner Booth BBQ Chicken Cheese Mix");
-    expect(profile.updatedAtMs).toBeGreaterThan(100);
-    const [stubProfile] = await db.select().from(brandProfilesTable).where(eq(brandProfilesTable.key, "stub__repoint"));
-    expect((stubProfile.values as any).app1CheeseRecipeName).toBe("Basha's Ultra Thin BBQ Chicken Cheese Mix");
-    const rows = await db.select().from(dailySyncTable);
-    const future = rows.find((row) => row.date === "2026-08-26")!.data as any;
-    const history = rows.find((row) => row.date === "2026-08-25")!.data as any;
-    expect(future.runValues.pending.app1CheeseRecipeName).toBe("Corner Booth BBQ Chicken Cheese Mix");
-    expect(future.runValues["stub-pending"].app1CheeseRecipeName).toBe("Basha's Ultra Thin BBQ Chicken Cheese Mix");
-    expect(future.runValuesUpdatedAt["stub-pending"]).toBeGreaterThan(10);
-    expect(future.runValuesUpdatedAt.pending).toBeGreaterThan(10);
-    expect(future.runValues.started.app1CheeseRecipeName).toBe(STUBS[1][1]);
-    expect(future.runValues["ended-only"].app1CheeseRecipeName).toBe("Corner BBQ Chicken Cheese Mix");
-    expect(history.runValues.history.app1CheeseRecipeName).toBe(STUBS[1][1]);
-
-    expect(await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, STUBS[0][0]))).toHaveLength(0);
-    expect(await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, STUBS[1][0]))).toHaveLength(1);
-    expect(await db.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.id, STUBS[2][0]))).toHaveLength(1);
-    const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, HEAL));
-    expect(marker.result).toEqual({ replacements: 4, aliasesInserted: 2, repointedProfiles: 2, repointedRuns: 2, deletedStubs: 1 });
-
-    await db.update(mixesTable).set({ batchSize: 321 })
-      .where(eq(mixesTable.id, "premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix"));
-    const managerEditedStatus = await sourceLibraryReconciliationStatus(db, "live");
-    expect(managerEditedStatus.findings).not.toContainEqual(expect.objectContaining({
-      id: "source:pool-mismatch:mixes:premix--bobo-s-deluxe-bobo-s-deluxe-veggie-mix",
-    }));
+    ))).toHaveLength(0);
+    const statusAfterRejectedRepair = await sourceLibraryReconciliationStatus(db, "live");
+    expect(statusAfterRejectedRepair.status).toBe("not-verified");
+    expect(statusAfterRejectedRepair.heal.markerValid).toBe(false);
   });
 
-  it("is marker-guarded on the second execution", async () => {
+  it("keeps a blocked repair retryable without replacing later manager edits", async () => {
     await db.update(brandProfilesTable).set({ values: { app1CheeseRecipeName: "Manual override" }, updatedAtMs: 9999 })
       .where(eq(brandProfilesTable.key, "link__profile"));
-    await runSourceLibraryReconciliationHeal();
+    let failure: unknown;
+    try {
+      await runSourceLibraryReconciliationHeal();
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      name: "RepairExecutionError",
+      cause: expect.objectContaining({
+        message: expect.stringContaining("Source-library reconciliation conflict: 1 stale row(s), 3 unreviewed row(s) skipped"),
+      }),
+    });
     const [profile] = await db.select().from(brandProfilesTable).where(eq(brandProfilesTable.key, "link__profile"));
     expect((profile.values as any).app1CheeseRecipeName).toBe("Manual override");
-    const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, HEAL));
-    expect(marker.result).toEqual({ replacements: 4, aliasesInserted: 2, repointedProfiles: 2, repointedRuns: 2, deletedStubs: 1 });
+    expect(await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, HEAL))).toHaveLength(0);
     const sandboxStatus = await sourceLibraryReconciliationStatus(db, "sandbox");
     expect(sandboxStatus.status).toBe("not-verified");
     expect(sandboxStatus.freshness).toBe("stale");

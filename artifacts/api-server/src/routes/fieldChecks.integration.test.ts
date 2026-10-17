@@ -2,6 +2,7 @@
 // clients. The test uses a disposable database and imports the router only after
 // DATABASE_URL points at it.
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
@@ -10,8 +11,11 @@ import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
-import { signLegacyTokenForTests } from "../lib/auth";
-import { FIELD_CHECK_RETENTION_DAYS } from "../lib/fieldChecks";
+import type { FieldChecksReport } from "../lib/fieldChecks";
+let FIELD_CHECK_MAX_CLOCK_SKEW_MS: number;
+let FIELD_CHECK_RETENTION_DAYS: number;
+let signLegacyTokenForTests: typeof import("../lib/auth").signLegacyTokenForTests;
+let enhancedErrorMessages: typeof import("../middlewares/errorMessagesEnhanced").enhancedErrorMessages;
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -23,6 +27,9 @@ let fieldCheckObservationsTable: DbModule["fieldCheckObservationsTable"];
 let fieldCheckIssuesTable: DbModule["fieldCheckIssuesTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let seedRoles: () => Promise<void>;
+let clearSandboxCache: () => void;
+let createFieldChecksRouter: typeof import("./fieldChecks").createFieldChecksRouter;
+let requireAuth: typeof import("../middlewares/requireAuth").requireAuth;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -33,6 +40,7 @@ let baseUrl: string;
 const PHONE_USER = "field-phone-user";
 const TABLET_USER = "field-tablet-user";
 const MANAGER = "field-manager";
+const SANDBOX_MANAGER = "field-sandbox-manager";
 const SUPERVISOR = "field-supervisor";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -58,6 +66,10 @@ beforeAll(async () => {
   }
 
   process.env.DATABASE_URL = testUrlString;
+  // Import only after selecting the disposable DB: fieldChecks imports the DB pool.
+  ({ signLegacyTokenForTests } = await import("../lib/auth"));
+  ({ enhancedErrorMessages } = await import("../middlewares/errorMessagesEnhanced"));
+  ({ FIELD_CHECK_MAX_CLOCK_SKEW_MS, FIELD_CHECK_RETENTION_DAYS } = await import("../lib/fieldChecks"));
   const dbModule = await import("@workspace/db");
   // This suite's historical disposable schema can predate additive lifecycle
   // columns when drizzle's push cache is reused. Keep the fixture explicitly
@@ -67,6 +79,8 @@ beforeAll(async () => {
     ADD COLUMN IF NOT EXISTS session_revoked_at TIMESTAMPTZ
   `);
   const router = (await import("./index")).default;
+  ({ createFieldChecksRouter } = await import("./fieldChecks"));
+  ({ requireAuth } = await import("../middlewares/requireAuth"));
   db = dbModule.db;
   pool = dbModule.pool;
   usersTable = dbModule.usersTable;
@@ -76,6 +90,7 @@ beforeAll(async () => {
   fieldCheckIssuesTable = dbModule.fieldCheckIssuesTable;
   dailySyncTable = dbModule.dailySyncTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
+  clearSandboxCache = (await import("../lib/sandbox")).clearSandboxCache;
 
   const app: Express = express();
   app.use(express.json());
@@ -89,6 +104,7 @@ beforeAll(async () => {
     next();
   });
   app.use("/api", router);
+  app.use(enhancedErrorMessages);
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
   });
@@ -111,6 +127,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  clearSandboxCache();
   await db.execute(sql`
     TRUNCATE
       ${fieldCheckObservationsTable},
@@ -126,12 +143,14 @@ beforeEach(async () => {
     { id: PHONE_USER, username: PHONE_USER, passwordHash: "x" },
     { id: TABLET_USER, username: TABLET_USER, passwordHash: "x" },
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
+    { id: SANDBOX_MANAGER, username: SANDBOX_MANAGER, passwordHash: "x", sandbox: true },
     { id: SUPERVISOR, username: SUPERVISOR, passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: PHONE_USER, role: "operator" },
     { userId: TABLET_USER, role: "operator" },
     { userId: MANAGER, role: "manager" },
+    { userId: SANDBOX_MANAGER, role: "manager" },
     { userId: SUPERVISOR, role: "supervisor" },
   ]);
 });
@@ -186,6 +205,543 @@ function syncAcknowledgmentObservation(
 }
 
 describe("field-check evidence from two authenticated clients", () => {
+  it("rejects anonymous observation uploads without persisting field evidence", async () => {
+    const response = await fetch(`${baseUrl}/api/field-checks/observations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        observations: [observation("anonymous-upload", "failure", "mobile-chrome")],
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    const body = await response.json() as {
+      error: string;
+      reason: string;
+      correlationId: string;
+    };
+    expect(body).toEqual({
+      error: "Unauthorized",
+      reason: "session_expired",
+      correlationId: expect.any(String),
+    });
+    expect(response.headers.get("content-type")).toMatch(/application\/json/u);
+    expect(response.headers.get("x-correlation-id")).toBe(body.correlationId);
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
+  it("keeps identical observation IDs and reports isolated between live and sandbox scopes", async () => {
+    const observationId = "same-live-sandbox-observation";
+    const liveObservation = {
+      ...observation(observationId, "failure", "mobile-chrome"),
+      appBuild: "live-scope-build",
+    };
+    const sandboxObservation = {
+      ...observation(observationId, "failure", "tablet-browser"),
+      appBuild: "sandbox-scope-build",
+    };
+
+    for (const [userId, input] of [
+      [MANAGER, liveObservation],
+      [SANDBOX_MANAGER, sandboxObservation],
+    ] as const) {
+      const accepted = await request(userId, "POST", "/api/field-checks/observations", {
+        observations: [input],
+      });
+      expect(accepted.status).toBe(202);
+      expect(await accepted.json()).toEqual({ accepted: 1, duplicate: 0 });
+
+      const replay = await request(userId, "POST", "/api/field-checks/observations", {
+        observations: [input],
+      });
+      expect(replay.status).toBe(202);
+      expect(await replay.json()).toEqual({ accepted: 0, duplicate: 1 });
+    }
+
+    const observationRows = await db.select().from(fieldCheckObservationsTable)
+      .where(eq(fieldCheckObservationsTable.observationId, observationId));
+    expect(observationRows).toHaveLength(2);
+    expect(observationRows.map(({ scope, appBuild, deviceCategory }) => ({
+      scope,
+      appBuild,
+      deviceCategory,
+    }))).toEqual(expect.arrayContaining([
+      { scope: "live", appBuild: "live-scope-build", deviceCategory: "mobile-chrome" },
+      { scope: "sandbox", appBuild: "sandbox-scope-build", deviceCategory: "tablet-browser" },
+    ]));
+
+    const issueRows = await db.select().from(fieldCheckIssuesTable)
+      .where(eq(fieldCheckIssuesTable.checkName, "cross-device-convergence"));
+    expect(issueRows).toHaveLength(2);
+    expect(issueRows.map(({ scope, failureCount, incompleteCount, status }) => ({
+      scope,
+      failureCount,
+      incompleteCount,
+      status,
+    }))).toEqual(expect.arrayContaining([
+      { scope: "live", failureCount: 1, incompleteCount: 0, status: "open" },
+      { scope: "sandbox", failureCount: 1, incompleteCount: 0, status: "open" },
+    ]));
+
+    const liveResponse = await request(MANAGER, "GET", "/api/field-checks");
+    expect(liveResponse.status).toBe(200);
+    expect(liveResponse.headers.get("content-type")).toMatch(/application\/json/u);
+    const liveReport = await liveResponse.json() as FieldChecksReport;
+    expect(liveReport.checks.find((check) => check.name === "cross-device-convergence"))
+      .toMatchObject({
+        failureCount: 1,
+        issueStatus: "open",
+        recentFailures: [expect.objectContaining({
+          appBuild: "live-scope-build",
+          deviceCategory: "mobile-chrome",
+        })],
+      });
+
+    const sandboxResponse = await request(SANDBOX_MANAGER, "GET", "/api/field-checks");
+    expect(sandboxResponse.status).toBe(200);
+    expect(sandboxResponse.headers.get("content-type")).toMatch(/application\/json/u);
+    const sandboxReport = await sandboxResponse.json() as FieldChecksReport;
+    expect(sandboxReport.checks.find((check) => check.name === "cross-device-convergence"))
+      .toMatchObject({
+        failureCount: 1,
+        issueStatus: "open",
+        recentFailures: [expect.objectContaining({
+          appBuild: "sandbox-scope-build",
+          deviceCategory: "tablet-browser",
+        })],
+      });
+  });
+
+  it("rate limits repeated authenticated observation uploads without persisting rejected evidence", async () => {
+    const rateLimitedUserId = `field-check-rate-limit-${randomUUID()}`;
+    await db.insert(usersTable).values({
+      id: rateLimitedUserId,
+      username: rateLimitedUserId,
+      passwordHash: "x",
+    });
+
+    const limit = 60;
+    for (let index = 0; index < limit; index += 1) {
+      const response = await request(rateLimitedUserId, "POST", "/api/field-checks/observations", {
+        observations: [
+          observation(`rate-limit-observation-${String(index).padStart(2, "0")}`, "failure", "mobile-chrome"),
+        ],
+      });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: 1, duplicate: 0 });
+    }
+
+    const observationsBeforeRejection = await db.select().from(fieldCheckObservationsTable);
+    const issuesBeforeRejection = await db.select().from(fieldCheckIssuesTable);
+    expect(observationsBeforeRejection).toHaveLength(limit);
+    expect(issuesBeforeRejection).toHaveLength(1);
+    expect(issuesBeforeRejection[0]).toMatchObject({
+      checkName: "cross-device-convergence",
+      failureCount: limit,
+    });
+
+    const rejected = await request(rateLimitedUserId, "POST", "/api/field-checks/observations", {
+      observations: [observation("rate-limit-rejected-observation", "failure", "mobile-chrome")],
+    });
+    expect(rejected.status).toBe(429);
+    expect(rejected.headers.get("content-type")).toMatch(/application\/json/u);
+    expect(rejected.headers.get("ratelimit-limit")).toBe(String(limit));
+    expect(Number(rejected.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await rejected.json()).toEqual({
+      error: "Too many requests. Please wait a moment and try again.",
+    });
+
+    expect(await db.select().from(fieldCheckObservationsTable)).toHaveLength(observationsBeforeRejection.length);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBeforeRejection);
+  });
+
+  it("shares the production observation limit across independently created route instances", async () => {
+    const rateLimitedUserId = `field-check-cross-instance-${randomUUID()}`;
+    await db.insert(usersTable).values({
+      id: rateLimitedUserId,
+      username: rateLimitedUserId,
+      passwordHash: "x",
+    });
+    // Create the legacy test token before switching NODE_ENV; production router
+    // construction below still exercises the production store selection.
+    const authorization = `Bearer ${signLegacyTokenForTests(rateLimitedUserId)}`;
+    const originalNodeEnv = process.env.NODE_ENV;
+    let productionRouters: ReturnType<typeof createFieldChecksRouter>[];
+    try {
+      process.env.NODE_ENV = "production";
+      productionRouters = [createFieldChecksRouter(), createFieldChecksRouter()];
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    const instanceServers: Server[] = [];
+    try {
+      for (const router of productionRouters) {
+        const app: Express = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+          req.log = {
+            info() {},
+            warn() {},
+            error() {},
+            debug() {},
+          } as unknown as typeof req.log;
+          next();
+        });
+        app.use(requireAuth);
+        app.use("/api", router);
+        await new Promise<void>((resolve) => {
+          const instanceServer = app.listen(0, () => {
+            instanceServers.push(instanceServer);
+            resolve();
+          });
+        });
+      }
+
+      const urls = instanceServers.map(
+        (instanceServer) => `http://127.0.0.1:${(instanceServer.address() as AddressInfo).port}`,
+      );
+      const limit = 60;
+      for (let index = 0; index < limit; index += 1) {
+        const response = await fetch(`${urls[index % urls.length]}/api/field-checks/observations`, {
+          method: "POST",
+          headers: {
+            authorization,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            observations: [
+              observation(
+                `cross-instance-rate-limit-${String(index).padStart(2, "0")}`,
+                "failure",
+                "mobile-chrome",
+              ),
+            ],
+          }),
+        });
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ accepted: 1, duplicate: 0 });
+      }
+
+      const observationsBeforeRejection = await db.select().from(fieldCheckObservationsTable);
+      const issuesBeforeRejection = await db.select().from(fieldCheckIssuesTable);
+      expect(observationsBeforeRejection).toHaveLength(limit);
+      expect(issuesBeforeRejection).toHaveLength(1);
+      expect(issuesBeforeRejection[0]).toMatchObject({
+        checkName: "cross-device-convergence",
+        failureCount: limit,
+      });
+
+      const rejected = await fetch(`${urls[1]}/api/field-checks/observations`, {
+        method: "POST",
+        headers: {
+          authorization,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          observations: [
+            observation("cross-instance-rate-limit-rejected", "failure", "mobile-chrome"),
+          ],
+        }),
+      });
+      expect(rejected.status).toBe(429);
+      expect(rejected.headers.get("content-type")).toMatch(/application\/json/u);
+      expect(rejected.headers.get("ratelimit-limit")).toBe(String(limit));
+      expect(Number(rejected.headers.get("retry-after"))).toBeGreaterThan(0);
+      expect(await rejected.json()).toEqual({
+        error: "Too many requests. Please wait a moment and try again.",
+      });
+
+      expect(await db.select().from(fieldCheckObservationsTable)).toHaveLength(
+        observationsBeforeRejection.length,
+      );
+      expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBeforeRejection);
+    } finally {
+      for (const instanceServer of instanceServers) {
+        instanceServer.closeAllConnections?.();
+      }
+      await Promise.all(
+        instanceServers.map(
+          (instanceServer) => new Promise<void>((resolve) => instanceServer.close(() => resolve())),
+        ),
+      );
+    }
+  });
+
+  it("rejects observations outside the clock window without persisting them", async () => {
+    const now = Date.now();
+    const invalidObservations = [
+      {
+        ...observation("clock-window-too-old", "success", "mobile-chrome"),
+        observedAt: new Date(now - FIELD_CHECK_MAX_CLOCK_SKEW_MS - 60_000).toISOString(),
+      },
+      {
+        ...observation("clock-window-in-the-future", "success", "mobile-chrome"),
+        observedAt: new Date(now + FIELD_CHECK_MAX_CLOCK_SKEW_MS + 60_000).toISOString(),
+      },
+    ];
+
+    for (const invalidObservation of invalidObservations) {
+      const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [invalidObservation],
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "Observation timestamp is outside the accepted clock window",
+      });
+    }
+
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
+  it("rejects a mixed-validity batch without persisting any observations or issues", async () => {
+    const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [
+        observation("mixed-validity-valid-failure", "failure", "mobile-chrome"),
+        {
+          ...observation("mixed-validity-invalid-failure", "failure", "tablet-browser"),
+          outcome: "not-an-outcome",
+        },
+      ],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Invalid field-check observation",
+    });
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual([]);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual([]);
+  });
+
+  it("rolls back observations and issue rollups when an issue write fails mid-batch", async () => {
+    const seed = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [observation("transaction-seed-failure", "failure", "mobile-chrome")],
+    });
+    expect(seed.status).toBe(202);
+
+    const observationsBefore = await db.select().from(fieldCheckObservationsTable);
+    const issuesBefore = await db.select().from(fieldCheckIssuesTable);
+    expect(issuesBefore).toHaveLength(1);
+    expect(issuesBefore[0]).toMatchObject({
+      checkName: "cross-device-convergence",
+      failureCount: 1,
+      status: "open",
+    });
+
+    await db.execute(sql`
+      CREATE FUNCTION fail_field_check_issue_write_for_test()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.check_name = 'startup' THEN
+          RAISE EXCEPTION 'injected field-check persistence failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await db.execute(sql`
+      CREATE TRIGGER fail_field_check_issue_write_for_test
+      BEFORE INSERT ON field_check_issues
+      FOR EACH ROW
+      EXECUTE FUNCTION fail_field_check_issue_write_for_test()
+    `);
+
+    try {
+      const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [
+          observation("transaction-batch-recover-existing", "success", "mobile-chrome"),
+          {
+            ...observation("transaction-batch-fail-new-issue", "failure", "tablet-browser"),
+            checkName: "startup",
+          },
+        ],
+      });
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("content-type")).toMatch(/application\/json/u);
+      expect(await response.json()).toEqual({
+        error: "Something went wrong on the server. Our team has been notified. Please try again later.",
+      });
+
+      expect(await db.select().from(fieldCheckObservationsTable)).toEqual(observationsBefore);
+      expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBefore);
+    } finally {
+      await db.execute(sql`DROP TRIGGER IF EXISTS fail_field_check_issue_write_for_test ON field_check_issues`);
+      await db.execute(sql`DROP FUNCTION IF EXISTS fail_field_check_issue_write_for_test()`);
+    }
+  });
+
+  it("reports never-observed, stale, and no-success coverage with bounded receipt delay", async () => {
+    const now = Date.now();
+    const observedAt = new Date(now - 30_000);
+    const accepted = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        observationId: "coverage-startup-failure",
+        checkName: "startup",
+        checkVersion: "3",
+        outcome: "failure",
+        observedAt: observedAt.toISOString(),
+        appBuild: "coverage-fixture",
+        deviceCategory: "desktop-chrome",
+        metrics: {},
+      }],
+    });
+    expect(accepted.status).toBe(202);
+    await db.update(fieldCheckObservationsTable)
+      .set({ receivedAt: new Date(observedAt.getTime() + 12_345) })
+      .where(eq(fieldCheckObservationsTable.observationId, "coverage-startup-failure"));
+    await db.insert(fieldCheckObservationsTable).values({
+      scope: "live",
+      observationId: "coverage-stale-performance",
+      checkName: "foreground-recovery",
+      checkVersion: "1",
+      outcome: "success",
+      observedAt: new Date(now - 73 * 60 * 60 * 1000),
+      receivedAt: new Date(now - 73 * 60 * 60 * 1000 + 3000),
+      appBuild: "coverage-fixture",
+      deviceCategory: "desktop-chrome",
+      metrics: {},
+    });
+
+    const response = await request(MANAGER, "GET", "/api/field-checks");
+    const report = await response.json() as FieldChecksReport;
+    expect(report.checks.find((check) => check.name === "offline-recovery"))
+      .toMatchObject({ coverage: "never-observed", lastReceiptDelayMs: null });
+    expect(report.checks.find((check) => check.name === "startup"))
+      .toMatchObject({ coverage: "no-success", lastReceiptDelayMs: 12_345 });
+    expect(report.checks.find((check) => check.name === "foreground-recovery"))
+      .toMatchObject({ coverage: "stale", lastReceiptDelayMs: 3000 });
+  });
+
+  it("shows a stale-deployment attempt as unconfirmed until a later-build startup succeeds", async () => {
+    const attempt = {
+      observationId: "recovery-attempt-incomplete",
+      checkName: "stale-deployment-recovery",
+      checkVersion: "3",
+      outcome: "incomplete",
+      observedAt: new Date().toISOString(),
+      appBuild: "old-build",
+      deviceCategory: "desktop-chrome",
+      metrics: {},
+    };
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [attempt],
+    })).status).toBe(202);
+    const unconfirmedReport = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(unconfirmedReport.checks.find((check) => check.name === "stale-deployment-recovery")).toMatchObject({
+      coverage: "no-success",
+      failureCount: 0,
+      incompleteCount: 1,
+      actionable: false,
+      issueStatus: null,
+      lastSuccessfulAt: null,
+      recentFailures: [expect.objectContaining({ outcome: "incomplete" })],
+    });
+
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...attempt,
+        observationId: "recovery-attempt-confirmed",
+        outcome: "success",
+        observedAt: new Date(Date.now() + 1000).toISOString(),
+        appBuild: "new-build",
+      }],
+    })).status).toBe(202);
+    const recoveredReport = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(recoveredReport.checks.find((check) => check.name === "stale-deployment-recovery")).toMatchObject({
+      coverage: "current",
+      actionable: false,
+      issueStatus: "recovered",
+      lastSuccessfulAt: expect.any(String),
+    });
+  });
+
+  it("retains v3 allowlisted causes and sources through deduplication and recovery", async () => {
+    const inputs = [
+      ...[1, 2, 3].map((failureCode) => ({
+        checkName: "sync-acknowledgment", metrics: { failureCode },
+      })),
+      ...[1, 2, 3, 4].map((sourceCode) => ({
+        checkName: "performance", metrics: { sourceCode, durationMs: 20_000 + sourceCode },
+      })),
+    ].map((input, index) => ({
+      ...input, observationId: `v3-diagnostic-fixture-${index}`,
+      checkVersion: "3", outcome: "failure", observedAt: new Date(Date.now() - 1000).toISOString(),
+      appBuild: "local", deviceCategory: "mobile-chrome",
+    }));
+    const first = await request(PHONE_USER, "POST", "/api/field-checks/observations", { observations: inputs });
+    expect(first.status).toBe(202);
+    expect(await first.json()).toEqual({ accepted: 7, duplicate: 0 });
+    const replay = await request(TABLET_USER, "POST", "/api/field-checks/observations", { observations: inputs });
+    expect(await replay.json()).toEqual({ accepted: 0, duplicate: 7 });
+    for (const metrics of [{ failureCode: 99 }, { failureCode: 1, runId: 123 }]) {
+      const invalid = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [{ ...inputs[0], observationId: "v3-invalid-diagnostic", metrics }],
+      });
+      expect(invalid.status).toBe(400);
+    }
+    const report = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    const sync = report.checks.find((check: { name: string }) => check.name === "sync-acknowledgment");
+    const perf = report.checks.find((check: { name: string }) => check.name === "performance");
+    if (!sync || !perf) throw new Error("Expected both diagnostic checks in the fixture report");
+    expect(sync).toMatchObject({ failureCount: 3, actionable: true, status: "needs-review" });
+    expect(sync.recentFailures.map((failure: { metrics: unknown }) => failure.metrics))
+      .toEqual(expect.arrayContaining([{ failureCode: 1 }, { failureCode: 2 }, { failureCode: 3 }]));
+    expect(perf.recentFailures.map((failure: { metrics: unknown }) => failure.metrics))
+      .toEqual(expect.arrayContaining(inputs.slice(3).map((input) => input.metrics)));
+    await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...inputs[0], observationId: "v3-sync-recovered", outcome: "success",
+        metrics: {}, observedAt: new Date().toISOString(),
+      }],
+    });
+    const recovered = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    expect(recovered.checks.find((check: { name: string }) => check.name === "sync-acknowledgment"))
+      .toMatchObject({ status: "healthy", actionable: false, failureCount: 3, recentFailures: expect.arrayContaining(sync.recentFailures) });
+  });
+  it("persists bounded workflow outcomes and exposes only their duration summary", async () => {
+    const observation = {
+      observationId: "browser-spec-import:spec-import-review-commit:1:success",
+      checkName: "spec-import-review-commit",
+      checkVersion: "1",
+      outcome: "success",
+      observedAt: new Date().toISOString(),
+      appBuild: "workflow-evidence-integration",
+      deviceCategory: "desktop-chrome",
+      metrics: { durationMs: 8_321 },
+    };
+    const accepted = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [observation],
+    });
+    expect(accepted.status).toBe(202);
+    expect(await accepted.json()).toEqual({ accepted: 1, duplicate: 0 });
+
+    const invalid = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...observation,
+        observationId: "browser-spec-import:spec-import-review-commit:2:success",
+        metrics: { durationMs: 8_321, recipeCount: 4 },
+      }],
+    });
+    expect(invalid.status).toBe(400);
+
+    const reportResponse = await request(MANAGER, "GET", "/api/field-checks");
+    expect(reportResponse.status).toBe(200);
+    const report = await reportResponse.json() as {
+      checks: Array<{
+        name: string;
+        lastSuccessfulMetrics: Record<string, number> | null;
+      }>;
+    };
+    expect(report.checks.find((check) => check.name === "spec-import-review-commit")?.lastSuccessfulMetrics)
+      .toEqual({ durationMs: 8_321 });
+    expect((await db.select().from(dailySyncTable))).toEqual([]);
+  });
+
   it("deduplicates a shared failure and preserves bounded context after recovery", async () => {
     const failure = observation("phone-tablet-shared-failure", "failure", "mobile-chrome");
     const first = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
@@ -310,6 +866,104 @@ describe("field-check evidence from two authenticated clients", () => {
       recentFailures: [],
       lastSuccessfulAt: expect.any(String),
     });
+  });
+});
+
+describe("filtered field evidence", () => {
+  it("derives counts, rows and recovery from the full retained scoped population", async () => {
+    const now = Date.now();
+    const rows = [
+      ...Array.from({ length: 7 }, (_, i) => ({
+        ...observation(`selected-${i}`, "failure", "mobile-chrome"),
+        appBuild: "local", observedAt: new Date(now - 60_000 - i * 1000).toISOString(),
+      })),
+      ...Array.from({ length: 6 }, (_, i) => ({
+        ...observation(`other-build-${i}`, "failure", "tablet-browser"),
+        appBuild: "build-b", observedAt: new Date(now - 30_000 - i * 1000).toISOString(),
+      })),
+      { ...observation("other-build-success", "success", "mobile-chrome"), appBuild: "build-b",
+        observedAt: new Date(now - 1000).toISOString() },
+      { ...observation("same-build-other-browser-success", "success", "tablet-browser"),
+        appBuild: "local", observedAt: new Date(now - 2000).toISOString() },
+    ];
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", { observations: rows })).status).toBe(202);
+    await db.insert(fieldCheckObservationsTable).values([
+      { scope: "sandbox", observationId: "sandbox-only", checkName: "cross-device-convergence",
+        checkVersion: "1", outcome: "failure", appBuild: "local", deviceCategory: "mobile-chrome",
+        observedAt: new Date(now), receivedAt: new Date(now), metrics: {} },
+      { scope: "live", observationId: "expired-only", checkName: "cross-device-convergence",
+        checkVersion: "1", outcome: "failure", appBuild: "local", deviceCategory: "mobile-chrome",
+        observedAt: new Date(now - 100_000), receivedAt: new Date(now - 31 * 86400_000), metrics: {} },
+    ]);
+    const observationsBefore = await db.select().from(fieldCheckObservationsTable);
+    const issuesBefore = await db.select().from(fieldCheckIssuesTable);
+    const report = async (query = "") => {
+      const response = await request(MANAGER, "GET", `/api/field-checks${query}`);
+      expect(response.status).toBe(200);
+      return await response.json() as FieldChecksReport;
+    };
+    const unfiltered = await report();
+    expect(unfiltered.population.countBasis).toBe("lifetime-issues");
+    expect(unfiltered.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 13, actionable: false, issueStatus: "recovered" });
+    const selected = await report("?appBuild=local&deviceCategory=mobile-chrome");
+    expect(selected.population).toEqual({
+      appBuild: "local", deviceCategory: "mobile-chrome", countBasis: "retained-observations", retentionDays: 30,
+    });
+    expect(selected.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, incompleteCount: 0, actionable: true, issueStatus: "open",
+        lastSuccessfulAt: null, recentFailures: expect.any(Array) });
+    expect(selected.checks.find((c) => c.name === "cross-device-convergence")?.recentFailures).toHaveLength(5);
+    const buildOnly = await report("?appBuild=local");
+    expect(buildOnly.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, actionable: false, issueStatus: "recovered" });
+    const browserOnly = await report("?deviceCategory=mobile-chrome");
+    expect(browserOnly.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, actionable: false, issueStatus: "recovered" });
+    for (const query of ["?appBuild=missing", "?appBuild=LOCAL", "?appBuild=local&deviceCategory=mobile-safari"]) {
+      const empty = await report(query);
+      expect(empty.actionableCount).toBe(0);
+      expect(empty.checks.every((c) => c.failureCount === 0 && c.incompleteCount === 0 &&
+        c.lastSuccessfulAt === null && c.issueStatus === null && c.recentFailures.length === 0)).toBe(true);
+    }
+    expect(await db.select().from(fieldCheckObservationsTable)).toEqual(observationsBefore);
+    expect(await db.select().from(fieldCheckIssuesTable)).toEqual(issuesBefore);
+    expect(await db.select().from(dailySyncTable)).toEqual([]);
+    // An older success arriving last must not recover newer failures.
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{ ...rows[0], observationId: "late-old-success", outcome: "success",
+        observedAt: new Date(now - 120_000).toISOString() }],
+    })).status).toBe(202);
+    expect((await report("?appBuild=local&deviceCategory=mobile-chrome")).checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ actionable: true, issueStatus: "open" });
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{ ...rows[0], observationId: "selected-recovery", outcome: "success",
+        observedAt: new Date().toISOString() }],
+    })).status).toBe(202);
+    expect((await report("?appBuild=local&deviceCategory=mobile-chrome")).checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 7, actionable: false, issueStatus: "recovered" });
+  });
+
+  it("rejects malformed filters and preserves review authorization", async () => {
+    for (const query of [
+      "?appBuild=", `?appBuild=${"a".repeat(101)}`, "?appBuild=a&appBuild=b",
+      "?deviceCategory=unknown", "?deviceCategory=mobile-chrome&deviceCategory=mobile-safari",
+      "?appBuild%5Bx%5D=a", "?scope=sandbox", "?appBuild=%20local%20",
+    ]) expect((await request(MANAGER, "GET", `/api/field-checks${query}`)).status).toBe(400);
+    expect((await request(PHONE_USER, "GET", "/api/field-checks?appBuild=local")).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/field-checks?appBuild=local`)).status).toBe(401);
+  });
+
+  it("uses matching incomplete counts for escalation and later recovery", async () => {
+    const inputs = Array.from({ length: 3 }, (_, i) => ({
+      ...observation(`incomplete-${i}`, "failure", "mobile-chrome"),
+      outcome: "incomplete", appBuild: "selected", observedAt: new Date(Date.now() - 10_000 - i * 1000).toISOString(),
+    }));
+    expect((await request(PHONE_USER, "POST", "/api/field-checks/observations", { observations: inputs })).status).toBe(202);
+    const response = await request(MANAGER, "GET", "/api/field-checks?appBuild=selected");
+    const report = await response.json() as FieldChecksReport;
+    expect(report.checks.find((c) => c.name === "cross-device-convergence"))
+      .toMatchObject({ failureCount: 0, incompleteCount: 3, actionable: true, issueStatus: "open" });
   });
 });
 

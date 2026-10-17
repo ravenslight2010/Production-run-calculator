@@ -10,6 +10,7 @@ import mixPlanSnapshotRouter from "../mixPlanSnapshot";
 import mixSurplusRouter from "../mixSurplus";
 import runSuggestionsRouter from "../runSuggestions";
 import operationalReportsRouter from "../operationalReports";
+import qcWorkflowsRouter from "../qcWorkflows";
 
 /** Inventory movement and manager/floor operational workflows. */
 const router: IRouter = Router();
@@ -25,5 +26,6 @@ router.use(mixPlanSnapshotRouter);
 router.use(mixSurplusRouter);
 router.use(runSuggestionsRouter);
 router.use(operationalReportsRouter);
+router.use(qcWorkflowsRouter);
 
 export default router;

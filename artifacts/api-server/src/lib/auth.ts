@@ -94,6 +94,9 @@ export function signToken(userId: string): string {
  * production. New-session tests must use signToken instead.
  */
 export function signLegacyTokenForTests(userId: string): string {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("signLegacyTokenForTests is test-only");
+  }
   const now = Math.floor(Date.now() / 1000);
   const payload = b64url(JSON.stringify({ sub: userId, iat: now, exp: now + sessionTtlSec() }));
   return `${payload}.${sign(payload)}`;

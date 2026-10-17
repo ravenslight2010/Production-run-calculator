@@ -2,37 +2,36 @@
 
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
-**Current ordering authority (2026-09-19):** use the [Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md) for sync and operations sequencing and the [Additional Domain Research Synthesis](../research/additional-domain-research-synthesis-2026-09-19.md) for inventory, import, QC, and cross-domain dependencies. The earlier [improvement research](improvement-research-2026-09-18.md) remains useful historical context. Keep this file as the catalog of built foundations, remaining work, and product ideas.
+**Current ordering authority (reconciled 2026-10-08):** use the [Full Plan](../attached_assets/FULL-PLAN-production-run-calculator-2026-10-03_1791084665943.md) for Phase A–D status and sequencing. The [Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md) and [Additional Domain Research Synthesis](../research/additional-domain-research-synthesis-2026-09-19.md) retain their detailed evidence and domain dependencies; older research remains historical context.
 
-**Capability reconciliation (2026-09-21):** statuses below describe repository capability, not production deployment or operator acceptance.
+**Capability reconciliation (2026-10-08):** statuses below describe repository capability unless they explicitly cite production evidence; they do not imply owner approval or production deployment.
 
 | Capability | Current status | Evidence boundary / remaining work |
 |---|---|---|
-| Sync | **Partial** | Complete/partial snapshot fencing, SSE, protected merge, wake recovery, measurements, and server projections are built; repeated-offline convergence, operator visibility, and current deployment evidence remain open. |
+| Sync | **Partial** | Repeated-offline convergence and user-visible status/recovery are built and tested; production topology, exact published-source verification, and capacity evidence remain incomplete. |
 | Server calculations | **Done for live projected surfaces** | Slices 1–7 are implemented with local offline/unsaved-edit fallbacks; this is not proof of production freshness. |
-| Inventory | **Partial** | Actual-case, packaging, surplus, prep-mix, freezer, and sauce physical-event accounting exist; final totals still need a completion-time freeze and waste/returns remain open. |
-| Mixes | **Partial** | Server mix-made deduction and surplus/carry exist; operational reconciliation and broader planning remain open. |
+| Inventory | **Partial** | Actual-case, prep-mix, finished-case surplus/allocation, sauce, and packaging formula paths exist; some package modes need focused tests, while final totals and waste/returns remain open. |
+| Mixes | **Partial** | Server mix-made deduction, dated surplus, and allocation exist; a next-run carry-over prompt was removed by prior product direction; reconciliation remains. |
 | Freezer | **Partial** | Dated surplus lots and allocations exist; unified lookahead and physical reconciliation remain open. |
 | Warehouse | **Partial** | Server snapshots, staging, needs, and switchover support exist; unified multi-day capacity/conflict planning remains open. |
-| Imports | **Partial** | Seven importer flows, review, aliases, history, and audit recovery exist; atomic apply, guarded undo, deterministic-first parsing, and provenance remain open. |
-| QC | **Open beyond thin foundations** | Existing quality, incident, downtime, substitution, and lot fields are inputs; the durable QC department and audit model are not built. |
-| Allergens | **Partial** | Run labels, normalization, and sequence warnings exist; ingredient mapping, verification, cleaning gates, declarations, and reporting remain open. |
+| Imports | **Partial** | Import history, source-versus-landed reporting, deterministic-first supported workbook parsing, and transactional apply/guarded undo for spec/premix/cheese exist; cell provenance, universal diff, inventory impact, and broad versioning remain. |
+| QC | **Gated beyond retained quality-check records** | QC Phase 1 has recorded direction but is not approved to build until target/tolerance, capability, history/export, and privacy prerequisites are resolved. |
+| Allergens | **Partial** | Ingredient mapping and an incomplete-safe read-only run footprint exist; verified cleaning controls, label declarations, and reporting remain. |
 | Reporting | **Partial** | Day/week summaries, completed history, and authoritative operational reports exist; automation, exports, costs, and advanced comparisons remain open. |
 | Downtime | **Partial** | Logging, aggregation, trends, and stall nudges exist; live alerts, classification, cost, recurrence, and correlations remain open. |
 | Battery/performance | **Partial** | Visibility-aware clock/timer consolidation and Floor Mode Wake Lock are built; controlled real-device battery evidence remains open. |
 
-### Recommended build order (summary)
+### Remaining build order (summary; reconciled 2026-10-08)
 
 | Phase | Focus | Priority |
 |-------|--------|----------|
-| **A** | Reliability correctness: repeated-offline convergence and remaining reset/auto-track regressions after complete-write fencing | Highest |
-| **B** | Operational evidence: current published identity/readiness, production database capacity budget, and AI dependency policy | High |
-| **C** | Inventory truth: actual cases, overproduction, prep-mix events, freezer movement, packaging completeness | High |
-| **D** | Import safety, durable QC ownership, allergen controls | High |
+| **A/B** | Check current published identity/readiness and continue the active database-capacity investigation; convergence, sync visibility, purge retention, and soft readiness are already covered in repository evidence | Highest |
+| **C** | Close targeted package/freezer/mix-surplus verification gaps; then define final totals, waste, and returns | High |
+| **D** | Continue active source-cell provenance work, then prioritize import impact preview and unified cross-import health; QC and allergen controls remain gated | High |
 | **E** | Station-first UX, unified multi-day preparation, AI portfolio decisions | Medium |
 | **F** | Reporting, downtime analytics, and evidence-triggered sync optimizations | Medium |
 
-Phases A and B are the reliability program. Inventory, import, QC, and allergen work are adjacent product tracks, not prerequisites for complete-write fencing. JSON Patch, compression, selective sync, and timestamp policy remain conditional on measurements.
+The active database-capacity task is #2808; use authorized Replit sources before asking for any values. Source-cell provenance is already tracked by active task #2854. Inventory, import, QC, and allergen work are adjacent product tracks, not prerequisites for complete-write fencing. JSON Patch, compression, selective sync, and timestamp policy remain conditional on measurements.
 
 ---
 
@@ -40,21 +39,18 @@ Phases A and B are the reliability program. Inventory, import, QC, and allergen 
 
 **Status**: Partially built — planning math, physical mix-production deduction, and surplus/carry ownership exist; broader reconciliation and planning remain
 **Priority**: High — same root issue as overproduction inventory gap
-**Reconciled note (2026-09-21):** server physical-event accounting and a mix-surplus ledger are implemented. Keep this capability **partial** because operator reconciliation, unified lookahead, and production evidence remain open.
+**Current scope note (2026-10-08):** server physical-event accounting and the mix-surplus ledger exist. Keep this capability **partial** because operator reconciliation, unified lookahead, and production evidence remain open. The next-run carry-over prompt was removed by product direction; do not restore it without renewed approval.
 
 ### Summary
-Mix plan must move stock when prep mixes are made, track leftovers, and allocate into later runs. Residual work if any of the following still apply:
-1. Ingredient deduction when prep mix is made
-2. Leftover tracking (like freezer surplus but for mixes)
-3. Auto-allocation to next matching run + reminder of freezer stock
+Server day-start events deduct components for fresh mix made; the mix-surplus ledger tracks leftovers and supports allocation. Remaining work is broader physical/operator reconciliation and multi-day planning, not rebuilding mix deduction or surplus storage. Automatic next-run prompting remains deferred by the product direction above.
 
-### The Problem (historical / residual)
+### Historical problem statement (superseded for physical accounting)
 - `lib/mixes/src/index.ts` long said "Advisory only — this never moves stock"
 - When prep mixes are made, ingredients get used but inventory may not reflect it
 - "Already Made" input may lack full inventory connection
 - Leftover/excess mix in the freezer and next-run reminders may still be incomplete
 
-### Proposed Solution
+### Historical proposal (superseded for implemented physical accounting)
 
 **A. Deduction on Mix-Made**
 - "Already Made" is an offset to fresh mix need, not a deduction trigger
@@ -80,7 +76,7 @@ Mix plan must move stock when prep mixes are made, track leftovers, and allocate
 - `mix_surplus_allocations` table: surplus_id, run_id, amount_allocated, allocated_at
 - Excluded from purge-all (like QC tables — audit trail)
 
-### Build Order
+### Historical build order (do not repeat shipped steps)
 1. Add mix-made action that deducts from inventory
 2. Create `mix_surplus` table + API
 3. Leftover tracking UI (shows available mix stock)
@@ -148,24 +144,25 @@ CRUD for each check type, dashboard/aggregation, audit/compliance, import approv
 
 ## 3. Overproduction & Surplus Management
 
-**Status**: Partially built — actual-case consumption and freezer surplus assets exist; live detection, broader disposition, and analytics remain
+**Status**: Partial — actual-case consumption and freezer surplus assets exist; separate event history, broader disposition, and analytics remain
 **Full plan**: [docs/overproduction-surplus-plan.md](overproduction-surplus-plan.md)
 **Priority**: Medium
 
 ### Summary
-Surplus system currently only handles freezer overproduction AFTER a run ends. Expand to real-time detection during runs, ingredient-level overages, disposition decisions (store/donate/ship/discard/use-next), surplus history, trend analysis, and configurable thresholds.
+Completed-run consumption already uses actual cases, and confirmed excess cases become dated freezer assets. The server scales recipe consumption lines, while a direct actual-case scaling regression remains open. The system does not yet provide real-time overproduction events, separate ingredient-level overage/disposition history, trend analysis, or configurable thresholds. A carry-over prompt was removed from the run UI by prior product direction; do not restore it without renewed approval.
 
 ### What Exists Already
 - Freezer surplus confirm (post-run excess → freezer lot)
 - Freezer surplus pull (allocate lots to upcoming runs)
+- Actual-case run consumption charges excess production once; confirming the finished-case asset does not charge ingredients again
 - Use First (expiry prioritization)
 - Reorder (stock alerts)
 
 ### What's Missing
 - Real-time overproduction detection
-- Ingredient-level overages (dough, sauce, cheese)
-- **Inventory auto-adjustment on overproduction** (critical: consumption is currently based on planned `casesNeeded`, not actual `casesCompleted` — overproduced ingredients are unaccounted for)
-- Disposition flow (store-in-freezer | use-on-next-run only)
+- Separate ingredient-level overage records beyond the existing run-consumption calculation
+- Separate immutable overproduction event and disposition history
+- Owner-defined disposition flow beyond confirmed freezer storage
 - Surplus dashboard + history
 - Trend analysis + recurring-overproduction alerts
 
@@ -189,41 +186,42 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 **Current dependency rule:** inventory changes must use one server-authoritative, idempotent transaction or intent per physical event. They must not add a parallel client stock-write path. See the [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).
 
 ### Summary
-Inventory consumption is a single-point event (run-end) rather than continuous. 8 gaps identified. Comprehensive plan covers all critical + medium + non-ingredient packaging gaps.
+The server records several physical events, including actual-case run consumption, day-start mix production, freezer finished-case allocations, sauce consumption, and packaging demand. Remaining gaps are bounded verification of some formula combinations, accepted final-total reconciliation, and waste/return workflows—not the earlier claim that planned cases are the only drawdown basis.
 
 ### What's Planned (Full 13-Item Packaging List)
 | Area | What | Status |
 |------|------|--------|
-| **A** | Overproduction inventory deduction | Planned (overproduction plan) |
-| **B** | Mix/prep mix inventory deduction | Planned (mix plan) |
-| **C** | Freezer pull → inventory deduction (fix double-counting) | Planned |
-| **D** | Use actual cases instead of planned | Planned |
-| **E** | **Full packaging inventory (13 items)** | Planned |
+| **A** | Actual-case consumption and finished-case surplus | Implemented; broader event/disposition history remains |
+| **B** | Mix/prep-mix deduction and surplus | Implemented for server-owned day-start events; reconciliation remains |
+| **C** | Freezer pull and finished-case inventory | Implemented in server paths; parity tests across representations remain |
+| **D** | Use actual cases instead of planned | Source path implemented with planned-value fallback; direct scaling test remains |
+| **E** | **Packaging inventory (13 items)** | Formula paths exist; coverage of all items/modes is incomplete |
 
 **Complete packaging list** (most lot-tracked by QC):
 
-| Item | Currently Tracked |
-|------|-------------------|
-| Circles | ✓ cartoned only |
-| Shippers | ✓ cartoned only |
-| Cartons | ✓ cartoned only |
-| Slip sheets | ✗ |
-| Grip sheets | ✗ |
-| Top labels | ✗ |
-| Bottom labels | ✗ |
-| Shipper labels | ✗ |
-| Pallets | ✗ |
-| Tape | ✗ |
-| Glue | ✗ |
-| Glue sticks | ✗ |
-| Ink | ✗ |
+| Item | Formula path |
+|------|---------------|
+| Circles | ✓ |
+| Shippers | ✓ |
+| Cartons | ✓ |
+| Slip sheets | ✓ |
+| Grip sheets | ✓ |
+| Top labels | ✓ |
+| Bottom labels | ✓ |
+| Shipper labels | ✓ |
+| Pallets | ✓ |
+| Tape | ✓ daily supply |
+| Glue / glue sticks | ✓ daily supply |
+| Ink | ✓ daily supply |
+
+**Evidence limit:** formulas are present in `computeRunLines` and `computeDailySupplyConsumptionLines`. Focused unit tests directly assert circles, shippers, cartons, shipper labels, tape, glue, and ink; add assertions for the remaining items and each supported packaging mode before treating C7 as fully verified.
 
 **Consumption by mode**:
 - `cartoned`: circles, shippers, cartons, grip/slip, pallets, tape/glue/ink
 - `labeled`: circles, shippers, top/bottom labels, shipper labels, grip/slip, pallets, tape/glue/ink
 - `n-a`: grip/slip, pallets only
 
-**QC lot tracking tie-in**: Packaging deductions carry lot numbers from QC lot entries → full traceability (QC entry → inventory deduction → run consumption → audit trail)
+**QC lot tracking tie-in**: Not implemented; gated on QC lot/check records and approved traceability rules.
 
 ### Still Open (lower priority)
 - Waste/spoilage logging
@@ -231,10 +229,9 @@ Inventory consumption is a single-point event (run-end) rather than continuous. 
 - Ingredient returns at run-end
 
 ### Build Order
-1. Actual cases + overproduction deduction + mix deduction (Phase 1)
-2. Freezer pull double-counting fix (Phase 2)
-3. Full packaging gaps — all 13 items (Phase 3)
-4. Waste & returns (Phase 4)
+1. Add focused assertions for package lines/modes and freezer/mix surplus parity.
+2. Define and implement final-total reconciliation.
+3. After owner-approved event/reason rules, add waste, spoilage, stoppage-loss, and return handling.
 
 ---
 
@@ -541,18 +538,18 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 ## 15. Import System Improvements
 
-**Status**: Partially built — importer foundations are substantial; apply atomicity, guarded undo, deterministic-first parsing, provenance, and QC approval remain open
+**Status**: Partial — import history, source-versus-landed reporting, deterministic-first supported workbook parsing, and atomic apply/guarded undo for spec/premix/cheese are built; provenance and broader verification remain
 **Full plan**: [docs/import-system-plan.md](import-system-plan.md)
 **Redesign plan**: [docs/importer-redesign-plan.md](importer-redesign-plan.md)
 **Priority**: High — QC is the primary source for imports
 
 ### Summary
-7 importers exist (spec, premix, cheese, shipping, sauce, dough, schedule) with AI-assisted matching, review stages, learned aliases, history, snapshots. 10 improvements planned + full importer redesign (deterministic-first, AI-fallback).
+7 importer types exist with review, learned aliases, history, source-versus-landed reporting, and saved review snapshots. Spec/premix/cheese have server-owned atomic apply and guarded undo. Deterministic-first parsing is implemented for supported workbook layouts; cell-source display is tracked by active task #2854.
 
 ### Redesign Goals
 More accurate, more automatic, more verifiable, less AI:
 - **Deterministic-first parse** — template files parse with NO AI; free-form falls back to AI
-- **Cell-level provenance** — every parsed value tagged with source cell
+- **Cell-level provenance** — every parsed value tagged with source cell (active task #2854)
 - **Auto-verify** — cross-field rule checks; confident items auto-apply
 - **Verification report** — round-trip diff + corpus check + signed hash
 - **AI as fallback only** — lower cost, fewer rate limits, smaller hallucination surface
@@ -562,31 +559,34 @@ More accurate, more automatic, more verifiable, less AI:
 - Second-pass AI review (ReviewBadge)
 - Learned aliases from past imports
 - Import history: browse, filter, reopen snapshots, retry
+- Source-versus-landed reconciliation report
+- Atomic apply, idempotent retry, and guarded undo for spec/premix/cheese
+- Deterministic-first parsing for supported workbook layouts; unsupported/ambiguous inputs remain review/fallback cases
 - Audit recovery for pending records
 - Capability gates (canImportSpec, etc.)
 
-Current apply behavior is multi-step across authoritative domains rather than one transaction. History and saved review snapshots do not yet provide general transactional rollback.
+Local-only guide and schedule projections keep their separate sync/recovery boundaries; do not describe the three atomic importers as a universal transaction covering every importer.
 
 ### What's Planned
-| # | Improvement | Status |
-|---|------------|--------|
-| 1 | **QC approval gate** — moved to QC dept plan (Shared Importers); import system only needs to expose `qc_review_status` + review queue API | In QC dept (after QC built) |
-| 2 | Rollback / undo last import | Planned |
-| 3 | Structured preview diff (what will change) | Planned |
-| 4 | Batch import (multi-file) | Planned |
-| 5 | Template download (per importer) | Planned |
-| 6 | Validation rules pre-check | Planned |
-| 7 | Import scheduling (deferred) | Later |
-| 8 | Cross-importer linking (import health view) | Planned |
-| 9 | Import → inventory impact projection | Planned |
-| 10 | Data versioning (re-import diff) | Planned |
+| # | Improvement | Current status |
+|---|------------|----------------|
+| 1 | **QC approval gate** — owned by QC department | Gated on QC Phase 1 decisions |
+| 2 | Rollback / undo last import | Complete for spec/premix/cheese; other projections retain existing boundaries |
+| 3 | Structured preview diff (what will change) | Partial; reviewed importer dialogs exist, universal before/after factory diff remains |
+| 4 | Batch import (multi-file) | Partial; spec multi-file parsing exists, mixed/all-importer batch is open |
+| 5 | Template download (per importer) | Open |
+| 6 | Validation rules pre-check | Partial; comprehensive shared preflight remains |
+| 7 | Import scheduling (deferred) | Deferred unless a recurring source is established |
+| 8 | Cross-importer linking (import health view) | Partial; spec/mix reconciliation exists, unified all-importer health remains |
+| 9 | Import → inventory impact projection | Open; preview only, no stock mutation |
+| 10 | Data versioning (re-import diff) | Open; source-keyed before/after version diff is not present |
 
 ### Build Order
-1. Structured preview + progress/transaction identity + pre-apply snapshot and guarded undo (Phase 1 — standalone)
-2. Validation + cross-import health + inventory impact (Phase 2)
-3. Batch import + versioning (Phase 3)
-4. **QC approval gate** — after QC department is built (Phase 4)
-5. Scheduling (deferred)
+1. Complete source-cell provenance under active task #2854.
+2. Add import-impact preview and finish unified cross-import health.
+3. Add shared preflight, broad batch/versioning, and universal before/after diff as separately scoped work.
+4. **QC approval gate** — only after QC Phase 1 is approved and built.
+5. Scheduling stays deferred absent a recurring source.
 
 ### Code References
 - `artifacts/run-calculator/src/components/SpecImportDialog.tsx`
@@ -600,13 +600,13 @@ Current apply behavior is multi-step across authoritative domains rather than on
 
 ## 16. Sync System Improvements
 
-**Status**: Snapshot-fenced complete/partial sync foundation built; repeated-offline convergence, current production evidence, and operator visibility remain
+**Status**: Snapshot-fenced sync, repeated-offline convergence, and user-visible status/recovery are built; current production evidence and fleet-wide visibility remain
 **Priority**: **High** (raised 2026-09-18; was Medium)
 **Full plan:** [sync-system-improvements-plan.md](sync-system-improvements-plan.md)
 **Ordering authority:** [sync-reliability-unified-plan-2026-09-19.md](sync-reliability-unified-plan-2026-09-19.md)
 
 ### Summary
-Cross-device sync is already stronger than older backlog text credited. Complete and partial writes now use snapshot preconditions. The immediate remaining work is repeated-offline convergence, current deployment evidence, and operator visibility—not greenfield delta sync.
+Cross-device sync is already stronger than older backlog text credited. Complete and partial writes use snapshot preconditions; stale queued edits rebase through canonical recovery, and user-facing status/recovery is implemented. Remaining work is deployment-bound evidence, capacity, and genuinely fleet-wide/device-specific visibility—not greenfield delta sync.
 
 ### Already built (do not re-propose as ideas)
 - **Protected merge / route-specific revision** — additive/tombstone merges exist, but ordinary day-state PUT retains `canonicalRevision` and does not enforce it as a universal precondition
@@ -621,14 +621,12 @@ Cross-device sync is already stronger than older backlog text credited. Complete
 - **Conditional partial peer SSE** with complete initial/recovery frames
 - **Privacy-safe sync and pool-pressure measurements** plus deterministic multi-process SSE verification
 
-### Still missing (build these)
-1. **Repeated-offline convergence** — confirm multiple edits and retries rebase cleanly after complete-snapshot conflicts
-2. **Current production identity/readiness evidence** — bind live recovery and stream observations to the exact published revision
-3. **Database capacity budget** — size connection limits from measured production pressure and deployment concurrency
-4. **AI dependency policy** — provider-key detection is corrected; hard-versus-soft readiness remains an explicit product/operations decision
-5. **Complete per-device sync health** — manager-visible last seen, queue depth, and lag
-6. **Field-specific conflict visibility** — explain when another device's value is retained
-7. **Conditional optimization** — broader sparse coverage, JSON Patch, selective sync, compression, or timestamp policy only when measurements justify them
+### Still missing or gated
+1. **Published identity/SSE evidence** — exact build identity is now recorded, but prepared-source equivalence and live authenticated SSE/topology behavior remain unproven.
+2. **Database capacity budget** — continue active task #2808 using authorized Replit evidence; current production evidence lacks the primary connection ceiling, deployed pool override, and effective instance counts.
+3. **Complete per-device sync health** — manager-visible last seen, queue depth, and revision lag across devices.
+4. **Field-specific conflict explanation** — explain when another device's value is retained; generic recovery/conflict visibility is already present.
+5. **Conditional optimization** — broader sparse coverage, JSON Patch, selective sync, compression, or timestamp policy only when measurements justify them.
 
 ### Resolved guardrail
 - Client and server blank templates now both include `cartonSize: 1`, with mirrored regression coverage. Keep the lockstep test mandatory whenever defaults change (research §2.1).

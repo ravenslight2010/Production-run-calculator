@@ -11,6 +11,7 @@
 //   • commitSpecImport persisting the sourceHash with the new snapshot.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as XLSX from "xlsx";
 import type { ParsedSpecImport, ParsedProfile } from "@workspace/spec-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { Mix } from "@workspace/mixes";
@@ -31,18 +32,39 @@ function fixtureParse(): ParsedSpecImport {
   return { profiles: [fixtureProfile()], recipes: [] };
 }
 
-const { parseSpy, saveSheetSpy, fetchSheetsSpy, applySpy, aliasesRef } = vi.hoisted(() => ({
+const { parseSpy, matchSpy, saveSheetSpy, fetchSheetsSpy, applySpy, aliasesRef } = vi.hoisted(() => ({
   parseSpy: vi.fn(async () => {
     throw new Error("AI parse must not run on exact re-import");
   }),
   saveSheetSpy: vi.fn(async () => {}),
+  matchSpy: vi.fn(async () => ({
+    brandMatches: [],
+    flavorMatches: [],
+    ingredientMatches: [],
+    appTypeMatches: [],
+    pepTypeMatches: [],
+  })),
   fetchSheetsSpy: vi.fn(async () => [] as unknown[]),
   applySpy: vi.fn(() => ({ touchedProfiles: [], crustProfiles: [] })),
   aliasesRef: { current: [] as unknown[] },
 }));
 
 vi.mock("./storage", () => ({
-  loadSpecImportKnown: () => ({ brands: [], flavorsByBrand: {} }),
+  loadSpecImportKnown: () => ({
+    brands: [],
+    flavorsByBrand: {},
+    appTypes: [],
+    pepTypes: [],
+    cheeseIngredients: [],
+    doughIngredients: [],
+    sauceIngredients: [],
+    sauceNames: [],
+    dieTypes: [],
+    doughNames: [],
+    doughRecipes: [],
+    sauceRecipes: [],
+    cheeseRecipes: [],
+  }),
   profileExistsForImport: () => false,
   recipeExistsForImport: () => false,
   importProfileIsTombstoned: () => false,
@@ -69,12 +91,16 @@ vi.mock("./parseSpecSheet", () => ({
   requestParseSpecSheet: parseSpy,
   makeParseCallPacer: () => async () => {},
   ParseSpecRateLimitError: class extends Error {},
+  ParseSpecAuthorizationError: class ParseSpecAuthorizationError extends Error {
+    constructor() {
+      super("AI parsing is not authorized");
+      this.name = "ParseSpecAuthorizationError";
+    }
+  },
   PARSE_RATE_WINDOW_MS: 62_000,
 }));
 vi.mock("./matchImport", () => ({
-  requestMatchImport: async () => {
-    throw new Error("no AI matcher in tests");
-  },
+  requestMatchImport: matchSpy,
 }));
 vi.mock("./aiCorrections", () => ({ saveAiCorrections: async () => {} }));
 vi.mock("./cheeseRecipes", () => ({
@@ -101,8 +127,31 @@ function bufOf(text: string): ArrayBuffer {
   return out;
 }
 
+function workbookBytes(sheets: Record<string, unknown[][]>): ArrayBuffer {
+  const workbook = XLSX.utils.book_new();
+  for (const [name, rows] of Object.entries(sheets)) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), name);
+  }
+  return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+}
+
+function aiProfile(brand: string, flavor: string, over: Partial<ParsedProfile> = {}): ParsedProfile {
+  return { brand, flavor, applicators: [], pepperonis: [], ...over };
+}
+
 beforeEach(() => {
-  parseSpy.mockClear();
+  parseSpy.mockReset();
+  parseSpy.mockImplementation(async () => {
+    throw new Error("AI parse must not run unless this test enables it");
+  });
+  matchSpy.mockReset();
+  matchSpy.mockImplementation(async () => ({
+    brandMatches: [],
+    flavorMatches: [],
+    ingredientMatches: [],
+    appTypeMatches: [],
+    pepTypeMatches: [],
+  }));
   saveSheetSpy.mockClear();
   applySpy.mockReset();
   fetchSheetsSpy.mockReset();
@@ -207,15 +256,18 @@ describe("exact re-import parse reuse", () => {
     expect(prepared.parsed.profiles[0].flavor).toBe("Cheese");
   });
 
-  it("single file: changed bytes fall through to a fresh parse", async () => {
+  it("single file: changed invalid bytes do not trigger a paid parse", async () => {
     const hash = await hashSpecImportSource([bufOf("old-bytes")]);
     fetchSheetsSpy.mockResolvedValue([
       { id: 1, label: "Prev", sourceKey: "specs", sourceHash: hash, createdAt: 100, data: fixtureParse() },
     ]);
 
-    // Bytes differ → no reuse → the normal parse path runs (and rejects here
-    // because the buffer isn't a real workbook / the AI stub throws).
-    await expect(prepareSpecImportWithAi(bufOf("new-bytes"), "Specs.xlsx")).rejects.toThrow();
+    // Bytes differ → no reuse. The invalid workbook is not an AI candidate and
+    // must return an actionable incomplete review without a provider request.
+    const prepared = await prepareSpecImportWithAi(bufOf("new-bytes"), "Specs.xlsx");
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.unresolved).toHaveLength(1);
+    expect(prepared.aiFallbackUnsupported).toBe(true);
   });
 
   it("multi file: reuses only for the SAME file set, before buffers are consumed", async () => {
@@ -237,7 +289,242 @@ describe("exact re-import parse reuse", () => {
 
     // A single-file re-import from that batch must NOT reuse the batch
     // snapshot (its data is the merged whole-batch parse).
-    await expect(prepareSpecImportWithAi(bufOf("file-a"), "a.xlsx")).rejects.toThrow();
+    const singleFile = await prepareSpecImportWithAi(bufOf("file-a"), "a.xlsx");
+    expect(singleFile.unresolved).toHaveLength(1);
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("conditional automatic AI fallback", () => {
+  it("keeps a complete deterministic workbook model-free for AI-authorized users", async () => {
+    const data = workbookBytes({
+      Products: [["Brand", "Flavor", "Die Type"], ["Fixture Brand", "Classic", "12 inch"]],
+    });
+    const prepared = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "deterministic.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(prepared.parsed.profiles).toMatchObject([
+      { brand: "Fixture Brand", flavor: "Classic", dieType: "12 inch" },
+    ]);
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(matchSpy).not.toHaveBeenCalled();
+  });
+
+  it("automatically interprets unresolved content with its workbook context", async () => {
+    parseSpy.mockImplementation(async () => ({
+      profiles: [
+        aiProfile("Mauro's Pinsa", "PEPPERONI HONEY G"),
+        aiProfile("Mauro's Pinsa", "TOMATO BASIL"),
+        aiProfile("Mauro's Pinsa", "ITALIAN BEEF & GIARDINIERA"),
+      ],
+      recipes: [],
+      generatedAt: 1,
+    }) as never);
+    const data = workbookBytes({
+      "Native OZ": [["OZ PIZZA"], ["PEPPERONI HONEY G"], ["TOMATO BASIL"], ["ITALIAN BEEF & GIARDINIERA"]],
+    });
+
+    const prepared = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "native.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+    expect((parseSpy.mock.calls[0][0] as { workbookText: string }).workbookText)
+      .toContain("OZ PIZZA");
+    expect(prepared.parsed.profiles.map((profile) => profile.flavor)).toEqual([
+      "PEPPERONI HONEY G",
+      "TOMATO BASIL",
+      "ITALIAN BEEF & GIARDINIERA",
+    ]);
+    expect(prepared.unresolved).toBeUndefined();
+  });
+
+  it("preserves deterministic profile fields while adding AI-only products", async () => {
+    parseSpy.mockImplementation(async () => ({
+      profiles: [
+        aiProfile("Fixture Brand", "Classic", { dieType: "10 inch" }),
+        aiProfile("Fixture Brand", "Native Pizza"),
+      ],
+      recipes: [],
+      generatedAt: 1,
+    }) as never);
+    const data = workbookBytes({
+      Products: [["Brand", "Flavor", "Die Type"], ["Fixture Brand", "Classic", "12 inch"]],
+      "Native OZ": [["OZ PIZZA"], ["Native Pizza"]],
+    });
+
+    const prepared = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "mixed.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(prepared.parsed.profiles).toHaveLength(2);
+    const deterministic = prepared.parsed.profiles.find((profile) => profile.flavor === "Classic");
+    expect(deterministic?.dieType).toBe("12 inch");
+    expect(deterministic?.sourceLocations?.brand)
+      .toEqual([{ sheet: "Products", cell: "A2" }]);
+    expect(prepared.parsed.profiles.some((profile) => profile.flavor === "Native Pizza")).toBe(true);
+  });
+
+  it("keeps deterministic recipe values and source units while supplementing AI-only rows", async () => {
+    parseSpy.mockImplementation(async () => ({
+      profiles: [],
+      recipes: [{
+        kind: "dough",
+        name: "House Dough",
+        doughballOz: 99,
+        doughballsPerTray: 99,
+        rowsUnit: "oz",
+        rows: [
+          { ingredient: "Flour", lbs: 999 },
+          { ingredient: "Water", lbs: 888 },
+          { ingredient: "Supplemental", lbs: 2 },
+        ],
+      }],
+      generatedAt: 1,
+    }) as never);
+    const data = workbookBytes({
+      "Dough Recipes": [
+        ["Recipe: House Dough"],
+        ["Aldo Foods: Classic"],
+        ["Target Doughball Weight (oz)", "8.25"],
+        ["Doughballs Per Tray", "24"],
+        ["Ingredient", "Lbs"],
+        ["Flour", "10"],
+        ["Water", "6.5"],
+        [],
+        ["Unsupported note", "manager should review"],
+      ],
+      "Native OZ": [["OZ PIZZA"], ["Native product"]],
+    });
+
+    const prepared = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "mixed-recipe.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    const recipe = prepared.parsed.recipes.find((item) => item.name === "House Dough");
+    expect(recipe?.doughballOz).toBe(8.25);
+    expect(recipe?.doughballsPerTray).toBe(24);
+    expect(recipe?.rowsUnit).toBe("Lbs");
+    expect(recipe?.rows.map((row) => [row.ingredient, row.lbs])).toEqual([
+      ["Flour", 10],
+      ["Water", 6.5],
+      ["Supplemental", 2],
+    ]);
+    expect(recipe?.sourceLocations?.rowsUnit).toEqual([
+      { sheet: "Dough Recipes", cell: "B5" },
+    ]);
+  });
+
+  it("does not call AI without permission and retains unresolved guidance", async () => {
+    const data = workbookBytes({ "Native OZ": [["OZ PIZZA"], ["A product"]] });
+    const prepared = await (await import("./specImport")).prepareSpecImport(data, "denied.xlsx");
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.unresolved?.length).toBeGreaterThan(0);
+    expect(prepared.parsed.profiles).toHaveLength(0);
+  });
+
+  it("does not send a dedicated-importer workbook through spec AI", async () => {
+    const data = workbookBytes({ Guide: [["PIZZA/BOX"], ["Shipping box"]] });
+    const prepared = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "Shipping_and_Palletizing_Guide.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.aiFallbackUnsupported).toBe(true);
+    expect(prepared.note).toMatch(/dedicated importer/i);
+  });
+
+  it("keeps multi-file AI context and results scoped to each selected workbook", async () => {
+    parseSpy.mockImplementation(async ({ workbookText }: { workbookText: string }) => {
+      const item = workbookText.includes("PRODUCT ALPHA") ? "PRODUCT ALPHA" : "PRODUCT BETA";
+      return {
+        profiles: [aiProfile(item.includes("ALPHA") ? "Brand Alpha" : "Brand Beta", item)],
+        recipes: [],
+        generatedAt: 1,
+      } as never;
+    });
+    const first = workbookBytes({ Native: [["OZ PIZZA"], ["PRODUCT ALPHA"]] });
+    const second = workbookBytes({ Native: [["OZ PIZZA"], ["PRODUCT BETA"]] });
+
+    const prepared = await (await import("./specImport")).prepareSpecImportMulti(
+      [first, second],
+      undefined,
+      ["same-revision-name.xlsx", "same-revision-name.xlsx"],
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(parseSpy).toHaveBeenCalledTimes(2);
+    expect((parseSpy.mock.calls[0][0] as { workbookText: string }).workbookText)
+      .toContain("PRODUCT ALPHA");
+    expect((parseSpy.mock.calls[1][0] as { workbookText: string }).workbookText)
+      .toContain("PRODUCT BETA");
+    expect(prepared.parsed.profiles.map((profile) => profile.flavor).sort())
+      .toEqual(["PRODUCT ALPHA", "PRODUCT BETA"]);
+  });
+
+  it("retains an explicitly incomplete result for provider failure and empty output", async () => {
+    const data = workbookBytes({ "Native OZ": [["OZ PIZZA"], ["A product"]] });
+    parseSpy.mockRejectedValueOnce(new Error("AI provider unavailable"));
+    const providerFailure = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "provider-failure.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+    expect(providerFailure.unresolved?.length).toBeGreaterThan(0);
+    expect(providerFailure.note).toMatch(/did not complete/i);
+    expect(providerFailure.note).toContain("AI provider unavailable");
+
+    parseSpy.mockImplementationOnce(async () => ({
+      profiles: [],
+      recipes: [],
+      generatedAt: 1,
+    }) as never);
+    const emptyResult = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "empty-output.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+    expect(emptyResult.unresolved?.length).toBeGreaterThan(0);
+    expect(emptyResult.note).toMatch(/incomplete/i);
+    expect(emptyResult.parsed.profiles).toHaveLength(0);
+  });
+
+  it("does not offer another AI retry after authorization is rejected", async () => {
+    const { ParseSpecAuthorizationError } = await import("./parseSpecSheet");
+    const data = workbookBytes({ "Native OZ": [["OZ PIZZA"], ["A product"]] });
+    parseSpy.mockRejectedValueOnce(new ParseSpecAuthorizationError());
+
+    const prepared = await (await import("./specImport")).prepareSpecImport(
+      data,
+      "authorization-denied.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(prepared.aiRetryBlocked).toBe(true);
+    expect(prepared.unresolved?.length).toBeGreaterThan(0);
+    expect(prepared.note).toMatch(/did not complete/i);
+    expect(parseSpy).toHaveBeenCalledTimes(1);
   });
 });
 

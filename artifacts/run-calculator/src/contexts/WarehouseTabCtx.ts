@@ -42,6 +42,10 @@ export interface WarehouseTabContextValue {
   isSupervisor: boolean;
   markCountedMutation: UseMutationResult<CycleCountSchedule[], Error, string, unknown>;
   refreshFreezerSurplus: () => Promise<void>;
+  adjustFinishedCaseStock: (
+    lotId: string,
+    input: import("../freezerSurplus").FreezerSurplusAdjustmentInput,
+  ) => Promise<import("../freezerSurplus").FreezerSurplusAdjustment>;
   replaceRunSurplus: (
     run: RunMeta,
     allocations: Array<{ lotId: string; cases: number }>,

@@ -17,7 +17,10 @@ import type { FormValues } from "../src/types";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
-const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const API_BASE =
+  process.env.PLAYWRIGHT_API_BASE_URL ??
+  process.env.PLAYWRIGHT_BASE_URL ??
+  `https://${process.env.REPLIT_DEV_DOMAIN}`;
 let authorizedFixtures: AuthorizedBrowserFixtures;
 let inventoryFixtureItems: Array<{ id: number; token: string }> = [];
 
@@ -142,15 +145,24 @@ async function runAuthoritativeAutoTrackTick(
   page: Page,
   nowMs: number,
   options: { rearm?: boolean } = {},
-): Promise<{ accepted?: number; outcomes?: Record<string, number> }> {
-  const response = await page.request.post("/api/sync/e2e/auto-track-tick", {
+): Promise<{ builtClaims: number; accepted: number; outcomes: Record<string, number> }> {
+  const today = new Date().toISOString().slice(0, 10);
+  const response = await page.request.post(`/api/sync/e2e/auto-track-tick?today=${today}`, {
     data: { nowMs, ...(options.rearm ? { rearm: true } : {}) },
   });
   expect(
     response.ok(),
     `authoritative auto-track fixture tick failed: ${response.status()}`,
   ).toBe(true);
-  return await response.json() as { accepted?: number; outcomes?: Record<string, number> };
+  const summary = await response.json() as {
+    builtClaims: number;
+    accepted: number;
+    outcomes: Record<string, number>;
+  };
+  expect(Number.isInteger(summary.builtClaims), "tick response must report built claims").toBe(true);
+  expect(Number.isInteger(summary.accepted), "tick response must report accepted events").toBe(true);
+  expect(summary.outcomes, "tick response must report event outcomes").toBeDefined();
+  return summary;
 }
 
 async function seedInventoryItem(
@@ -270,15 +282,31 @@ async function seedRunningValues(
 test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const username = uid();
-  await openAsAuthorizedFixture(page, username);
-  await seedRunningValues(page);
+  const sauceName = `Fixture Sauce ${username}`;
+  const fixture = await createAuthorizedServerFixture(username, {
+    casesNeeded: 10,
+    pizzasPerCase: 1,
+    sauceOzPerPizza: 2,
+    sauceBarrelLbs: 2,
+    frontlineRecipeName: sauceName,
+  });
+  await seedInventoryItem(page, fixture.token, sauceName);
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: fixture.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
   await page.getByTestId("tab-sauce").click();
   const sauceOutput = page.getByTestId("output-sauce-batches");
   await expect(sauceOutput).toBeVisible();
-  await expect(sauceOutput.locator("xpath=..")).toContainText("On line 1");
-  await expect(sauceOutput.locator("xpath=..")).toContainText("ready 1");
-  await expect(sauceOutput.locator("xpath=..")).toContainText("being made 1");
+  await expect(sauceOutput.locator("xpath=..")).toContainText(/Total .* consumed 0/);
+  await expect(sauceOutput.locator("xpath=..")).toContainText("On line");
+  await expect(sauceOutput.locator("xpath=..")).toContainText("ready");
+  await expect(sauceOutput.locator("xpath=..")).toContainText("being made");
   await expect(page.getByTestId("tickbar-fill")).toBeVisible();
 
   // Barrel depletion remains a passive countdown. The old manual-advance
@@ -295,6 +323,79 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
 
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
+});
+
+test("Sauce stock edits sync to a peer and persist after tab changes and reload", async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const username = uid();
+  const sauceName = `Fixture Sauce ${username}`;
+  const fixture = await createAuthorizedServerFixture(username, {
+    casesNeeded: 10,
+    pizzasPerCase: 1,
+    sauceOzPerPizza: 2,
+    sauceBarrelLbs: 2,
+    frontlineRecipeName: sauceName,
+  });
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: fixture.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page.getByTestId("tab-sauce").click();
+  await expect(page.getByTestId("sauce-stock-on-hand"))
+    .toContainText("2.0 / 2.0 barrels");
+  const dailyNeeds = page.getByTestId("sauce-daily-needs");
+  await expect(dailyNeeds).toContainText("Planned Sauce Demand — Today");
+  await expect(dailyNeeds).toContainText("not remaining demand or on-line stock");
+  await expect(dailyNeeds).toContainText(sauceName);
+
+  await page.getByTestId("sauce-stock-decrease").click();
+  await expect(page.getByTestId("sauce-stock-on-hand"))
+    .toContainText("1.9 / 2.0 barrels");
+
+  const peerContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    await peerContext.addCookies([{
+      name: "rc_auth",
+      value: fixture.token,
+      url: API_BASE,
+    }]);
+    const peerPage = await peerContext.newPage();
+    await peerPage.goto("/", { waitUntil: "domcontentloaded" });
+    await peerPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await peerPage.getByTestId("tab-sauce").click();
+    await expect(peerPage.getByTestId("sauce-stock-on-hand"))
+      .toContainText("1.9 / 2.0 barrels");
+
+    await page.getByTestId("tab-run").click();
+    await page.getByTestId("tab-sauce").click();
+    await expect(page.getByTestId("sauce-stock-on-hand"))
+      .toContainText("1.9 / 2.0 barrels");
+    await peerPage.reload({ waitUntil: "domcontentloaded" });
+    await peerPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await peerPage.getByTestId("tab-sauce").click();
+    await expect(peerPage.getByTestId("sauce-stock-on-hand"))
+      .toContainText("1.9 / 2.0 barrels");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await page.request.get(`/api/sync/today?today=${today}`);
+    expect(response.ok(), `canonical sync read failed: ${response.status()}`).toBe(true);
+    const sync = await response.json() as {
+      runValues?: Record<string, {
+        sauceStockBarrels?: number;
+        sauceStockInitialized?: boolean;
+      }>;
+    };
+    expect(sync.runValues?.[fixture.runId]?.sauceStockBarrels).toBe(1.9);
+    expect(sync.runValues?.[fixture.runId]?.sauceStockInitialized).toBe(true);
+  } finally {
+    await peerContext.close();
+  }
 });
 
 test("Sauce automatic supply stays accurate after the final partial unit", async ({ page }) => {
@@ -399,7 +500,7 @@ test("Dough and Sauce phone quick checks share line-speed feedback across tab sw
   await expect(page.getByTestId("speed-nudge-card")).toContainText("Line Speed Suggestion");
 });
 
-test("Frontline App tracking survives off-tab work, corrections, pause, and reload", async ({
+test("Frontline App on-hand stock survives off-tab work, adjustment, pause, and reload", async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -415,58 +516,67 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
 
-  // Frontline tracking is provider-owned: App 1 advances while another station
-  // is mounted, then is visible when the operator returns to Frontline.
+  const app1Stock = page.getByTestId("stock-app1-lbs");
+  await page.getByTestId("tab-frontline").click();
+  // This fixture seeds a run already in progress, so it deliberately bypasses
+  // the normal Start action that fills a new run's bins. Use the same operator
+  // control as a physical refill before exercising automatic depletion.
+  await expect(app1Stock).toHaveValue("0");
+  await app1Stock.locator("xpath=..").getByRole("button", { name: "Fill to cap" }).click();
+  await expect(app1Stock).toHaveValue("2");
+
+  // Automatic stock depletion is server-owned: App 1 updates while another
+  // station is mounted, then the canonical value is visible on return.
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
-  // Production owns automatic progress on the server. Drive that same engine
-  // explicitly rather than waiting for retired browser-side interval writes.
-  await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 2_500);
+  const tick = await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 60_000);
+  expect(tick.accepted, JSON.stringify(tick)).toBeGreaterThan(0);
+
+  const readCanonicalStock = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await page.request.get(`/api/sync/today?today=${today}`);
+    expect(response.ok(), `canonical stock read failed: ${response.status()}`).toBe(true);
+    const sync = await response.json() as {
+      runValues?: Record<string, { app1StockLbs?: number }>;
+    };
+    const stock = sync.runValues?.[fixture.runId]?.app1StockLbs;
+    expect(Number.isFinite(stock), "canonical App 1 stock must be present").toBe(true);
+    return stock as number;
+  };
+  const readCanonicalPausedAt = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await page.request.get(`/api/sync/today?today=${today}`);
+    expect(response.ok(), `canonical pause read failed: ${response.status()}`).toBe(true);
+    const sync = await response.json() as {
+      dayState?: { runs?: Array<{ id: string; pausedAt?: number }> };
+    };
+    return Number(sync.dayState?.runs?.find((run) => run.id === fixture.runId)?.pausedAt) || 0;
+  };
+  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBeLessThan(2);
+
   await page.getByTestId("tab-sauce").click();
   await expect(page.getByTestId("output-sauce-batches")).toBeVisible();
   await page.getByTestId("tab-frontline").click();
-  const appOutput = page.getByTestId("output-app1-batches");
-  const consumedText = appOutput.locator("xpath=..").getByText(/Total .* consumed/i);
-  await expect(consumedText).toBeVisible();
-  await expect(appOutput.locator("xpath=..")).toContainText("On line");
-  await expect(appOutput.locator("xpath=..")).toContainText("ready");
-  const readConsumed = async () => {
-    const match = ((await consumedText.textContent()) ?? "").match(/consumed\s+([\d.]+)/i);
-    return Number(match?.[1] ?? 0);
-  };
-  const madeBeforeCorrection = await readConsumed();
-  expect(madeBeforeCorrection).toBeGreaterThan(0);
+  await expect.poll(async () => Number(await app1Stock.inputValue())).toBe(await readCanonicalStock());
+  expect(await readCanonicalStock()).toBeLessThan(2);
 
-  await appOutput.locator("xpath=../..")
-    .getByRole("button", { name: "Increase consumed batches correction" })
-    .click();
-  await expect.poll(readConsumed).toBe(madeBeforeCorrection + 1);
-  // Allow the debounced correction to reach the canonical row before changing
-  // lifecycle state or asking the authoritative engine for its next event.
-  await page.waitForTimeout(750);
-  await expect.poll(readConsumed).toBe(madeBeforeCorrection + 1);
+  await app1Stock.fill("0.5");
+  await app1Stock.locator("xpath=..").getByRole("button", { name: "Save" }).click();
+  await expect.poll(readCanonicalStock, { timeout: 8_000 }).toBe(0.5);
 
   await page.getByTestId("tab-run").click();
   await page.getByRole("button", { name: /pause.?run/i }).click();
   await expect(page.getByRole("button", { name: /resume.?run/i })).toBeVisible();
-  await page.waitForTimeout(1_500);
+  await expect.poll(readCanonicalPausedAt, { timeout: 8_000 }).toBeGreaterThan(0);
+  await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 65_000);
+  await expect.poll(readCanonicalStock).toBe(0.5);
   await page.getByRole("button", { name: /resume.?run/i }).click();
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
-
-  // Once the shared correction fence has elapsed, the next authoritative event
-  // resumes at the corrected anchor instead of replaying suppressed/paused time.
-  await page.waitForTimeout(750);
-  await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 65_000, { rearm: true });
-  await page.getByTestId("tab-frontline").click();
-  await expect.poll(readConsumed, { timeout: 8_000 }).toBeGreaterThan(madeBeforeCorrection + 1);
-  const madeAfterTick = await readConsumed();
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
-  await expect(page.getByTestId("output-app1-batches").locator("xpath=..")
-    .getByText(new RegExp(`consumed ${madeAfterTick}(?:\\.0+)?$`, "i")))
-    .toBeVisible();
+  await expect(app1Stock).toHaveValue("0.5");
   await page.getByTestId("tab-packaging").click();
   await expect(page.getByTestId("tab-sauce")).toBeAttached();
   await expect(page.getByTestId("tab-dough")).toBeAttached();

@@ -195,7 +195,7 @@ async function writeEvidence(path: string, result: ReportKeyRotationPreflight): 
         process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
           ?? process.env.NODE_ENV
           ?? "unknown",
-        process.env.REPORT_KEY_ROTATION_PREFLIGHT_REVISION?.trim() ?? "unbound",
+        process.env.REPORT_KEY_ROTATION_PREFLIGHT_REVISION?.trim() || "unbound",
       ),
       null,
       2,

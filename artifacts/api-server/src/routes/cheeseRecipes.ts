@@ -1,10 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, cheeseRecipesTable, type CheeseRecipeRow } from "@workspace/db";
 import { SaveCheeseRecipesBody, DeleteCheeseRecipesBody } from "@workspace/api-zod";
 import { normalizeCheeseRecipe, type CheeseRecipe } from "@workspace/cheese-recipes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
 
@@ -18,6 +21,23 @@ import { broadcastMasterDataChanged } from "./sync";
 // Gated on "manage-inventory" since this is warehouse/inventory master-data.
 
 const MAX_BATCH = 500;
+const RECIPE_AUDIT_FIELDS = [
+  "name",
+  "brand",
+  "flavors",
+  "shredderSetting",
+  "cellulose",
+  "notes",
+  "components",
+  "enabled",
+] as const;
+
+function requestCorrelationId(req: Request): string {
+  const candidate = (req as Request & { correlationId?: unknown }).correlationId;
+  return typeof candidate === "string" && candidate.length > 0 && candidate.length <= 128
+    ? candidate
+    : randomUUID();
+}
 
 class RecipeRevisionConflict extends Error {
   constructor(readonly rejectedIds: string[]) {
@@ -68,6 +88,18 @@ function toDbValues(item: CheeseRecipe) {
     enabled: item.enabled,
     updatedAt: new Date(),
   };
+}
+
+function changedRecipeFields(next: CheeseRecipe, existing: CheeseRecipeRow): string[] {
+  const previous = toApiItem(existing);
+  const persistedNext = {
+    ...next,
+    // Blank cellulose values deliberately preserve the existing value.
+    cellulose: next.cellulose || previous.cellulose,
+  };
+  return RECIPE_AUDIT_FIELDS.filter(
+    (field) => !isDeepStrictEqual(persistedNext[field], previous[field]),
+  );
 }
 
 function nextRevision(previous?: Date): Date {
@@ -123,6 +155,7 @@ router.post(
       // transaction under a per-scope advisory lock so two CONCURRENT requests
       // can't both pass the pre-read and insert the same name — the second
       // waits for the first to commit and then sees its names as taken.
+      const correlationId = requestCorrelationId(req);
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtext(${"cheese-recipes:" + currentScope()}))`,
@@ -166,6 +199,11 @@ router.post(
           values.updatedAt = nextRevision(existing?.updatedAt);
           if (!existing) {
             await tx.insert(cheeseRecipesTable).values(values);
+            await writeAuditEvent(tx, {
+              action: "cheese_recipe_created",
+              resource: `cheese_recipe:${recipe.id}`,
+              changes: { fieldNames: [...RECIPE_AUDIT_FIELDS], correlationId },
+            });
             continue;
           }
           if (
@@ -201,6 +239,14 @@ router.post(
                 eq(cheeseRecipesTable.scope, currentScope()),
               ),
             );
+          const fieldNames = changedRecipeFields(recipe, existing);
+          if (fieldNames.length > 0) {
+            await writeAuditEvent(tx, {
+              action: "cheese_recipe_updated",
+              resource: `cheese_recipe:${recipe.id}`,
+              changes: { fieldNames, correlationId },
+            });
+          }
         }
       });
       invalidateMasterDataBootstrapCache();
@@ -239,14 +285,25 @@ router.delete(
 
     try {
       if (ids.length > 0) {
-        await db
-          .delete(cheeseRecipesTable)
-          .where(
-            and(
-              inArray(cheeseRecipesTable.id, ids),
-              eq(cheeseRecipesTable.scope, currentScope()),
-            ),
-          );
+        const correlationId = requestCorrelationId(req);
+        await db.transaction(async (tx) => {
+          const deletedRows = await tx
+            .delete(cheeseRecipesTable)
+            .where(
+              and(
+                inArray(cheeseRecipesTable.id, ids),
+                eq(cheeseRecipesTable.scope, currentScope()),
+              ),
+            )
+            .returning({ id: cheeseRecipesTable.id });
+          for (const row of deletedRows) {
+            await writeAuditEvent(tx, {
+              action: "cheese_recipe_deleted",
+              resource: `cheese_recipe:${row.id}`,
+              changes: { fieldNames: [...RECIPE_AUDIT_FIELDS], correlationId },
+            });
+          }
+        });
       }
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");

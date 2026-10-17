@@ -1,0 +1,2039 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-15T11:26:57Z",
+  "sourceIdentity": {
+    "revision": "858078ed44c8838cedfa80b40c4950ac42b668e2",
+    "bundleSha256": "3468d08570540775d10b5df16eb43ea0318545ded502e1ebfac822f47fb722a7"
+  },
+  "declarationContract": {
+    "baselineFileCount": 983,
+    "candidateFileCount": 983,
+    "status": "pass",
+    "classificationTotals": {
+      "changedFiles": 282,
+      "formattingOnly": 273,
+      "approvedSemantic": 9,
+      "unexplainedSemantic": 0
+    },
+    "categories": [
+      {
+        "category": "api-client-react",
+        "changed": 2,
+        "formattingOnly": 1,
+        "approvedSemantic": 1,
+        "unexplainedSemantic": 0
+      },
+      {
+        "category": "api-zod",
+        "changed": 212,
+        "formattingOnly": 211,
+        "approvedSemantic": 1,
+        "unexplainedSemantic": 0
+      },
+      {
+        "category": "db",
+        "changed": 68,
+        "formattingOnly": 61,
+        "approvedSemantic": 7,
+        "unexplainedSemantic": 0
+      },
+      {
+        "category": "other",
+        "changed": 0,
+        "formattingOnly": 0,
+        "approvedSemantic": 0,
+        "unexplainedSemantic": 0
+      }
+    ],
+    "files": [
+      {
+        "path": "lib/api-client-react/dist/generated/api.d.ts",
+        "category": "api-client-react",
+        "baselineSha256": "caaa8edd8378a891be34337e6da971b9051376a3c0c14a3443ece98624b46d21",
+        "candidateSha256": "7166a38f8cf5a2d1a8e6e7b69974888466219a9230621e70ce76939647da439a",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 emits equivalent no-substitution template-literal types instead of string-literal types for generated query and mutation key tuples; the complete module is bidirectionally assignable under TypeScript 6.0.3 and 7.0.2."
+      },
+      {
+        "path": "lib/api-client-react/dist/generated/api.schemas.d.ts",
+        "category": "api-client-react",
+        "baselineSha256": "7500d3102468a3ab246e6f83b9b12afcb0020bb4ec85ed6a8e94d26b1d25dafb",
+        "candidateSha256": "59d12e1f0fe515ce0d315d06f97fc02ece44dca7e6282f8f5d32723b6436fd04",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/api.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6e79d5b844c0fc5b972f2ac0e4a85ff77ceba70c962e51df9acf1b9bf046e601",
+        "candidateSha256": "3f560c6cd40b2ff90c9392c528f8a7f550c3e53cea880448200090235ba2e4ac",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 emits equivalent direct Zod namespace references instead of nested zod.z paths and reorders equivalent members; the complete module is bidirectionally assignable under TypeScript 6.0.3 and 7.0.2."
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/aiMemoryHealthFindingStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e7755c909b505e877a2e695f2d76a2255b1934055881707a7d3dc3a978332c21",
+        "candidateSha256": "34b20e6359f1d8202bf7a843a2e57c0912c8c572566cd76378561b63f1447462",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/aiModelStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "8a6edd780630c66187c37b13f402008449c6dc48e7bf99eecf52d07f592d2ada",
+        "candidateSha256": "cfebf11528a16fc2d1ee76c732b62e83486393ea56bf8532ec6aa4d12998ecb7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/aiRetentionReportScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "45a7beb3a91d1c58ab6b4e26e7c5da83b5fd145a3520b522fb706fe61007657b",
+        "candidateSha256": "524ca1938aa339ee71cbd6766317e4bff7bcf020e3280fcf47f53ba9e02bdc42",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/aiStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3c131d22c6114f065fcfa8371c7f955ca1d5f8bbad67edbce724537749da5b25",
+        "candidateSha256": "356a09a1153fbf30a7f0f77bca0c0308e188dff185cd393500966f2b1bd863cd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/anomalyMetric.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7438d1528e0b8c78a859574c1a3e6151a0ddc8d2ce0f8b6211c77bfd98399aeb",
+        "candidateSha256": "454546290ad35694d9b9a725d9ab37673e0f7a3149c9ab116a53d2488f0c1c10",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/anomalySeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "904c6df3b497212560530198c40e2a4cbdd69528c33c5565af7151797966ccad",
+        "candidateSha256": "452594cfb2efacbdfe33182362ddb0bb278e41b415f5f0430171e62ad4c64ff8",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/applicatorBatchEvidenceHashContract.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "af0e1d54e75bd7d4e21906b9503cfb3587958cc8907bb847844e99a6a5a7cdbe",
+        "candidateSha256": "d2717a9c08afc59a5c0fa2577d2a2c3292608d5ee84a830ae44fce4527b7f99d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/applicatorBatchEvidenceSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d3924e16cd547320a268653737517f31cd638537baf433defabc9b8122903657",
+        "candidateSha256": "dee1dd7f309150cf70e9103cbb9bde71aa1ab39476d4ea4db558e39bc4d81efa",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/applyScheduledJobCleanupResultOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4f5021b11ceb9ca2036e95d890954fbdbb20ed267e3321219ee37544029e82b8",
+        "candidateSha256": "474f0a62e9c3dd5776ce3cbc44d3d2bf6280e6132029f8ad5e43ad98435ccf8c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/auditLogChangesFieldNamesItem.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c1c5b4d877db28ece8bc967aa0946832cc92434bdae657148ce47237753dfcb8",
+        "candidateSha256": "137bf2c6cd8e358b912ebc13e9af920abc58d9c026db8a05285fc0bb5a3c600d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/autoTrackClaimChannel.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5cfd0371652cec4c787fe98690229c60051f6468184f83f88d5fac07eeb7d23f",
+        "candidateSha256": "d8c8b65d7f2917a55d60697db81221e5de34c637da2c8e3f5c290776437e0143",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/autoTrackClaimResponseOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "08115715280ae18fe26048eec0ac949ec388673906dd89895d6a65140b7e1701",
+        "candidateSha256": "3e2ae9d15e83e3ddcb4679a59a34b35cdb204429df4bb0d6259e1c4423c07183",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/autoTrackMutationField.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "db2264e9a62f92ad6e6f7c820fea2b9c607b0a0c672a3f31d8475179ef01def3",
+        "candidateSha256": "ef4f8b323c8ae0798ef63d2b84d600b6203285fe8414f9a956070933971b510a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnosticsWarningsItemOperation.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3d9cb9b70e365034253b691c1d628b01f23b09a23c46ae8fd796285b750ea079",
+        "candidateSha256": "4558d99571eae72bc7fad5ecfea247b941803efb8eeb612664618e3a1f20de51",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoBuildMode.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5320d7b94205ecb593095fc080462f46e8ccc81f174d493ced46bfb40660b272",
+        "candidateSha256": "6be8ddfd103771758fed8b30fd401b9813aed4b4fc37e62c95ca284bbbdd3e83",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoGitBinding.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d9ab17ada600960f10b2686eb9a3cc8445cb3eebf69f1a5c7caa6b20da1bd989",
+        "candidateSha256": "e968458324b381c05cfe82adac3b9a89f06e01c0749d0e842121f830ba705eb7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6ab7d878a4e60fa4eab3df73a189eef1348bf923b3b6fc5389183e1bfff6896f",
+        "candidateSha256": "da049e13697916c94551962886af2d0ecd2a25559e93a013f0010f88632e8e2e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoPlatformIdentitySource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "10550a0107fcf53aa2e028edcde0801d23cc71621eafdcc629d46a2988463c30",
+        "candidateSha256": "2facffc4d55ed311d5e256f4854d77d15cff72316b8614ac0398d08d193a8710",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoSourcePolicy.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "9547ffc8cba1673d92129fa9360d127c9a133e8d28a641e9491cf0bb730f8edc",
+        "candidateSha256": "12a34da735f88896699bfc83ce8d35059943cac8bcd39773de13474d0a0ef1b9",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/capability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d25f3c0cf1265dc59a883c23261e893e73b162a95a7dfebda3d35bd5ad48c7b6",
+        "candidateSha256": "60df2a5d59c4e14d4a4fad087cb1475ce26dcb0f3f4d306b2c27c3d18b9b0303",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/dataHealthFindingReconciliationCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f8f7309e46e8bef14c7b36e88ba170aeaa07bc81e772d73d0f80f5aa05efcf08",
+        "candidateSha256": "235c2a09670fd5ddd13b54d3f621653c2522342cee06866a4698e62e0c8ed448",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/dataHealthFindingRepairability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1b4e5ca2d319ee9f632ec42b93be043c3636c60d8187e017abaff207e2d4da7f",
+        "candidateSha256": "434f98c48cf86d0f9199d14cbe852c4aa26e30525ae2e2e7ef9fbd3f2cd3e16d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/dataHealthFindingSeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "feb6d39fe10ef84eed3deb488c1d79ac1ed14be8d04617d19011f9f47bb5ecb0",
+        "candidateSha256": "0f0d89c60640f37fca5ef85ca41eaf0e275c8bc6e60e309c4cfa0192758f91a3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/dataHealthFindingSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f73c1e2995245b7955192588e847952c0e1c8433228e6526cc3c8be0ada2283c",
+        "candidateSha256": "1517edfb0bd2a8601c6858256ad914cd3bcacf883ba1c5022604250a9cefc23b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordActorCapability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "ee69da9088041d40c7fd56aec232bd9e038926aafb1e1795271f8b82d3a876f9",
+        "candidateSha256": "fdb551602df2a8779fea1f3762b727b6eb1591980bb38d3b2aeaf9ff6d652ba4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordImportType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d5ad6bce8e0da970a6a260540444126efeb30a388001d9ed04109e83d14ff654",
+        "candidateSha256": "f12b5b5c1c319ecbb3f5912881e9257a3e620a9b6a20885838d662d04e58308b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "8e39e447a59c368268bf4106baf725a9caa48c49236d15d94085abd8e9941c04",
+        "candidateSha256": "d40c8be1fce78293652846c7a6d3a45566e6fdc283d72c570898893ddb189d9f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5a7aede3101762938b19c87b2b3069fc4422e097e7e924ea359a8e6e0d44f650",
+        "candidateSha256": "3b442504de603058b0e13e9fa7b3b7f51e688f91abac0e88c2c32023815ae2dc",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/downloadCanonicalOperationalReportFormat.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1711f9ca22c168d076f353555aa28b749dcf55d36339d9b8d1d142693965dae7",
+        "candidateSha256": "a54b64c1c496eec2b969023a041c000bed444108cdb36edf0f24a083df5cf87a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/duplicateReviewGroupStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "ac95532127df791c03ebae0bf6a4e4dd3ac260e1c83a7e2c7d01f2eb68a0f3a8",
+        "candidateSha256": "2a793ea3c14d256891bbc6aebc48ed32692bfb5a4da39741bdb3f4006072aa18",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/exportQcHistoryCsvStation.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "75bfb62ec230f394a5aa13c2dcc6d4e4b67938d1e55371eea3661406ae1be847",
+        "candidateSha256": "24493665aa8cfb42267137f6a02b49040c3cdc192ae1a2192076a4c8afe947c6",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/facilityKnowledgeHealthFindingStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "907a831947ddcff97efa35eca363738b29fed1dbba8521f777998ffa1541c5f7",
+        "candidateSha256": "d4744574cd23d26648379766a27ad605c87e9996331c8d467b0a13180462ecc1",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckFailureOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3be178a8dd99b05d17e500c48ec80da8ba1c06d166a930189d5fda03b23eb202",
+        "candidateSha256": "0011c98d07a70a83bf2f405dabcbb4ac5747c8b92ef8e5298a3f1b9d85e85060",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckObservationInputCheckName.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f3a8d65a9b1d2c8504fbd40cfdb89e9abf4bccda96d60e292c65996846858dfb",
+        "candidateSha256": "6ab590aebf5f6928293996ba592ffbba74d6fc1d418cb0c05bc9d0475cf4d01d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckObservationInputDeviceCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "eafd334b81b3c4d52e83cabf39e68c789e717264a2cba4ba94598f6f4c7d1d13",
+        "candidateSha256": "c71e19531d0ea6d69f01798cf1e77fd65073ede57c380fcfe7e947667cf9f103",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckObservationInputOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c8233cf65edd087ec3335e91f3d00be644bd58de571f3d89dfb0ea045a65a5f8",
+        "candidateSha256": "0c04af9b0476892e4c953b15adae846ca58a8074131ae79b9269af6673f43493",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckSummaryIssueStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6ff08080d3bec96bbbe1e07f9d888abb0be0917e93d72efc9e4f09ce14696402",
+        "candidateSha256": "e67643f53fceea8565b8685c62ed37ca003adfcc6ec170880ba857dadd614e54",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckSummaryObservedBy.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6ed15dad9a71ed310669f13b27a432b29ecf38977fe7a3cf6c474acaae4b4da5",
+        "candidateSha256": "0102f2f31dd203e77614944d4e5d31d4c47aba6c8968f3c8182f1b2ae3e6522f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldCheckSummaryStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3e901437bd63bc28376bd3348991794b54f89e919cc7b5db038ec37abaf9f146",
+        "candidateSha256": "cda6a3e60245eebb72cb33a1de445922ffddac83bed569ca9550ced88d2c04a9",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldChecksReportOverallStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "00fa7bc5274feef3e86eb66b8a5af7e60629460084d2e37a34682f8999cbb360",
+        "candidateSha256": "47cb009cb95fbabd6b5d63c39946580c0ba33b67998fb14a78ee1ea2dff716c4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/fieldChecksReportScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "63f62d1bd64cb004c8603e95910e4f770c61b7968a14ea0e4a5796fe3edcad4e",
+        "candidateSha256": "1a060ad379e76a99e513b74586411f22cc4df1530564605725c71f4edca0af54",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/finalizedOperationalReportScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "069bae8ca52c0c2aecf117a83e52b99abeb8607c3b3404cbb74ae2c3f0425ea8",
+        "candidateSha256": "0edb7c31727958a5071834a8c81c2ea9193bf69e3626be24530fd6f2b6bbe9b7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryHashContract.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c9a594df3898b0bac54f304dbf286195a7117f382bb1c34d53708e7651f96211",
+        "candidateSha256": "bf69a3caa982f233ec4c053b45efc0407c6f2a1a9734d51b54919c5b58a50a67",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryProofContract.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6c338562cc6f247643c6be00dc4497e6ad7a3f006380343b2d06bfb8f9077b3a",
+        "candidateSha256": "485822704950e3579753546cd3c999a48cdfb41727e6876465c2c17cf9407b90",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryProofStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6863380fd7a0fe5adb0807f6d971f14c7a5eebb2d486393cf7c47371d58c2af2",
+        "candidateSha256": "89d7a21181de5a22e51610038648ecf463366bf15bf9cf32262b850dac431d07",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryReportScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "461044551b1a3af0ffe939819d50b9eba5edde6d11720aee3bb9cc96d5973290",
+        "candidateSha256": "d92ef4af71014dbcacabcdd0e5e1d2ba1d364a8c759c0632486d6be2d608bee1",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/freezerSurplusAdjustmentEventType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "47986aa66cbfd8b4250a794ba67d5f236048c2bee50acc7528282b2fb5c6053f",
+        "candidateSha256": "c6af5ddbb71fd8b1bd7e0d8cd4f9e3ffb6e891b5063a6bb473135d932728c049",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/getBuildInfo503Status.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4c9e7d41754242787e77320f9f29d356c90a3308f2df56ca826b29a67f202d44",
+        "candidateSha256": "a6c12c3c09a10a73dcb4e062eaaa8f3db242c69dfec3365734ae4e014ed632a7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/getQcHistoryStation.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b2dff7bbf3aadc41f5a87c4f3fd4701a36a8cc9521853da4ff8a6d14f2028e7a",
+        "candidateSha256": "70cc158f39dc351c57fa6e73a9a80dc448e82177566a617a4d740c7ee725c258",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationCheckName.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1623bee7e95419389463adc7c21ef6acaf1ec3c7f3095876d535fea3c70bb71a",
+        "candidateSha256": "d27006dc29fbbd52a0ebe2f6467116da1e42019b2b611d627e5a9ae3626c52b6",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationCheckVersion.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "02bf2103c97fba2395ece0f3b73eabbe863d9a9d249b7ad38f787f3190c564f9",
+        "candidateSha256": "491e3b4e89002cf8828ea37c93010f9a86dd86d9b767dabb9421e96a490f529a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationDeviceCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3fd5f0e8bd84d6469d5a248bb38c1927d31151801186eab08f50eff36232e5d9",
+        "candidateSha256": "cbf003c63784a28fa17f938e0088f4464b29014f8109797cbfd87b06a6345b12",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1284d8ff64d655fa940ccd473701f151b76c8e2d368b4d8066bc7d9c233f546d",
+        "candidateSha256": "8c75022bcb81cf358e2ff1d4084d05426852897545c254be331295e69b9ab226",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiDetail.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "0ef4a6da0466f2aa6e0d69dcfffa637eb4f60acba6f91949ebd4041140af3264",
+        "candidateSha256": "a11e2638340052de0f6cbcda6ee46340f27f68a28c601d13840624b0740f67c8",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "edaf2103b85805083e6a8fb94861f6571c40347a3d181bf313c5a62ad61e0e47",
+        "candidateSha256": "1919dca85d1e4ee4c879cf2a04e09e57e59f1b897120b3d2134761bbf76fe42c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksAuditProtection.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e9894e7ce08e8ceb66249f17671cb8fa1d930b1160445b067f8d6a154c3c1b89",
+        "candidateSha256": "132d26153fc345fca0584cb41c6223620d0d04afc839b35354e695755870dc13",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksBackgroundWorkers.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "079ef17c760e8dddf694f94ed9e042e31578775d51a0195b30f48f975bb9ebc7",
+        "candidateSha256": "5aa83bc4bc916cc677bfe5f228b256ee3a7ec881e3e627c6413615284490a0cf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksDatabase.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d69e2b147c7c6ba136826028c39ecec83a07fefb5aeb4d8342dfac935e4b44bb",
+        "candidateSha256": "5ee58915a7e479be5a2adfa3ccf37687c3cc638431f6b0d6e911ccbee1acfa75",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksDependencies.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "79ddbc83331d32661bfb4879d6ff3482e2ce9f37be3047439a062c05f3bc534b",
+        "candidateSha256": "cb3792548109ced8de712b6db01fa56c1d1dce225ae076d52765e8ccd5be70d5",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksProcess.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4071c872cc3dab9e3de9f394b0fd77e39c04f9ccbd838134ea13732da797b5d0",
+        "candidateSha256": "4099998e6f226c36659f5e6456e0fed7506e0039a8102a7b15eae9cce1fad7f2",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksStartup.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "eb329166757976d07643772d7a5831ee7fd00c19df33078ba90d4c843330cb05",
+        "candidateSha256": "0b981f55eea88313eb873055dd3bf3ad761c5d80469b44edcc34d0d8e71c16d2",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStartupPhase.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "acc8934460337f1e44a8776533774db9ec0d56a095d059a6ac68bd1f3e8cb7f6",
+        "candidateSha256": "688b2d99f7da48a6fcf9fea77696001fecab3137b2dd33db60ea9443361868f3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c6d1e70e31c87651163470b9a592dca30bb438a47db7dc0442257733fe3f559e",
+        "candidateSha256": "8260336c5826a54962e65b5d35866a11a73d4234161d70a23a82232dbb1fdac4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importAliasType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "aa533b5cf172aea3593f97d05f2dd5648dc9197c04a3844303266361231bfb28",
+        "candidateSha256": "a58c61ea418b87c72f80e3af1eb22e46912b7db3ceaf3865d4a0d595ed27f5cf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importHistoryImportType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "197613f1f67db326bdebaec65c1c92932835e1b0b4978998bb3800fa563d58fb",
+        "candidateSha256": "7d094ab674eae7e248fae7a16f332294d69128d2571338e346a734c8930ec867",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importHistoryInputImportType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "16e16cc9b25ef9d94395c50779ea6c7db3b5d8928add8c1bc6c14957ef0b1dd2",
+        "candidateSha256": "73e2edf6dc4e0958f00b9c4c9fbd8cdf94dc72da66c71f65ae7fdfb06a244f8f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importHistoryInputStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6078623bbca3be06477f78412caeeef0df0f91eb8b68a7a9bfed4ea3bacec6b2",
+        "candidateSha256": "2ccf01475ddfbac00c32ea4edf3ee4c062026b00fa3c5b98e86300be8e748ca5",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importHistoryStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a53cda858f72d9a450fd9198efa5c13d20d93a075f058c390cce61c757b40ab3",
+        "candidateSha256": "2fa8c9da9e7cffaead77c7c9d22ff45b36de134fd3419c887f52a2ad47d78875",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importOperationResponseOperationStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "0040bf73ab9367db15a61ed95bf7af5732808c807b2804b3989506bffa537eb2",
+        "candidateSha256": "605c1b403a396f80cbb66557bd02b161b6208e4138ec87f26395db168413b9bf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentClusterSeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "ccc9d6e2d033166e7b94898d42cad024ea612cb8fc5c5e3ce57bb633d0fe4a82",
+        "candidateSha256": "3734352772c20db26f66477acf40576a43b1c81d758abf53c02e055b7844e808",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentPriority.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6f1ba3a36c65f10d32f4e97b485763bfe99617031601ebcb4830ed08e577d097",
+        "candidateSha256": "94c6b913d78cb9ad4e42b8764020264ec2b852848a931f5337c53fff78c10013",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f17d5d1ccf449ba0fc9701f786a5f647ea8b8748d748daffeb5e4ee2436af3c7",
+        "candidateSha256": "59f432401062ea809238d0bbf6f66c5ec4ac44298e581810ce6bda7692b42e10",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b177fab628a6b5c666c19ef059721aef434ae0793eaebc9eac9ce60b5c9373aa",
+        "candidateSha256": "4151f2e4941c687b5f0072123bfb31be9dbf05d272eab9530fa62fc988154345",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentWorkflowState.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "12585a25fabdd886c7803d8e22cfe887f061473e4ec1e7b07c11cd79086a8430",
+        "candidateSha256": "0676dc1783d3169c2db52ebc92065c8c2c04d38ce7ead5d532af0e60549598d0",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentWorkflowUpdatePriority.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f6bc19cc354e70a714d046c9db36858cb734f99eac41b5ffeeeaffe9544cd0fb",
+        "candidateSha256": "0765d2655b0f0be00385ecb41514b8d4315e5154a5a96cab2a8c8c33d51aa745",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/incidentWorkflowUpdateWorkflowState.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2b5b0338e55d1ba4758040d4ce0594e4cb6f207736b7bee60b1544c44115fff3",
+        "candidateSha256": "7334c57df76857c41808f635beb68e3da3855889d53448840cf776a9f64e8c36",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/ingredientAllergen.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "0fa22d3e0a4d1229eb12ff8de87917ddcbf02ca2100a3a2950fed8d07a36497a",
+        "candidateSha256": "6ec64dd734f02452b11f97fe201964e43277ba3f6480881c9f81d0767c6c9a86",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/ingredientCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "021898ed5f8db35ce068b0a9cdc9240559d4f26a707407429ea56b0b8b71ef7b",
+        "candidateSha256": "55b43a6a1e9a6521476c9c7f5d30ae27fab64bee49f50020fe5a9388bee56e9a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/labelFieldCheckMatch.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "943e996835e3ac0c97d224812f8b1ee8b32aa580810408eb692a45d11a256fb6",
+        "candidateSha256": "69917560568d2095eff5f9a998118ca53ae5944c293d806f891486484edf4c41",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/labelVerifyResultVerdict.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c09134615851f74fb0f3dddfd68697848634f109a1fbc310a3d5775628ebf0b5",
+        "candidateSha256": "410d6c0486fe03ee943433ec26e250aac21be9f78043696c88446e5029019a0f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listFinalizedOperationalReportsScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "80629a493ce039c0ebf4cf0702ef90b6b1a1aacd146d0c16b24558ae52a41e5b",
+        "candidateSha256": "4a83e9cc38aa2d77fee4e8ef7afc2698c8a3d268320c5c83d29472bed20edf9e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listImportHistoryStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "cc2905469358ce0e3fe84bb203a958c551bf19e63117e78412cc10af8ee267e5",
+        "candidateSha256": "d600587f009072e085a37cd5c5820c81cd104e0b143f1fd80e0ac97a83e1e881",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listImportHistoryType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7ba108f3f23df682c8b5797345e3cc18a2e2c3d565944c7b5e52a137f2035a0d",
+        "candidateSha256": "6adb22cec06879b740c5764bb429f068f8d5e52c8bcf65694bbb0638f7f53055",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listManagerActionQueueCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6069a2b598c3e5d0f4c44c5a5dc057f841a33836a2951455127e5e7aa4c461f5",
+        "candidateSha256": "8da6034e5f12745cdd79ac6ce81fed10d23b26d76b1a988d357ddb6ff0217099",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listManagerActionQueueStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e43f85ccac003c6a4e7042c248f0e562e27fc1d5a0badfc0b2af5da272150160",
+        "candidateSha256": "2df2ea9575d53f62e05c8969160c1a4c051aba4e0faa1e32e661945acb9422d3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listQualityChecksProductType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2e3c42ed4ee9967ce90c7496233ac7a0fdfd0f5b6267182f49f40cb8c9f7937f",
+        "candidateSha256": "ed96e3763e9767054fb3edd41a4df0b8e81fe064160fa2f640b23860e8b7d641",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listQualityChecksStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "65f6a4fc7be2a56e06dc19ad0ae9cc354fbd40494100605c8fa0ea7f6105a792",
+        "candidateSha256": "df374401e364bfbfada1d04a03462b1ef1b5f30da8cb61d0fba62c68c224b3a7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/managerActionItemCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "12736e020440347a8c1fc8793c2b633591f7ea2cd801055c521cbfe94bd6795b",
+        "candidateSha256": "5219bcb5d9ec187c9a12cf8142d010ee822f82738ac21701ea146be04cc78dab",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/managerActionItemSeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "235af3e2a89345fa78ed2b75775408d22388ac372504ee23947dc6d5f10fe48d",
+        "candidateSha256": "67d38f094337b8607a605146d043d3315aa53217afd5023823a85cc955396ee7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/managerActionItemStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c387947a132be4953042881cb2be93209b9ee25f15fe22ee13f054d7621a8bc4",
+        "candidateSha256": "04783ddd8c70170a680d9db1df47f8a13fb61e23869cc10362093cfafacaa091",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/managerActionItemUpdateStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f11d1345124471264c7dbf6b49e4476a374d9820aae33e7d2668c80d5e5c7ace",
+        "candidateSha256": "20685c0296537fb76a9e6dadc5afab25a129b779480952bb3b9ad2219120ad25",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/manualSectionEditRequestSection.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7c42d9828ec97515ead080e8d168af8c5875f4b8355a0219e2c7ba2b5d6479d1",
+        "candidateSha256": "2d55118f39040104694dd2bb0d3a7abb8a763e2225ad8140fd7d9388db184da4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/manualSectionEditResponseOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "8abb55846acc7ed51e8087b23d30a92881bd48f51bff7dd705e5e2f800615294",
+        "candidateSha256": "42d541c2356923542e9a86b0e9d9f5cf09ecb72bdd1655f236c94bd81bee66ff",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/manualSectionLockEventEvent.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b1370749926b4ce9716106220bde81912ba2b9149e30d77c08d852f54c3eea6a",
+        "candidateSha256": "055bf3502c24c871551617688b2e4e242bdd21be90bf3b47a5a0ca02f94d9cbc",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/manualSectionLockEventScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2bab7fe962fd3de4e93733ff31ee725770039f7d87888ab6dfc28f4c07cfda5c",
+        "candidateSha256": "e9ace8f37100f6d07b5f6fd1f3a932b174d13ae129c859f56e62f5e882ac74bf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/manualSectionLockEventSection.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4c2346154b233c82d5a2b88b50f724a7b52a65d515d5a3e210bd4aa4067ca136",
+        "candidateSha256": "af10c7fb4725bb9cd1ba7979eb4a32aea66d49aae26d6a1bb82e3393719f273c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/manualSectionLockEventType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f000195b359e5be344f363eba0ca5a6c0ed8bc077301a927d4ffe4b1bc071ade",
+        "candidateSha256": "6a2220ba1df5330f1e169f462f96d9ea98a357631e872474ec7df9b1f08410df",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/matchImportCandidateIngredientKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d463aa1e0146a1d8d2c5a5bf219d93acc1025c4857c9d39256810fc6bd5f67df",
+        "candidateSha256": "6d176e57e68fb27e13998a869a189dcdf2df6489004f8ea8437df15a2082b07a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/matchImportIngredientMatchKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "86f894df78f1f315ec24214c712680c8c92955b4f5ec9495c941f0ad832a96aa",
+        "candidateSha256": "face443e8b1a59efebf758300a2447a5375aa333d197bb347fc1d7aa877f2433",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/matchImportResultDecision.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a9bff503555ba1b97d3ae1093a84a13c5b434d24afe44951613dfd31daf02ced",
+        "candidateSha256": "8647436e6ac5b37e2804f15c8faddb48e4fb18306042839b86fcb9c54bace84c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/matchPremixResultDecision.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a82b8fe1709e1502b733c89727cae081735bbfa77f6c7820ff309fc3d07e4a72",
+        "candidateSha256": "ccf9a2ffe992c2275a7170a3b6919e79698c633c79b39b427feb05d1f27a16ed",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/mergeOutcomeReason.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6f1e0d748f4f5d24042813937096887f39bc6a4a3f219e6e21e97d308530c4ce",
+        "candidateSha256": "bbd6e60ec911b51789a7f47e3d56f56614e6536d1529fe515bffaebfd0307250",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/mergeOutcomeStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a3482011b7e9bc3015d3759445f3152fd3ba755b6e5a83f1a2562aeed7912ec1",
+        "candidateSha256": "fdacddc36b6fa990a9e4bd8c92795da590c2a4faa02e3730059aa47306e7bd51",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/mergeSuggestCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "35395cdd8fab6f741ba9274a789c0475cd51b534b01f320dc33c5c0c446ca1e0",
+        "candidateSha256": "050d04a6c11021fff0dc9d46e0daf7926a4e01690ed5d34af2ca4dd513c536e9",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/mixDiscrepancyWireSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "aafa58ced701a0ba644bcec14167283bae62acfdc1b262ffa828adfd17c89b05",
+        "candidateSha256": "03c1fabe7c80fe3cdff8937d5eab36633e2845b7feee3e6cabfd55ccfeb0b5c4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/mixDiscrepancyWireType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d77cacb6a88ba2f8ae2ed2f2b5bce05299d5d3a8b8d500f3e6fd5967b0e9f597",
+        "candidateSha256": "2a80d29feeb05aba3a68caa1213ff2866d7fb2d4cf44e323cc0858d76786d63e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/observeRunSuggestionInputType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c16359611f206d5d64c97a5c9b91144c78d9b5895e024082462f9ddb85e46ff2",
+        "candidateSha256": "d60576a498ce0abb8d6f76c03dd4ae416e73a8859e494071152e37706406cf2c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalIntentAction.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "83a49bc04bb7109fdb901c0144896db394d2f76eae5477deecc4a3f57a53ea7b",
+        "candidateSha256": "e00380e3f45d7c1bc40f933a82819b9ed8852c5d8ac01e34e4cdcd19691dccec",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalIntentLifecycle.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "72c1588836c79724379772c02c8a87b7295f5bff058043c96268d2d5903c97a4",
+        "candidateSha256": "6be495cd455b0b09ad8c8d44517ff50eb2927770ea0a86f64709c9ed32d158cf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalIntentReceiptOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "0031a41b1e67e4bb9ae1d850e5be826069cfecf94c99d100e2268553fac05d86",
+        "candidateSha256": "a225a7564dd078a11a9560d2c07cb3ede5fb9ebbc5cee6977d0abf06afbee494",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalIntentResponseOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "eea51043c246d43c2a90961bfa42895588553f2c8a0053ced7a11f9ba4e876f8",
+        "candidateSha256": "303200c2357334b03f777be2a8320f291280672694c622486e4ce620c12e2633",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalLinePhaseState.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "94a61566b75495cf44d3b1b3eee34704c5da29525e5e1db452e42cb9b085d01d",
+        "candidateSha256": "bbaf10e4e17e29370acbe055803287f5ce455033e80c1b5fca35f7ae820efdb3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalProjectionFactsPaceStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d16811a93d04e1ca19f1f558a58fd388772ebae37a0a306d1a08f9ebd02a00a6",
+        "candidateSha256": "2ab7c755074ef41e29a1c094779e80382bd9b9331ccef586b9edf08d2524d01b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalProjectionFactsRunStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5b50b7f1c5d4d7e69b29c527d1bc3fe10d1b5dfc7968baf0376eb1a472d082ce",
+        "candidateSha256": "798f236c7c64ad7d20a5ec1a981b27986d96979bc923d9f0b813aeec7a30d581",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentitySource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5a3b0acac28efbcdc91dd9e99d4252cc971d35c2ddf1b1c4bfb7364ba5c09b43",
+        "candidateSha256": "58c7a4cfa076fc5d1020ad9777881b6627a41a41f3ce00b1a194227b247fe6cd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentityStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "ca9c2a8423ca0f16c4d00f50ab6cb667d76eb9b22fa329a8077fed6d00438120",
+        "candidateSha256": "00cad7cf4b1a28bed3e8b88825116563e7eb85c38a74998d9e475c1877d9e606",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportIncidentsAvailability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "180b0cb68c4f645ea36830b4e0bc4a0a99c3bfcec168c7be5fe9996c70bba59d",
+        "candidateSha256": "6e9d0cc5e3a18b11bf262eb5afbb2b9f629a5b93a5556aca4d5d284f96bf9b6e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportInputScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1d2b6f094b4741465f0ebabbdcecadb0d5221b3d0e5e3e1a71873b2e53b9b501",
+        "candidateSha256": "83d8975044ab8e96922db7ef1aee3c580fe3837d4b91e710b850447fb1527c42",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportInventoryAvailability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "321535e5bddb00213b3879601d536857c5169a214a3e3fff50a57157a0d0d5be",
+        "candidateSha256": "0d1b5ae18b812bd0b154c70aa60d68fc6489416df69552a870261119ab60da07",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportQualityAvailability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c8923b74d212609172a63cd8fcf083747e89afffdb505c5b1787848235c7d65a",
+        "candidateSha256": "c06f2e70efa7dfb127bd735287f84e3aca1ea38b135f804722f50f3b29451740",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5c4075f95ec39ab479d6d4696d96b5a0715951b9d7d029a86652164ecd0f66ab",
+        "candidateSha256": "d80e1bf57c844eaabcf6dd7ed7a0f5f1c6c828425c712ba0f56f6a3510780626",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewFormulaProvenanceCalculator.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f5970e0b708f0b5b453ed1bd437d0521ce7897ae8104c33b94dc9231106e6409",
+        "candidateSha256": "54a2a40c49ea699246cecbb01105bb8bc72e3b7b6c10b69e2d2416c87275cf36",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewFormulaProvenanceInventoryItem.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "fd07c550ec780cc9e7cf544b5541611028f56bd674fdb38a4e5a8a790fb3abee",
+        "candidateSha256": "f5852e59cbc9c29a794e1daa65af156975f88c6c82dad8db46ab11572abdc025",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewFormulaProvenanceLinePhases.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4940a7acd75e706720876853588d5fb276e7d51d05532163acc831346ac94d4b",
+        "candidateSha256": "601a38ccd2d57cc904a3069bc22bc2133e91bd3520a8e5a355866a33fc838c76",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewFormulaProvenancePolicy.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a1d33b5566a65ed75c2c2c958bfc0cb43d2b6fcb9a3b7de20a536f3017f2d5ba",
+        "candidateSha256": "88a9f2b60cecae0e04f49048d0fc0b1efc30f8774ce71e5662810ef592b60f2f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewFormulaProvenanceTemporaryOverrides.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e42598c0c80b864acd1967b5447d964cb1552d702e0492ef9f22e377ae15741c",
+        "candidateSha256": "17d1dd54de8dafaf193eb565cbcd1ed3c72be4e805c51a3dd0ca1c753a17831f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewFreshnessStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "ba3a6fbbc3a75efa0f9f376f888bcb16c17766f8aa103c6a5bbac14d6aa20396",
+        "candidateSha256": "3135b8e3b47134228bc8e115e3d73ff0c7483662f378e3a8565ce561b9a78c04",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewObservedStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a411fe57913857c557f67ea27c2457c008df55a8ced0bccb37e1949c5a8a3bf9",
+        "candidateSha256": "c7bc5db9395a1678f9781698c49c7bbb628b07ea4e63186a141ed9936303467f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalRunViewPacePaceStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c3a471ec732d925e246f01c1d95e64268c3cbba03e1462cf2c515afcdccc34d9",
+        "candidateSha256": "46f42bd01c21dcaee0cabdcf46167515f8ec7e714b66181696dfed45b214c63d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/parseSpecImagesResultDecision.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a8bac8270f2fe0c780c2eb361670cc273483e5ca6862afbf829036e0c988c3e7",
+        "candidateSha256": "012519d53038dd74536c9496b1718fb84189604d0380c83d564d08f46378e0c5",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/parseSpecSheetResultDecision.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "392ea6fc169fae9a7b65b5d2d00135c936b2c2222cae7dabfafd02fb652bf822",
+        "candidateSha256": "fc653ed15e2b1df863c86c37d9a00983a583c2d09f3488d09e9406a514f8f02e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/photoGuessCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "22dc7b9b5248954f4c6b74153411316b2001edf5328e445e27c316f696756878",
+        "candidateSha256": "3c5ed84ed4b5ef7867b8335de25c39c49f7ffdc4ba28e26e1add3a0251157f09",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/productionRuleEnforcement.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7814d67e778a941d468b9427c3b3f2bbbfe8de67dbbed5b19d7a1ae42f11377e",
+        "candidateSha256": "a1a57dfb0e3f4d1d8e4e5bcbfc4e1ede5d9da1312d58f6fe3db8686cdb5d286a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/productionRuleType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b9d660922eb3edcf1cb76fc50137928ac9c227d2cf9f7b367d9e83bb2f32ba92",
+        "candidateSha256": "b397fdc26b8a8af7bcf2e75b1c57122db842a40b5c1124f641d60157549ad875",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/profileDataHealthFindingRecipeKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "380f87fd099dd155fb59e97b47c77406e3718dd8c85b2ffa6d27d279a6aab2cb",
+        "candidateSha256": "f20f2535fd39927d7252214272cc37c149e02b21305e2dcddede165aade8b513",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/profileDataHealthFindingStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3d58589806e076d390f7b46b328fdb6929c8eec0fcbe41fb8a80620c76001e21",
+        "candidateSha256": "65805fd2e6e2f3306d37d8ecc0e02cb638e6cd25f51de0662b04eaa23c4807cc",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/profileDataHealthRepairRecipeKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3ac044dda92093ba67bd5fcffdb2b3f0a94c016d5dc5f8e4970d981883d052a9",
+        "candidateSha256": "9890d305468b652336ca932c25b7fb5be3aabe77f871472403921874f591d4f8",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcAllergenReviewInputCleaningStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2b169c760948ebb74ef5f68328219693f7bc81e194191da7a6b06c12bc618a04",
+        "candidateSha256": "52711301ced2af4dc86ee86fc3a461ddd87a15c3302cfe4472d0bbbdb6bad15f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcAllergenReviewInputFootprintAllergensItem.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d41dd852491997fd71d6fcc593cb2137689030b65a2a23459db2d517d89dd44e",
+        "candidateSha256": "a7980ad056b2e8ff60b083e1c8d98b66601670e108c3155ebd2f1397a77e5d19",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcAllergenReviewInputFootprintStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1522fc0c78ce454e9a522f6c9b32cef16cf35a1bc9ef222d9b410537d8abae88",
+        "candidateSha256": "4aec2c5fbf702f6dd5c6a399dbc7cda91b0e80dd18b1f19c260959d8e847cc77",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcAllergenReviewInputStagedIngredientsItemArea.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "872cfd995e1e95cac53b1ebfa79f8e07d474665f97807b73679acd12d864a5a1",
+        "candidateSha256": "239dd1b583511a1f761095b6820530f1a82c5e10a6a13465d514c85a2079d0a0",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcAllergenReviewInputStagedIngredientsStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2d3e4093b5bc1f0246539f29f21bf921bb17a82a3de58a3c8a054f2816212168",
+        "candidateSha256": "5e77794531e70b6b5541edd26842ee3952ae767d156044fff73063f0ede93ec8",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcCleaningInputMethod.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "657d67d38b0c55830a4373362c006cd774c53def7b626fb66b583bf6dce0f4df",
+        "candidateSha256": "4241cdeab13ad4f5ace3337d62490cbf80e6443017eadaab76705f64dc5bd577",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcEventEventType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e2138adb66bb032596c8cb0a3f6e09b30dbfda47e40368711ae1ac1fe8a66bd7",
+        "candidateSha256": "82451bfa03e2bd190b9e54182772b644cd4ab386b8f1ee446a99406cfc31935a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcLotInputStation.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b660da8af8e99f9544b1d7f383b9275f2ae8782cff777b7385b90226a1b1378c",
+        "candidateSha256": "521cc835a652c4aaedc311cc9f20a44fe5aa2fc9b474fd38f5896e03b61e6aec",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcRedactionInputFieldsItem.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "9150082d1b5504445b4207aedf6d4e9c0ef09822c506554b83cceb06c231665a",
+        "candidateSha256": "a789c1e750380a8e162cdf257ad9503f8bbca539ebb6e41ac6958793eacc750c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcRunResponseWeightCheckEventsItemCheckType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d7aea9201a2c1e27ef86a1c07a0ac75402b1052c2bd0530157a622df8cf3e737",
+        "candidateSha256": "069ea96e92d22a8bf816a8b8de1540b02f7e6437fd405c6c09914109cf9ffa0f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcTargetInputUnit.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3faee5125ba96392295dda0235bf846410c61aaced4cd18c9765834bb594bf0a",
+        "candidateSha256": "f2e3bc93a35cea2eb4fced02bbd92938ac98e95e6cb315e67a7cfecede77b6ac",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcTargetSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e08a9652cda4a52738a27e23b6fd48f1c0e5e1c428f497b08350aa0efeb2ccf6",
+        "candidateSha256": "427f1ca7312a5b61946793c36ece55996a1e0286a9434694449beefa49e243d7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcTargetState.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "9a69e96e3273d5f4d7f3721d371b29554a43d879732942a473b0b3c2d5f41182",
+        "candidateSha256": "66cf2bccd295995a8bcbd4576992b09b35fb4e02406e6a6dbe5f4117408e44a1",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcWeightCheckInputActualUnit.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "878501e65c430310004abf606dc6838f8720f89a02a489bf18c8333cdbf448e2",
+        "candidateSha256": "48f731177af3d95eca0ccff8d89dc0bc0190781d6bf296f6267e5ffd983ff6de",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qcWeightCheckInputCheckType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2460a038d20dc6cc26586215679506540c1765d961bfa8b738645d05ca5ac86f",
+        "candidateSha256": "c66b8cd9eb80200460902ee742747346b3399d936492498f9ba099b26f350d33",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityAssessmentStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7befbb63adde68e060682e736ef58f5fb1b17fb18da9fa410ac790a9a4f361bb",
+        "candidateSha256": "d31738c1bb3b46a017332b98c32eaf2303f9c09a254103e74c55afe773312b55",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityCheckPhotoInputProductType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "260ce11941b008e8f7c07029d3f2715e14921f3a8c0a514600b3767b46391265",
+        "candidateSha256": "c80f04c949101f38d694cf28c36d241afb70c598a5eb574871a11ef4fb695b79",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityCheckRecordInputProductType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e37102022d05059d1425bd2ca3be0c7bfe83eb4d7cea1598bafb358ce621b676",
+        "candidateSha256": "12ebc292ac016a5beab23fe0c8b83b0a986dfe8ff43ee1001a21bb67fc5f4826",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityCheckRecordInputStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "36d60a7ba85a1af6078d9b0778a51c7496e74e6e212be43b6dac160d81f176c8",
+        "candidateSha256": "0d7e9c49c9fee4a3eac39594d15078e2b712c4bd78e215964bb6a54b51fa3839",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityCheckRecordProductType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "09af296138000e58ad3f2d6ef413e38c0d15a4f2409df6f0dbcc148663eff009",
+        "candidateSha256": "e587110122d1bba4f3d830c7dbe696e647ef6a57de0e354f412e1fec1b8a8526",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityCheckRecordStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "9dcd8090030481855a08534bd524c9b6535294241d03bc2ecfe4385f88eafb5e",
+        "candidateSha256": "3002b65f8ce38bb88ad9c3d0f0766851cca527c18096efdd872c11fb2514f871",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/qualityIssueSeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a2c7a2d94daddd5ee861f1ec07ff497c7848fc7ea617c0dbab35b16bbd417976",
+        "candidateSha256": "caf254d3e2c56a38eefaecfd2a9c849f97adde6b843ffc8e012bfa5909a938b0",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reconcileDiscrepancyKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "de4a20616b01eb1a93f7b711a19556499b5ad138317155bd664e58e173630ddd",
+        "candidateSha256": "7282aa558b2feec42a1b370c888ae26e106b07cbf4a43c44125f685b19b5eb8b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reconcileDiscrepancyType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3ad3a8a235fc0ec0abdf9f6783cb93849739a7588cbece46287e02b8964b2bdd",
+        "candidateSha256": "6b43550e35d32cd6faba709fac0e5667c9fa6b4e9ea1823ecae80b8c43f582cd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/recordFreezerSurplusAdjustmentInputEventType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f41e0ef853c62a6d79f6af4762d6239de5ea9f16a40e2501a83e643d7866df8d",
+        "candidateSha256": "8837eec2dfe838a8bf33242f309d61feff7f4265cb4ca8353f78dbafc5a9f1fa",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reportIncidentInputAppPlatform.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4ffa4e75e56f1b0e4db5119bfa0a351b66afd56d3ea3350f847951ec0e86f4cf",
+        "candidateSha256": "107858387e5d4b65e82bf4ca5a95e97bfa31bf6eb81a911dc6d05d22704170d1",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reportIncidentInputDiagnosticsConnectivity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b8099fab3755ba14f882ecddba7589eedd026df26c6bf266879a7353be2a0e5d",
+        "candidateSha256": "bfe35d0de15396fa7052a9ad9f451a226a2568f56a1d4330d5c2062b214c5cbf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reportIncidentInputDiagnosticsOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "517789acd239c8141e65c7bb190b50f9b33e7b01225129728236cee8bc9862d7",
+        "candidateSha256": "d658c241024b9b180a8549e46643240b457ab67cb30bdf0bb6a6283b430c4036",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reportIncidentInputDiagnosticsSignalKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "ec8238fef3f99571d42d41d622a24a276db9882837a744d33725e2a33edd3c85",
+        "candidateSha256": "9dce0e1cd36c917c42cbdeb9db19081e90c97649c6f6c043aa6e4545bfc35e9d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reportIncidentInputDiagnosticsSyncState.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b7af65b76edf22ae2aab126e45952f2d58b411580c92f0ef795fc490fcad4187",
+        "candidateSha256": "ba1f75de87537287ce47afe96cb74eb70fddc842f7d057a1a21bcc6532406898",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/reportIncidentInputSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "fdcf93862d2d1dc487a1671c3ea9d86ecc87d207e1171f52298116cedd8e3408",
+        "candidateSha256": "0e55f41617b3a15fe85c8821a1cdd9972214dad036b35b917c7eb1c7068d2868",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/resolveDuplicateReviewInputOutcome.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "af209a5319e5d6c552efcb6c8688cfabd58895c0de948a7661a8e60ccb54d80e",
+        "candidateSha256": "472db63df198aa96059d9a337cd8719c5bf5d3e40142c007d3fd6cf1b1172576",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/runSuggestionStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4785817e5d47b2cf09b9b25a03f28a29ea46b44fc56b23e6fa597188ca30d490",
+        "candidateSha256": "438309fd2f99398e5572c7787841e83307ae4e0a5ba771c337c68d8e16035f9e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/runSuggestionType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "6c652be48b48f115241e68779c3e25a4fbe597d62bf805ec96fcfa81fe999e2b",
+        "candidateSha256": "5dc410382542476f5d445447b9a2de3d65ee3befb370c3b434068b19177ff929",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/scheduleOptimizeRuleInputEnforcement.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c9a009205708fea103b7cb74534b66621f63975f2c680644cc8c9d966dc0b4d0",
+        "candidateSha256": "71f0200c743fc89861e92dee494d2f2b84d9dbfece4cb450fca91cd48a22fdec",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/scheduleOptimizeRuleInputType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "e0d9631cca6f19abdd3c0631edc0759429b1e6f0acced1c3c575593b3344e9bb",
+        "candidateSha256": "c3bda5e42589766941884a373de16b3e3f46df067c31a7f019e0dcd6476745a5",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/scheduledJobCleanupGroupScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "adcd0fda0dc9c75736dcb36e768846bd8b4d89896110bc2742a12b014ff83d69",
+        "candidateSha256": "22b0da1655ddae2acfbfb99864f2d434e2f49e6a31683622be09c89976188bad",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/scheduledJobCleanupMemberLeaseState.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "24345a37a7c21eaa13c8ad12533ec13caea14d008a37eebec73eb9799c44664e",
+        "candidateSha256": "034d46aa5369f31719ee4cd94342849efe05701ddd402ecc81dfebdb4f9c8d54",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/scheduledJobCleanupMemberStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "8b71bcdba5e00802059fcff2b69799ce9538e3167a1a4c8f371cc1a558e3454d",
+        "candidateSha256": "accf5f7c53376efba062e825b21084b05e420270a7d04dfc851be465ce64d649",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/searchFinalizedOperationalReportsScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f713445611b48f576608de769bd2b523ba5ef442d434b4ecc2f1fcf0941b3e52",
+        "candidateSha256": "49d95636653d08ac2d6cfcdd09e48165ec0036fbb4533b613877854291c71282",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/serverJobStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "1d00052c4c8b442fb761628f8a642fe2b18a9c6c1d52d4828670a2b6014a9951",
+        "candidateSha256": "10c4490e59ab3b0277fe00e14cbbdf6a6b44c9a540c61c0441b2db0629e52d13",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/shiftHandoffItemSeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "aff1e90ed062f4e4853edba1a691e1950791c3e904b208f6b1d0d0e9795cea69",
+        "candidateSha256": "98eec30c7e55fb9f889d10e09dee85fe1866c314d0793b88113ed5cc66121be4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/shiftHandoffItemSource.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "4f60b72bdbef59cfceeabe18d52ab46a4b6e43d3ba8b387890231feae781100c",
+        "candidateSha256": "c17b991dec3fc2abfeeb0da24ab82ec43018d5014cc5252638b2959ad1a30d62",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/shiftHandoffItemStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "369d29d38c44789e9a9adffff2d3ec15e854010125e51e219e47ab88576c9a17",
+        "candidateSha256": "bbab7ef6ecea11b2ed3c65489898290e953facada0e622ad500e9e90d15baf8f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/shiftHandoffSourceAvailability.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "10d1aa8a656d2c30eb79405d13d218a4feda954780cbb5496ce626d87c8c41a8",
+        "candidateSha256": "33eddd7193538a7f526b7f8ad79d3a0aae0979198f93e0b02f80dd36e4e92f15",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryPoolExceptionSummaryId.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "31b46982e9c3347b52445b440b9bd7d40ef1e00e2d39ce9ab54312f5c3ed8f61",
+        "candidateSha256": "99e57afd63ed759eebff3d0bbf11b0c748e7dbf8f9c3c79300dd30620b741064",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryPoolExceptionSummarySha256.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5cb28bbf4d1deb0b2a72d5cd80ab84418b54ac734e389aff878dd7293ae05831",
+        "candidateSha256": "bfef4bc3339971cb1581c161a0f934471d0e1cdf53ab291795d9ddfda0577a6e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryPoolMismatchDescriptorDifferingFieldsItem.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "977e0ffb74df6438dd656a56644ded5b2f030430eb21685e52df31caf213e8d0",
+        "candidateSha256": "4e66dc1cdfd9b85b32991b5a39e71fc5427851f67745dd0e5c5f6e81b36e441e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryPoolMismatchDescriptorMismatchType.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "10a685e07003a28f0b4892962d2784c3f7448e884d9d90ea4e8525bdbe934a0d",
+        "candidateSha256": "f629819223c8e8dfe22fb3b2e9af4dce4b3332fe60c538d2600292d91eca436c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryPoolMismatchDescriptorTable.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7c9c97a68bc9e2c945d7f081e5d791f218848b363be438195bae194a5af9e42e",
+        "candidateSha256": "923241e5b729a1e846724f16ad2ae057e30e304533951c0e7d5bf80da86351e4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c8a3ba6ea25a2d52007ccd9f950cff45e2b77e6482aa857dfc07395542cf656d",
+        "candidateSha256": "3288a259262d5140e2640ead4d4ccf7285f7ae830fe2b33e48e0efe3990797f3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationCaptureRequestDeploymentHandoffKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d005226d5879878b12bcb7423586ade21bc760a645b572262320b3e55d970208",
+        "candidateSha256": "7d2588d398c9857f78356560fd1bad998390eef6b18f260b8934f5a116aaa0d8",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3c3c7e965e7af169d8d538a607af0095c7ddcab9743b7314445621749b97a771",
+        "candidateSha256": "252584d270caec6cbba9308bd1a1ecfe10a5fa708442b8e2cf4e7436706ba6bf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationDiagnosticsDatabaseAttestation.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "b86f73778f11f36ae50e6bbe3e07b9e0cf7ad575b7449de42ffce9ff93a07c81",
+        "candidateSha256": "7f76b72422b3f300314317017dccc961ca41c2b22807696df67d82ae06aeaefb",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationDiagnosticsEnvironment.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "9e15e669689a496e0d8f1b36fb154cf08709ffa409b8c9af7251a3de39183a72",
+        "candidateSha256": "5bae5870246c89f8fe0c1c2495cd15677174ceb144239190a6d689069ecb82ea",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationDiagnosticsVerifier.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "8d87cd3a77a212294da797d05a9126850892dec56e15856215a92b8c1c29a498",
+        "candidateSha256": "4eafddb6d14ab614e6deeb1efb597fd305fbb35c09107da7ac2b29e9b027c61a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationEvidenceDatabaseAttestation.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "533016a6534aff1a4d6d51ea46cfd28c67c7616d5f1abf05d8314f7d060562c7",
+        "candidateSha256": "3bb9bef5ac5aa32f909ff3014bd271eab21d13f4c233c89fc2bceb4ab8db88db",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationEvidenceEnvironment.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "85e982bac816cb949e2d1f00bdf35a4e983694306f424080d30136a2fef3e940",
+        "candidateSha256": "90a7840aeddd9af572de357b5c66a490472e3a9e4a33e27ec6b1349a2274ca6b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "668fc0567b1439106bef89b9816b7a0890a4e36db25c3f8cb9270b5297426c63",
+        "candidateSha256": "bd52594570844607f6a14d2cf9544b6a187381cb85508862a25ae50bc0a8890f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationEvidenceVerifier.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "a218478d493e084bc9e8ca49301238760932421f9684fa7102391ef9b1246b32",
+        "candidateSha256": "0a1de3dbe6a5603d4f5b54693634ee5f2b8f65936ef4f8b0caa05578ef98c996",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusFindingsItemCategory.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7d759f2aa2628f1a6daf7718c6b3666232b25dc0dc2764bddc0a28311bc37fd7",
+        "candidateSha256": "44a31bf23e623255cdbe9a9568fa1f3044c4d717a6c4bde100469489d2f8087c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusFindingsItemSeverity.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f78b5b345cd54c87baafbac070f248896e34ef110fb13a6d247157e3d1d6d21f",
+        "candidateSha256": "40e327d28a22c9700cd168a858ac80de4f5c733af9974a8ba1ada726e1e325b7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusFindingsItemSourceRoute.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "08db50cf1da6148c2f0147ea5c667ab614cdf1937c6f2c9305f2035fa7cdadf2",
+        "candidateSha256": "3b98c972d75e8341cead47f46f08d448ab77fa4e12a927428c091b05f64092d6",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusFreshness.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "7f116d5179b98d520ddbef47642143f37d5a616cda83ac3b11e91cfe4b8a960e",
+        "candidateSha256": "3f91f8587a48c295859d6c0e0f4d7adac25a0b710590b5040741cbb516780893",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "5c125f1e6c935a90b85207d28b9a922e1f2c050f1647c4bc6b5981756655dae6",
+        "candidateSha256": "b4e93e713dbce8605311992b42680599ade242c61294cd74397fb37910874c69",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/specImportAliasKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "c58874ac189dfe3a788a87b4e6dc3a90140668b6faead19d6ae08f78e39f808c",
+        "candidateSha256": "bb57c5ccf391c978ddfea248a9112ea37405b8a4bfea7af043b110ea48b519cd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/specImportRecipeKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "3360e57e3aaee4f599be9d5d4292bfc252758cd159ee091ea7d4a94054cb4c47",
+        "candidateSha256": "92ecb424afff1ddc79a1f2e9c9810279f3f75982a4a5371ebfb9dad4a3f54dff",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/specReconcileRecipeKind.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "39145d70d82644a0fd3beb3a4e37e6da3e10423920b4afb5b85c022f901aeb68",
+        "candidateSha256": "5148fac15b3deabbe628b045c55678fe481b88453d072b32526c8199c4310619",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/suggestionMetadataDecision.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "0073a582ed3c3fc8d1df0d71693eb2d963cafd1aa491e8b11655ee4609bf9e8d",
+        "candidateSha256": "f337e704c7277af12b0ccc3350bc10e992e8db8021c13065b0c6ac1324ebc228",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/summaryInputScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "f1e4d5a44e5507f2cd148830429ed438b0db73eed1f0084e3a11895e591dc268",
+        "candidateSha256": "ea79128992848e4696e843a832a8d4ca45031e0987a5e878a99531fc5ddad26d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/summaryStatsScope.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "d0631c367310abad2702cf5b633941ab491d1e4f9b31515688c0543bdbc28b7a",
+        "candidateSha256": "68a0029949df2a266c7d8f7bba783f0a2518755981a00406104bc6c6687af4ba",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/syncPeerFrameCompleteness.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "2df9251e33ab0ad1f2d72c0c9925a4e25a677e73d19d3f5b31aceee2b256e5c9",
+        "candidateSha256": "8df50dc84ef186a83c188821442f6b4efd55de7373e442edd74240cf11a3a2dd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/updateRunSuggestionInputStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "23d68f8f34c2ffa56d6b617eee1df375f6197d8ff8b4666b31a6b8673cabe173",
+        "candidateSha256": "abbb9e8999ffe30640d744017aeb0c133e7795c702984b254270ba6b785ed051",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/wasteInsightItemStatus.d.ts",
+        "category": "api-zod",
+        "baselineSha256": "742babf603b2f32a929a668f528f362243bc04c136f7659137b27a671bc2185d",
+        "candidateSha256": "b48e0c76572f653a23242223b14de17e4a9a8a1d3da80398a3b7876ab9f1a169",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/actionItems.d.ts",
+        "category": "db",
+        "baselineSha256": "df92135306058a3345c4b9d879d7137fae8e1c01f06e14d54424f8dd877596f9",
+        "candidateSha256": "e9ab72e204c5656dc771a8b658b31c31aacfd384fe0f1aaab4f094d229316b72",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/aiConversationTurns.d.ts",
+        "category": "db",
+        "baselineSha256": "f9d1cded107c92006a56c0be3d69507ae4ff0afcb1d51c6b012928b7dfba1d35",
+        "candidateSha256": "0407b187d8f2f08c514cfe197b9918db51449458c2882cb1d3440a1b50bf6abb",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/aiCorrections.d.ts",
+        "category": "db",
+        "baselineSha256": "97b1391ce8f4c5c3ce1ffe2bb803493c06034781bf59d15c9a8fec4ab2d04eb5",
+        "candidateSha256": "d4c7daa79f6e8875c4285457bf71c155dfbf4ebaf9190f5d24420e72033702bf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/aiResultCache.d.ts",
+        "category": "db",
+        "baselineSha256": "4b1782aa23a53d11d326cc800868c646f2188058743b6332984c5bfc4953f2fb",
+        "candidateSha256": "5e9a17c16eebc43d1469ba475f8825ec0648f85975e1d18eddf75a29d1d30389",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/applicatorBatchEvidence.d.ts",
+        "category": "db",
+        "baselineSha256": "9ca1ccdf971cbfdc94c579398d78301f6f036ab76917b38e2a6942490af63d7f",
+        "candidateSha256": "5b545b74d7cfe49f0a8a135ed1af98205f7c76ab01baf2f0971d7bcce04b47cb",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/auditLog.d.ts",
+        "category": "db",
+        "baselineSha256": "15bfbf6460f913a208eae4210b1e051fb1f63d796cb60c9de7f96792bf337d6b",
+        "candidateSha256": "04848472a63ee070f6521069e2dee04c9eaafee82d1294fa8d9ef45c65567456",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/authSessions.d.ts",
+        "category": "db",
+        "baselineSha256": "c568c29abef6dd34660a873da65fddb84683aeda546a34d5c3cc631f0cd3eb66",
+        "candidateSha256": "b226ad513eca555c2800a7209c7414496c9abda66696e6689cf7bd7d699d23e7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/backgroundOperations.d.ts",
+        "category": "db",
+        "baselineSha256": "9cd871aad58e769983a71c32692dbe97f16eb7110a482dee67b003c183dff3ad",
+        "candidateSha256": "ce1c7e87b00d30b19369c0987e7045a4464b3c827606f6dc5580c9412a7fec53",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/brandProfiles.d.ts",
+        "category": "db",
+        "baselineSha256": "a4b6a29032df09555162dea0195de20f52c289c18d687cc1c95d64e3085ae115",
+        "candidateSha256": "3a56beeb668e99416f45882a90d558d9382be98a5f1347454ec64ac6dc3bf2bd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/cacheMaintenance.d.ts",
+        "category": "db",
+        "baselineSha256": "6d3ed627011fcc9bdc5316383a9419659706e6cada418445d5cb8746cded927b",
+        "candidateSha256": "c85d95645ec9473639a2505c23af9455d7a1428a317cc2cf108c0a106a0c113f",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/cheeseRecipes.d.ts",
+        "category": "db",
+        "baselineSha256": "3367ed5e84702e8c1b469f8ac9a831e875e936568334db321315416d57964164",
+        "candidateSha256": "aed800f50369247b4e4f490e8a7e6fbc862fc819c505f4795e12bc9b17c97675",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/cycleCountSchedules.d.ts",
+        "category": "db",
+        "baselineSha256": "0d0e35920813e6482dd3e27dc037d74bb7287f53bd89abb03ecac1f53d2afc09",
+        "candidateSha256": "20618fbae8ecb11bbcc81379793400fd851136dc8b4738d46929ac226243b367",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/dataHeals.d.ts",
+        "category": "db",
+        "baselineSha256": "1bfb84158fa5bd0960ba98af5e35450b96757d345f5a0dca60c8c913e624148e",
+        "candidateSha256": "cee98d566ee570217f42a2a24e9eccdbfa80cc6d660425c1011007c6b8446402",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/dataReset.d.ts",
+        "category": "db",
+        "baselineSha256": "73cb217f28537f11a732d2659c83a255e3bed8aa3684d2c460a643886834f68c",
+        "candidateSha256": "4861d0d34823d91b2ffa994e6b7fd769721c33c03948dafa4042662ae9136642",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/deniedMerges.d.ts",
+        "category": "db",
+        "baselineSha256": "0ad24894e7b735d49d088148b661ffc5280ca64853ee5a4d781745c0686ada83",
+        "candidateSha256": "96ee7a4159bbfa438eea29ecca427ad59db243f1851710ebc83680892a20e4dc",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and declaration member order only; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/dieLineDefaults.d.ts",
+        "category": "db",
+        "baselineSha256": "a0ab6529458642beb205980d79298b117829f74cdb2c2e087f35ad575022c584",
+        "candidateSha256": "6d99a17cb77cb9058d855af4db6e19c15a5e5e7170f55333d2c7bd568195dc9c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/dieTypes.d.ts",
+        "category": "db",
+        "baselineSha256": "47203d2bcf052c35519b1bbe40da977c3ef6781c142dee3ff3e710194b10b339",
+        "candidateSha256": "419df55399157e1e92710fbe2ed5453b7e454d91b453a21f0dc7de384b84e82a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/doughRecipes.d.ts",
+        "category": "db",
+        "baselineSha256": "13cb8fe4b1ed4dfba24e6c9970eb666ea837a9e79068715a36743e987e71d077",
+        "candidateSha256": "61dd1851f8c5547445f25f37872c927f1b720a8648a71133e787c079944faa61",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/duplicateReviewGroups.d.ts",
+        "category": "db",
+        "baselineSha256": "208a1959504e7df7d5a186b67b02f01faef71510f5c73a84517659307603a9dd",
+        "candidateSha256": "040b154b9f2ae037fcad5f756aff3ec96626797b73efa0e8d5e0ce53b6d96c6e",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/facilityKnowledge.d.ts",
+        "category": "db",
+        "baselineSha256": "c361b656d752d13b30c956c22e751b94ba92b856566aace2620eaaf38f267c8c",
+        "candidateSha256": "ad0ee21f32e4569f744504c73b1aabfc57fcfb875b3aa9f0c16c16a3f65e61ec",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/factoryKv.d.ts",
+        "category": "db",
+        "baselineSha256": "498d52ca3f832951e7ead5013f8c9d55216f7c5510116cf5a03d47d942341af5",
+        "candidateSha256": "1c1f52e92bf34c1e620db4535a38c539421c0f58632b8c6e76457e75b46a4a35",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/fieldChecks.d.ts",
+        "category": "db",
+        "baselineSha256": "932fd5c6a7b1c2ac863d4a788163c05aa36621f67e0d22db64dfc54c769a000b",
+        "candidateSha256": "704dc730925a8bdfd2bc2d88730c045f55ba4146721f9d6793ecd5a150d18781",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/fillMissingValues.d.ts",
+        "category": "db",
+        "baselineSha256": "db8412858387d445d4814d075945c67b7d12a1424cec97f534d34e58dffb8d11",
+        "candidateSha256": "e792f21960ee09a51125753aba96125157ad91f894150df3e4a846cf3c629664",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/freezerPullItems.d.ts",
+        "category": "db",
+        "baselineSha256": "4b6be0507b962e831d27643f34a71533d12898b57cd0ed04104bbaa9726e0ecf",
+        "candidateSha256": "f53ce20db450c63eae26d9dc7dd183c5b8d9ec8dfb4c2ad90aab91fb90ccff32",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/freezerSurplus.d.ts",
+        "category": "db",
+        "baselineSha256": "32c173970a56c243fbe81eb434696bea86eab71dc144f5c40c4cb229ee7c02bc",
+        "candidateSha256": "0e2587a504bf462f543063ef63ac373ec0c5aa841184050a52d335ea7411ba3d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/importAliases.d.ts",
+        "category": "db",
+        "baselineSha256": "a253b68eb71cf6a51077daf645010ff2f45633200b8755536bd1aacdfc0c237c",
+        "candidateSha256": "5a3d8e146713a11cf4caf60dd9a8248267b90f903fca42aa401accf26f6b747c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/importHistory.d.ts",
+        "category": "db",
+        "baselineSha256": "93682b0bc202a6d4dfec1d6e8f59aafcf0bc8d2530efe1b9de6a38d616d6e853",
+        "candidateSha256": "332683cecea96a5ede4e6da135670f72f78490b6a5eb3b7e9d712474e6508bec",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/importOperations.d.ts",
+        "category": "db",
+        "baselineSha256": "517ebaaf01df3cff555061e98fec9e7f76c90116c9fb9f33ef0da8f6ebd73fd5",
+        "candidateSha256": "4fe828c3fdb89b2b613d09022bf7167708957120db0e5e73101b4a65d14bb6f3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/incidents.d.ts",
+        "category": "db",
+        "baselineSha256": "25eb1b914c102ad00e65de393fdc8d31a571312eb5a699443c7cc5be287683a3",
+        "candidateSha256": "abfca5768c104903482ec2d6cf620f6533ed4d604df024e9e1762018a083c80b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/ingredientBatchWeights.d.ts",
+        "category": "db",
+        "baselineSha256": "6a458887d5792d85503c9fd585ed2fc7ffad55d624d9b69d0f13c73eec952839",
+        "candidateSha256": "6223c86fda286ca8565b9f8098d7c2052c9cfdb73ab89cd0b7dd91e7d0ca50cc",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/ingredients.d.ts",
+        "category": "db",
+        "baselineSha256": "5440eb80b2625e3934fd90548b8059437d0852f72a8fc23e02e22f4e54fe1bb2",
+        "candidateSha256": "46b3c542a5023129809795ea5a9a5527664a29f085abfa3bf4966328b6d86916",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/inventory.d.ts",
+        "category": "db",
+        "baselineSha256": "305fd3c7a71e48c8b656379acc22343aa009897238532c6e1e9110c4f3bffaeb",
+        "candidateSha256": "a4202a3f124ebd20e169f954e63ee7a27e170ce1708bc9c0121038d5aa819e32",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/masterDataHealth.d.ts",
+        "category": "db",
+        "baselineSha256": "27422b968e910e72e62450a16109a1b88b470d8bce5ff89f30a90e89b2a0ecf8",
+        "candidateSha256": "9d592403933a3fef54ff64852b6ca320a4dc3f3037c09ee34e8fd6b032405b57",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/mergeAliases.d.ts",
+        "category": "db",
+        "baselineSha256": "a230eee16985df3a361b003279a8526496a4ada7c230af0e712956b833f056de",
+        "candidateSha256": "93f8f8ba72fc0012734f46a3e9ef50fc72dce7e65a2d367ab73a35804b886a98",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and declaration member order only; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/mergedAway.d.ts",
+        "category": "db",
+        "baselineSha256": "b604d8b143d2f622439573a49d99c6826e4193dbc6a023049d19023da030ce1f",
+        "candidateSha256": "9437bc9ac89175bdd46354f17f8b1d5d0cdd71c0cfefae784e37b3d08d1e649c",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/mixSurplus.d.ts",
+        "category": "db",
+        "baselineSha256": "fa2308bc6b4cd7d44ed7eca90543e646ec637fb5d8503521ca99b011e880f426",
+        "candidateSha256": "ac17f1f062235ee6498b03309309614d4976760f603e1f418080a74246b8e238",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/mixes.d.ts",
+        "category": "db",
+        "baselineSha256": "318f576f9dd4b68cd5a83a40375e397cd955462203dd75886f8ec3c57dea8c71",
+        "candidateSha256": "96bab4b47aa8499f1b849683a92de589a894082fe963358f9588bc90b51ddeb4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/operationalIntentLedger.d.ts",
+        "category": "db",
+        "baselineSha256": "219d2c26c2e867b9b21a56794b4a8195d6de321f019473a3a909438c33118716",
+        "candidateSha256": "537785242fbc306489a0e27e9b7072d830a7650b417595736997a6979de0fba4",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/operationalReports.d.ts",
+        "category": "db",
+        "baselineSha256": "de950525cd8013d4beb9faa443d090ebc961d6ec1333ae14c288ad3a7e582995",
+        "candidateSha256": "25dfccd37419c1043b84a1a989af031a4ae407581085237222973aadf47487cd",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/passwordResets.d.ts",
+        "category": "db",
+        "baselineSha256": "fd1bb9ab70548b20759192d165310d783f2fff52a883562749369008ff710410",
+        "candidateSha256": "4bc53b98f9303989d86468abb5c39451cb8208dd6eef06a8077a69ebe1e5fe56",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/photoAliases.d.ts",
+        "category": "db",
+        "baselineSha256": "cc8d990598375b17e16a7e1182fc73475b150ed48bba8f292675b95777b0dad6",
+        "candidateSha256": "e844b6543806a2fd11763e8db107afd9fcc15fdeae9bebc6aed4e314c0c2dc41",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and declaration member order only; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/proactiveAlertSettings.d.ts",
+        "category": "db",
+        "baselineSha256": "f404b93e93c8f0768717c9aa613388dc2a274435fc455ede2508d6c0ce01bb02",
+        "candidateSha256": "4da3d7f305517949d0bb97f6482697dd1875f93506730f086000333976e30524",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/productionRules.d.ts",
+        "category": "db",
+        "baselineSha256": "b2d118b23607d270dfdaa51da29b50670764a46b89fb8db9ca88fd80b6a3b2c6",
+        "candidateSha256": "6dcf8958070c88df8822496d391c0ea5bc4430aedf6dff6af2b135c07f4195a3",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/qcWorkflowEvents.d.ts",
+        "category": "db",
+        "baselineSha256": "960d19ec4c0fcb85baa8fa40faf31794686a853491b268af305629ad0582b180",
+        "candidateSha256": "2076daaa534cd1cf5a592c5c040ad25a340e2d16dd8b60421170e798b8bb7975",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/qualityChecks.d.ts",
+        "category": "db",
+        "baselineSha256": "1dfde23e2d8c99247e4cda6545b7b912823dd07b750612113668bf60f25e9a2c",
+        "candidateSha256": "fe61e1053ca95a618f1236f6196810b660779682919ba7d280e0bc4c4900a468",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/rateLimit.d.ts",
+        "category": "db",
+        "baselineSha256": "0ac646b38d28f9563a424ff7238c6a7992496831a91099387d12d1b911f7b866",
+        "candidateSha256": "f0aca4692b3ec0841031706fcfb001fa97f8d20eaddb3b1e36c0a74871bbc015",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/roles.d.ts",
+        "category": "db",
+        "baselineSha256": "679a45a1fa9edd64708aca6338b5e63299cfab12f4d4a40117cc4cbef22038ee",
+        "candidateSha256": "4df2b7e88cdb215a087eb958c56adb5d885630e6be974fcfd383ada95fb14049",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/runSuggestions.d.ts",
+        "category": "db",
+        "baselineSha256": "9f3b0ecb3b56c3e5ee3074917e7e569cf159ae076cddc09999785f33e34f6203",
+        "candidateSha256": "935f4f7c1b950529035f95da444327cbd3de75d750192a279e45e3d216fe837a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/runTemplates.d.ts",
+        "category": "db",
+        "baselineSha256": "a5714eaab03fc2bcdb971ddb34c983e681705af87028101958881c821c1c5ceb",
+        "candidateSha256": "37a70f2878868eb48621d74ba8a5349407fdca0214b7f564227e87d993632690",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/runs.d.ts",
+        "category": "db",
+        "baselineSha256": "eb6e572fc306abbffc7f84c70ba1f08f9c77ababf2193c64834d73abf29f6b82",
+        "candidateSha256": "f2bc96b9a606b09a6c9e5f926d2057ef972fcbcb780dfed5dd88f009f2cef8ab",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/sandboxMeta.d.ts",
+        "category": "db",
+        "baselineSha256": "6e58b1cc032b5a1d99656a0166779ddb3afe14dbb83c62bc45c7f92380c5a3fb",
+        "candidateSha256": "7eb3958126958176527ec498986b85ef63b0a7c5a0dce440f61da89496ed0d8a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/sauceRecipes.d.ts",
+        "category": "db",
+        "baselineSha256": "9ab4753dfdb71c13588e92686d0f698752a649f2d953274457c3cf35b5f64653",
+        "candidateSha256": "c3d05df8800d30fe0c74a53a6a67dc8fa657c591418d9b60dbc04e5fbde8d83a",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/savedCheeseSheets.d.ts",
+        "category": "db",
+        "baselineSha256": "162ed1b2cd6d211e245a7e1fcd364b6df881aa3dfe212fd46ae93a1c54a99ab5",
+        "candidateSha256": "48f881dcb4e75bc62342bda5e20f0fe15ef76d899d9820729eb350e80bffa06b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/savedPremixSheets.d.ts",
+        "category": "db",
+        "baselineSha256": "f25fdbc3fd4bb77ac8c11ce9002bd0c834135ec70e7ed4cddf4d3f2fb396bc16",
+        "candidateSha256": "be262fa6533c8f7d7c7291b3a33f06bdf28ed179d5a074bee12300d757634c1d",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/savedShippingGuides.d.ts",
+        "category": "db",
+        "baselineSha256": "66583646957bb54c5430f355d2b4fbc3017aee1c0ce3bebe6685f17c74149a9c",
+        "candidateSha256": "4ad852a17f4a2fb7723db01c2a6bb99eb346c06ebd03db1aec463d0364b4cd6e",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/savedSpecSheets.d.ts",
+        "category": "db",
+        "baselineSha256": "2c77d0dfb8cd187692c8b06522c3ae761d649fa451b07e8c92a0f2518f0b2ae0",
+        "candidateSha256": "698c98a3c86650579ac76dc79242093a584565d64dc82f13549b242dd146bef0",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/scheduledJobCleanupPlans.d.ts",
+        "category": "db",
+        "baselineSha256": "73af05e4e1ddbe481242b085a12d59797a7cec24dc41902544777979972a9c15",
+        "candidateSha256": "657f8fed427741b9b572fab06dc3bf8d17c8e757b8d39103460cd8c38e3f11e0",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/serverJobs.d.ts",
+        "category": "db",
+        "baselineSha256": "accb91d79c051ea2b5b5a554311fc00835d26ba7f280287876dd75d96ec12444",
+        "candidateSha256": "059109f76ac6cbb06b99299925afee9611b16e1e03977bf186a085a83aa9d138",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/signupAccessCodes.d.ts",
+        "category": "db",
+        "baselineSha256": "b5505313602aa8334fab8053a75576cbcacae0a2d64c8c72c67108381fa6c7f4",
+        "candidateSha256": "71fefffc0cfd917bc48db89a6b47d063cb7b204391cc862bae54d412b68083e7",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/specImportAliases.d.ts",
+        "category": "db",
+        "baselineSha256": "cd029a6268d907401011b99811cc3f7c59d45d642338b1337a9689847e197817",
+        "candidateSha256": "72a73739bf56928acbf88ca64e52ced2106437d2c4539cf71e67e65a809ed5f7",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/staffInvitations.d.ts",
+        "category": "db",
+        "baselineSha256": "03222a2aeebdf7f738d0f238244b109a54f81d7ddaafe6f8eb56bb03ab851267",
+        "candidateSha256": "fd1a6260e78cb01409d195cb0dd239d238c8a1bff7bdebc27ef7b55338f7a28b",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/supervisorPinSettings.d.ts",
+        "category": "db",
+        "baselineSha256": "682a72cbd00fd8bc446a6ce25a7aed351e77697f989ea4e569d55fa8f5f20b30",
+        "candidateSha256": "113e191673bad69c7325f973170bde391aea97d812d6593c1c1ba391fa8cb145",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/sync.d.ts",
+        "category": "db",
+        "baselineSha256": "10fc88831bc35d047897d23e79749ebb6a889cff742cdaf97743d184f321996e",
+        "candidateSha256": "ba174100d90717b810e92b34247e0ec3ceacd025288984ce3b2443a04bf703c9",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/syncConflictLog.d.ts",
+        "category": "db",
+        "baselineSha256": "01421e49994217026dd0a3a9c7b195ce26c1d26cedfb75f079dd94eb0b0b1c88",
+        "candidateSha256": "492b3bb87e1e216297ce4fc00dbcc1be816fa9201a350620f156f9a50662fddb",
+        "classification": "approved-semantic",
+        "approvalReason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+      },
+      {
+        "path": "lib/db/dist/schema/syncOutbox.d.ts",
+        "category": "db",
+        "baselineSha256": "cf1aff9a57678f7bb33660758fcb525202798b3e9fadc0df5ad2eabaa42c29d3",
+        "candidateSha256": "37700dbd412f60e09098a57638924841e32efaa5292675cc62064a438e1c6695",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/userRoles.d.ts",
+        "category": "db",
+        "baselineSha256": "8ef4ced7f54be91af5cf124128ead04d082f64b29935f7e08630fd84ceeba57b",
+        "candidateSha256": "275845b4261c83ebe3fad21759f9c8424c227ca93c91ddc56e28db53935a4887",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/users.d.ts",
+        "category": "db",
+        "baselineSha256": "45bee118ce452dd6a68198c643cfbde0df00201317728d9e7a226d629fc1fc10",
+        "candidateSha256": "8c4809e8f655ed54ceb1115b8f19a8fcf980d313e679aca6c0c9abb06d7a3eaf",
+        "classification": "formatting-only"
+      },
+      {
+        "path": "lib/db/dist/schema/webPush.d.ts",
+        "category": "db",
+        "baselineSha256": "fac426bda3bdacda8907847b7658a671361097d34308f0181322e9a4c3555f6e",
+        "candidateSha256": "e4482ace76e9e1c0b2f031919327053207a29e7a80f133cade97d5de10ddef6b",
+        "classification": "formatting-only"
+      }
+    ]
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "canonicalization": "sorted-json-keys-v1",
+    "digest": "969a48f2905bdb226e3758a20843a35c9db7c6276e450885f79b858c09ee500e"
+  }
+}

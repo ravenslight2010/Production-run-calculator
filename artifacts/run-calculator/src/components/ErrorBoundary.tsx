@@ -6,14 +6,29 @@ import { WEB_BUILD_ID } from "../buildIdentity";
 import {
   claimStaleAssetRecoveryAttempt,
   clearStaleAppShellCaches,
+  recordStaleAssetRecoveryAttempt,
   STALE_ASSET_RELOAD_FALLBACK_MS,
 } from "../pwaUpdateRecovery";
+import { emitFieldCheckSignal } from "../fieldChecks";
+import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
+import {
+  getAutomaticUpdateReloadSafety,
+  reportAutomaticUpdateReloadSafety,
+} from "../updateReloadSafety";
 
 type Props = {
   children: ReactNode;
-  onUpdateAndReload?: () => Promise<void> | void;
+  onUpdateAndReload?: (canReload?: () => boolean) => Promise<void> | void;
+  scheduleSafeIdleRecovery?: (
+    safeAtFailure: boolean,
+    recover: (canReload: () => boolean) => void | Promise<void>,
+  ) => () => void;
 };
-type State = { error: Error | null; diagnosticReference: string | null };
+type State = {
+  error: Error | null;
+  diagnosticReference: string | null;
+  safeAtFailure: boolean;
+};
 
 export function isMissingNotificationError(error: unknown): boolean {
   return (
@@ -53,10 +68,17 @@ const bound = (value: string | undefined, limit: number) =>
 // files a report), and show a recovery screen. The AI can't edit code, so
 // "recovery" here is a safe retry/reload — never an automated code change.
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, diagnosticReference: null };
+  state: State = { error: null, diagnosticReference: null, safeAtFailure: false };
+  private cancelSafeIdleRecovery?: () => void;
+  private staleAssetRecoveryStarted = false;
 
   static getDerivedStateFromError(error: Error): State {
-    return { error, diagnosticReference: null };
+    return {
+      error,
+      diagnosticReference: null,
+      // Capture before the failed child unmounts and reports itself unsafe.
+      safeAtFailure: getAutomaticUpdateReloadSafety(),
+    };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -75,6 +97,53 @@ export default class ErrorBoundary extends Component<Props, State> {
     }).then((result) => {
       if (result?.correlationId) this.setState({ diagnosticReference: result.correlationId });
     });
+    if (failureKind === "stale_deployment_asset" && this.props.scheduleSafeIdleRecovery) {
+      this.cancelSafeIdleRecovery = this.props.scheduleSafeIdleRecovery(
+        this.state.safeAtFailure,
+        (canReload) => this.recoverStaleAssetWhenSafe(canReload),
+      );
+    }
+  }
+
+  componentWillUnmount() {
+    this.cancelSafeIdleRecovery?.();
+  }
+
+  private async recoverStaleAssetWhenSafe(canReload: () => boolean): Promise<void> {
+    if (
+      this.staleAssetRecoveryStarted ||
+      !this.props.onUpdateAndReload ||
+      !canReload() ||
+      !claimStaleAssetRecoveryAttempt(WEB_BUILD_ID)
+    ) return;
+
+    const safeNow = await checkPreHomeReloadSafety();
+    if (!canReload()) return;
+    if (!safeNow) {
+      reportAutomaticUpdateReloadSafety(false);
+      this.setState({ safeAtFailure: false });
+      return;
+    }
+    reportAutomaticUpdateReloadSafety(true);
+
+    this.staleAssetRecoveryStarted = true;
+    this.recordRecoveryAttempt();
+    const fallback = window.setTimeout(() => {
+      if (canReload()) window.location.reload();
+    }, STALE_ASSET_RELOAD_FALLBACK_MS);
+    try {
+      await clearStaleAppShellCaches();
+      if (canReload()) await this.props.onUpdateAndReload(canReload);
+    } catch {
+      if (canReload()) window.location.reload();
+    } finally {
+      window.clearTimeout(fallback);
+    }
+  }
+
+  private recordRecoveryAttempt(): void {
+    recordStaleAssetRecoveryAttempt(WEB_BUILD_ID);
+    emitFieldCheckSignal("stale-deployment-recovery", "incomplete");
   }
 
   render() {
@@ -93,6 +162,13 @@ export default class ErrorBoundary extends Component<Props, State> {
               ? "This older app version needs an update before it can continue. We've sent the details to your manager."
               : "The app hit an unexpected error and couldn't continue. We've sent the details to your manager. Reloading usually clears it — your saved work isn't affected."}
           </p>
+          {staleDeploymentAsset && (
+            <p className="text-xs text-muted-foreground">
+              {this.state.safeAtFailure
+                ? "Because reload was safe when the error occurred, the app will try one update after a minute without activity."
+                : "Automatic recovery is paused because the app could not confirm that reloading was safe. Use the button when you’re ready."}
+            </p>
+          )}
           {this.state.diagnosticReference && (
             <p className="text-xs text-muted-foreground">
               Diagnostic reference:{" "}
@@ -103,9 +179,12 @@ export default class ErrorBoundary extends Component<Props, State> {
           )}
           <Button
             onClick={() => {
+              this.cancelSafeIdleRecovery?.();
+              this.cancelSafeIdleRecovery = undefined;
               if (needsUpdate && this.props.onUpdateAndReload) {
                 if (claimStaleAssetRecoveryAttempt(WEB_BUILD_ID)) {
                   if (staleDeploymentAsset) {
+                    this.recordRecoveryAttempt();
                     // If the lazy chunk failed before the registration effect
                     // settled, the normal worker handoff can wait indefinitely
                     // in some browsers. Keep it as the primary path, but make

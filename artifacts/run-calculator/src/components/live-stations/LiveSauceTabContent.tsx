@@ -1,33 +1,38 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Droplets, Timer } from "lucide-react";
-import { computeSauceRunRequirement } from "@workspace/live-calc";
-import type { RecipeRow, RunMeta } from "../../types";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Droplets, Timer } from "lucide-react";
+import { computeSauceRunRequirement, computeSauceStockStepSeconds } from "@workspace/live-calc";
+import { MANUAL_SECTION_FIELDS } from "@workspace/sync-contract";
+import type { RunMeta } from "../../types";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { BatchMadeRow } from "./BatchMadeRow";
+import { SauceStockControl } from "./SauceStockControl";
 import { TickBar } from "../TickBar";
 import { ReadOnlyRecipeCard, fmtMS } from "./stationShared";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useLiveRun } from "../../contexts/LiveRunContext";
 import { useManualControlLock, getManualSectionLock } from "../../manualSectionLocks";
 import { usePrepPhase } from "../../hooks/usePrepPhase";
-import { consumeSauceBarrel } from "../../inventoryShared";
 import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../../sauceBarrelStore";
 import { markRunValuesUpdated } from "../../adapters/browserRunPersistence";
 import { createPackagingControlAdapter } from "../../packagingManager";
 import { fmtNum } from "../../utils";
+import { shouldSeedCarriedOverSauce } from "./sauceCarryoverSeed";
+import { loadRunValues } from "../../storage";
+import { buildSauceDailyNeeds } from "../../sauceDailyNeeds";
+import type { FormValues } from "../../types";
 
 export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
-    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection, setWriteError,
+    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection,
+    sauceAutoTrackFailure, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
-  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
+  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
   const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
-  const sauceLock = useManualControlLock(currentRunId, "sauce-batches");
+  const sauceStockLock = useManualControlLock(currentRunId, "sauce-stock");
 
   // ── Barrel progress: backed by module-level store so it survives Radix ────
   // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
@@ -36,6 +41,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const [sauceMade, setSauceMadeRaw] = useState(
     () => Math.max(0, Number(v.sauceBarrelsMade) || getSauceBarrelEntry(currentRunId).barrelsMade),
   );
+  const seededRunIdRef = useRef<string | null>(null);
 
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
@@ -71,6 +77,34 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
       sauceBarrelCorrectionGeneration: correctionGeneration,
     }, baseline);
   }, [currentRunId, form, lastLocalEditRef, queueManualCorrection]);
+
+  const setManualSauceStock = useCallback((requestedBarrels: number) => {
+    const values = form.getValues();
+    const stock = Math.round(Math.min(2, Math.max(0, requestedBarrels)) * 10) / 10;
+    const anchor = Math.max(
+      Number(values.sauceStockAnchorNetSec) || 0,
+      Number.isFinite(elapsedBatchSec) ? elapsedBatchSec : 0,
+    );
+    const generation = Math.max(0, Number(values.sauceStockCorrectionGeneration) || 0) + 1;
+    const baseline = Object.fromEntries(
+      MANUAL_SECTION_FIELDS["sauce-stock"].map((field) => [
+        field,
+        Number(values[field as keyof FormValues]) || 0,
+      ]),
+    );
+    form.setValue("sauceStockBarrels", stock, { shouldDirty: true });
+    form.setValue("sauceStockAnchorNetSec", anchor, { shouldDirty: true });
+    form.setValue("sauceStockCorrectionGeneration", generation, { shouldDirty: true });
+    form.setValue("sauceStockInitialized", true, { shouldDirty: true });
+    const now = Date.now();
+    markRunValuesUpdated(currentRunId, now);
+    lastLocalEditRef.current = now;
+    queueManualCorrection(currentRunId, {
+      sauceStockBarrels: stock,
+      sauceStockAnchorNetSec: anchor,
+      sauceStockCorrectionGeneration: generation,
+    }, baseline);
+  }, [currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
   // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
   const {
     prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
@@ -94,16 +128,23 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   }, [currentRunId, runStatus]);
   // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
   useEffect(() => {
-    if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
-      if ((Number(v.sauceBarrelsMade) || 0) === 0) {
-        applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
-      }
+    if (shouldSeedCarriedOverSauce({
+      currentRunId,
+      seededRunId: seededRunIdRef.current,
+      runStatus,
+      prepCarriedOver: prep.prepCarriedOver,
+      prepBatchesSauce: prep.prepBatchesSauce,
+      sauceBarrelsMade: v.sauceBarrelsMade,
+    })) {
+      seededRunIdRef.current = currentRunId;
+      applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
     }
   }, [
     applyManualSauceProgress,
     elapsedBatchSec,
     prep.prepBatchesSauce,
     prep.prepCarriedOver,
+    currentRunId,
     runStatus,
     v.sauceBarrelsMade,
   ]);
@@ -115,6 +156,48 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     ozPerPizza: v.sauceOzPerPizza,
     barrelLbs: calc.sauceEffBarrel,
   });
+  const legacyStockInitAttemptRef = useRef<string | null>(null);
+  const dailyNeedValues = useMemo(() => {
+    const values: Record<string, FormValues> = {};
+    for (const run of dayState.runs) {
+      values[run.id] = run.id === currentRunId ? v as FormValues : loadRunValues(run.id);
+    }
+    return values;
+  }, [currentRunId, dayState.runs, v]);
+  const dailySauceNeeds = useMemo(
+    () => buildSauceDailyNeeds(dayState.runs, dailyNeedValues),
+    [dailyNeedValues, dayState.runs],
+  );
+  const sauceStockStepSec = computeSauceStockStepSeconds(
+    v.sauceOzPerPizza,
+    calc.ppm,
+    calc.sauceEffBarrel,
+  );
+  const sauceStockOnHand = Math.min(
+    2,
+    Math.max(0, Math.round((Number(v.sauceStockBarrels) || 0) * 10) / 10),
+  );
+
+  useEffect(() => {
+    if (
+      !isLive
+      || !currentRun?.startedAt
+      || currentRun.endedAt
+      || v.sauceStockInitialized === true
+      || sauceStockLock
+      || legacyStockInitAttemptRef.current === currentRunId
+    ) return;
+    legacyStockInitAttemptRef.current = currentRunId;
+    setManualSauceStock(2);
+  }, [
+    currentRun?.endedAt,
+    currentRun?.startedAt,
+    currentRunId,
+    isLive,
+    setManualSauceStock,
+    sauceStockLock,
+    v.sauceStockInitialized,
+  ]);
 
   return (
     <>
@@ -159,108 +242,103 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           </CardContent>
         </Card>
       )}
-      {sauceRequirement.totalUnits > 0 && (
+      {sauceAutoTrackFailure && !sauceAutoTrackFailure.dismissed && (
+        <div
+          role="alert"
+          data-testid="sauce-auto-track-failure"
+          className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <p className="min-w-0 flex-1">
+            {sauceAutoTrackFailure.kind === "transient"
+              ? "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready."
+              : "Automatic Sauce barrel tracking needs attention. Check sign-in and Sauce inventory/setup; progress was not advanced."}
+          </p>
+          {sauceAutoTrackFailure.kind === "permanent" && (
+            <button
+              type="button"
+              data-testid="button-retry-sauce-auto-track"
+              onClick={() => {
+                retryFailedAutomaticClaim();
+                clearSauceAutoTrackFailureNotice();
+              }}
+              className="shrink-0 text-xs font-semibold text-amber-200 hover:text-amber-50"
+            >
+              Retry
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="button-dismiss-sauce-auto-track-failure"
+            onClick={dismissSauceAutoTrackFailure}
+            className="shrink-0 text-xs font-semibold text-amber-200 hover:text-amber-50"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {(sauceRequirement.totalUnits > 0 || isLive) && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-primary w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Droplets className="w-4 h-4" /> Sauce Batches Needed
+              <Droplets className="w-4 h-4" /> Current-run Sauce needs
             </CardTitle>
           </CardHeader>
           <CardContent className="px-5 pb-5">
-            <p className="text-xs text-muted-foreground mb-4">
-              Based on{" "}
-              <span className="font-mono text-foreground">
-                {fmtNum(Math.max(0, calc.casesLeftToRun), 0)}
-              </span>{" "}
-              cases remaining ×{" "}
-              <span className="font-mono text-foreground">
-                {v.pizzasPerCase}
-              </span>{" "}
-              pizzas/case
+            <p className="text-xs text-muted-foreground mb-3">
+              Planned for this run: <span className="font-mono font-semibold text-foreground">{fmtNum(sauceRequirement.totalUnits, 2)} barrels</span>
+              {sauceMade > 0 && <> · Historical full barrels recorded: <span className="font-mono font-semibold text-foreground">{sauceMade}</span></>}
             </p>
-            <BatchMadeRow
-              label={v.frontlineRecipeName?.trim() || "Sauce"}
-              totalBatches={sauceRequirement.totalUnits}
-              made={sauceMade}
-              onIncrement={() => {
-                const barrelIndex = Math.max(0, Number(v.sauceBarrelsMade) || 0) + 1;
-                const targetCorrectionGeneration =
-                  Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0) + 1;
-                // Deterministic until this action commits: retries, reloads, or
-                // duplicate taps share one marker, while a decrement advances
-                // the generation so a genuinely remade barrel gets a new one.
-                const manualEventId =
-                  `manual:${targetCorrectionGeneration}:${barrelIndex}`.slice(0, 160);
-                const sauceName = (v.frontlineRecipeName ?? "").trim();
-                const hasSauceRecipe = (v.frontlineRecipe ?? []).some((r: RecipeRow) => Number(r.lbs ?? 0) > 0);
-                const itemKey = hasSauceRecipe
-                  ? "ingredient:Sauce:batches"
-                  : sauceName
-                    ? `ingredient:${sauceName}:lbs`
-                    : "";
-                const barrelQty = hasSauceRecipe ? 1 : calc.sauceEffBarrel;
-                if (itemKey && barrelQty > 0) {
-                  const retryDelays = [0, 1_500, 5_000];
-                  const attempt = (index: number): void => {
-                    window.setTimeout(() => {
-                      void consumeSauceBarrel(
-                        currentRunId,
-                        barrelIndex,
-                        itemKey,
-                        barrelQty,
-                        manualEventId,
-                      )
-                        .then(() => {
-                          applyManualSauceProgress(
-                            barrelIndex,
-                            elapsedBatchSec,
-                            targetCorrectionGeneration,
-                          );
-                        })
-                        .catch(() => {
-                          setWriteError(
-                            "Couldn't record Sauce barrel usage. Inventory was not advanced; this same barrel is retrying.",
-                          );
-                          if (index + 1 < retryDelays.length) attempt(index + 1);
-                        });
-                    }, retryDelays[index]);
-                  };
-                  attempt(0);
-                } else {
-                  applyManualSauceProgress(barrelIndex, elapsedBatchSec);
-                }
-              }}
-              onDecrement={() => {
-                applyManualSauceProgress(Math.max(0, sauceMade - 1), elapsedBatchSec);
-              }}
-              isLive={isLive}
-              testId="output-sauce-batches"
-              pipeline="sauce"
-              disabled={!!sauceLock}
-              disabledReason={sauceLock?.peer ? "Corrections unavailable while another station is editing." : undefined}
+            <SauceStockControl
+              barrels={sauceStockOnHand}
+              disabled={!isLive || !!sauceStockLock}
+              disabledReason={sauceStockLock?.peer ? "Sauce stock is being corrected on another device." : undefined}
+              onChange={setManualSauceStock}
             />
              {/* Passive countdown only. Automatic staged supply determines the
                  visible on-line, ready, in-production, and still-to-make values. */}
-            {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && calc.sauceDepletionSec > 0 && (() => {
-              // Use pause-aware elapsedBatchSec; lastBarrelNetSecRef is also stored
-              // in net-elapsed coords so the delta is naturally pause-safe.
-              const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
-              const secLeft = Math.max(0, calc.sauceDepletionSec - barrelElapsed);
-              const pctLeft = calc.sauceDepletionSec > 0 ? secLeft / calc.sauceDepletionSec : 1;
-              const color = pctLeft < 0.15 ? "text-red-400" : "text-blue-400";
+            {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && sauceStockOnHand > 0 && sauceStockStepSec > 0 && (() => {
+              const elapsedSinceAnchor = Math.max(0, elapsedBatchSec - (Number(v.sauceStockAnchorNetSec) || 0));
+              const secLeft = Math.max(0, sauceStockStepSec - elapsedSinceAnchor);
+              const pctLeft = secLeft / sauceStockStepSec;
               return (
                 <TickBar
-                  label="Current barrel lasts"
+                  label="Next 0.1-barrel stock decrease"
                   secLeft={secLeft}
-                  periodSec={calc.sauceDepletionSec}
-                  color={color}
+                  periodSec={sauceStockStepSec}
+                  color={pctLeft < 0.15 ? "text-red-400" : "text-blue-400"}
                 />
               );
             })()}
           </CardContent>
         </Card>
       )}
+      <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4" data-testid="sauce-daily-needs">
+        <div className="h-1 bg-red-400/70 w-full" />
+        <CardHeader className="pb-2 pt-4 px-5">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Planned Sauce Demand — Today
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-5">
+          <p className="text-xs text-muted-foreground mb-3">
+            Saved planned demand for all runs today; not remaining demand or on-line stock.
+          </p>
+          {dailySauceNeeds.length ? (
+            <ul className="space-y-2">
+              {dailySauceNeeds.map((need) => (
+                <li key={need.key} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate">{need.recipeName} <span className="text-xs text-muted-foreground">({need.runCount} {need.runCount === 1 ? "run" : "runs"})</span></span>
+                  <span className="shrink-0 font-mono font-semibold tabular-nums">{fmtNum(need.plannedBarrels, 2)} barrels</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">No saved Sauce demand for today&apos;s runs.</p>
+          )}
+        </CardContent>
+      </Card>
       {/* Packaging quick check — same widget as the dough tab so the sauce
           crew can update skid/case counts without switching tabs. */}
       {(runStatus === "running" || runStatus === "paused" || (runStatus === "ended" && !!autoTrackSuggestion)) && (() => {
@@ -286,8 +364,11 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           skidsCompleted: packedSkids,
           casesOnCurrentSkid: packedCasesOnSkid,
           casesPerSkid: cps,
-          applyProgress: (nextSkids, nextCases) => {
-            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+          applyProgress: (nextSkids, nextCases, previousSkids, previousCases) => {
+            persistManualPackagingProgress(currentRunId, nextSkids, nextCases, undefined, {
+              skidsCompleted: previousSkids,
+              casesOnCurrentSkid: previousCases,
+            });
             form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
             form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
           },

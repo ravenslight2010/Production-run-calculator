@@ -17,6 +17,9 @@ export interface SpecImportAlias {
   externalName: string;
   /** The saved canonical name the label resolves to */
   canonicalName: string;
-  /** Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise. */
+  /**
+     * Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.
+     * @nullable
+     */
   context?: string | null;
 }

@@ -203,7 +203,7 @@ test("exports the filtered audit PDF and safely retries rejected downloads", asy
   await pdfButton.click();
   expect((await unauthorizedResponse).status()).toBe(401);
   await expect(page.getByText("Your session has expired. Sign in again and retry the PDF download.", { exact: true })).toBeVisible();
-  expect(page.getByText("private audit payload", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("private audit payload", { exact: true })).toHaveCount(0);
   await expect(pdfButton).toBeEnabled();
   await expect(page.getByText(`${auditResourcePrefix}in-range-latest`, { exact: true })).toBeVisible();
 
@@ -213,7 +213,7 @@ test("exports the filtered audit PDF and safely retries rejected downloads", asy
   await pdfButton.click();
   expect((await nonLiveScopeResponse).status()).toBe(403);
   await expect(page.getByText("PDF export requires manager access in the live facility.", { exact: true })).toBeVisible();
-  expect(page.getByText("private audit payload", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("private audit payload", { exact: true })).toHaveCount(0);
   await expect(pdfButton).toBeEnabled();
   await expect(page.getByText(`${auditResourcePrefix}in-range-latest`, { exact: true })).toBeVisible();
 

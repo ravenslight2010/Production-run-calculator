@@ -391,6 +391,16 @@ export default function StaffRolesCard() {
             {serverMessage(removeMutation.error, "Could not remove staff member.")}
           </p>
         )}
+        {statusMutation.isError && (
+          <p className="text-xs text-red-500">
+            {serverMessage(statusMutation.error, "Could not update account status.")}
+          </p>
+        )}
+        {revokeMutation.isError && (
+          <p className="text-xs text-red-500">
+            {serverMessage(revokeMutation.error, "Could not revoke sessions.")}
+          </p>
+        )}
         {resetSuccess && (
           <p className="text-xs text-green-600">{resetSuccess}</p>
         )}
@@ -467,9 +477,11 @@ export default function StaffRolesCard() {
                         {member.disabled ? "Enable account" : "Disable account"}
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onSelect={() => revokeMutation.mutate(member.userId)}>
-                      Revoke all sessions
-                    </DropdownMenuItem>
+                    {!isSelf && (
+                      <DropdownMenuItem onSelect={() => revokeMutation.mutate(member.userId)}>
+                        Revoke all sessions
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       className="text-red-600 focus:text-red-600"
                       onSelect={() => {

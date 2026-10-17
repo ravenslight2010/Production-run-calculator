@@ -11,16 +11,118 @@ import {
   retryOperationalIntent,
   discardOperationalIntent,
   setOperationalIntentIdentity,
+  setOperationalIntentCanonicalAdopter,
+  submitManualSection,
 } from "./operationalIntentOutbox";
 
 describe("operational intent outbox", () => {
   beforeEach(() => setOperationalIntentIdentity({ scope: "live", userId: "operator-1" }));
   afterEach(() => {
+    setOperationalIntentCanonicalAdopter(undefined);
     setOperationalIntentIdentity(null);
     localStorage.clear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("rebases queued same-section deltas from a conflict response without a canonical adopter", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, any>;
+      requests.push(body);
+      const cases = Number(body.values.casesOnCurrentSkid);
+      const canonicalCases = requests.length === 1 ? 24 : cases;
+      return {
+        ok: requests.length > 1,
+        status: requests.length === 1 ? 409 : 200,
+        json: async () => ({
+          outcome: requests.length === 1 ? "conflicted" : "accepted",
+          data: {
+            runValues: {
+              "run-1": { skidsCompleted: 0, casesOnCurrentSkid: canonicalCases },
+            },
+          },
+        }),
+      };
+    }));
+    const base = { skidsCompleted: 0, casesOnCurrentSkid: 30 };
+    await Promise.all([
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { ...base, casesOnCurrentSkid: 29 }, baseValues: base,
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { ...base, casesOnCurrentSkid: 28 }, baseValues: { ...base, casesOnCurrentSkid: 29 },
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { ...base, casesOnCurrentSkid: 27 }, baseValues: { ...base, casesOnCurrentSkid: 28 },
+        observedGeneration: "run-1:1",
+      }),
+    ]);
+    expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 23, 22]);
+    expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 24, 23]);
+  });
+
+  it("preserves untouched Dough fields when a manual edit supplies only one field", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ outcome: "accepted" }),
+      };
+    }));
+
+    await submitManualSection({
+      runId: "dough-run", section: "dough",
+      values: { batchesReady: 1 },
+      baseValues: { traysOnLine: 5, batchesReady: 0 },
+      observedGeneration: "dough-run:1",
+    });
+
+    expect(requests[0]).toMatchObject({
+      values: { traysOnLine: 5, batchesReady: 1 },
+      baseValues: { traysOnLine: 5, batchesReady: 0 },
+    });
+  });
+
+  it("uses a newer supplied baseline after the prior section chain drains", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, any>;
+      requests.push(body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          outcome: "accepted",
+          data: { runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: body.values.casesOnCurrentSkid } } },
+        }),
+      };
+    }));
+    await submitManualSection({
+      runId: "run-1", section: "packaging",
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 30 },
+      observedGeneration: "run-1:1",
+    });
+    await submitManualSection({
+      runId: "run-1", section: "packaging",
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 49 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 50 },
+      observedGeneration: "run-1:2",
+    });
+    expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 50]);
+    expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 49]);
   });
   it("persists the exact correction and retains it for retry until canonical outcome", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
@@ -147,6 +249,67 @@ describe("operational intent outbox", () => {
     await flushOperationalIntentOutbox();
     expect(readOperationalIntentOutbox().find((x) => x.id === auth.id)).toMatchObject({ state: "permanently-rejected", failure: "validation" });
   });
+  it.each([
+    [400, "permanently-rejected", "validation"],
+    [403, "blocked", "permission"],
+  ] as const)("does not retry or discard a %s validation/authorization failure", async (status, state, failure) => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status, headers: { get: () => null },
+      // A failed response must never be adopted as canonical data.
+      json: async () => ({ outcome: "accepted", data: { runValues: { bad: { casesNeeded: 999 } } } }),
+    });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "failure", observedGeneration: "failure:1", effectiveAt: 1, action: "pause" });
+
+    await flushOperationalIntentOutbox();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(adopt).not.toHaveBeenCalled();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state, failure })]);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("keeps transient 5xx responses queued for backoff", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 503, headers: { get: () => null },
+      json: async () => ({ outcome: "accepted", data: { invalid: true } }),
+    });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "server", observedGeneration: "server:1", effectiveAt: 1, action: "pause" });
+
+    await flushOperationalIntentOutbox();
+
+    expect(adopt).not.toHaveBeenCalled();
+    const [pending] = readOperationalIntentOutbox();
+    expect([pending]).toEqual([expect.objectContaining({
+      id: intent.id, state: "pending", failure: "server", attempts: 1,
+    })]);
+    expect(pending?.nextRetryAt).toBeGreaterThan(Date.now());
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("adopts canonical data only for the documented 409 conflict response", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const canonical = { runValues: { "run-1": { casesNeeded: 12 } } };
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 409, headers: { get: () => null },
+      json: async () => ({ outcome: "conflicted", data: canonical, canonicalRevision: 3 }),
+    });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:1", effectiveAt: 1, action: "pause" });
+
+    await flushOperationalIntentOutbox();
+
+    expect(adopt).toHaveBeenCalledWith(canonical, expect.objectContaining({ id: intent.id, canonicalRevision: 3 }), "conflicted");
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "conflicted" })]);
+  });
   it("keeps blocked and rejected Ends fenced until explicit discard", () => {
     const base = {
       version: 1 as const,
@@ -194,6 +357,43 @@ describe("operational intent outbox", () => {
     expect(readOperationalIntentOutbox()).toEqual([]);
     expect(retryOperationalIntent(intent.id)).toBe(false);
   });
+  it("keeps an authentication-blocked intent private until its owner explicitly retries it", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false, status: 401, headers: { get: () => null }, json: async () => ({}),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: { get: () => null }, json: async () => ({ outcome: "accepted" }),
+      });
+    vi.stubGlobal("fetch", fetch);
+
+    const intent = queueOperationalIntent({
+      runId: "account-switch", observedGeneration: "account-switch:1", effectiveAt: 1, action: "pause",
+    });
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id, owner: "live:operator-1", state: "blocked", failure: "authentication",
+    })]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-2" });
+    expect(readOperationalIntentOutbox()).toEqual([]);
+    expect(retryOperationalIntent(intent.id)).toBe(false);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id, owner: "live:operator-1", state: "blocked", failure: "authentication",
+    })]);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id, owner: "live:operator-1", state: "accepted",
+    })]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it("does not discard an in-flight action or apply its response after identity changes", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     let release!: (value: unknown) => void;
@@ -209,6 +409,104 @@ describe("operational intent outbox", () => {
     expect(readOperationalIntentOutbox()).toEqual([]);
     setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
     expect(readOperationalIntentOutbox()[0]).toMatchObject({ id: intent.id, state: "sending" });
+  });
+  it("retains a late 401 as blocked after sign-out and requires an explicit retry", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    let release!: (value: unknown) => void;
+    const pendingResponse = new Promise((resolve) => { release = resolve; });
+    const fetch = vi.fn()
+      .mockReturnValueOnce(pendingResponse)
+      .mockResolvedValueOnce({
+        ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ outcome: "accepted" }),
+      });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({
+      runId: "run-1", observedGeneration: "run-1:7", effectiveAt: 1, action: "pause",
+    });
+    const flushing = flushOperationalIntentOutbox();
+    await vi.waitFor(() => expect(readOperationalIntentOutbox()[0]?.state).toBe("sending"));
+
+    // Model /me rejecting the session before the operational-intent request
+    // returns its own 401.
+    setOperationalIntentIdentity(null);
+    release({
+      ok: false, status: 401, headers: { get: () => null }, json: async () => ({}),
+    });
+    await flushing;
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+      guidance: "Sign in again, then choose Retry.",
+    })]);
+    const terminalKey = `run-calculator:operational-intent-outbox:v1:terminal:${intent.id}`;
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+    });
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject({
+      id: intent.id,
+      state: "blocked",
+      failure: "authentication",
+    });
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("keeps a 403 permission denial durable until the same intent is explicitly retried", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requestIds: string[] = [];
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { intent: { id: string } };
+      requestIds.push(body.intent.id);
+      if (requestIds.length === 1) {
+        return {
+          ok: false, status: 403, headers: { get: () => null }, json: async () => ({}),
+        };
+      }
+      return {
+        ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ outcome: "accepted" }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({
+      runId: "permission", observedGeneration: "permission:1", effectiveAt: 1, action: "pause",
+    });
+
+    await flushOperationalIntentOutbox();
+    const blocked = {
+      id: intent.id,
+      state: "blocked",
+      failure: "permission",
+      guidance: "You do not have permission. Ask a manager, then Retry if access changes.",
+    };
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining(blocked)]);
+    const terminalKey = `run-calculator:operational-intent-outbox:v1:terminal:${intent.id}`;
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject(blocked);
+
+    // Signing out and back into the same account does not send blocked work.
+    setOperationalIntentIdentity(null);
+    setOperationalIntentIdentity({ scope: "live", userId: "operator-1" });
+    await flushOperationalIntentOutbox();
+    expect(JSON.parse(localStorage.getItem(terminalKey) ?? "null")).toMatchObject(blocked);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(requestIds).toEqual([intent.id]);
+
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    await flushOperationalIntentOutbox();
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(requestIds).toEqual([intent.id, intent.id]);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
   it("keeps a pending action across an offline reload boundary and adopts canonical data only after retry", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });

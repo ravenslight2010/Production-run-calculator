@@ -1,30 +1,97 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { captureReleaseIdentity } from "./release-source-identity.mjs";
 import {
+  discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
+} from "./check-routine-node-version.mjs";
+import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
+import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  computeSourceLibraryEvidenceId,
+  DEFAULT_FROM_DATE,
+  DEFAULT_HEAL_ID,
+  DEFAULT_REPORT,
+  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
+} from "./verify-source-library-reconciliation.mts";
+import {
+  buildReadinessEvidence,
+  sanitizeReadinessResponse,
+  validateReadinessEvidence,
+} from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
+
+const releaseCheckEnvironment = {
+  RELEASE_EVIDENCE_DIR: join(
+    tmpdir(),
+    `release-evidence-test-import-${process.pid}`,
+  ),
+  SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT: "",
+  SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: "development",
+  SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF: "",
+  SOURCE_LIBRARY_RECONCILIATION_REVISION: "",
+  SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER: "",
+  RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "",
+  READINESS_EVIDENCE_DEPLOYMENT_ID: "",
+  READINESS_EVIDENCE_DEPLOYED_REVISION: "",
+} as const;
+const originalReleaseCheckEnvironment = new Map(
+  [
+    ...Object.keys(releaseCheckEnvironment),
+    "RELEASE_CHECK_FIXTURE_STEPS",
+  ].map((key) => [
+    key,
+    process.env[key],
+  ]),
+);
+Object.assign(process.env, releaseCheckEnvironment);
+delete process.env.RELEASE_CHECK_FIXTURE_STEPS;
+const releaseCheck = await import("./release-check.mts");
+for (const [key, value] of originalReleaseCheckEnvironment) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+const {
   RELEASE_EVIDENCE_ALLOWLIST,
   READINESS_EVIDENCE_PATH,
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
+  RELEASE_CHECK_API_SHARD_STEPS,
+  RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS,
+  RELEASE_CHECK_STEPS,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
+  FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+  FULL_RESPONSIVE_WEBKIT_GATE_STEP,
+  FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
   TYPESCRIPT_7_SUPPORTED_RUNNERS,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
+  SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  WEBKIT_IDENTITY_CONTRACT_STEP,
+  formatPublishedReadinessBlockedCheckpoint,
+  missingPublishedReadinessEvidence,
   resolveSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryReleaseDatabaseOwner,
   resolveSourceLibraryReleaseRevision,
   sourceLibraryReconciliationPreflightEnabled,
   assertUniqueReleaseSteps,
@@ -32,6 +99,7 @@ import {
   PRODUCTION_AUDIT_WARNING_MS,
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   defaultReleaseEvidenceDir,
+  defaultReleaseConcurrencyForEnvironment,
   formatTypescript7TrendHistorySummary,
   formatReleaseReport,
   parseBrowserDurationRegressions,
@@ -52,23 +120,7 @@ import {
   validateWebKitBrowserEvidence,
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
-} from "./release-check.mts";
-import {
-  discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
-} from "./check-routine-node-version.mjs";
-import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
-import {
-  computeSourceLibraryEvidenceId,
-  DEFAULT_FROM_DATE,
-  DEFAULT_HEAL_ID,
-  DEFAULT_REPORT,
-  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
-} from "./verify-source-library-reconciliation.mts";
-import {
-  buildReadinessEvidence,
-  sanitizeReadinessResponse,
-} from "./capture-readiness-recovery.mts";
-import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+} = releaseCheck;
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -89,7 +141,19 @@ function sourceEvidence(overrides: Record<string, unknown> = {}) {
       stubs: 3,
     },
     marker: {},
-    pools: {},
+    pools: {
+      expected: 68,
+      exactMatches: 68,
+      guardedRenames: 0,
+      missing: 0,
+      mismatches: 0,
+    },
+    poolExceptions: {
+      id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+      sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+      approvedMismatches: 0,
+      unresolvedMismatches: 0,
+    },
     aliases: {},
     profiles: {},
     pendingRuns: {},
@@ -134,6 +198,79 @@ function readinessEvidenceFixture() {
     mode: "normal",
     samples: [sample, sample],
   });
+}
+
+function verifyReadinessEvidenceVerificationIsRecomputed(): void {
+  const valid = readinessEvidenceFixture();
+  const failedSamples = valid.samples.map((sample) => ({
+    ...sample,
+    outcome: "probe_error" as const,
+  }));
+  const inconsistent = buildReadinessEvidence({
+    environment: "release",
+    deploymentId: valid.deploymentId,
+    revision: valid.revision,
+    generatedAt: valid.generatedAt,
+    mode: "normal",
+    samples: failedSamples,
+  });
+  const forged = {
+    ...inconsistent,
+    verification: {
+      mode: "normal" as const,
+      passed: true,
+      reason: "sustained HTTP 200 readiness",
+    },
+  };
+  assert.throws(
+    () => validateReadinessEvidence(forged, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /verification does not match its samples/,
+  );
+}
+
+function verifyPublishedReadinessEvidenceRejectsObserveMode(): void {
+  const valid = readinessEvidenceFixture();
+  const observe = buildReadinessEvidence({
+    environment: "release",
+    deploymentId: valid.deploymentId,
+    revision: valid.revision,
+    generatedAt: valid.generatedAt,
+    mode: "observe",
+    samples: valid.samples,
+  });
+  assert.throws(
+    () => validateReadinessEvidence(observe, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /mode is not permitted/,
+  );
+}
+
+function verifyPublishedReadinessEvidenceRejectsDevelopmentEnvironment(): void {
+  const valid = readinessEvidenceFixture();
+  assert.throws(
+    () => validateReadinessEvidence({ ...valid, environment: "development" }, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /environment does not match/,
+  );
+}
+
+function verifyReadinessEvidenceValidation(): void {
+  verifyReadinessEvidenceVerificationIsRecomputed();
+  verifyPublishedReadinessEvidenceRejectsObserveMode();
+  verifyPublishedReadinessEvidenceRejectsDevelopmentEnvironment();
 }
 
 const aiDigest = "a".repeat(64);
@@ -248,6 +385,29 @@ async function fixture(
                 durationMs: 100,
               }],
             })}\n`
+          : file === "browser-compatibility/webkit-result.json"
+            ? `${JSON.stringify({
+                schemaVersion: 1,
+                browser: "webkit",
+                revision: "current-revision",
+                environment: "disposable release test",
+                result: "passed",
+                cases: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map(
+                  (identity) => {
+                    const [caseFile = "", projectAndTitle = ""] =
+                      identity.split(" :: ");
+                    const [projectName = "", ...titleParts] =
+                      projectAndTitle.split(" › ");
+                    return {
+                      file: caseFile,
+                      projectName,
+                      title: titleParts.join(" › "),
+                      status: "passed",
+                      durationMs: 100,
+                    };
+                  },
+                ),
+              })}\n`
         : file === "report-key-rotation-preflight.json"
           ? `${JSON.stringify({
               verifier: "report-key-rotation-preflight",
@@ -399,6 +559,40 @@ async function run(): Promise<void> {
     false,
     "disposable fixture verification must have an explicit readiness opt-out contract",
   );
+  const blockedMissingEvidence = missingPublishedReadinessEvidence({
+    deploymentId: undefined,
+    deployedRevision: undefined,
+    invalidHandoff: true,
+  });
+  assert.deepEqual(blockedMissingEvidence, [
+    "current published deployment handoff",
+    "readiness deployment ID",
+    "deployed source revision",
+  ]);
+  const boundedBlockedCheckpoint = formatPublishedReadinessBlockedCheckpoint({
+    mode: "full",
+    assessedRevision: `test-sha256:${"a".repeat(64)}`,
+    missingEvidence: blockedMissingEvidence,
+  });
+  assert.deepEqual(boundedBlockedCheckpoint.trimEnd().split("\n"), [
+    "# Release Check Checkpoint — BLOCKED / NO-GO",
+    "Mode: full",
+    `Assessed revision: test-sha256:${"a".repeat(64)}`,
+    "Missing evidence:",
+    "- current published deployment handoff",
+    "- readiness deployment ID",
+    "- deployed source revision",
+  ]);
+  assert.throws(
+    () =>
+      formatPublishedReadinessBlockedCheckpoint({
+        mode: "standard",
+        assessedRevision: "unknown",
+        missingEvidence: ["deployed source revision"],
+      }),
+    /valid assessed revision/,
+    "the blocked checkpoint must not accept an unbound revision value",
+  );
   const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
   const retainedEvidenceFiles = new Set(
     retainedEvaluationInventory.map((entry) => entry.evidencePath),
@@ -407,6 +601,7 @@ async function run(): Promise<void> {
     retainedEvaluationInventory.map((entry) => entry.sourceRelativePath),
     [
       "docs/second-pass-reviewer-benchmark-2026-09-05.json",
+      "docs/second-pass-reviewer-benchmark-2026-10-06.json",
       "lib/corpus-harness/snapshots/evaluation-manifest.json",
     ],
     "release evidence must inventory both root-level and wrapped retained evaluations",
@@ -529,6 +724,9 @@ async function run(): Promise<void> {
   const rootPackage = JSON.parse(
     await readFile(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { scripts?: Record<string, string> };
+  const scriptsPackage = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { scripts?: Record<string, string> };
   const ciWorkflow = await readFile(
     new URL("../../.github/workflows/ci.yml", import.meta.url),
     "utf8",
@@ -536,6 +734,49 @@ async function run(): Promise<void> {
   const releaseWorkflow = await readFile(
     new URL("../../.github/workflows/release-check.yml", import.meta.url),
     "utf8",
+  );
+  const dockerfile = await readFile(
+    new URL("../../Dockerfile", import.meta.url),
+    "utf8",
+  );
+  const responsiveWebKitConfig = await readFile(
+    new URL(
+      "../../artifacts/run-calculator/playwright.compatibility.config.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const responsiveWebKitSpec = await readFile(
+    new URL(
+      "../../artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /trace:\s*"retain-on-failure"/u,
+    "raw Playwright traces must remain failure-only local inputs to the sanitizer",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /screenshot:\s*"off"/u,
+    "raw built-in screenshots must not become uploadable test attachments",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /compatibility-debug-reporter\.ts/u,
+    "the responsive compatibility run must use the sanitizing reporter",
+  );
+  assert.match(
+    responsiveWebKitSpec,
+    /test\.afterEach[\s\S]*?page\.screenshot\([\s\S]*?mask:/u,
+    "failure screenshots must be captured with masks",
+  );
+  assert.match(
+    responsiveWebKitSpec,
+    /page\.locator\("input, textarea, select"\)/u,
+    "failure screenshots must mask entered form values",
   );
   const configuredKeyrings = [...releaseWorkflow.matchAll(
     /OPERATIONAL_REPORT_SIGNING_KEYS:\s*'([^']+)'/g,
@@ -558,7 +799,7 @@ async function run(): Promise<void> {
     assert.ok(job.source, `${job.name} release job must be present`);
     assert.match(
       job.source!,
-      /node-version:\s*"24\.20\.0"/,
+      /node-version:\s*"24\.21\.0"/,
       `${job.name} release job must use the retained Node.js version`,
     );
     assert.match(
@@ -573,7 +814,141 @@ async function run(): Promise<void> {
         job.source!.indexOf(job.runner),
       `${job.name} WebKit dependency installation must precede its release runner`,
     );
+    const handoffName = `Generate ${job.name} release evidence handoff`;
+    const handoffStart = job.source!.indexOf(`- name: ${handoffName}`);
+    const uploadStart = job.source!.indexOf(`- name: Upload ${job.name} release evidence`);
+    assert.ok(handoffStart >= 0, `${job.name} job must generate a handoff`);
+    assert.ok(
+      uploadStart > handoffStart,
+      `${job.name} evidence upload must include its generated handoff`,
+    );
+    const handoffBlock = job.source!.slice(handoffStart, uploadStart);
+    assert.match(handoffBlock, /if: always\(\)/);
+    assert.match(handoffBlock, /continue-on-error: true/);
+    assert.match(handoffBlock, new RegExp(`HANDOFF_MODE: ${job.name}`));
+    assert.match(
+      handoffBlock,
+      new RegExp(`HANDOFF_EVIDENCE_DIR: release-evidence${job.name === "full" ? "-full" : ""}`),
+    );
+    assert.match(
+      handoffBlock,
+      /captureReleaseIdentity\(process\.cwd\(\)\)\.revision/u,
+      "release handoffs must use the canonical filtered source revision",
+    );
+    assert.match(
+      handoffBlock,
+      /handoff_path="\$HANDOFF_EVIDENCE_DIR\/release-evidence-handoff\.md"/u,
+      "release handoffs must use the configured evidence directory",
+    );
+    assert.match(
+      handoffBlock,
+      /run-release-node\.sh\s+\\\s+pnpm --filter @workspace\/scripts exec tsx\s+\\\s+\.\/src\/release-evidence-handoff\.mts/u,
+    );
+    assert.match(handoffBlock, /--revision "\$revision"/);
+    assert.match(handoffBlock, /--evidence-dir "\$HANDOFF_EVIDENCE_DIR"/);
+    assert.match(handoffBlock, /Handoff generation: \*\*FAILED\*\*/);
   }
+  const standardReleaseJob = releaseJobs.find((job) => job.name === "standard");
+  const fullReleaseJob = releaseJobs.find((job) => job.name === "full");
+  assert.ok(standardReleaseJob?.source);
+  assert.ok(fullReleaseJob?.source);
+  const apiImageCheckStart = standardReleaseJob.source.indexOf(
+    "- name: Build production API image and verify its Node.js version",
+  );
+  const apiImageCheckEnd = standardReleaseJob.source.indexOf(
+    "\n      - name:",
+    apiImageCheckStart + 1,
+  );
+  assert.ok(apiImageCheckStart >= 0, "standard release job must build the production API image");
+  assert.ok(apiImageCheckEnd > apiImageCheckStart);
+  const apiImageCheck = standardReleaseJob.source.slice(
+    apiImageCheckStart,
+    apiImageCheckEnd,
+  );
+  assert.match(apiImageCheck, /docker build --pull --target api/u);
+  assert.match(apiImageCheck, /docker run --rm "\$api_image" node --version/u);
+  assert.match(apiImageCheck, /expected_node_version="v\$\(tr -d '\\r\\n' < \.nvmrc\)"/u);
+  assert.match(apiImageCheck, /actual_node_version.*expected_node_version/u);
+  assert.match(
+    dockerfile,
+    /COPY package\.json pnpm-lock\.yaml pnpm-workspace\.yaml \.nvmrc \.\/\n/u,
+    "the builder must have the checked-in Node.js pin available",
+  );
+  assert.match(dockerfile, /pnpm install --frozen-lockfile/u);
+  assert.match(dockerfile, /actual_pnpm_version="\$\(pnpm --version\)"/u);
+  assert.match(
+    dockerfile,
+    /actual_pnpm_version" != "\$pnpm_version"/u,
+    "the builder must fail when installed pnpm differs from packageManager",
+  );
+  assert.doesNotMatch(
+    standardReleaseJob.source,
+    /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR|responsive-webkit-debug/u,
+    "standard release checks must not configure the full-only debug artifact",
+  );
+  assert.match(
+    fullReleaseJob.source,
+    /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR:\s*\$\{\{\s*runner\.temp\s*\}\}\/responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+    "full-run browser diagnostics must be staged under a unique runner-temp path",
+  );
+  const diagnosticsCheckStart = fullReleaseJob.source.indexOf(
+    "- name: Check for sanitized responsive WebKit diagnostics",
+  );
+  const diagnosticsUploadStart = fullReleaseJob.source.indexOf(
+    "- name: Upload sanitized responsive WebKit failure diagnostics",
+  );
+  const stoppedSummaryStart = fullReleaseJob.source.indexOf(
+    "- name: Summarize stopped full release check",
+  );
+  assert.ok(diagnosticsCheckStart >= 0);
+  assert.ok(diagnosticsUploadStart > diagnosticsCheckStart);
+  assert.ok(stoppedSummaryStart > diagnosticsUploadStart);
+  const diagnosticsBlock = fullReleaseJob.source.slice(
+    diagnosticsUploadStart,
+    stoppedSummaryStart,
+  );
+  assert.match(
+    diagnosticsBlock,
+    /if: always\(\) && steps\.responsive-webkit-debug-artifact\.outputs\.available == 'true'/u,
+    "the separate debug upload must require an emitted sanitized manifest",
+  );
+  assert.match(diagnosticsBlock, /retention-days: 3/u);
+  assert.match(
+    diagnosticsBlock,
+    /path: \$\{\{\s*runner\.temp\s*\}\}\/responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+  );
+  assert.match(
+    diagnosticsBlock,
+    /name: responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+    "separate attempts of one workflow run must retain distinct debug artifacts",
+  );
+  assert.doesNotMatch(
+    diagnosticsBlock,
+    /release-evidence-full/u,
+    "debug artifacts must remain separate from canonical full evidence",
+  );
+  const canonicalFullUploadStart = fullReleaseJob.source.indexOf(
+    "- name: Upload full release evidence",
+  );
+  assert.ok(canonicalFullUploadStart >= 0);
+  assert.ok(
+    diagnosticsCheckStart > canonicalFullUploadStart,
+    "the debug artifact probe must not alter the canonical full-evidence upload",
+  );
+  const canonicalUploadEnd = fullReleaseJob.source.indexOf(
+    "- name: Check for sanitized responsive WebKit diagnostics",
+    canonicalFullUploadStart,
+  );
+  const canonicalUploadBlock = fullReleaseJob.source.slice(
+    canonicalFullUploadStart,
+    canonicalUploadEnd,
+  );
+  assert.match(canonicalUploadBlock, /path:\s*release-evidence-full/u);
+  assert.doesNotMatch(
+    canonicalUploadBlock,
+    /responsive-webkit-debug|runner\.temp/u,
+    "raw or sanitized browser diagnostics must not enter the canonical artifact",
+  );
   assert.equal(
     configuredKeyrings.length,
     2,
@@ -615,7 +990,310 @@ async function run(): Promise<void> {
   assert.throws(
     () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
     /requires --source-library-revision/,
+    "the assessed checkout revision must never stand in for a deployed revision",
   );
+  const handoffDirectory = await mkdtemp(
+    join(tmpdir(), "release-source-handoff-"),
+  );
+  try {
+    const issuedAt = new Date(Date.now() - 1_000).toISOString();
+    const handoffPath = join(handoffDirectory, "deployment-handoff.json");
+    await writeFile(
+      handoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "published-release-test",
+        deployedRevision: "c".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt,
+        expiresAt: new Date(
+          Date.parse(issuedAt) + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseRevision(
+        "a".repeat(40),
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "c".repeat(40),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseDatabaseOwner(
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "approved_source_owner",
+    );
+    const runtimeHandoffPath = join(
+      handoffDirectory,
+      "published-runtime-handoff.json",
+    );
+    await writeFile(
+      runtimeHandoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "published-runtime-evidence-test",
+        deployedRevision: "d".repeat(40),
+        issuedAt,
+        expiresAt: new Date(
+          Date.parse(issuedAt) + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseDatabaseOwner(
+        "release",
+        undefined,
+        runtimeHandoffPath,
+        true,
+      ),
+      undefined,
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          undefined,
+          runtimeHandoffPath,
+        ),
+      /approved PostgreSQL database owner/,
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          undefined,
+          undefined,
+          true,
+        ),
+      /approved PostgreSQL database owner/,
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          "different_source_owner",
+          handoffPath,
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message ===
+          "Source-library database owner conflicts with the database owner in the deployment handoff." &&
+        !error.message.includes("approved_source_owner") &&
+        !error.message.includes("different_source_owner"),
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseRevision(
+          "a".repeat(40),
+          "release",
+          "d".repeat(40),
+          handoffPath,
+        ),
+      /conflicts with the deployed revision/,
+    );
+    const staleIssuedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+    const staleHandoffPath = join(
+      handoffDirectory,
+      "stale-deployment-handoff.json",
+    );
+    await writeFile(
+      staleHandoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "stale-published-release",
+        deployedRevision: "f".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt: staleIssuedAt.toISOString(),
+        expiresAt: new Date(
+          staleIssuedAt.getTime() + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+      "utf8",
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseRevision(
+          "a".repeat(40),
+          "release",
+          undefined,
+          staleHandoffPath,
+        ),
+      /deployment handoff is stale/,
+      "an expired published deployment handoff must not supply release identity",
+    );
+  } finally {
+    await rm(handoffDirectory, { recursive: true, force: true });
+  }
+
+  const blockedEvidenceDirectory = await mkdtemp(
+    join(tmpdir(), "release-blocked-evidence-"),
+  );
+  try {
+    const retainedReport = "# Previous retained report\n";
+    await writeFile(
+      join(blockedEvidenceDirectory, "release-check-report.md"),
+      retainedReport,
+      "utf8",
+    );
+    const expectedAssessedRevision = captureReleaseIdentity(
+      new URL("../../", import.meta.url).pathname,
+    ).revision;
+    const childEnvironment: NodeJS.ProcessEnv = {
+      ...process.env,
+      CI: "true",
+      NODE_ENV: "test",
+      RELEASE_EVIDENCE_DIR: blockedEvidenceDirectory,
+      READINESS_EVIDENCE_DEPLOYMENT_ID: "",
+      READINESS_EVIDENCE_DEPLOYED_REVISION: "",
+      SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF: "",
+      SOURCE_LIBRARY_RECONCILIATION_REVISION: "",
+      SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER: "",
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT: "",
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "",
+    };
+    const blockedRun = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        new URL("./release-check.mts", import.meta.url).pathname,
+        "--readiness-deployment-id",
+        "",
+        "--deployed-revision",
+        "",
+      ],
+      {
+        cwd: new URL("../", import.meta.url).pathname,
+        env: childEnvironment,
+        encoding: "utf8",
+        timeout: 60_000,
+      },
+    );
+    assert.equal(
+      blockedRun.error,
+      undefined,
+      blockedRun.error?.message ?? "",
+    );
+    assert.equal(blockedRun.status, 1, blockedRun.stderr);
+    assert.match(
+      blockedRun.stderr,
+      /no release gates were run and production readiness is NO-GO/,
+    );
+    assert.doesNotMatch(
+      `${blockedRun.stdout}\n${blockedRun.stderr}`,
+      /Release check started/,
+      "missing published identity must block before release gates start",
+    );
+    const blockedCheckpoint = await readFile(
+      join(blockedEvidenceDirectory, RELEASE_CHECKPOINT_REPORT),
+      "utf8",
+    );
+    assert.deepEqual(blockedCheckpoint.trimEnd().split("\n"), [
+      "# Release Check Checkpoint — BLOCKED / NO-GO",
+      "Mode: standard",
+      `Assessed revision: ${expectedAssessedRevision}`,
+      "Missing evidence:",
+      "- readiness deployment ID",
+      "- deployed source revision",
+    ]);
+    assert.doesNotMatch(
+      blockedCheckpoint,
+      /^Deployed revision:/m,
+      "the assessed checkout revision must not be recorded as the deployed revision",
+    );
+    assert.equal(
+      await readFile(
+        join(blockedEvidenceDirectory, "release-check-report.md"),
+        "utf8",
+      ),
+      retainedReport,
+      "a pre-gate checkpoint must leave retained release evidence untouched",
+    );
+
+    const staleIssuedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+    const staleHandoffPath = join(
+      blockedEvidenceDirectory,
+      "stale-deployment-handoff.json",
+    );
+    await writeFile(
+      staleHandoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "stale-release-handoff",
+        deployedRevision: "f".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt: staleIssuedAt.toISOString(),
+        expiresAt: new Date(
+          staleIssuedAt.getTime() + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+      "utf8",
+    );
+    const staleBlockedRun = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        new URL("./release-check.mts", import.meta.url).pathname,
+        "--full",
+        "--readiness-deployment-id",
+        "",
+        "--deployed-revision",
+        "",
+      ],
+      {
+        cwd: new URL("../", import.meta.url).pathname,
+        env: {
+          ...childEnvironment,
+          SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF:
+            staleHandoffPath,
+        },
+        encoding: "utf8",
+        timeout: 60_000,
+      },
+    );
+    assert.equal(
+      staleBlockedRun.error,
+      undefined,
+      staleBlockedRun.error?.message ?? "",
+    );
+    assert.equal(staleBlockedRun.status, 1, staleBlockedRun.stderr);
+    assert.doesNotMatch(
+      `${staleBlockedRun.stdout}\n${staleBlockedRun.stderr}`,
+      /Release check started/,
+      "an expired handoff must be rejected before full-release gates start",
+    );
+    const staleBlockedCheckpoint = await readFile(
+      join(blockedEvidenceDirectory, RELEASE_CHECKPOINT_REPORT),
+      "utf8",
+    );
+    assert.deepEqual(staleBlockedCheckpoint.trimEnd().split("\n"), [
+      "# Release Check Checkpoint — BLOCKED / NO-GO",
+      "Mode: full",
+      `Assessed revision: ${expectedAssessedRevision}`,
+      "Missing evidence:",
+      "- current published deployment handoff",
+      "- readiness deployment ID",
+      "- deployed source revision",
+    ]);
+    assert.doesNotMatch(
+      staleBlockedCheckpoint,
+      /stale-release-handoff|f{40}|Deployed revision:/,
+      "a stale handoff must not leak or promote its old deployment identity",
+    );
+  } finally {
+    await rm(blockedEvidenceDirectory, { recursive: true, force: true });
+  }
+
   assert.deepEqual(
     configuredKeyrings,
     [
@@ -643,6 +1321,26 @@ async function run(): Promise<void> {
     rootPackage.scripts?.["audit:prod"],
     "pnpm run audit:prod:release",
     "the configured production security workflow must retain its fail-closed compatibility command",
+  );
+  assert.equal(
+    scriptsPackage.scripts?.["test:webkit-case-contract"],
+    "tsx ./src/webkit-case-contract.test.mts",
+    "the WebKit identity contract must have a focused release-check command",
+  );
+  assert.deepEqual(
+    WEBKIT_IDENTITY_CONTRACT_STEP.args,
+    [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      "test:webkit-case-contract",
+    ],
+    "the standard release gate must execute only the focused WebKit identity contract",
+  );
+  assert.equal(
+    WEBKIT_IDENTITY_CONTRACT_STEP.timeoutMs,
+    2 * 60_000,
+    "the WebKit identity discovery gate must remain bounded",
   );
   assert.match(
     ciWorkflow,
@@ -714,9 +1412,102 @@ async function run(): Promise<void> {
     releaseGateLabelsForMode("standard").includes("browser WebKit smoke"),
     "standard release checks must include the bounded WebKit browser smoke",
   );
+  assert.equal(
+    releaseGateLabelsForMode("standard").includes(
+      FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+    ),
+    false,
+    "standard release checks must not add the full-only responsive WebKit gate",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("full").includes(
+      FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+    ),
+    true,
+    "full release checks must include the phone/tablet WebKit gate",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.timeoutMs,
+    FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+    "responsive WebKit must have a fixed outer gate timeout",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+    20 * 60_000,
+    "the full-only responsive WebKit gate timeout must remain fixed at 20 minutes",
+  );
+  assert.deepEqual(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args.slice(1),
+    [
+      "--playwright-config=playwright.compatibility.config.ts",
+      "--project=phone-webkit",
+      "--project=tablet-webkit",
+    ],
+    "the full compatibility gate must select only the phone and tablet WebKit projects",
+  );
+  assert.ok(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.env?.PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH?.endsWith(
+      "/browser-compatibility/webkit-result.json",
+    ),
+    "responsive WebKit must retain a separate evidence file",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "WebKit identity contracts",
+    ).length,
+    1,
+    "standard release checks must run the WebKit release and compatibility identity contracts exactly once",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("full").includes("WebKit identity contracts"),
+    "full release checks must retain the standard WebKit identity contract",
+  );
+  for (const mode of ["standard", "full"] as const) {
+    assert.equal(
+      releaseGateLabelsForMode(mode).filter(
+        (label) => label === "real API/web build-source integration",
+      ).length,
+      1,
+      `${mode} must run the isolated real-build identity regression exactly once`,
+    );
+  }
+  assert.match(
+    releaseJobs[0]!.source!,
+    /run: node scripts\/src\/test-results\.mjs run --lane release-standard -- pnpm run release:check$/m,
+    "the standard GitHub release job must enter through the release checker that owns the WebKit identity gate",
+  );
   assert.ok(
     RELEASE_EVIDENCE_ALLOWLIST.includes("browser-smoke/webkit-result.json"),
     "WebKit smoke evidence must be retained through the release allowlist",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "browser-compatibility/webkit-result.json",
+    ),
+    "responsive WebKit evidence must be retained through the release allowlist",
+  );
+  assert.equal(
+    RELEASE_EVIDENCE_ALLOWLIST.some((path) =>
+      path.includes("responsive-webkit-debug"),
+    ),
+    false,
+    "browser-debug files must remain outside the canonical release-evidence allowlist",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes("screen-off-wake/FINAL-REPORT.md"),
+    "focused screen-off/wake evidence must be retained through the release allowlist",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "sse-topology-observation-2026-10-09.json",
+    ),
+    "the retained SSE deployment-topology decision must be included in release evidence",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "web-push-license-approval-2026-10-09.md",
+    ),
+    "the retained production web-push license approval must be included in release evidence",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes(
@@ -736,13 +1527,26 @@ async function run(): Promise<void> {
     true,
     "full reconciliation must wait for the database preflight",
   );
+  const sourceEvidenceInputIndex =
+    SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP.args.indexOf("--input");
+  const importsSourceLibraryEvidence =
+    sourceEvidenceInputIndex >= 0 &&
+    Boolean(
+      SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP.args[
+        sourceEvidenceInputIndex + 1
+      ],
+    );
   assert.equal(
     releaseStepDependencies(
       { label: "release-tests", args: [], stage: "release-tests" },
       0,
     ).includes(SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL),
-    true,
-    "expensive release tests must wait for the database preflight",
+    sourceLibraryReconciliationPreflightEnabled(
+      true,
+      importsSourceLibraryEvidence,
+      undefined,
+    ),
+    "expensive release tests must wait for the database preflight unless published evidence is explicitly imported",
   );
   assert.equal(
     SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.args.includes("--preflight"),
@@ -1036,7 +1840,7 @@ async function run(): Promise<void> {
       "@workspace/scripts",
       "exec",
       "tsx",
-      "./src/verify-source-library-reconciliation.mts",
+      "./src/verify-source-library-reconciliation-cli.mts",
     ],
     "the release gate must invoke the read-only source-library verifier",
   );
@@ -1052,8 +1856,12 @@ async function run(): Promise<void> {
     SOURCE_LIBRARY_RECONCILIATION_STEP.args[
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.indexOf("--environment") + 1
     ],
-    "development",
-    "local release evidence must identify the development database explicitly",
+    resolveSourceLibraryEvidenceEnvironment(
+      process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT,
+      importsSourceLibraryEvidence,
+      Boolean(process.env.CI),
+    ),
+    "the verifier environment must reflect whether production evidence is imported",
   );
   assert.match(
     SOURCE_LIBRARY_RECONCILIATION_STEP.args[
@@ -1142,6 +1950,452 @@ async function run(): Promise<void> {
   );
   assert.equal(RELEASE_CHECK_DEFAULT_CONCURRENCY, 4);
   assert.equal(RELEASE_CHECK_API_CONCURRENCY, 2);
+  assert.equal(
+    defaultReleaseConcurrencyForEnvironment({ REPLIT_ENVIRONMENT: "production" }),
+    1,
+    "Replit release checks must serialize even when this workspace label says production",
+  );
+  assert.equal(
+    defaultReleaseConcurrencyForEnvironment({ REPLIT_DEV_DOMAIN: "present" }),
+    1,
+    "a Replit development domain must select the constrained-workspace budget",
+  );
+  assert.equal(
+    defaultReleaseConcurrencyForEnvironment({ CI: "true" }),
+    RELEASE_CHECK_DEFAULT_CONCURRENCY,
+    "non-Replit CI should preserve its configured release concurrency",
+  );
+  const apiUnitReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find(
+    (step) => step.label === "API unit tests (release shard 1/12)",
+  );
+  const consumerTypecheckContracts = [
+    {
+      label: "API server typecheck",
+      packageName: "@workspace/api-server",
+      packagePath: "../../artifacts/api-server/package.json",
+    },
+    {
+      label: "run calculator typecheck",
+      packageName: "@workspace/run-calculator",
+      packagePath: "../../artifacts/run-calculator/package.json",
+      pretypecheck:
+        "pnpm run test:vite-config-loading && pnpm run check:vite-config-loading && pnpm --filter @workspace/inventory-math exec node ../../node_modules/typescript/bin/tsc -b --force && pnpm --filter @workspace/spec-import exec node ../../node_modules/typescript/bin/tsc -b && pnpm --filter @workspace/recipe-guide-import exec node ../../node_modules/typescript/bin/tsc -b --force",
+    },
+    {
+      label: "mockup sandbox typecheck",
+      packageName: "@workspace/mockup-sandbox",
+      packagePath: "../../artifacts/mockup-sandbox/package.json",
+    },
+    {
+      label: "scripts typecheck",
+      packageName: "@workspace/scripts",
+      packagePath: "../package.json",
+    },
+  ] as const;
+  assert.equal(
+    RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.length,
+    consumerTypecheckContracts.length,
+    "every consumer typecheck package must have exactly one release gate",
+  );
+  const sharedLibraryTypecheckStep = RELEASE_CHECK_STEPS.find(
+    (step) => step.label === "shared library typechecks",
+  );
+  assert.ok(sharedLibraryTypecheckStep, "the shared-library release gate must exist");
+  assert.deepEqual(
+    sharedLibraryTypecheckStep.args,
+    ["run", "typecheck:libs"],
+    "the shared-library release gate must invoke the root typecheck:libs script",
+  );
+  assert.ok(
+    rootPackage.scripts?.["typecheck:libs"]?.trim(),
+    "the root package must keep its typecheck:libs script defined",
+  );
+  assert.match(
+    rootPackage.scripts?.["typecheck:libs"] ?? "",
+    /^node\s+\.\/node_modules\/typescript\/bin\/tsc\s+--build(?:\s|$)/u,
+    "the root typecheck:libs script must run the TypeScript project-reference build",
+  );
+  const rootTypeScriptProject = JSON.parse(
+    await readFile(new URL("../../tsconfig.json", import.meta.url), "utf8"),
+  ) as { references?: Array<{ path: string }> };
+  const discoverSharedLibraryProjects = async (
+    directory: string,
+    relativePath: string,
+  ): Promise<string[]> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const projects: string[] = [];
+    if (entries.some((entry) => entry.isFile() && entry.name === "tsconfig.json")) {
+      projects.push(`./lib/${relativePath}`);
+    }
+    const nestedProjects = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) =>
+          discoverSharedLibraryProjects(
+            join(directory, entry.name),
+            relativePath ? `${relativePath}/${entry.name}` : entry.name,
+          ),
+        ),
+    );
+    return [...projects, ...nestedProjects.flat()];
+  };
+  const sharedLibraryProjects = (
+    await discoverSharedLibraryProjects(
+      fileURLToPath(new URL("../../lib/", import.meta.url)),
+      "",
+    )
+  ).sort();
+  const referencedSharedLibraryProjects = (
+    rootTypeScriptProject.references ?? []
+  )
+    .map(({ path }) => path)
+    .filter((path) => path.startsWith("./lib/"))
+    .sort();
+  assert.deepEqual(
+    referencedSharedLibraryProjects,
+    sharedLibraryProjects,
+    "the root TypeScript project must reference every composite shared library under lib/",
+  );
+  for (const requiredProject of [
+    "./lib/factory-constants",
+    "./lib/formula-guard",
+    "./lib/ingredient-catalog",
+  ]) {
+    assert.ok(
+      sharedLibraryProjects.includes(requiredProject),
+      `${requiredProject} must remain in the shared-library TypeScript project graph`,
+    );
+  }
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const sharedLibraryPackages = await Promise.all(
+    sharedLibraryProjects.map(async (projectPath) => {
+      const packageDirectory = resolve(repositoryRoot, projectPath);
+      const packageJson = JSON.parse(
+        await readFile(join(packageDirectory, "package.json"), "utf8"),
+      ) as {
+        name?: string;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
+      };
+      assert.ok(
+        packageJson.name,
+        `${projectPath} must have a named workspace package`,
+      );
+      return {
+        packageDirectory,
+        packageJson,
+        projectPath,
+      };
+    }),
+  );
+  const buildableLibraryDirectories = new Map(
+    sharedLibraryPackages.map(({ packageDirectory, packageJson }) => [
+      packageJson.name!,
+      packageDirectory,
+    ]),
+  );
+  assert.equal(
+    buildableLibraryDirectories.size,
+    sharedLibraryPackages.length,
+    "shared-library workspace package names must be unique",
+  );
+  for (const { packageDirectory, packageJson, projectPath } of sharedLibraryPackages) {
+    const tsconfig = JSON.parse(
+      await readFile(join(packageDirectory, "tsconfig.json"), "utf8"),
+    ) as { references?: Array<{ path: string }> };
+    const dependencyNames = [
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+      ...Object.keys(packageJson.peerDependencies ?? {}),
+      ...Object.keys(packageJson.optionalDependencies ?? {}),
+    ].filter((name) => name.startsWith("@workspace/"));
+    const referencedDirectories = new Set(
+      (tsconfig.references ?? []).map(({ path }) => {
+        const referencePath = resolve(packageDirectory, path);
+        return referencePath.endsWith(".json")
+          ? resolve(referencePath, "..")
+          : referencePath;
+      }),
+    );
+    // Only dependencies with a buildable project discovered under lib/ need a
+    // TypeScript project reference; workspace packages without one stay out.
+    const missingBuildableDependencies = dependencyNames.filter((name) => {
+      const dependencyDirectory = buildableLibraryDirectories.get(name);
+      return dependencyDirectory && !referencedDirectories.has(dependencyDirectory);
+    });
+    assert.deepEqual(
+      missingBuildableDependencies,
+      [],
+      `${packageJson.name} (${projectPath}) must reference every buildable shared-library dependency`,
+    );
+  }
+  for (const contract of consumerTypecheckContracts) {
+    const packageDirectory = resolve(
+      fileURLToPath(new URL(contract.packagePath, import.meta.url)),
+      "..",
+    );
+    const packageJson = JSON.parse(
+      await readFile(join(packageDirectory, "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    const dependencyNames = [
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+      ...Object.keys(packageJson.peerDependencies ?? {}),
+      ...Object.keys(packageJson.optionalDependencies ?? {}),
+    ].filter((name) => name.startsWith("@workspace/"));
+    const tsconfigFiles = (await readdir(packageDirectory))
+      .filter((name) => /^tsconfig(?:\..+)?\.json$/u.test(name))
+      // This API diagnostic-only config deliberately bypasses reference
+      // rebuilds so routes can be checked against the last successful
+      // api-zod declarations; the full API config below owns its dependency graph.
+      .filter(
+        (name) =>
+          !(
+            contract.packageName === "@workspace/api-server" &&
+            name === "tsconfig.routes.json"
+          ),
+      )
+      .sort();
+    assert.ok(
+      tsconfigFiles.includes("tsconfig.json"),
+      `${contract.packageName} must keep its primary TypeScript config`,
+    );
+    for (const tsconfigFile of tsconfigFiles) {
+      const tsconfig = JSON.parse(
+        await readFile(join(packageDirectory, tsconfigFile), "utf8"),
+      ) as { references?: Array<{ path: string }> };
+      const referencedDirectories = new Set(
+        (tsconfig.references ?? []).map(({ path }) => {
+          const referencePath = resolve(packageDirectory, path);
+          return referencePath.endsWith(".json")
+            ? resolve(referencePath, "..")
+            : referencePath;
+        }),
+      );
+      // Dependencies without a TypeScript project under lib/ cannot
+      // participate in the project-reference graph (for example,
+      // typescript-api-v6, which is JavaScript plus declarations).
+      const missingBuildableDependencies = dependencyNames.filter((name) => {
+        const dependencyDirectory = buildableLibraryDirectories.get(name);
+        return dependencyDirectory && !referencedDirectories.has(dependencyDirectory);
+      });
+      assert.deepEqual(
+        missingBuildableDependencies,
+        [],
+        `${contract.packageName} (${tsconfigFile}) must reference every buildable shared-library dependency`,
+      );
+    }
+  }
+  for (const contract of consumerTypecheckContracts) {
+    const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(
+      (candidate) => candidate.label === contract.label,
+    );
+    assert.ok(step, `the ${contract.label} release gate must exist`);
+    assert.deepEqual(
+      step.args,
+      ["--filter", contract.packageName, "run", "typecheck"],
+      `the ${contract.label} release gate must invoke its package-level typecheck script`,
+    );
+    const packageJson = JSON.parse(
+      await readFile(new URL(contract.packagePath, import.meta.url), "utf8"),
+    ) as { name?: string; scripts?: Record<string, string> };
+    assert.equal(
+      packageJson.name,
+      contract.packageName,
+      `${contract.label} must point to the matching workspace package`,
+    );
+    assert.ok(
+      packageJson.scripts?.typecheck?.trim(),
+      `${contract.packageName} must define its package-level typecheck script`,
+    );
+    if ("pretypecheck" in contract) {
+      assert.equal(
+        packageJson.scripts?.pretypecheck,
+        contract.pretypecheck,
+        "the calculator typecheck lifecycle must run configuration-loading checks and dependency builds, in order, before typechecking",
+      );
+    }
+  }
+  const workspaceNpmrc = await readFile(
+    new URL("../../.npmrc", import.meta.url),
+    "utf8",
+  );
+  const enablePrePostScriptsSetting = workspaceNpmrc
+    .split(/\r?\n/u)
+    .filter((line) => !/^\s*[#;]/u.test(line))
+    .map((line) =>
+      line.match(/^\s*enable-pre-post-scripts\s*=\s*(.*?)\s*$/iu)?.[1],
+    )
+    .filter((value): value is string => value !== undefined)
+    .at(-1);
+  assert.notEqual(
+    enablePrePostScriptsSetting?.toLowerCase(),
+    "false",
+    "the workspace .npmrc must not disable pnpm pre/post lifecycle scripts required by release typecheck setup checks",
+  );
+  const apiPackage = JSON.parse(
+    await readFile(
+      new URL("../../artifacts/api-server/package.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { scripts?: Record<string, string> };
+  const apiRoutesTsconfig = JSON.parse(
+    await readFile(
+      new URL("../../artifacts/api-server/tsconfig.routes.json", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    compilerOptions?: {
+      noImplicitAny?: boolean;
+      strictNullChecks?: boolean;
+      useUnknownInCatchVariables?: boolean;
+    };
+    include?: string[];
+  };
+  const routeTypecheckCommand = (
+    apiPackage.scripts?.["typecheck:routes"] ?? ""
+  ).match(
+    /^node\s+(\.\.\/\.\.\/node_modules\/typescript\/bin\/tsc)\s+-p\s+tsconfig\.routes\.json\s+--noEmit$/u,
+  );
+  assert.ok(
+    routeTypecheckCommand,
+    "the API route typecheck must run TypeScript on its route project without emitting",
+  );
+  assert.ok(
+    apiRoutesTsconfig.include?.includes("src/routes/**/*.ts"),
+    "the API route project must include route source files",
+  );
+  assert.equal(
+    apiRoutesTsconfig.compilerOptions?.noImplicitAny,
+    true,
+    "the API route project must explicitly reject implicit any types",
+  );
+  assert.equal(
+    apiRoutesTsconfig.compilerOptions?.strictNullChecks,
+    true,
+    "the API route project must explicitly enable strict null checks",
+  );
+  assert.equal(
+    apiRoutesTsconfig.compilerOptions?.useUnknownInCatchVariables,
+    true,
+    "the API route project must explicitly treat catch variables as unknown",
+  );
+  assert.match(
+    apiPackage.scripts?.typecheck ?? "",
+    /(?:^|&&)\s*pnpm run typecheck:routes(?:\s|$)/u,
+    "the API package typecheck must include the focused route compiler check",
+  );
+  const apiServerRoot = fileURLToPath(
+    new URL("../../artifacts/api-server/", import.meta.url),
+  );
+  const routeFixtureRoot = await mkdtemp(
+    join(apiServerRoot, ".release-route-typecheck-"),
+  );
+  try {
+    const routeFixtureSource = join(
+      routeFixtureRoot,
+      "deliberate-type-error.ts",
+    );
+    const routeFixtureTsconfig = join(
+      routeFixtureRoot,
+      "tsconfig.routes.json",
+    );
+    await writeFile(
+      routeFixtureSource,
+      [
+        "export const deliberateRouteTypeError: string = 42;",
+        "export function deliberateImplicitAny(parameter) { return parameter; }",
+        "const maybeNull: string | null = null;",
+        "export const deliberateNullError: string = maybeNull;",
+        "export function deliberateUnknownCatch(): string {",
+        "  try { throw new Error('fixture'); } catch (error) {",
+        "    return error.message;",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      { flag: "wx" },
+    );
+    await writeFile(
+      routeFixtureTsconfig,
+      `${JSON.stringify(
+        {
+          extends: join(apiServerRoot, "tsconfig.routes.json"),
+          compilerOptions: { rootDir: routeFixtureRoot },
+          include: [routeFixtureSource],
+        },
+        null,
+        2,
+      )}\n`,
+      { flag: "wx" },
+    );
+    const routeTypecheckProbe = spawnSync(
+      process.execPath,
+      [
+        routeTypecheckCommand[1],
+        "-p",
+        routeFixtureTsconfig,
+        "--noEmit",
+      ],
+      {
+        cwd: apiServerRoot,
+        encoding: "utf8",
+        timeout: 120_000,
+      },
+    );
+    const routeTypecheckOutput = [
+      routeTypecheckProbe.stdout,
+      routeTypecheckProbe.stderr,
+    ].join("\n");
+    assert.equal(
+      routeTypecheckProbe.error,
+      undefined,
+      "the isolated API route typecheck must start successfully",
+    );
+    assert.notEqual(
+      routeTypecheckProbe.status,
+      0,
+      "the API route typecheck must reject a deliberate route type error",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts.*error TS2322/u,
+      "the API route typecheck must report the fixture's deliberate assignment error",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts.*error TS7006/u,
+      "the API route typecheck must reject an implicitly typed parameter",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts\(4,\d+\): error TS2322/u,
+      "the API route typecheck must reject assigning a nullable value to a non-nullable type",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts.*error TS18046/u,
+      "the API route typecheck must reject using an unknown catch variable without narrowing",
+    );
+  } finally {
+    await rm(routeFixtureRoot, { recursive: true, force: true });
+  }
+  assert.deepEqual(
+    apiUnitReleaseStep?.env,
+    {
+      NODE_ENV: "test",
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+    },
+    "the API unit release shard must opt into its own guarded disposable database",
+  );
   assert.equal(
     releaseConcurrencyLimit({ label: "package", args: [] }, 4),
     4,
@@ -1333,6 +2587,26 @@ async function run(): Promise<void> {
   assert.throws(
     () =>
       validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({
+          databaseAttestation: "unexpected-owner-claim",
+        }))),
+      ),
+    /invalid database attestation/,
+    "unknown database attestations must not enter release evidence",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({
+          databaseAttestation: "published-app-runtime-connection",
+        }))),
+      ),
+    /does not match its environment/,
+    "published-app database attestation must not qualify development evidence",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
         Buffer.from(JSON.stringify(sourceEvidence())),
         {
           maxAgeMs: 60_000,
@@ -1422,6 +2696,83 @@ async function run(): Promise<void> {
     /revision is stale/,
     "stale WebKit evidence must not be accepted",
   );
+  const responsiveWebkitCases =
+    WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+      const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+      const [projectName = "", ...titleParts] =
+        projectAndTitle.split(" › ");
+      return {
+        file,
+        projectName,
+        title: titleParts.join(" › "),
+        status: "passed",
+        durationMs: 100,
+      };
+    });
+  const responsiveWebkitEvidence = {
+    schemaVersion: 1,
+    browser: "webkit",
+    revision: "current-revision",
+    environment: "disposable release test",
+    result: "passed",
+    cases: responsiveWebkitCases,
+  };
+  assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(JSON.stringify(responsiveWebkitEvidence)),
+      {
+        currentRevision: "current-revision",
+        requirePass: true,
+        expectedCaseIdentities:
+          WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+      },
+    ),
+    "revision-bound evidence must match every reviewed phone/tablet journey",
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...responsiveWebkitEvidence,
+            cases: responsiveWebkitCases.map((testCase, index) =>
+              index === 0
+                ? { ...testCase, projectName: "phone-chromium" }
+                : testCase,
+            ),
+          }),
+        ),
+        {
+          currentRevision: "current-revision",
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        },
+      ),
+    /reviewed phone\/tablet project inventory/u,
+    "Chromium cases must not satisfy the responsive WebKit evidence contract",
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...responsiveWebkitEvidence,
+            cases: responsiveWebkitCases.map((testCase, index) =>
+              index === 0 ? { ...testCase, status: "skipped" } : testCase,
+            ),
+          }),
+        ),
+        {
+          currentRevision: "current-revision",
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        },
+      ),
+    /unless every phone\/tablet journey passed/u,
+    "skipped compatibility journeys must not satisfy a full release pass",
+  );
   assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(
       Buffer.from(
@@ -1443,6 +2794,115 @@ async function run(): Promise<void> {
       ),
     /targets development, but release evidence was requested/,
     "evidence from another environment must not be accepted",
+  );
+  assert.doesNotThrow(() =>
+    validateSourceLibraryReconciliationEvidence(
+      Buffer.from(JSON.stringify(sourceEvidence({ environment: "release" }))),
+      {
+        expectedEnvironment: "release",
+        expectedPoolExceptionsSha256:
+          APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+      },
+    ),
+    "historical v1 evidence may remain readable when it authorizes no current mismatches",
+  );
+  const fingerprintBoundExceptionSha256 = "c".repeat(64);
+  assert.doesNotThrow(() =>
+    validateSourceLibraryReconciliationEvidence(
+      Buffer.from(
+        JSON.stringify(
+          sourceEvidence({
+            environment: "release",
+            poolExceptions: {
+              id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+              sha256: fingerprintBoundExceptionSha256,
+              approvedMismatches: 0,
+              unresolvedMismatches: 0,
+            },
+          }),
+        ),
+      ),
+      {
+        expectedEnvironment: "release",
+        expectedPoolExceptionsSha256: fingerprintBoundExceptionSha256,
+      },
+    ),
+    "release evidence may use a pinned fingerprint-bound version 2 exception",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify(
+            sourceEvidence({
+              environment: "release",
+              pools: {
+                expected: 68,
+                exactMatches: 58,
+                guardedRenames: 0,
+                missing: 0,
+                mismatches: 10,
+              },
+              poolExceptions: {
+                id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+                sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+                approvedMismatches: 10,
+                unresolvedMismatches: 0,
+              },
+            }),
+          ),
+        ),
+        {
+          expectedEnvironment: "release",
+          expectedPoolExceptionsSha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+        },
+      ),
+    /fingerprint-bound owner approval/u,
+    "historical v1 evidence must not silently waive current mismatches",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({ environment: "release" }))),
+        {
+          expectedEnvironment: "release",
+          expectedPoolExceptionsSha256: "a".repeat(64),
+        },
+      ),
+    /fingerprint-bound owner approval/u,
+    "release evidence must reject a different exception-set hash",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify(
+            sourceEvidence({
+              environment: "release",
+              pools: {
+                expected: 68,
+                exactMatches: 67,
+                guardedRenames: 0,
+                missing: 0,
+                mismatches: 1,
+              },
+              poolExceptions: {
+                id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+                sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+                approvedMismatches: 0,
+                unresolvedMismatches: 1,
+              },
+            }),
+          ),
+        ),
+        {
+          expectedEnvironment: "release",
+          expectedPoolExceptionsSha256:
+            APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+        },
+      ),
+    /unresolved pool mismatches/u,
+    "a GO-shaped result must not hide an unresolved pool mismatch",
   );
   assert.throws(
     () =>
@@ -1680,6 +3140,55 @@ async function run(): Promise<void> {
     /Source-library reconciliation evidence: not produced/,
     "release reports must link the retained source-library evidence",
   );
+  const developmentRevision = "c".repeat(40);
+  const developmentLabels = ["development gate one"];
+  const developmentReport = formatReleaseReport(
+    developmentLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set([READINESS_EVIDENCE_PATH]),
+    {
+      revision: developmentRevision,
+      environment: "development release validation",
+      sourceLibraryEnvironment: "development",
+      sourceLibraryRevision: developmentRevision,
+      deployedRevision: "d".repeat(40),
+      decision: "NO-GO",
+      expectedLabels: developmentLabels,
+    },
+  );
+  assert.match(
+    developmentReport,
+    /^Deployed revision: not applicable$/m,
+    "development evidence must not retain a supplied deployed revision",
+  );
+  assert.match(
+    developmentReport,
+    /^Readiness evidence: not applicable$/m,
+    "development evidence must mark readiness as not applicable",
+  );
+  assert.doesNotMatch(
+    developmentReport,
+    new RegExp(
+      `^Readiness evidence: ${READINESS_EVIDENCE_PATH.replaceAll("/", "\\/")}$`,
+      "m",
+    ),
+    "a stale readiness path must be ignored for development evidence",
+  );
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(developmentReport, {
+        currentRevision: developmentRevision,
+        expectedMode: "standard",
+        expectedLabels: developmentLabels,
+        expectedSourceLibraryEnvironment: "development",
+        expectedSourceLibraryRevision: developmentRevision,
+      }),
+    "the validator must accept explicit development N/A fields",
+  );
   assert.doesNotThrow(() =>
     validateReleaseReport(alertingReleaseReport, {
       currentRevision: "current-revision",
@@ -1886,6 +3395,39 @@ async function run(): Promise<void> {
     const readinessEvidencePath = join(root, READINESS_EVIDENCE_PATH);
     await mkdir(join(readinessEvidencePath, ".."), { recursive: true });
     await writeFile(readinessEvidencePath, `${JSON.stringify(readinessEvidence)}\n`);
+    const developmentOnlyReport = formatReleaseReport(
+      validLabels.map((label) => ({
+        label,
+        status: "PASS" as const,
+        elapsedMs: 100,
+      })),
+      "standard",
+      new Set([...retainedEvidenceFiles, READINESS_EVIDENCE_PATH]),
+      {
+        revision: "current-revision",
+        environment: "disposable release test",
+        sourceLibraryEnvironment: "development",
+        requireReadinessEvidence: false,
+        decision: "NO-GO",
+      },
+    );
+    assert.match(developmentOnlyReport, /^Deployed revision: not applicable$/m);
+    assert.match(developmentOnlyReport, /^Readiness evidence: not applicable$/m);
+    await writeFile(
+      join(root, "release-check-report.md"),
+      developmentOnlyReport,
+      "utf8",
+    );
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedSourceLibraryEnvironment: "development",
+        requireReadinessEvidence: false,
+      }),
+      "development verification should ignore retained published-readiness evidence",
+    );
     await writeFile(
       join(root, "release-check-report.md"),
       formatReleaseReport(
@@ -1899,6 +3441,9 @@ async function run(): Promise<void> {
         {
           revision: "current-revision",
           environment: "disposable release test",
+          sourceLibraryEnvironment: "development",
+          deployedRevision: "e".repeat(40),
+          requireReadinessEvidence: true,
           decision: "GO",
         },
       ),
@@ -2084,6 +3629,20 @@ async function run(): Promise<void> {
       }),
       /incomplete checkpoint.*not retained release evidence.*left unchanged.*--resume/,
       "an active checkpoint must not make an older retained report look current",
+    );
+    await writeFile(
+      join(root, RELEASE_CHECKPOINT_REPORT),
+      boundedBlockedCheckpoint,
+      "utf8",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      /blocked before its gates.*no resumable gate state.*rerun without --resume/,
+      "a missing-identity checkpoint must not suggest resuming gates that never ran",
     );
     await rm(join(root, RELEASE_CHECKPOINT_REPORT));
     await rm(join(root, "release-check-report.md"));
@@ -2297,4 +3856,5 @@ async function run(): Promise<void> {
   );
 }
 
+verifyReadinessEvidenceValidation();
 await run();

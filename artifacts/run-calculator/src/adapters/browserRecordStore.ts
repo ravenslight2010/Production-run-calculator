@@ -115,7 +115,7 @@ export function withBrowserStorageOverride<T>(
 export const browserStorage: BrowserKeyValueStorage = {
   get length() {
     if (browserStorageOverride) return browserStorageOverride.length;
-    return storageAvailable()?.length ?? 0;
+    try { return storageAvailable()?.length ?? 0; } catch { return 0; }
   },
   key(index) {
     if (browserStorageOverride) return browserStorageOverride.key(index);

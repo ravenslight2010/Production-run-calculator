@@ -102,6 +102,7 @@ import {
   type InventoryCategory,
 } from "../inventoryShared";
 import { setPhotoAliasesCache, usePhotoAliases } from "../photoAliasesStore";
+import { prepareImageSource } from "../inventoryImage";
 import { useWarehouseSnapshot, refreshWarehouseSnapshot } from "../warehouseSnapshotClient";
 import { useMe } from "../useRole";
 import type { FormValues } from "../types";
@@ -1477,18 +1478,7 @@ async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
   // can't decode via <img>/canvas. Transparently convert it to a JPEG Blob
   // first so intake just works; if conversion fails we fall through to the
   // <img> decode below, which surfaces the actionable HEIC guidance.
-  let source: Blob = file;
-  if (isHeicFile(file)) {
-    try {
-      const heic2any = (await import("heic2any")).default;
-      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
-      source = Array.isArray(converted) ? converted[0] : converted;
-    } catch {
-      // Conversion failed — leave `source` as the original so the <img> decode
-      // below rejects with the clear HEIC_UNSUPPORTED_MESSAGE fallback.
-      source = file;
-    }
-  }
+  const source = await prepareImageSource(file);
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();

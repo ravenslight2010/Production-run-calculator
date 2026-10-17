@@ -241,8 +241,74 @@ describe("SSE sync baseline gate", () => {
     expect(source).toMatch(
       /pushTimerRef\.current = setTimeout\(\(\) => \{\s*if \(document\.hidden\) \{\s*foregroundPushPendingRef\.current = true;/,
     );
+    expect(source).toContain("foregroundSyncBarrierRef.current");
+    expect(source).toContain("const payload = buildSyncPayload(dayStateRef.current);");
     expect(source).toContain("syncMeta: { queuedAt: timing.queuedAtEpoch }");
     expect(source).toContain("X-Sync-Response-Bytes");
+  });
+
+  it("keeps station displays read-only at sync, autosave, and background-write boundaries", () => {
+    const home = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+    const lifecycle = readFileSync(
+      resolve(process.cwd(), "src/hooks/useHomeFormLifecycle.ts"),
+      "utf8",
+    );
+    const liveContext = readFileSync(
+      resolve(process.cwd(), "src/contexts/LiveRunContext.tsx"),
+      "utf8",
+    );
+    const schedulePush = home.slice(
+      home.indexOf("function schedulePush("),
+      home.indexOf("function retryLatestSync():"),
+    );
+    const doFetch = home.slice(
+      home.indexOf("function doFetch("),
+      home.indexOf("function schedulePush("),
+    );
+    const baseline = home.slice(
+      home.indexOf("onInitialBaseline: (shouldPush) =>"),
+      home.indexOf("onClose: () =>", home.indexOf("onInitialBaseline: (shouldPush) =>")),
+    );
+    const handoff = home.slice(
+      home.indexOf("function LiveRunHandoffGuard()"),
+      home.indexOf("return null;", home.indexOf("function LiveRunHandoffGuard()")),
+    );
+    const outbox = home.slice(
+      home.indexOf("// The normal snapshot sync remains a recovery path"),
+      home.indexOf("// Cursor recovery complements"),
+    );
+    const dayStart = home.slice(
+      home.indexOf("// ── Feature B+E7: Day-start inventory consumption"),
+      home.indexOf("// ── Factory KV: startup fetch"),
+    );
+    const factory = home.slice(
+      home.indexOf("// ── Factory KV: startup fetch"),
+      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+    );
+    const profileReconcile = home.slice(
+      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+      home.indexOf("// Dough pause/resume is immediate"),
+    );
+    const canonicalPush = home.slice(
+      home.indexOf("async function pushTodayCanonical("),
+      home.indexOf("function schedulePush("),
+    );
+
+    expect(schedulePush).toContain("if (screenMode !== null) return;");
+    expect(doFetch).toContain("if (screenMode !== null) return;");
+    expect(baseline).toContain("if (screenMode !== null)");
+    expect(baseline).toContain("return;");
+    expect(handoff).toContain("if (screenMode !== null || !nextRunPrepActive) return;");
+    expect(lifecycle).toContain("readOnly = false");
+    expect(lifecycle).toContain("if (readOnly) return;");
+    expect(liveContext).toContain("disabled: screenMode !== null");
+    expect(outbox).toContain("if (screenMode !== null) return;");
+    expect(dayStart).toContain("if (screenMode !== null) return;");
+    expect(factory).toContain("if (screenMode !== null) return;");
+    expect(factory).toContain("if (screenMode === null) void flushFactoryQueue();");
+    expect(factory).toContain("if (screenMode === null) void runFactoryKvMigration(data);");
+    expect(profileReconcile).toContain("if (screenMode !== null) return;");
+    expect(canonicalPush).toContain("if (screenMode !== null) throw new Error");
   });
 
   it("omits unchanged history from hot pushes and records it only after acknowledgement", () => {

@@ -18,6 +18,9 @@ import { isManualSection } from "@workspace/sync-contract";
 
 type SyncWork = {
   payload: SyncPayload;
+  baseSnapshot?: SyncPayload;
+  pendingIntentId?: string;
+  recoveryBlocked?: boolean;
   sig?: string;
   queuedAtPerf?: number;
   queuedAtEpoch?: number;
@@ -230,13 +233,22 @@ export function useHomeSyncCoordination() {
             const frame = JSON.parse(event.data as string) as {
               type?: string; event?: "acquired" | "released"; runId?: string;
               section?: string; ownerId?: string; serverTime?: number; reset?: boolean; rollover?: boolean;
+              initial?: boolean;
+              canonicalReconcile?: boolean;
             };
-            if (frame.reset || frame.rollover) clearManualSectionLocks();
+            if (frame.reset || frame.rollover || frame.initial) clearManualSectionLocks();
+            if (frame.canonicalReconcile) clearManualSectionLocks();
             if (frame.type === "manual-section-lock" && frame.runId && isManualSection(frame.section)
               && frame.ownerId && frame.ownerId !== connection.clientId) {
-              if (frame.event === "acquired") claimManualSectionLock(
-                frame.runId, frame.section, frame.ownerId, 35_000, true,
-              );
+              if (frame.event === "acquired") {
+                const ageMs = Number.isFinite(frame.serverTime)
+                  ? Math.max(0, Date.now() - Number(frame.serverTime))
+                  : 0;
+                const remainingMs = 35_000 - ageMs;
+                if (remainingMs > 0) claimManualSectionLock(
+                  frame.runId, frame.section, frame.ownerId, remainingMs, true,
+                );
+              }
               else if (frame.event === "released") releaseManualSectionLock(
                 frame.runId, frame.section, frame.ownerId,
               );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Snowflake } from "lucide-react";
 import { todayStr } from "../utils";
 import type { RunMeta } from "../types";
@@ -7,7 +7,12 @@ import {
   summarizeSurplusForRun,
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
-import { getFreezerSurplusRemainingMs } from "../freezerSurplus";
+import {
+  fetchFreezerSurplusAdjustments,
+  getFreezerSurplusRemainingMs,
+  type FreezerSurplusAdjustment,
+  type FreezerSurplusAdjustmentInput,
+} from "../freezerSurplus";
 import { useMe } from "../useRole";
 
 export function FreezerSurplusPanel({
@@ -23,6 +28,7 @@ export function FreezerSurplusPanel({
   getOriginalTarget,
   onConfirm,
   onAllocate,
+  onAdjust,
 }: {
   mode: "packaging" | "warehouse";
   ledger: FreezerSurplusLedger;
@@ -36,6 +42,10 @@ export function FreezerSurplusPanel({
   getOriginalTarget: (run: RunMeta) => number;
   onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
   onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
+  onAdjust?: (
+    lotId: string,
+    input: FreezerSurplusAdjustmentInput,
+  ) => Promise<FreezerSurplusAdjustment>;
 }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
@@ -45,7 +55,45 @@ export function FreezerSurplusPanel({
   const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
+  const [adjustments, setAdjustments] = useState<FreezerSurplusAdjustment[]>([]);
+  const [adjustmentsError, setAdjustmentsError] = useState<string | null>(null);
+  const [adjustmentType, setAdjustmentType] =
+    useState<FreezerSurplusAdjustment["eventType"]>("damage");
+  const [adjustmentLotId, setAdjustmentLotId] = useState("");
+  const [adjustmentCases, setAdjustmentCases] = useState("1");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [adjustmentRunId, setAdjustmentRunId] = useState("");
+  const [correctsEventId, setCorrectsEventId] = useState("");
+  const pendingEvent = useRef<{ fingerprint: string; eventId: string } | null>(null);
   const runs = pendingRuns ?? [];
+
+  useEffect(() => {
+    if (mode !== "warehouse" || !canManageInventory) return;
+    let active = true;
+    void fetchFreezerSurplusAdjustments()
+      .then((events) => {
+        if (active) {
+          setAdjustments(events);
+          setAdjustmentsError(null);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setAdjustmentsError(
+            cause instanceof Error ? cause.message : "Couldn't load finished-case adjustment history.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [canManageInventory, mode]);
+
+  useEffect(() => {
+    if (ledger.lots.length > 0 && !ledger.lots.some((lot) => lot.id === adjustmentLotId)) {
+      setAdjustmentLotId(ledger.lots[0].id);
+    }
+  }, [adjustmentLotId, ledger.lots]);
 
   async function confirmLot() {
     if (!canManageInventory) return;
@@ -84,6 +132,57 @@ export function FreezerSurplusPanel({
       );
     } catch {
       // The parent exposes the server's actionable error.
+    }
+  }
+
+  async function saveAdjustment() {
+    if (!canManageInventory || !onAdjust) return;
+    const lot = ledger.lots.find((candidate) => candidate.id === adjustmentLotId);
+    const count = Number(adjustmentCases);
+    const reason = adjustmentReason.trim();
+    if (!lot || !Number.isSafeInteger(count) || count <= 0 || count > 1_000_000 || !reason) {
+      setAdjustmentsError("Choose a freezer lot, enter a positive whole-case count, and provide a reason.");
+      return;
+    }
+    const input: Omit<FreezerSurplusAdjustmentInput, "eventId"> = {
+      eventType: adjustmentType,
+      cases: count,
+      reason,
+      ...(adjustmentType === "return" ? { runId: adjustmentRunId } : {}),
+      ...(adjustmentType === "correction" ? { correctsEventId } : {}),
+    };
+    if (
+      (adjustmentType === "return" && !adjustmentRunId) ||
+      (adjustmentType === "correction" && !correctsEventId)
+    ) {
+      setAdjustmentsError(
+        adjustmentType === "return"
+          ? "Choose the run that returned these cases."
+          : "Choose the earlier damage or return event being corrected.",
+      );
+      return;
+    }
+    const fingerprint = JSON.stringify({ lotId: lot.id, ...input });
+    const eventId =
+      pendingEvent.current?.fingerprint === fingerprint
+        ? pendingEvent.current.eventId
+        : crypto.randomUUID();
+    pendingEvent.current = { fingerprint, eventId };
+    setAdjustmentsError(null);
+    try {
+      const event = await onAdjust(lot.id, { ...input, eventId });
+      setAdjustments((current) => [
+        event,
+        ...current.filter((existing) => existing.eventId !== event.eventId),
+      ].slice(0, 500));
+      pendingEvent.current = null;
+      setAdjustmentCases("1");
+      setAdjustmentReason("");
+      setAdjustmentsError(null);
+    } catch (cause) {
+      setAdjustmentsError(
+        cause instanceof Error ? cause.message : "Couldn't record this finished-case adjustment.",
+      );
     }
   }
 
@@ -256,6 +355,173 @@ export function FreezerSurplusPanel({
               );
             })}
           </div>
+          {canManageInventory && onAdjust && (
+            <section
+              className="mt-4 rounded-lg border border-amber-500/30 bg-background/70 p-3"
+              data-testid="finished-case-adjustments"
+            >
+              <h3 className="text-sm font-semibold">Correct finished-case stock</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Record damage, a return from an allocated run, or a correction to an earlier event. Each save is attributed to your manager account and kept in the adjustment history.
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Event
+                  <select
+                    aria-label="Finished-case adjustment type"
+                    value={adjustmentType}
+                    onChange={(event) => {
+                      setAdjustmentType(event.target.value as FreezerSurplusAdjustment["eventType"]);
+                      pendingEvent.current = null;
+                      setAdjustmentsError(null);
+                    }}
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="damage">Damage</option>
+                    <option value="return">Return from a run</option>
+                    <option value="correction">Correct an earlier event</option>
+                  </select>
+                </label>
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Dated freezer lot
+                  <select
+                    aria-label="Finished-case adjustment lot"
+                    value={adjustmentLotId}
+                    onChange={(event) => {
+                      setAdjustmentLotId(event.target.value);
+                      setAdjustmentRunId("");
+                      setCorrectsEventId("");
+                      pendingEvent.current = null;
+                    }}
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="">Choose a lot</option>
+                    {ledger.lots.map((lot) => (
+                      <option key={lot.id} value={lot.id}>
+                        {lot.productionDate} · {lot.brand}{lot.flavor ? ` — ${lot.flavor}` : ""} · {lot.remainingCases} available
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {adjustmentType === "return" && (
+                  <label className="text-xs font-semibold text-muted-foreground">
+                    Allocated run
+                    <select
+                      aria-label="Finished-case return run"
+                      value={adjustmentRunId}
+                      onChange={(event) => {
+                        setAdjustmentRunId(event.target.value);
+                        pendingEvent.current = null;
+                      }}
+                      className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    >
+                      <option value="">Choose a run</option>
+                      {ledger.allocations
+                        .filter((allocation) => allocation.lotId === adjustmentLotId)
+                        .map((allocation) => (
+                          <option key={allocation.runId} value={allocation.runId}>
+                            {allocation.runDate} · {allocation.brand}{allocation.flavor ? ` — ${allocation.flavor}` : ""} · {allocation.cases} allocated
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                )}
+                {adjustmentType === "correction" && (
+                  <label className="text-xs font-semibold text-muted-foreground">
+                    Earlier event
+                    <select
+                      aria-label="Finished-case event to correct"
+                      value={correctsEventId}
+                      onChange={(event) => {
+                        setCorrectsEventId(event.target.value);
+                        pendingEvent.current = null;
+                      }}
+                      className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    >
+                      <option value="">Choose an earlier event</option>
+                      {adjustments
+                        .filter((event) => event.lotId === adjustmentLotId && event.eventType !== "correction")
+                        .map((event) => {
+                          const alreadyCorrected = adjustments
+                            .filter(
+                              (candidate) =>
+                                candidate.eventType === "correction" &&
+                                candidate.correctsEventId === event.eventId,
+                            )
+                            .reduce((sum, candidate) => sum + candidate.cases, 0);
+                          const correctable = event.cases - alreadyCorrected;
+                          return correctable > 0 ? (
+                            <option key={event.eventId} value={event.eventId}>
+                              {event.eventType} · {event.cases} cases · {event.reason} ({correctable} correctable)
+                            </option>
+                          ) : null;
+                        })}
+                    </select>
+                  </label>
+                )}
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Cases
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000000"
+                    step="1"
+                    inputMode="numeric"
+                    aria-label="Finished-case adjustment cases"
+                    value={adjustmentCases}
+                    onChange={(event) => {
+                      setAdjustmentCases(event.target.value);
+                      pendingEvent.current = null;
+                    }}
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-muted-foreground sm:col-span-2">
+                  Reason
+                  <input
+                    type="text"
+                    maxLength={300}
+                    aria-label="Finished-case adjustment reason"
+                    value={adjustmentReason}
+                    onChange={(event) => {
+                      setAdjustmentReason(event.target.value);
+                      pendingEvent.current = null;
+                    }}
+                    placeholder="Explain why stock is changing"
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveAdjustment()}
+                disabled={busy || ledger.lots.length === 0}
+                className="mt-3 rounded-md bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Record adjustment"}
+              </button>
+              {adjustmentsError && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{adjustmentsError}</p>}
+              <div className="mt-4 border-t border-border/50 pt-3">
+                <h4 className="text-xs font-semibold">Recent adjustment history</h4>
+                {adjustments.length === 0 ? (
+                  <p className="mt-1 text-xs text-muted-foreground">No finished-case adjustments have been recorded.</p>
+                ) : (
+                  <ul className="mt-2 space-y-2">
+                    {adjustments.slice(0, 20).map((event) => (
+                      <li key={event.eventId} className="rounded-md bg-muted/40 px-2.5 py-2 text-xs">
+                        <p className="font-semibold">
+                          {event.eventType} · {event.cases} {event.cases === 1 ? "case" : "cases"}
+                        </p>
+                        <p className="text-muted-foreground">
+                          {event.reason} · {event.actorId} · {new Date(event.createdAt).toLocaleString()}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+          )}
            {!canManageInventory && loaded && runs.length > 0 && (
               <div
                 className="mt-3 rounded-md border border-border/60 bg-background/50 px-3 py-2"

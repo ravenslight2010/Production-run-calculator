@@ -1,93 +1,94 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Planning; existing quality, incident, downtime, substitution, and basic lot surfaces are inputs, not proof that the durable QC system is built
-**Updated:** 2026-09-19
+**Status:** Approved Phase 1 implemented; later gates and additional QC programs remain deferred
+**Updated:** 2026-10-09
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 QC is a durable follow-on product track, not a sync-protocol prerequisite. New QC actions require explicit capabilities, server-generated audit identity, reset/purge survival, and stable ingredient identity for lot and allergen rollups.
+
+## QC Phase 1 — Approved and Implemented
+
+### Lots and weights
+
+- Lots and Weights are distinct QC views. Each lot is an append-only record linked to the current run, stable ingredient identity, station, authenticated recorder, and server timestamp. Repeated lots remain separate records.
+- Weight checks support pre-run and 30-minute check types. Each records the target snapshot, target unit, actual value/unit, check type, authenticated recorder, server time, and evaluated result. Out-of-tolerance readings require a note.
+- Targets resolve only from unambiguous imported portion fields or a manager-reviewed QC override. Imported sauce, applicator, and pepperoni portions are ounces per pizza; the doughball target is ounces. Recipe-linked cheese/mix applicators use their linked recipe name. Only an exact name match to one active ingredient is used. Incomplete, conflicting, unmatched, or missing targets return “not evaluated.”
+- The spec-import contract has no explicit crust target field. Crust targets are therefore not inferred or evaluated unless a future approved importer contract adds an explicit value.
+- Default tolerance is ±0.1 in the target unit. A reviewed QC override may supply another non-negative tolerance; a blank override tolerance uses the default. An explicit approved spec limit takes precedence if one becomes available.
+- QC managers and app managers can change or clear reviewed targets. Each settings change records its authenticated actor, timestamp, and reason.
+
+### Allergen and cleaning records
+
+- The pre-run checklist snapshots the current derived run footprint, unknown/missing mappings, the per-run Warehouse ingredient-stage rows and their checked state, staged-ingredient review, and relevant cleaning status. The derived footprint remains visibility-only and separate from the manually entered run-allergen field.
+- A cleaning record captures method, start/end times, authenticated cleaner, and server timestamp. A different authenticated person must verify it; self-verification is rejected.
+- An authorized QC manager or app manager can sign off once for the current run evidence set. Any later QC record reopens that review.
+- QC work never blocks production or shipping. Unknown or incomplete allergen data remains visible and is not presented as clear.
+
+### Roles, history, audit, and retention
+
+- QC operators can record QC work and view facility-scoped history. QC managers and app managers can edit targets, sign off runs, and export full filtered history as CSV.
+- Facility scope comes from the authenticated request. History queries are bounded and paginated; CSV export is manager-only.
+- QC events are append-only, server-timestamped, and attributed to authenticated actor IDs. Corrections and privacy redactions are new auditable events, never edits or deletes. Retention is indefinite.
+- The new QC event ledger is outside day-state reset and factory-purge deletion. The existing photo-quality records remain a separate surface with their existing behavior.
+
+### Deferred from Phase 1
+
+Shipping holds or release enforcement; regulatory or food-label declarations; component, label, and date-code checks; import or recipe approval; trend/analytics; cross-contact analytics; lot-to-customer traceability; line clearance; finished-lot identification; mock recall; and HACCP evidence.
 
 ## Critical Requirements
 
 ### Daily Reset: Archive Yesterday, Show Only Today
 The daily reset (midnight day-state clear) is the natural cutoff point. QC data behavior:
 
-- **Active QC Dashboard** — always shows ONLY today's checks (current run, today's weight checks, today's lot entries, today's component checks)
-- **Yesterday's data is saved** — QC records from previous days remain in the database, untouched by the daily reset
-- **History view** — one tap away from the active dashboard; browse any previous day, filter by date/ingredient/lot/station, export for audits
+- **Active QC pages** — Lots and Weights remain separate; each defaults to current-run/today records
+- **History view** — browse prior records, filter by date/ingredient/lot/station, and export CSV as scoped in the owner decision note
+- **Yesterday's data is saved** — historical QC records are not removed by the daily reset; retention follows the approved privacy/redaction policy
 - **No clutter** — operators see only what matters RIGHT NOW on the active screen; historical data never pollutes the current view
-- **The reset doesn't delete QC data** — it only clears day-state (runs, active operational data). QC tables are server-persisted and accumulate indefinitely
+- **The reset doesn't delete QC data** — it clears day-state (runs and active operational data), not server-persisted QC history
 
-**UI pattern**:
+**Illustrative view pattern (not an implementation spec)**:
 ```
-QC Dashboard
-├── Today (active)     ← default view, shows current run checks only
-├── History            ← calendar/date picker, browse past days
-│   ├── Sep 7 (yesterday) — 12 checks, 2 failures
-│   ├── Sep 6 — 18 checks, 0 failures
-│   └── ...
-└── Audit Export       ← CSV/PDF for compliance
+QC
+├── Lots               ← separate page; current run by default
+├── Weights            ← separate page; current run by default
+└── History / CSV      ← filter historical checks for authorized review
 ```
 
-The daily reset is invisible to QC — the dashboard just naturally shows today because that's the default filter. Yesterday becomes "history" automatically at midnight.
+The daily reset is invisible to QC pages: each defaults to current records, while older entries remain available in history subject to the approved retention policy.
 
 ### QC Data Survives All Wipes
-The factory reset (`POST /sync/purge-all`) currently wipes ALL scoped tables including `qualityChecksTable`. QC data must survive both:
-- **Daily reset** (day-state clear at midnight) — already safe since QC tables are server-side, not in day-state
-- **Factory reset** (full purge-all) — QC tables must be **excluded** from the purge-all scopedTables list in `sync.ts` line ~1200, or moved to a separate audit DB/schema that the purge endpoint doesn't touch
+Phase 1 QC events and the existing photo-quality records are separate from day-state and factory-purge data. Integration coverage verifies that live and sandbox QC events survive both `/sync/reset` and `/sync/purge-all`, while scoped operational state is reset or purged.
 
-**Implementation**: Add QC tables to a new `auditedTables` group in the purge endpoint that gets `ON DELETE DO NOTHING` or is simply skipped. The purge-all handler at `artifacts/api-server/src/routes/sync.ts:1198` explicitly lists every table — QC tables must NOT appear in that list.
+### Audit, Access, and Retention — Phase 1 Contract
+- Each QC event is facility-scoped from the authenticated request, attributed to the authenticated actor ID, and timestamped by the server.
+- The QC event ledger rejects UPDATE and DELETE. Corrections and privacy redactions append events that preserve the original history while changing the reviewed presentation.
+- Operators with `record-qc` can record QC work and read scoped history. `manage-qc` and app managers can change targets, sign off runs, and export full filtered history as CSV.
+- History reads are bounded and paginated; export is manager-only. No IP address, user agent, or unrestricted request body is stored.
+- Retention is indefinite. Privacy requests use the audited redaction path rather than deleting QC evidence.
+- Required audit and record writes are atomic. If a required event cannot be saved, the operation fails instead of silently succeeding.
 
-### Full Audit Trail / Traceability / Accountability
-Every QC operation must produce an immutable audit record:
-- **Who** performed the action (user_id, username, role)
-- **What** was checked (ingredient name, lot number, weight value, pass/fail)
-- **When** (server-generated timestamp, not client)
-- **Where** (station, run_id, line position)
-- **Why** (if failed — reason code + free-text notes)
-- **Evidence** (photo URL if captured)
+These are implemented Phase 1 boundaries, not open design questions. The retained [operational audit design boundaries](idea-backlog.md#17-residual-observability--resilience-ideas) still apply.
 
-QC audit records must be:
-- Append-only (no UPDATE/DELETE allowed on audit rows)
-- Retained indefinitely (not subject to any cleanup/purge)
-- Queryable by any manager/supervisor for compliance review
-- Exportable as CSV/PDF for external audits
+The remainder of this document separates implemented Phase 1 behavior from deferred candidates. Deferred proposals are not approved requirements.
 
-**Implementation**:
-- Each QC table gets `created_at` (server DEFAULT NOW()), `created_by` (user FK), `scope` (factory isolation)
-- Add a `qc_audit_log` table that fires on INSERT to any QC table (PostgreSQL trigger or application-level)
-- Audit log has its own retention policy: never deleted, ever
-- API routes for audit export: `GET /api/qc/audit?from=&to=&type=&ingredient=`
+## Existing Surfaces and Phase 1 Placement
 
-**Privacy and authorization guardrails before implementation**:
-- Derive facility scope from the authenticated request and enforce the live-scope fence; a query parameter must never choose the authorization scope
-- Store stable user IDs and server timestamps; do not default to raw usernames, IP addresses, user agents, request bodies, or unrestricted JSON
-- Define an allowlisted, size-bounded event schema for each QC action
-- Resolve the relationship between indefinite compliance retention and privacy/redaction requirements before creating tables
-- Paginate and capability-gate every read/export path
-- If an operation requires an audit record for compliance, persist both atomically or fail explicitly rather than swallowing the audit failure
-- Follow the retained [operational audit design boundaries](idea-backlog.md#17-residual-observability--resilience-ideas)
-
-## Current State
-### Move All Existing QC Features into the QC Department
-
-Currently QC features are scattered across the app. Everything below moves into the new QC department section:
+Phase 1 adds run QC workflows inside the existing QC department without replacing photo history or moving unrelated import, inventory, substitution, incident, or downtime workflows:
 
 | Current Location | Feature | Move To |
 |-----------------|---------|---------|
-| Bottom bar `quality` tab | `QcQualitySurface` (photo quality checks) | QC Department → Quality Checks |
-| Bottom bar `incidents` tab | `QcIncidentsSurface` (incident log) | QC Department → Incidents |
-| Bottom bar `downtime` tab | `QcDowntimeSurface` (downtime trends) | QC Department → Downtime |
-| Inventory tab | AI quality/defect photo check (`inventoryShared.ts` → `QualityCheckRecord`) | QC Department → Quality Checks |
-| Inventory tab | Lot number field on inventory batches | QC Department → Lot Tracking (plus keep read-only summary in inventory) |
-| Inventory tab | Substitutions Manager (temporary ingredient subs) | QC Department → Substitutions |
-| Inventory tab | Substitution Log (today's sub actions) | QC Department → Substitution Log |
+| QC department | Append-only Lots and Weights workflows | QC workflows |
+| QC department | Derived allergen footprint, staged review, cleaning record and independent verification | QC workflows |
+| QC department | Existing photo-quality history | Separate photo-quality section; behavior unchanged |
+| QC department | Incident log and downtime trends | Existing separate surfaces |
+| Inventory tab | Inventory lot number field and temporary substitutions | Remain in Inventory |
 | Manager menu | Import dialogs (spec, premix, cheese, shipping, guides) | **Shared** — see below |
 
-**Tab placement**: The bottom nav bar gains a `qc` tab (replacing or joining `quality`/`incidents`/`downtime` which currently exist as secondary tabs). The QC tab becomes one of the 6 bottom-bar slots (Run, Dough, Sauce, Frontline, QC, Warehouse) — or the existing quality/incidents/downtime tabs consolidate into a single QC section with internal sub-tabs (QA Checks, Incidents, Downtime, Lot Tracking, Weight Checks). The second option is recommended to avoid nav overcrowding.
+QC workflows are available from the department menu to authorized QC staff; the primary station navigation is unchanged.
 
-### Shared Importers: QC + Everyone Else
+### Shared Importers: QC + Everyone Else (approval workflow deferred)
 
-The importers stay available to both QC and management, but with roles:
+The existing importers stay available under their current permissions. Phase 1 does not add QC import approval or change importer behavior. The following proposal is deferred:
 
 - **Who can import**: Managers, supervisors, and QC staff (existing capability gates stay)
 - **Who must verify/approve**: QC staff — every import lands in a **pending review** state
@@ -102,7 +103,7 @@ The importers stay available to both QC and management, but with roles:
   - **Company-wide** → imported data still shows everywhere (profiles, recipes, mixes) but with a small "unverified" badge until QC approves
 - **Why shared works**: QC is the *primary* source but not the *only* source — managers can import in an emergency, but QC verification is the enforced quality gate
 
-**Implementation notes**:
+**Deferred implementation notes**:
 - Extend import metadata with `qc_review_status` enum: `pending | verified | rejected`
 - Add `qc_reviewed_by`, `qc_reviewed_at`, `qc_review_notes` to import records
 - API: `GET /api/qc/import-reviews` (queue), `POST /api/qc/import-reviews/:id/approve`, `POST /api/qc/import-reviews/:id/reject`
@@ -111,37 +112,28 @@ The importers stay available to both QC and management, but with roles:
 
 
 - **Existing tabs**: Quality (photo checks), Incidents, Downtime Trends
-- **Inventory lot tracking**: Basic — lot number field on inventory items, no workflow enforcement
-- **No**: weight checks, component checks, shipper label verification, date verification, lot traceability per station, QC-specific dashboards
+- **Inventory lot tracking**: Basic lot number field on inventory items; separate from Phase 1 run-level QC lots
+- **Phase 1 adds**: weight checks and per-run, per-station QC lot records
+- **Deferred**: component checks, shipper labels, date verification, full lot traceability, and QC analytics dashboards
 
 ---
 
-## QC Department Structure
+## QC Department Structure and Deferred Candidates
 
 ### 1. Lot Tracking (Enhanced)
 **What exists**: Simple lot number text field on inventory batches
-**What's needed**:
+**Implemented in Phase 1**:
 - Per-station lot logging (every ingredient used gets its lot recorded against the current run)
-- Lot → run traceability (which lot was used on which run, which brand/flavor)
-- Lot → ingredient → recipe chain (full backward traceability)
-- Lot expiry alerts (cross-reference with inventory expiration dates)
-- One-tap lot scan input (barcode-ready text field)
+- Stable ingredient ID, run, station, authenticated recorder, and server timestamp are included in the immutable event.
+- Repeated lots for one run/ingredient remain separate records.
 
-**Data model additions**:
-- `run_lots` table: run_id, ingredient_name, lot_number, station (dough/sauce/frontline/warehouse), recorded_by, recorded_at
-- Links to existing `inventory_batches` table
+**Deferred**: lot-to-customer traceability, recipe-chain rollups, expiry alerts, barcode scanning, and inventory-batch linking.
 
 ### 2. Weight Checks
 **What exists**: Nothing — manual clipboard process
-**What's needed**:
-- Pre-run weight verification (before run starts, QC records expected vs actual weights for key ingredients)
-- Periodic weight checks (every 30 min during run, QC records current weights)
-- Auto-calculated tolerance bands (flag if weight drifts beyond ±X% of expected)
-- Dashboard showing weight trend over time (visual graph)
-- One-tap check-in (quick form: ingredient, expected weight, actual weight, pass/fail)
+**Implemented in Phase 1**: pre-run and 30-minute checks, explicit target snapshots, actual value/unit, default ±0.1 target-unit tolerance, reason-required deviations, authenticated recorder, server time, and “not evaluated” when a valid target is unavailable.
 
-**Data model additions**:
-- `weight_checks` table: run_id, ingredient_name, expected_weight, actual_weight, unit, tolerance_pct, pass_fail, checked_by, checked_at, check_number (0=pre-run, 1=30min, 2=60min, etc.)
+**Deferred**: trend graphs, analytics, and any inferred target or tolerance.
 
 ### 3. Component Checks
 **What exists**: Nothing
@@ -209,11 +201,12 @@ The importers stay available to both QC and management, but with roles:
 
 ## Recommended Build Order
 
-### Phase 1: Foundation (highest impact)
-1. **QC role/permissions** — add "qc" role to StaffRolesCard, gate QC features behind it
-2. **Lot tracking per run** — `run_lots` table + per-station lot input UI
-3. **Weight checks** — `weight_checks` table + pre-run/periodic check forms
-4. **QC dashboard** — single screen showing all QC status for current run
+### Phase 1: QC and allergen foundation — implemented
+1. Separate append-only lot and weight records tied to a run and stable ingredient.
+2. Explicit importer-backed targets, reviewed overrides, target-unit tolerance, and not-evaluated behavior.
+3. Advisory allergen pre-run checklist and independently verified cleaning records.
+4. Per-run QC manager sign-off, scoped history, manager CSV export, audited correction/redaction, and reset/purge retention.
+5. Existing photo-quality history stays separate.
 
 ### Phase 2: Verification Workflows
 5. **Component checks** — checklist form per run
@@ -244,65 +237,27 @@ The importers stay available to both QC and management, but with roles:
 | `lib/db/src/schema/inventory.ts` | Inventory schema (has lot field) |
 | `artifacts/run-calculator/src/pages/home.tsx` | Main app (tab rendering) |
 
-## Database Tables to Add
+## Phase 1 Persistence
 
-All QC tables share these audit columns:
-- `id` (uuid, PK)
-- `scope` (text, factory isolation — but **excluded from purge-all**)
-- `created_by` (text, username of who performed the check)
-- `created_at` (timestamptz, server DEFAULT NOW(), immutable)
-- `run_id` (uuid, FK to production_runs — nullable for planning tables)
+Phase 1 uses one facility-scoped append-only `qc_workflow_events` ledger for lots, weight checks, allergen reviews, cleaning and verification, target settings, sign-offs, corrections, and redactions. Each event has an authenticated actor ID and server-generated timestamp. The ledger is outside day-state and factory-purge deletion.
 
-| # | Table | Purpose | Survives Reset |
-|---|-------|---------|---------------|
-| 1 | `run_lots` | Per-run, per-station ingredient lot logging | Yes |
-| 2 | `weight_checks` | Pre-run + periodic weight verification | Yes |
-| 3 | `component_checks` | Once-per-run component verification | Yes |
-| 4 | `label_checks` | Shipper label verification | Yes |
-| 5 | `date_checks` | Pizza/carton date code verification | Yes |
-| 6 | `qc_checklists` | Computed checklist state per run | Yes |
-| 7 | `qc_audit_log` | Immutable append-only audit trail for all QC ops | Yes, never deleted |
-| 8 | `qc_recipes` | QC-owned recipe versions (approval history) | Yes |
-| 9 | `qc_future_plans` | Upcoming brand/flavor planning entries | Yes |
+## Phase 1 UI Surfaces
 
-## UI Components to Create
-1. `QcDashboard.tsx` — main QC status screen
-2. `LotTrackingForm.tsx` — quick lot entry per station
-3. `WeightCheckForm.tsx` — weight check entry
-4. `ComponentCheckForm.tsx` — component checklist
-5. `LabelCheckForm.tsx` — shipper label verification
-6. `DateCheckForm.tsx` — date code verification
-7. `QcHistoryView.tsx` — historical QC data (extends existing QualityHistoryTab)
-8. `FuturePlanningView.tsx` — upcoming brands/flavors/recipes
+The QC department presents distinct Lots and Weights views, an allergen/staging review, cleaning record and independent verification, manager target settings, per-run sign-off, scoped event history, and manager CSV export. Corrections and privacy redactions are available to QC managers. The existing `QualityHistoryTab` remains a separate photo-quality section.
 
-## API Routes to Add
+## Phase 1 API
 
-### CRUD (per check type)
-1. `POST /api/qc/run-lots` — log a lot for a run (server sets created_by, created_at)
-2. `GET /api/qc/run-lots?runId=X` — get lots for a run
-3. `POST /api/qc/weight-checks` — record a weight check
-4. `GET /api/qc/weight-checks?runId=X` — get weight checks for a run
-5. `POST /api/qc/component-checks` — record component check
-6. `GET /api/qc/component-checks?runId=X` — get component checks
-7. `POST /api/qc/label-checks` — record label check
-8. `GET /api/qc/label-checks?runId=X` — get label checks
-9. `POST /api/qc/date-checks` — record date check
-10. `GET /api/qc/date-checks?runId=X` — get date checks
+- `GET/POST /api/qc/targets`
+- `POST /api/qc/lots` and `/api/qc/weight-checks`
+- `GET /api/qc/runs/:runId`
+- `POST /api/qc/allergen-reviews`
+- `POST /api/qc/cleaning-records` and `/api/qc/cleaning-records/:recordId/verification`
+- `POST /api/qc/run-signoffs`
+- `GET /api/qc/history` and manager-only `GET /api/qc/history.csv`
+- Manager-only `POST /api/qc/events/:eventId/corrections` and `/redactions`
 
-### Dashboard & Aggregation
-11. `GET /api/qc/dashboard?runId=X` — aggregated QC status for current run
-12. `GET /api/qc/dashboard/summary?from=&to=` — shift/day summary
+Every path is capability-gated and derives facility scope from the authenticated request. History queries are paginated and bounded; CSV export streams bounded database pages. QC ledger records are excluded from daily reset and factory purge.
 
-### Audit & Compliance (immutable, never purged)
-13. `GET /api/qc/audit?from=&to=&type=&ingredient=` — audit log query
-14. `GET /api/qc/audit/export?format=csv|pdf` — export for external audits
-15. `GET /api/qc/traceability?lot=X` — full chain: lot → run → checks → customer
+## Deferred API and Workflow Gates
 
-### Import & Recipe Approval
-16. `PUT /api/qc/import-approval/:id` — approve/reject import (audit logged)
-17. `POST /api/qc/recipe-approval` — approve/reject recipe change
-18. `GET /api/qc/future-plans` — upcoming brand/flavor plans
-19. `POST /api/qc/future-plans` — add a future plan entry
-
-### Protected (never purge-all'd)
-All routes under `/api/qc/*` are **excluded from the purge-all handler** in `sync.ts`. The QC tables are added to a separate `auditedTables` group that the purge endpoint skips.
+Component checks, shipper labels, date codes, import/recipe approval, dashboards, trend/analytics, PDF export, lot-to-customer traceability, holds, release enforcement, and label/regulatory claims are not part of Phase 1.

@@ -334,6 +334,86 @@ describe("incident review — manager only", () => {
     expect(Date.parse(list[0].createdAt)).toBeGreaterThanOrEqual(Date.parse(list[1].createdAt));
   });
 
+  it("hides resolved incidents after 14 days but retains records and keeps unresolved issues visible", async () => {
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const oldResolvedId = "resolved-older-than-14-days";
+    const recentResolvedId = "resolved-within-14-days";
+    const oldUnresolvedId = "unresolved-older-than-14-days";
+    const missingResolutionTimeId = "resolved-without-resolution-time";
+
+    await db.insert(incidentsTable).values([
+      {
+        id: oldResolvedId,
+        source: "auto_crash",
+        reporterId: OPERATOR,
+        reporterName: "operator",
+        reporterRole: "operator",
+        screen: "Run",
+        appPlatform: "web",
+        context: { errorMessage: "Old resolved crash." },
+        status: "resolved",
+        workflowState: "resolved",
+        resolvedAt: new Date(now - 14 * dayMs - 60_000),
+      },
+      {
+        id: recentResolvedId,
+        source: "auto_crash",
+        reporterId: OPERATOR,
+        reporterName: "operator",
+        reporterRole: "operator",
+        screen: "Run",
+        appPlatform: "web",
+        context: { errorMessage: "Recently resolved crash." },
+        status: "resolved",
+        workflowState: "resolved",
+        resolvedAt: new Date(now - 14 * dayMs + 60_000),
+      },
+      {
+        id: oldUnresolvedId,
+        source: "user_report",
+        reporterId: OPERATOR,
+        reporterName: "operator",
+        reporterRole: "operator",
+        screen: "Run",
+        appPlatform: "web",
+        context: { description: "This issue still needs follow-up." },
+        status: "reviewed",
+        workflowState: "waiting",
+        createdAt: new Date(now - 30 * dayMs),
+      },
+      {
+        id: missingResolutionTimeId,
+        source: "user_report",
+        reporterId: OPERATOR,
+        reporterName: "operator",
+        reporterRole: "operator",
+        screen: "Run",
+        appPlatform: "web",
+        context: { description: "Legacy resolution date is unknown." },
+        status: "resolved",
+        workflowState: "resolved",
+        resolvedAt: null,
+      },
+    ]);
+
+    const response = await req(MANAGER, "GET", "/api/incidents");
+    expect(response.status).toBe(200);
+    const list = (await response.json()) as Array<{ id: string }>;
+    const visibleIds = list.map((incident) => incident.id);
+
+    expect(visibleIds).not.toContain(oldResolvedId);
+    expect(visibleIds).toContain(recentResolvedId);
+    expect(visibleIds).toContain(oldUnresolvedId);
+    expect(visibleIds).toContain(missingResolutionTimeId);
+
+    // Hiding is non-destructive; managers can still retrieve retained history.
+    const oldDetail = await req(MANAGER, "GET", `/api/incidents/${oldResolvedId}`);
+    expect(oldDetail.status).toBe(200);
+    const retainedRows = await db.select().from(incidentsTable);
+    expect(retainedRows.some((incident) => incident.id === oldResolvedId)).toBe(true);
+  });
+
   it("counts unreviewed incidents and drops the count after review", async () => {
     const id = await seedIncident(OPERATOR);
     await seedIncident(OPERATOR);

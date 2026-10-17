@@ -92,7 +92,7 @@ describe("operational report sharing", () => {
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining("Operational week") }));
   });
 
-  it("builds deterministic structured rows, CSV, and workbook sheets", () => {
+  it("builds deterministic structured rows, CSV, and workbook sheets", async () => {
     const rows = operationalReportRows(report);
     expect(rows.find((row) => row.ID === "production-summary")).toMatchObject({
       "Cases Planned": 200,
@@ -106,14 +106,14 @@ describe("operational report sharing", () => {
     expect(csv).toContain('"Quality","section-status"');
     expect(csv).toContain('"Inventory","section-status"');
     expect(csv).toContain('"available-no-detail-rows"');
-    expect(operationalReportWorkbook(report).SheetNames).toEqual([
+    expect((await operationalReportWorkbook(report)).SheetNames).toEqual([
       "Report", "Production", "Quality", "Incidents", "Inventory", "Actions",
     ]);
     expect(reportFilename(report, "csv")).toBe("operational-week-2026-09-04.csv");
     expect(reportFilename(report, "xlsx")).toBe("operational-week-2026-09-04.xlsx");
   });
 
-  it("neutralizes spreadsheet formulas in CSV and workbook cells", () => {
+  it("neutralizes spreadsheet formulas in CSV and workbook cells", async () => {
     const unsafe: OperationalReport = {
       ...report,
       productionRows: [{
@@ -129,7 +129,7 @@ describe("operational report sharing", () => {
       }],
     };
     expect(operationalReportCsv(unsafe)).toContain(`"'=HYPERLINK(""https://example.invalid"")"`);
-    const sheet = operationalReportWorkbook(unsafe).Sheets.Production;
+    const sheet = (await operationalReportWorkbook(unsafe)).Sheets.Production;
     const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
     expect(rows.find((row) => row.ID === "unsafe")?.Detail).toBe(`'=HYPERLINK("https://example.invalid")`);
   });

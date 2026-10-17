@@ -1,0 +1,10 @@
+{
+  "eval_id": 3,
+  "eval_name": "unrelated-chunk-network-failure",
+  "prompt": "The current web build gets a 503 while importing an unrelated alerts-panel chunk after a brief network interruption. The build ID matches the server and there is no Notification reference error. The user has unsaved form input. Should we use the stale-client update-and-reload path or retry? Give a safe next step.",
+  "assertions": [
+    "The response does not misclassify the 503 as the exact Safari Notification stale-client case or recommend the special Update and reload path.",
+    "The response rejects an automatic or blind reload and preserves the unsaved form input.",
+    "The response gives a bounded, non-destructive diagnostic or retry next step appropriate to a transient network/chunk failure."
+  ]
+}

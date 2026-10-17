@@ -1116,6 +1116,11 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                   </p>
                                 )}
                               </div>
+                              {isFinished && (
+                                <p className="col-span-2 text-[11px] text-muted-foreground">
+                                  Stock adjusts automatically after saved case-count or packaging changes.
+                                </p>
+                              )}
                             </div>
                           )}
                           {/* Read-only waste display for history */}
@@ -1507,8 +1512,8 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                             )}
                             {/* Run card */}
                             {isCurrentRun
-                              ? <SummaryCard run={run} isCurrent onShowDetail={() => setIngredientDetailRunId(run.id)} />
-                              : <SummaryCard run={run} readOnly={isUpcoming ? false : undefined} onShowDetail={() => setIngredientDetailRunId(run.id)} />
+                              ? SummaryCard({ run, isCurrent: true, onShowDetail: () => setIngredientDetailRunId(run.id) })
+                              : SummaryCard({ run, readOnly: isUpcoming ? false : undefined, onShowDetail: () => setIngredientDetailRunId(run.id) })
                             }
                           </div>
                         );
@@ -1574,12 +1579,12 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                 <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
                                   {day.runs.map((run: any) => (
                                     <div key={run.id} className="space-y-2">
-                                      <SummaryCard
-                                        run={run}
-                                        readOnly
-                                        runVals={day.runValues[run.id] as FormValues | undefined}
-                                        onShowDetail={() => setIngredientDetailRunId(run.id)}
-                                      />
+                                      {SummaryCard({
+                                        run,
+                                        readOnly: true,
+                                        runVals: day.runValues[run.id] as FormValues | undefined,
+                                        onShowDetail: () => setIngredientDetailRunId(run.id),
+                                      })}
                                       <ApplicatorEvidenceReview
                                         day={day}
                                         run={run}
@@ -1607,7 +1612,17 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
       const todayRun = dayState.runs.find((r: any) => r.id === ingredientDetailRunId);
       if (todayRun) {
         detailRun = todayRun;
-        detailVals = todayRun.id === currentRun.id ? v : loadRunValues(todayRun.id);
+        const isCurrentRun = todayRun.id === currentRun.id;
+        const hasStarted = Boolean(todayRun.startedAt || todayRun.endedAt);
+        // A pending current run follows the active form. Once it has started,
+        // Ingredient Detail must use its durable snapshot instead: the active
+        // form may be overlaid with a newer shared recipe. Non-selected runs
+        // stay reactive to canonical writes through runValuesById.
+        detailVals = isCurrentRun
+          ? hasStarted
+            ? loadRunValues(todayRun.id)
+            : v
+          : (runValuesById.get(todayRun.id) ?? loadRunValues(todayRun.id));
       } else {
         for (const day of history) {
           if (day.runValues?.[ingredientDetailRunId]) {

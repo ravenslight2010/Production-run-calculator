@@ -1,0 +1,51 @@
+{
+  "format": "distill-backfill-decision",
+  "version": 1,
+  "decision": "no-go",
+  "decisionDate": "2026-10-02",
+  "currentParseVersion": "41",
+  "productionSystemPromptSha256": "65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76",
+  "benchmark": {
+    "outcome": "inconclusive",
+    "evidenceSha256": "263401938696e0197a01311143638e8d23cfed893cbdaf80b5bf4629d12cb2c1"
+  },
+  "trainingEvaluation": {
+    "outcome": "no-go",
+    "evidenceSha256": "33b109f3a5471258f17403603c6a9077da0c957031bb6482dc2b93461a2e76f3"
+  },
+  "datasetSafety": {
+    "outcome": "no-go",
+    "evidenceSha256": "8a83eca4f12c61967a7fee693ab787261769994bc42494106a0c3d48c9573508"
+  },
+  "verifiedIndependentGoldCaseCount": 0,
+  "eligibleAuthorizedApplyEvidenceBundle": "not_found_in_reviewed_workspace",
+  "goldCaseReview": {
+    "outcome": "protocol_documented_no_private_case_review",
+    "reviewDate": "2026-10-08",
+    "evidenceSha256": "263401938696e0197a01311143638e8d23cfed893cbdaf80b5bf4629d12cb2c1",
+    "reviewedSources": [
+      "docs/evidence/local-spec-import-benchmark-blocker-2026-10-02.md",
+      "docs/evidence/distillation-dataset-safety-review-2026-10-02.md",
+      "docs/evidence/conditional-qlora-training-decision-2026-10-02.md"
+    ],
+    "provenanceScope": "Repository evidence and metadata only; no customer workbook, private evidence store, or provider payload was accessed.",
+    "verifiedIndependentGoldCaseCount": 0,
+    "unreviewedPrivateStoreCaseCount": "unknown_not_accessed",
+    "eligibleAuthorizedApplyEvidenceBundle": "not_found_in_reviewed_workspace",
+    "examplesCreated": 0,
+    "datasetSplitsCreated": 0
+  },
+  "reasonCodes": [
+    "benchmark_has_zero_eligible_independent_gold_cases",
+    "training_evaluation_is_no_go",
+    "deterministic_corpus_snapshots_are_not_independent_gold",
+    "authorized_apply_evidence_bundle_not_found_in_reviewed_workspace",
+    "no_training_examples_or_manifest_emitted"
+  ],
+  "privateEvidenceAccessed": false,
+  "examplesEmitted": 0,
+  "maintenanceUpdate": {
+    "date": "2026-10-08",
+    "note": "Recomputed the production system-prompt SHA-256 from buildParseSpecSheetPrompt({ workbookText: \"\" }); it remains 65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76, matching the backfill guard. The generated prompt contains no NaN. The independent gold-case review protocol and metadata-only eligible count were documented; no private evidence was accessed and no examples or splits were created. The benchmark remains inconclusive and the no-go decision, training evaluation, dataset-safety outcome, and parse version are unchanged."
+  }
+}

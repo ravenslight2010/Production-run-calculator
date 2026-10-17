@@ -11,9 +11,9 @@
       "reason": "The managed Expo guide names companion mobile-ui references that are not injected into this workspace."
     },
     {
-      "path": ".local/skills/media-generation/SKILL.md",
+      "path": ".local/skills/html-report-authoring/SKILL.md",
       "findings": { "broken_local_reference": 1 },
-      "reason": "This platform-managed guide references a provider companion path whose availability is controlled outside the repository."
+      "reason": "The guide names atta-chart-authoring as the owner of references/report-embedding.md; that file is present under the sibling managed skill, not html-report-authoring."
     },
     {
       "path": ".local/skills/mockup-extract/SKILL.md",
@@ -53,19 +53,17 @@
       "reason": "This managed provider guide contains a legacy frontmatter-adjacent note and references provider-owned setup content."
     },
     {
-      "path": ".local/skills/skill-authoring/SKILL.md",
-      "findings": { "broken_local_reference": 2 },
-      "reason": "The managed authoring guide uses placeholder paths for the skill being authored."
-    },
-    {
       "path": ".local/skills/stripe/SKILL.md",
       "findings": { "broken_local_reference": 1 },
       "reason": "The managed provider guide documents a project-specific seed script that need not exist in this repository."
     },
     {
       "path": ".local/skills/video-js/SKILL.md",
-      "findings": { "line_limit_exceeded": 1 },
-      "reason": "Platform-managed video guidance exceeds the editable 500-line policy."
+      "findings": {
+        "line_limit_exceeded": 1,
+        "broken_local_reference": 3
+      },
+      "reason": "The managed video guide exceeds the editable line limit; its three script/scaffold references are relative to a generated video artifact that is not part of this repository."
     },
     {
       "path": ".local/secondary_skills/ad-creative/SKILL.md",

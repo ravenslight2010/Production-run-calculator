@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import {
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
   typescript7ProjectMeasurementCommands,
+  typescript7RetainedSummaryCheckArgs,
   typescript7TrendHistorySummary,
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
@@ -21,6 +22,16 @@ import {
   approvedTypescript7Runner,
   typescript7NativePackagesFromLockfile,
 } from "./typescript-7-native-contract.mts";
+import {
+  createRetainedDeclarationContractReport,
+  verifyRetainedDeclarationContractReport,
+} from "./typescript-declaration-contract-evidence.mts";
+import {
+  TYPESCRIPT_7_CONTRACT_MANIFEST_FILE,
+  TYPESCRIPT_7_CONTRACT_REPORT_FILE,
+  verifyTypescript7ContractArtifact,
+  writeTypescript7ContractArtifact,
+} from "./typescript-7-contract-artifact.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
   diagnosticsEqualForPairs,
@@ -55,6 +66,13 @@ test("lockfile native inventory is complete and unsupported runners fail closed"
     "utf8",
   );
   const packages = typescript7NativePackagesFromLockfile(lockfile, "7.0.2");
+  assert.deepEqual(
+    typescript7NativePackagesFromLockfile(
+      `---\nlockfileVersion: '9.0'\npackages:\n  'ignored@1.0.0': {}\nsnapshots:\n  'ignored@1.0.0': {}\n---\n${lockfile}`,
+      "7.0.2",
+    ),
+    packages,
+  );
   assert.equal(packages.length, 20);
   assert.ok(packages.includes("@typescript/typescript-linux-x64"));
   assert.deepEqual(approvedTypescript7Runner("linux", "x64"), {
@@ -252,6 +270,293 @@ test("disposable reproduction shares declaration and prerequisite boundaries", a
   );
 });
 
+test("historical summary validation stays separate from the current comparison", async () => {
+  const reproductionScript = resolve(
+    import.meta.dirname,
+    "../../docs/evidence/reproduce-typescript-7-comparison.sh",
+  );
+  const reproduction = await readFile(reproductionScript, "utf8");
+  assert.deepEqual(
+    typescript7RetainedSummaryCheckArgs(reproductionScript),
+    [reproductionScript, "--check-retained-summary"],
+  );
+  assert.match(reproduction, /--check-current-summary SUMMARY_PATH \[CONTRACT_REPORT_PATH\]/);
+  assert.match(reproduction, /capturedAt:/);
+  assert.match(reproduction, /sourceIdentity:/);
+  assert.match(reproduction, /bundleSha256:/);
+  assert.match(reproduction, /contractComparison:/);
+  assert.match(reproduction, /check_current_summary "\$OUT\/summary\.json" "\$OUT\/typescript-7-declaration-contracts-current\.json"/);
+  assert.match(reproduction, /Latest successful declaration contract report retained at/);
+  assert.doesNotMatch(
+    reproduction,
+    /check_documented_declaration_counts "\$OUT\/summary\.json"/,
+  );
+});
+
+test("compact contract evidence reuses the existing TypeScript 6 and 7 builds", async () => {
+  const comparisonSource = await readFile(
+    resolve(import.meta.dirname, "./compare-typescript-7.mts"),
+    "utf8",
+  );
+  const baselineBuild = comparisonSource.indexOf(
+    'run("typescript-6-build-cold"',
+  );
+  const baselineSnapshot = comparisonSource.indexOf(
+    "copyDeclarationSnapshot(\n        checkout,\n        baselineDeclarationSnapshot",
+    baselineBuild,
+  );
+  const baselineClean = comparisonSource.indexOf(
+    '"typescript-6-clean"',
+    baselineBuild,
+  );
+  const candidateBuild = comparisonSource.indexOf(
+    'run("typescript-7-build-cold"',
+    baselineBuild,
+  );
+  const candidateSnapshot = comparisonSource.indexOf(
+    "copyDeclarationSnapshot(\n        checkout,\n        candidateDeclarationSnapshot",
+    candidateBuild,
+  );
+  assert.ok(baselineBuild >= 0 && baselineBuild < baselineSnapshot);
+  assert.ok(baselineSnapshot < baselineClean);
+  assert.ok(candidateBuild >= 0 && candidateBuild < candidateSnapshot);
+  assert.match(comparisonSource, /compare-declaration-contracts\.mts/u);
+  assert.match(comparisonSource, /comparisonReportMatchesDeclarationManifests/u);
+  assert.match(comparisonSource, /TYPESCRIPT_7_DECLARATION_CONTRACT_ARTIFACT_DIR/u);
+
+  const workflow = await readFile(
+    resolve(import.meta.dirname, "../../.github/workflows/release-check.yml"),
+    "utf8",
+  );
+  assert.equal((workflow.match(/run: node scripts\/src\/test-results\.mjs run --lane release-/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/uses: actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4/gu) ?? []).length >= 2, true);
+  assert.match(workflow, /typescript-7-declaration-contracts-standard-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+  assert.match(workflow, /typescript-7-declaration-contracts-full-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+});
+
+test("retained declaration evidence is revision-bound and integrity-checked", () => {
+  const revision = "a".repeat(40);
+  const bundleSha256 = "b".repeat(64);
+  const formattingFile = {
+    path: "lib/db/dist/formatting.d.ts",
+    category: "db" as const,
+    baselineSha256: "c".repeat(64),
+    candidateSha256: "d".repeat(64),
+    classification: "formatting-only" as const,
+  };
+  const approvedFile = {
+    path: "lib/api-zod/dist/approved.d.ts",
+    category: "api-zod" as const,
+    baselineSha256: "e".repeat(64),
+    candidateSha256: "f".repeat(64),
+    classification: "approved-semantic" as const,
+    approvalReason: "Reviewed exact-hash emitter change.",
+  };
+  const files = [formattingFile, approvedFile];
+  const categories = [
+    { category: "api-client-react" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+    { category: "api-zod" as const, changed: 1, formattingOnly: 0, approvedSemantic: 1, unexplainedSemantic: 0 },
+    { category: "db" as const, changed: 1, formattingOnly: 1, approvedSemantic: 0, unexplainedSemantic: 0 },
+    { category: "other" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+  ];
+  const summary = {
+    capturedAt: "2026-10-15T09:00:00.000Z",
+    sourceIdentity: { revision, bundleSha256 },
+    declarations: {
+      textuallyChangedFileCount: 2,
+      contractComparison: {
+        status: "pass",
+        changedFiles: 2,
+        formattingOnlyChanges: 1,
+        approvedSemanticChanges: 1,
+        unexplainedSemanticChanges: 0,
+      },
+    },
+  };
+  const comparison = {
+    schemaVersion: 1,
+    baselineFileCount: 10,
+    candidateFileCount: 10,
+    status: "pass",
+    categories,
+    files,
+  };
+  const retained = createRetainedDeclarationContractReport(summary, comparison);
+
+  assert.equal(retained.sourceIdentity.revision, revision);
+  assert.equal(retained.sourceIdentity.bundleSha256, bundleSha256);
+  assert.deepEqual(retained.declarationContract.classificationTotals, {
+    changedFiles: 2,
+    formattingOnly: 1,
+    approvedSemantic: 1,
+    unexplainedSemantic: 0,
+  });
+  assert.equal(retained.declarationContract.files[1].approvalReason, approvedFile.approvalReason);
+  assert.equal(retained.integrity.algorithm, "sha256");
+  verifyRetainedDeclarationContractReport(summary, retained);
+
+  const tampered = structuredClone(retained);
+  tampered.declarationContract.files[1].approvalReason = "Changed after comparison.";
+  assert.throws(
+    () => verifyRetainedDeclarationContractReport(summary, tampered),
+    /integrity check failed/,
+  );
+
+  assert.throws(
+    () =>
+      verifyRetainedDeclarationContractReport(
+        {
+          ...summary,
+          sourceIdentity: { revision, bundleSha256: "9".repeat(64) },
+        },
+        retained,
+      ),
+    /identity does not match/,
+  );
+  assert.throws(
+    () =>
+      createRetainedDeclarationContractReport(
+        {
+          ...summary,
+          declarations: {
+            ...summary.declarations,
+            contractComparison: {
+              ...summary.declarations.contractComparison,
+              formattingOnlyChanges: 0,
+            },
+          },
+        },
+        comparison,
+      ),
+    /classification totals do not match/,
+  );
+});
+
+test("run-specific declaration artifacts are minimal, revision-bound, and success-only", async () => {
+  const runnerTemp = await mkdtemp(resolve(tmpdir(), "ts7-contract-artifact-"));
+  const directory = resolve(runnerTemp, "artifact");
+  const revision = "a".repeat(40);
+  const bundleSha256 = "b".repeat(64);
+  const workflow = {
+    runId: "12345",
+    runAttempt: "2",
+    repository: "example/repository",
+    eventName: "pull_request",
+    sha: revision,
+  };
+  const summary = {
+    capturedAt: "2026-10-15T09:00:00.000Z",
+    sourceIdentity: { revision, bundleSha256 },
+    declarations: {
+      textuallyChangedFileCount: 1,
+      contractComparison: {
+        status: "pass",
+        changedFiles: 1,
+        formattingOnlyChanges: 1,
+        approvedSemanticChanges: 0,
+        unexplainedSemanticChanges: 0,
+      },
+    },
+  };
+  const comparison = {
+    schemaVersion: 1,
+    baselineFileCount: 10,
+    candidateFileCount: 10,
+    status: "pass",
+    categories: [
+      { category: "api-client-react" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+      { category: "api-zod" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+      { category: "db" as const, changed: 1, formattingOnly: 1, approvedSemantic: 0, unexplainedSemantic: 0 },
+      { category: "other" as const, changed: 0, formattingOnly: 0, approvedSemantic: 0, unexplainedSemantic: 0 },
+    ],
+    files: [
+      {
+        path: "lib/db/dist/formatting.d.ts",
+        category: "db" as const,
+        baselineSha256: "c".repeat(64),
+        candidateSha256: "d".repeat(64),
+        classification: "formatting-only" as const,
+      },
+    ],
+  };
+  const comparisonOutcome = {
+    status: "ADVISORY_DRIFT" as const,
+    commandsSucceeded: true,
+    diagnosticsEqual: true,
+    advisory: true,
+    acceptanceGatesMet: false,
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        writeTypescript7ContractArtifact({
+          directory,
+          runnerTemp,
+          summary,
+          declarationComparison: comparison,
+          comparison: {
+            ...comparisonOutcome,
+            status: "PROMOTION_BLOCKED",
+          },
+          workflow,
+        }),
+      /failed or incomplete TypeScript comparison/,
+    );
+    assert.equal(
+      await readdir(runnerTemp).then((entries) => entries.includes("artifact")),
+      false,
+    );
+    await writeTypescript7ContractArtifact({
+      directory,
+      runnerTemp,
+      summary,
+      declarationComparison: comparison,
+      comparison: comparisonOutcome,
+      workflow,
+    });
+    assert.deepEqual(
+      (await readdir(directory)).sort(),
+      [
+        TYPESCRIPT_7_CONTRACT_MANIFEST_FILE,
+        TYPESCRIPT_7_CONTRACT_REPORT_FILE,
+      ].sort(),
+    );
+    assert.equal(
+      verifyTypescript7ContractArtifact({
+        directory,
+        runnerTemp,
+        workflow,
+        sourceBundleSha256: bundleSha256,
+      }),
+      true,
+    );
+    assert.throws(
+      () =>
+        verifyTypescript7ContractArtifact({
+          directory,
+          runnerTemp,
+          workflow: { ...workflow, sha: "e".repeat(40) },
+          sourceBundleSha256: bundleSha256,
+        }),
+      /identity or comparison outcome is invalid/,
+    );
+    await writeFile(resolve(directory, "compiler-output.log"), "not compact");
+    assert.throws(
+      () =>
+        verifyTypescript7ContractArtifact({
+          directory,
+          runnerTemp,
+          workflow,
+          sourceBundleSha256: bundleSha256,
+        }),
+      /unexpected files or directories/,
+    );
+  } finally {
+    await rm(runnerTemp, { recursive: true, force: true });
+  }
+});
+
 test("retained resource approval evidence is compact and integrity-checked", async () => {
   const path = resolve(
     import.meta.dirname,
@@ -447,26 +752,56 @@ test("resource approval generator derives compact deterministic samples", () => 
 });
 
 test("runner fingerprints retain only bounded non-sensitive labels", () => {
-  const previousImage = process.env.TYPESCRIPT_7_RUNNER_IMAGE;
-  const previousImageOs = process.env.ImageOS;
-  const previousImageVersion = process.env.ImageVersion;
-  try {
-    delete process.env.ImageOS;
-    delete process.env.ImageVersion;
-    process.env.TYPESCRIPT_7_RUNNER_IMAGE = `ubuntu label/${"x".repeat(100)}`;
-    const fingerprint = typescript7RunnerFingerprint();
-    assert.match(fingerprint.image, /^[A-Za-z0-9._@+-]{1,80}$/);
-    assert.match(fingerprint.hardwareClass, /^[a-f0-9]{64}$/);
-    assert.ok(fingerprint.logicalCpuCount > 0);
-    assert.ok(fingerprint.memoryGiB > 0);
-  } finally {
-    if (previousImage === undefined) delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
-    else process.env.TYPESCRIPT_7_RUNNER_IMAGE = previousImage;
-    if (previousImageOs === undefined) delete process.env.ImageOS;
-    else process.env.ImageOS = previousImageOs;
-    if (previousImageVersion === undefined) delete process.env.ImageVersion;
-    else process.env.ImageVersion = previousImageVersion;
-  }
+  const fingerprint = typescript7RunnerFingerprint({
+    environment: {
+      TYPESCRIPT_7_RUNNER_IMAGE: `ubuntu label/${"x".repeat(100)}`,
+    },
+    localRuntime: null,
+  });
+  assert.match(fingerprint.image, /^[A-Za-z0-9._@+-]{1,80}$/);
+  assert.match(fingerprint.hardwareClass, /^[a-f0-9]{64}$/);
+  assert.ok(fingerprint.logicalCpuCount > 0);
+  assert.ok(fingerprint.memoryGiB > 0);
+});
+
+test("Replit image identity is retained as a digest, not a registry path", () => {
+  const fingerprint = typescript7RunnerFingerprint({
+    environment: { REPL_IMAGE: "internal-registry/private-runner:stable" },
+    localRuntime: null,
+  });
+  assert.match(fingerprint.image, /^repl-image-[a-f0-9]{64}$/);
+  assert.doesNotMatch(fingerprint.image, /internal-registry|private-runner/u);
+});
+
+test("local runner identity changes when its OS/runtime fingerprint changes", () => {
+  const environment = {};
+  const localRuntime = {
+    platform: "linux",
+    arch: "x64",
+    osRelease: 'ID=ubuntu\nVERSION_ID="24.04"\n',
+    kernelRelease: "6.18.55",
+    nodeVersion: "v24.13.0",
+  };
+  const first = typescript7RunnerFingerprint({ environment, localRuntime });
+  const repeated = typescript7RunnerFingerprint({ environment, localRuntime });
+  const changed = typescript7RunnerFingerprint({
+    environment,
+    localRuntime: { ...localRuntime, kernelRelease: "6.18.56" },
+  });
+  assert.match(first.image, /^runtime-[a-f0-9]{64}$/);
+  assert.equal(repeated.image, first.image);
+  assert.notEqual(changed.image, first.image);
+});
+
+test("runner fingerprint refuses to capture evidence without an image identity", () => {
+  assert.throws(
+    () =>
+      typescript7RunnerFingerprint({
+        environment: {},
+        localRuntime: null,
+      }),
+    /runner image identity is unavailable/,
+  );
 });
 
 test("retained comparison evidence is revision-bound and advisory", () => {

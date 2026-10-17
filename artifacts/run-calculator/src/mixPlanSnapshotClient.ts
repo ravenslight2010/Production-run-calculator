@@ -18,6 +18,7 @@ import {
 
 const snapshots = new Map<string, MixPlanSnapshot>();
 const inflight = new Map<string, Promise<void>>();
+const queued = new Set<string>();
 const listeners = new Set<() => void>();
 
 function isValidSnap(s: unknown): s is MixPlanSnapshot {
@@ -30,7 +31,16 @@ function notify(): void {
 }
 
 async function refresh(makeDay: string): Promise<void> {
-  if (inflight.has(makeDay)) return inflight.get(makeDay);
+  const pending = inflight.get(makeDay);
+  if (pending) {
+    // A live mix edit can happen while the initial snapshot is still loading.
+    // Do not treat that request as the acknowledgement for the newer inputs:
+    // fetch once more after the in-flight request settles.
+    queued.add(makeDay);
+    await pending;
+    if (queued.delete(makeDay)) return refresh(makeDay);
+    return;
+  }
   const p = (async () => {
     try {
       const snap = await fetchMixPlanSnapshot(makeDay);

@@ -34,6 +34,21 @@ the in-session case.
 be gated to run once per app open, not react to background `["me"]` refetches. Keep
 web + mobile identical.
 
+## Manager controls and the surrounding form
+
+Manager-tab filter actions must not rely on a nested native form or submit the
+surrounding production form. Use explicit non-submitting actions and prevent
+implicit Enter submission where appropriate.
+
+**Why:** A filter Apply action reset an authenticated manager view back to its
+default population even though the screen still appeared to be Reported issues.
+The component behaved correctly in isolation; only actual Home exposed the
+surrounding form interaction.
+
+**How to apply:** For new manager controls, include their real surrounding form
+in a rendered regression fixture. Do not infer that staying on the same visible
+tab proves no native submission or state reset happened.
+
 ## Second, unrelated cause: Vite dev-server full-reloads (NOT app logic)
 
 A separate "reloads during import" report turned out to be the **Vite dev server**, not

@@ -5,8 +5,31 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AuditLogChangesFieldNamesItem } from './auditLogChangesFieldNamesItem';
 
 /**
  * Allowlisted, redacted evidence object no larger than 8192 bytes.
  */
-export type AuditLogChanges = { [key: string]: unknown };
+export type AuditLogChanges = {
+  count?: number;
+  outcome?: string;
+  /** @maxLength 200 */
+  reasonCode?: string;
+  targetId?: string | number;
+  /** @maxLength 200 */
+  targetType?: string;
+  /** @maxLength 200 */
+  authorizedBy?: string;
+  /** @maxLength 200 */
+  from?: string;
+  /** @maxLength 200 */
+  to?: string;
+  /** @maxLength 200 */
+  method?: string;
+  /** @maxLength 200 */
+  requestId?: string;
+  /** @maxItems 8 */
+  fieldNames?: AuditLogChangesFieldNamesItem[];
+  /** @maxLength 128 */
+  correlationId?: string;
+};

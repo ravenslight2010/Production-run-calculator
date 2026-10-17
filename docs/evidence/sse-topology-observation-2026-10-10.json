@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "kind": "sse-topology-observation",
+  "capturedAtUtc": "2026-10-10T18:06:28.057Z",
+  "environment": "production",
+  "captureMethod": [
+    "Replit deployment metadata",
+    "Read-only GET /api/build-info, /api/livez, and /api/readyz",
+    "Sanitized 48-hour deployment-log query for database capacity samples"
+  ],
+  "deployment": {
+    "active": true,
+    "public": true,
+    "reportedType": "autoscale",
+    "buildSuccessful": true,
+    "deploymentId": "unknown",
+    "sourceRevision": "ae6fbbe3a9e1eac09b2cb08ce98473981397ba16",
+    "sourceRevisionBinding": "verified",
+    "sourceFingerprintSha256": "dfc24955f61d21ba10aee9f93df42d3e92a1c3ddd708f6ad45761ad2ff57a543"
+  },
+  "healthProbes": {
+    "livez": {
+      "httpStatus": 200,
+      "status": "ok"
+    },
+    "readyz": {
+      "httpStatus": 200,
+      "status": "ok"
+    }
+  },
+  "servingProcessEvidence": {
+    "captureWindowUtc": [
+      "2026-10-10T14:24:35.856Z",
+      "2026-10-10T18:04:47.920Z"
+    ],
+    "maximumServingApiProcesses": null,
+    "currentServingApiProcesses": null,
+    "peakServingApiProcesses": null,
+    "autoscaleMaximumMachines": null,
+    "evidenceAvailable": false,
+    "reason": "Deployment metadata and capacity logs expose no authoritative Autoscale machine or API-process counts."
+  },
+  "capacityBudgetReview": {
+    "queryLookbackHours": 48,
+    "sampleWindowUtc": [
+      "2026-10-10T14:24:35.856Z",
+      "2026-10-10T18:04:47.920Z"
+    ],
+    "environment": "production",
+    "source": "Sanitized deployment capacity logs matched to the live /api/build-info source revision and fingerprint",
+    "sampleIntervalMs": 300000,
+    "sampleCount": 45,
+    "primaryObservedSamples": 43,
+    "unavailablePrimarySamples": 2,
+    "postgresMaxConnections": 450,
+    "knownReservedSlots": {
+      "superuser": 4,
+      "role": 0
+    },
+    "providerReservedSlots": "unknown",
+    "clientBackendsRange": [
+      6,
+      13
+    ],
+    "estimatedOrdinarySlotsRemainingRangeAfterKnownReserves": [
+      433,
+      440
+    ],
+    "perProcessPoolMax": 10,
+    "sampledPoolTotalRange": [
+      3,
+      10
+    ],
+    "sampledPoolWaitingRange": [
+      0,
+      2
+    ],
+    "highestObservedPoolWaitingSample": {
+      "capturedAtUtc": "2026-10-10T15:04:39.719Z",
+      "peakMeaning": "Highest pool-wait count among retained samples; not a certified deployment or workload peak",
+      "pool": {
+        "max": 10,
+        "total": 10,
+        "idle": 0,
+        "waiting": 2
+      },
+      "database": {
+        "primaryVerified": true,
+        "maxConnections": 450,
+        "superuserReservedSlots": 4,
+        "roleReservedSlots": 0,
+        "clientBackends": 13,
+        "estimatedOrdinarySlotsRemainingAfterKnownReserves": 433
+      }
+    },
+    "autoscaleCurrentProcesses": null,
+    "autoscaleMaximumProcesses": null,
+    "representsPeakHeadroom": false,
+    "rawLogsRetained": false
+  },
+  "nonProductionTopologyValidation": {
+    "status": "not_run",
+    "reason": "No separate non-production deployed topology was available for this check; production was not written to."
+  },
+  "sanitization": {
+    "productionUrlRetained": false,
+    "rawResponseBodiesRetained": false,
+    "rawLogsRetained": false,
+    "credentialsOrPersonalDataRetained": false,
+    "requestDataOrDatabaseRowsRetained": false
+  },
+  "conclusion": {
+    "isolatedCrossProcessFanout": "VERIFIED",
+    "publishedLivePeerSseSupported": false,
+    "status": "DESIGN APPROVED; SUPPORT BLOCKED BY CAPACITY AND DEPLOYED-TOPOLOGY VALIDATION",
+    "reason": "The deployed revision and sampled primary database capacity are verified, but Autoscale maximum/current/peak API-process counts and provider-reserved slots remain unknown. The observed sample window does not establish representative peak headroom, and cross-instance behavior was not tested on a non-production deployment."
+  }
+}

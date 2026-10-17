@@ -229,9 +229,9 @@ describe("freeze tunnel and warehouse freezer domain isolation", () => {
         batchesReady: store.batchesReady,
       },
       form,
-      onPackagingProgressAutoAdvance: (skidsCompleted, casesOnCurrentSkid) => (
+      onPackagingProgressAutoAdvance: (runId, skidsCompleted, casesOnCurrentSkid) => (
         recordAutomaticPackagingProgress({
-          runId: RUN_ID,
+          runId,
           skidsCompleted,
           casesOnCurrentSkid,
           now: nowMs,

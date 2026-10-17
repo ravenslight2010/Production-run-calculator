@@ -3,6 +3,9 @@ import {
   CACHE_MAINTENANCE_FAILURE_THRESHOLD,
   CACHE_MAINTENANCE_FAILURE_MAX_EVENTS,
   CACHE_MAINTENANCE_FAILURE_WINDOW_MS,
+  GEMINI_FALLBACK_EXHAUSTION_THRESHOLD,
+  GEMINI_FALLBACK_EXHAUSTION_WINDOW_MS,
+  clearGeminiFallbackDiagnosticsForTests,
   clearCacheMaintenanceDiagnosticsForTests,
   getCacheMaintenanceDiagnostics,
   isHealthProbePath,
@@ -10,6 +13,7 @@ import {
   observabilityMiddleware,
   recordCacheMaintenance,
   recordCostLimitEvent,
+  recordGeminiFallbackResult,
   recordStartupSlowWarning,
   safeErrorCode,
   safeQueueAgeMs,
@@ -17,6 +21,7 @@ import {
 
 afterEach(async () => {
   await clearCacheMaintenanceDiagnosticsForTests();
+  clearGeminiFallbackDiagnosticsForTests();
   vi.useRealTimers();
 });
 
@@ -270,5 +275,91 @@ describe("observability", () => {
     await recordCacheMaintenance(fields, log);
     await recordCacheMaintenance(fields, log);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("alerts once when a bounded Gemini fallback trigger is exhausted repeatedly", () => {
+    const now = new Date("2026-09-02T12:00:00.000Z");
+    vi.useFakeTimers({ now });
+    const warn = vi.fn();
+    const log = { warn };
+    const fields = {
+      requestResult: "fallback_exhausted" as const,
+      fallbackTrigger: "service_unavailable" as const,
+    };
+
+    for (let i = 0; i < GEMINI_FALLBACK_EXHAUSTION_THRESHOLD - 1; i += 1) {
+      recordGeminiFallbackResult(fields, log);
+    }
+    expect(warn).not.toHaveBeenCalled();
+
+    recordGeminiFallbackResult(fields, log);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      {
+        event: "gemini_fallback_exhaustion",
+        requestResult: "fallback_exhausted",
+        fallbackTrigger: "service_unavailable",
+        recentExhaustedCount: GEMINI_FALLBACK_EXHAUSTION_THRESHOLD,
+        threshold: GEMINI_FALLBACK_EXHAUSTION_THRESHOLD,
+        windowMs: GEMINI_FALLBACK_EXHAUSTION_WINDOW_MS,
+      },
+      "Gemini fallback exhaustion may disrupt spec imports",
+    );
+
+    recordGeminiFallbackResult(fields, log);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+      /prompt|workbook|model response|provider error|Sensitive|secret/i,
+    );
+  });
+
+  it("keeps Gemini triggers separate and deduplicates again only after the window clears", () => {
+    vi.useFakeTimers({ now: new Date("2026-09-02T12:00:00.000Z") });
+    const warn = vi.fn();
+    const log = { warn };
+    const unavailable = {
+      requestResult: "fallback_exhausted" as const,
+      fallbackTrigger: "service_unavailable" as const,
+    };
+    const rateLimited = {
+      requestResult: "fallback_exhausted" as const,
+      fallbackTrigger: "rate_limited" as const,
+    };
+
+    recordGeminiFallbackResult(unavailable, log);
+    recordGeminiFallbackResult(unavailable, log);
+    recordGeminiFallbackResult(rateLimited, log);
+    expect(warn).not.toHaveBeenCalled();
+
+    recordGeminiFallbackResult(unavailable, log);
+    expect(warn).toHaveBeenCalledOnce();
+    recordGeminiFallbackResult(unavailable, log);
+    expect(warn).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(GEMINI_FALLBACK_EXHAUSTION_WINDOW_MS + 1);
+    recordGeminiFallbackResult(unavailable, log);
+    expect(warn).toHaveBeenCalledOnce();
+    recordGeminiFallbackResult(unavailable, log);
+    recordGeminiFallbackResult(unavailable, log);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores non-exhausted results and unknown runtime trigger labels", () => {
+    const warn = vi.fn();
+    const log = { warn };
+    for (let i = 0; i < GEMINI_FALLBACK_EXHAUSTION_THRESHOLD; i += 1) {
+      recordGeminiFallbackResult(
+        { requestResult: "fallback_success", fallbackTrigger: "service_unavailable" },
+        log,
+      );
+      recordGeminiFallbackResult(
+        {
+          requestResult: "fallback_exhausted",
+          fallbackTrigger: "raw provider error" as never,
+        },
+        log,
+      );
+    }
+    expect(warn).not.toHaveBeenCalled();
   });
 });

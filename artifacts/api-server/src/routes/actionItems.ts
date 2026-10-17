@@ -400,7 +400,11 @@ router.patch("/manager-action-queue/:id", requireCapability("manage-staff"), asy
       await tx.insert(auditLogsTable).values({
          scope, actor: req.userId!, action: "manager_action_item_update",
         resource: `action_item:${id}`,
-         changes: { outcome: "updated", targetId: String(id) },
+         changes: {
+           outcome: "updated",
+           targetId: String(id),
+           ...(status === "resolved" ? { status: "resolved" } : {}),
+         },
       });
       return { outcome: "updated" as const, item: rows[0] };
     });

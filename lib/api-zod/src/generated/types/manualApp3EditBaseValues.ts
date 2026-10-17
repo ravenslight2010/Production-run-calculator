@@ -10,4 +10,7 @@ export type ManualApp3EditBaseValues = {
   app3BatchesMade: number;
   app3BatchAnchorNetSec: number;
   app3BatchCorrectionGeneration: number;
+  app3StockLbs: number;
+  app3StockAnchorNetSec: number;
+  app3StockCorrectionGeneration: number;
 };

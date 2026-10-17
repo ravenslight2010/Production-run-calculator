@@ -1,17 +1,50 @@
+import { EventEmitter } from "node:events";
+import { performance } from "node:perf_hooks";
+import { Pool, type PoolClient } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   capacityTelemetrySnapshot,
   clearCapacityTelemetryForTests,
+  installPoolTelemetry,
   legacySyncReadinessSnapshot,
   recordLegacySyncWrite,
   recordSseFrame,
+  recordSsePeerFrameSkippedExactSnapshot,
   recordSyncParserRejection,
   recordSyncPut,
+  recordSyncTransaction,
   reportCapacityTelemetry,
   syncRunCountBucket,
+  syncPeerFrameTelemetrySnapshot,
 } from "./capacityTelemetry";
 
 beforeEach(() => clearCapacityTelemetryForTests());
+
+class SyntheticPgClient extends EventEmitter {
+  private connected = false;
+  _queryable = true;
+  _ending = false;
+
+  connect(callback: (error?: Error) => void): void {
+    this.connected = true;
+    setImmediate(() => callback());
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  end(callback?: (error?: Error) => void): Promise<void> {
+    this.connected = false;
+    this._ending = true;
+    callback?.();
+    return Promise.resolve();
+  }
+
+  ref(): void {}
+
+  unref(): void {}
+}
 
 describe("capacity telemetry", () => {
   it("reports bounded percentile distributions without operational identifiers", () => {
@@ -44,11 +77,119 @@ describe("capacity telemetry", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/payload|runId|recipe|user|facility|errorText/i);
   });
 
+  it("reports bounded event-loop delay percentiles after a stall and resets them with the window", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const stallStartedAt = performance.now();
+    while (performance.now() - stallStartedAt < 100) {}
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const snapshot = capacityTelemetrySnapshot();
+    const eventLoopDelay = snapshot.distributions["node.event_loop.delay_ms"];
+    expect(eventLoopDelay).toBeDefined();
+    expect(eventLoopDelay?.count).toBeGreaterThan(0);
+    expect(eventLoopDelay?.max).toBeGreaterThanOrEqual(50);
+    expect(Object.keys(eventLoopDelay ?? {}).sort()).toEqual(["count", "max", "p50", "p95", "p99"]);
+    expect(Object.values(eventLoopDelay ?? {}).every((value) =>
+      Number.isFinite(value) && value >= 0 && value <= 10 * 60 * 1_000,
+    )).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toMatch(/payload|runId|recipe|user|facility|errorText/i);
+
+    const info = vi.fn();
+    reportCapacityTelemetry({ info } as never);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distributions: expect.objectContaining({
+          "node.event_loop.delay_ms": expect.objectContaining({
+            count: expect.any(Number),
+            p50: expect.any(Number),
+            p95: expect.any(Number),
+            p99: expect.any(Number),
+            max: expect.any(Number),
+          }),
+        }),
+      }),
+      "bounded capacity telemetry",
+    );
+    expect(capacityTelemetrySnapshot().distributions["node.event_loop.delay_ms"]).toBeUndefined();
+  });
+
   it("classifies bounded run counts", () => {
     expect(syncRunCountBucket({ dayState: { runs: [] } })).toBe("0");
     expect(syncRunCountBucket({ dayState: { runs: [{}] } })).toBe("1-5");
     expect(syncRunCountBucket({ dayState: { runs: Array(20).fill({}) } })).toBe("6-20");
     expect(syncRunCountBucket({ dayState: { runs: Array(80).fill({}) } })).toBe("21-50");
+  });
+
+  it("exposes fixed peer-frame counts without payloads or peer identifiers", () => {
+    recordSseFrame({ mode: "complete", frameBytes: 800, durationMs: 2, outcome: "sent", peerUpdate: true });
+    recordSseFrame({ mode: "partial", frameBytes: 240, durationMs: 1, outcome: "sent", peerUpdate: true });
+    recordSsePeerFrameSkippedExactSnapshot();
+
+    const snapshot = syncPeerFrameTelemetrySnapshot();
+    expect(snapshot).toMatchObject({
+      exactSnapshotSkipped: 1,
+      partialSent: 1,
+      completeSent: 1,
+    });
+    expect(snapshot.windowMs).toBeGreaterThanOrEqual(0);
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "completeSent",
+      "exactSnapshotSkipped",
+      "partialSent",
+      "windowMs",
+    ]);
+    expect(JSON.stringify(snapshot)).not.toMatch(/private-peer-7|private-run-9|private shift note/i);
+  });
+
+  it("keeps percentile samples representative across the whole report window", () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      for (let index = 0; index < 50_000; index += 1) {
+        recordSyncTransaction(5);
+      }
+      for (let index = 0; index < 1_000; index += 1) {
+        recordSyncTransaction(21_500);
+      }
+
+      expect(capacityTelemetrySnapshot().distributions["db.sync_transaction.duration_ms"]).toEqual({
+        count: 51_000,
+        p50: 5,
+        p95: 5,
+        p99: 5,
+        max: 21_500,
+      });
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("records elapsed time when pg-pool's checkout timeout fires late", async () => {
+    const pool = new Pool({
+      Client: SyntheticPgClient as never,
+      max: 1,
+      connectionTimeoutMillis: 10,
+      idleTimeoutMillis: 0,
+    });
+    installPoolTelemetry(pool);
+
+    let heldClient: PoolClient | undefined;
+    try {
+      heldClient = await pool.connect();
+      const queuedCheckout = pool.connect();
+      const stallStartedAt = performance.now();
+      while (performance.now() - stallStartedAt < 80) {}
+
+      await expect(queuedCheckout).rejects.toThrow("timeout exceeded when trying to connect");
+      expect(pool.waitingCount).toBe(0);
+      expect(capacityTelemetrySnapshot().distributions["db.pool.acquisition_ms"]).toMatchObject({
+        count: 2,
+      });
+      expect(capacityTelemetrySnapshot().distributions["db.pool.acquisition_ms"]?.max)
+        .toBeGreaterThanOrEqual(60);
+    } finally {
+      heldClient?.release();
+      await pool.end();
+    }
   });
 
   it("requires a complete zero-write window before declaring the legacy cutoff ready", () => {

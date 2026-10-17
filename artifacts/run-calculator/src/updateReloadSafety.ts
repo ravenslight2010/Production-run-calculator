@@ -124,3 +124,33 @@ export function startUpdateReloadIdleTracking(
     );
   };
 }
+
+export function scheduleSafeIdleAutomaticRecovery(
+  recover: (canReload: () => boolean) => void | Promise<void>,
+  safeAtFailure: boolean,
+  idleMs = UPDATE_RELOAD_IDLE_MS,
+  target: IdleTrackingTarget = window,
+): () => void {
+  if (!safeAtFailure) return () => {};
+
+  // ErrorBoundary captures the last known safe state before React unmounts the
+  // failed screen. Activity on the recovery page still cancels the reload.
+  let stopped = false;
+  let idle = false;
+  let started = false;
+  const canReload = () => !stopped && idle && safeAtFailure;
+  const tryRecover = () => {
+    if (started || !canReload()) return;
+    started = true;
+    recover(canReload);
+  };
+  const stopIdleTracking = startUpdateReloadIdleTracking((nextIdle) => {
+    idle = nextIdle;
+    tryRecover();
+  }, idleMs, target);
+
+  return () => {
+    stopped = true;
+    stopIdleTracking();
+  };
+}

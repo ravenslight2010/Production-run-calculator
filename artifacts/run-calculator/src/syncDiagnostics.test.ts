@@ -55,7 +55,7 @@ describe("sync diagnostics", () => {
       date: "2026-08-21",
       message: "Sync write was rejected",
       response: "403",
-      fieldCheck: { checkName: "sync-acknowledgment", outcome: "failure" },
+      fieldCheck: syncWriteFieldCheck({ ok: false, status: 403 }),
     });
     recordSyncDiagnostic({
       kind: "ack",
@@ -73,7 +73,7 @@ describe("sync diagnostics", () => {
 
     window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
     expect(signals).toEqual([
-      { checkName: "sync-acknowledgment", outcome: "failure", metrics: {} },
+      { checkName: "sync-acknowledgment", outcome: "failure", metrics: { failureCode: 1 } },
       { checkName: "sync-acknowledgment", outcome: "success", metrics: {} },
     ]);
     expect(loadSyncDiagnostics("2026-08-21")).toHaveLength(6);

@@ -1,14 +1,22 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { type Express } from "express";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
+import {
+  clearCapacityTelemetryForTests,
+  legacySyncReadinessSnapshot,
+} from "../lib/capacityTelemetry";
+import { applySyncDeltaData } from "@workspace/sync-contract";
+import type { AutoTrackClaim } from "../lib/autoTrackCoordination";
+import type { AutoTrackClaimServiceDependencies } from "../lib/autoTrackClaimService";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
   dayState: { date, runs: [] },
@@ -37,22 +45,42 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let qualityChecksTable: DbModule["qualityChecksTable"];
+let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
+let automaticTrackingDeferredDiagnosticsTable: DbModule["automaticTrackingDeferredDiagnosticsTable"];
+let syncOutboxCursorsTable: DbModule["syncOutboxCursorsTable"];
+let syncOutboxEventsTable: DbModule["syncOutboxEventsTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
+let reconcileOperationalIntentInTransaction:
+  typeof import("../lib/operationalIntentService")["reconcileOperationalIntentInTransaction"];
+let clearServerTickDateBackoffsForTests:
+  typeof import("./sync")["clearServerTickDateBackoffsForTests"];
+let clearBackgroundOperationDiagnosticsForTests:
+  typeof import("../lib/backgroundOperations")["clearBackgroundOperationDiagnosticsForTests"];
+let getBackgroundOperationDiagnostics:
+  typeof import("../lib/backgroundOperations")["getBackgroundOperationDiagnostics"];
+let getAutoTrackDeferredDiagnostic:
+  typeof import("../lib/backgroundOperations")["getAutoTrackDeferredDiagnostic"];
+let getSharedAutoTrackDeferredDiagnostic:
+  typeof import("../lib/backgroundOperations")["getSharedAutoTrackDeferredDiagnostic"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
-let derivedRunMapSharedDayStateFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS"];
+let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
+let executeAutoTrackClaim: typeof import("../lib/autoTrackClaimService")["executeAutoTrackClaim"];
+let autoTrackClaimDependencies: AutoTrackClaimServiceDependencies;
 
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+let injectedSseWriteFailures = 0;
 
 const USER = "user-1";
 const MANAGER = "manager-1";
@@ -85,6 +113,10 @@ beforeAll(async () => {
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   const syncMod = await import("./sync");
+  const autoTrackClaimServiceMod = await import("../lib/autoTrackClaimService");
+  const applicatorEvidenceMod = await import("./applicatorBatchEvidence");
+  const inventoryMod = await import("./inventory");
+  const operationalIntentServiceMod = await import("../lib/operationalIntentService");
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
@@ -97,22 +129,68 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  qualityChecksTable = dbMod.qualityChecksTable;
+  qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
+  automaticTrackingDeferredDiagnosticsTable =
+    dbMod.automaticTrackingDeferredDiagnosticsTable;
+  syncOutboxCursorsTable = dbMod.syncOutboxCursorsTable;
+  syncOutboxEventsTable = dbMod.syncOutboxEventsTable;
   dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
+  reconcileOperationalIntentInTransaction =
+    operationalIntentServiceMod.reconcileOperationalIntentInTransaction;
+  clearServerTickDateBackoffsForTests = syncMod.clearServerTickDateBackoffsForTests;
+  const backgroundOperationsMod = await import("../lib/backgroundOperations");
+  clearBackgroundOperationDiagnosticsForTests =
+    backgroundOperationsMod.clearBackgroundOperationDiagnosticsForTests;
+  getBackgroundOperationDiagnostics = backgroundOperationsMod.getBackgroundOperationDiagnostics;
+  getAutoTrackDeferredDiagnostic = backgroundOperationsMod.getAutoTrackDeferredDiagnostic;
+  getSharedAutoTrackDeferredDiagnostic =
+    backgroundOperationsMod.getSharedAutoTrackDeferredDiagnostic;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
-  derivedRunMapSharedDayStateFields = syncMod.DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS;
+  derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
+  executeAutoTrackClaim = autoTrackClaimServiceMod.executeAutoTrackClaim;
+  autoTrackClaimDependencies = {
+    appendAutomaticApplicatorEvidence: applicatorEvidenceMod.appendAutomaticApplicatorEvidence,
+    consumeSauceBarrelInTransaction: inventoryMod.consumeSauceBarrelInTransaction,
+  };
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    next();
+  });
+  app.use((req, res, next) => {
+    const failSenderId = req.get("x-test-fail-broadcast-sender-id");
+    if (req.path === "/api/sync/events" && failSenderId) {
+      let failurePending = true;
+      res.write = new Proxy(res.write, {
+        apply(target, thisArg, args) {
+          const chunk = args[0];
+          const text = typeof chunk === "string"
+            ? chunk
+            : Buffer.isBuffer(chunk) ? chunk.toString("utf8") : "";
+          const line = text.split("\n").find((entry) => entry.startsWith("data: "));
+          if (failurePending && line) {
+            const frame = JSON.parse(line.slice("data: ".length)) as { senderId?: string | null };
+            if (frame.senderId === failSenderId) {
+              failurePending = false;
+              injectedSseWriteFailures += 1;
+              throw new Error("injected SSE broadcast write failure");
+            }
+          }
+          return Reflect.apply(target, thisArg, args);
+        },
+      });
+    }
     next();
   });
   app.use("/api", routerMod.default);
@@ -122,7 +200,7 @@ beforeAll(async () => {
   });
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   if (server) {
@@ -149,7 +227,9 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  injectedSseWriteFailures = 0;
+  clearServerTickDateBackoffsForTests();
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -167,6 +247,514 @@ beforeEach(async () => {
     dayRow("2030-03-11"),
     dayRow("2030-03-12"),
   ]);
+});
+
+describe("completed-run inventory corrections from sync writes", () => {
+  const DATE = "2030-03-10";
+  const RUN_VALUES = {
+    casesNeeded: 10,
+    pizzasPerCase: 12,
+    casesPerLayer: 0,
+    frontlineRecipe: [],
+    sauceBarrelLbs: 0,
+    sauceOzPerPizza: 0,
+    app1OzPerPizza: 0, app1BatchLbs: 0, app1Type: "", app1CheeseRecipe: [],
+    app2OzPerPizza: 0, app2BatchLbs: 0, app2Type: "", app2CheeseRecipe: [],
+    app3OzPerPizza: 0, app3BatchLbs: 0, app3Type: "", app3CheeseRecipe: [],
+    app4OzPerPizza: 0, app4BatchLbs: 0, app4Type: "", app4CheeseRecipe: [],
+    pep1OzPerPizza: 0, pep1Sticks: 0, pep1BatchLbs: 0, pep1Type: "",
+    pep2OzPerPizza: 0, pep2Sticks: 0, pep2BatchLbs: 0, pep2Type: "",
+    crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 0,
+    doughRecipe: [{ ingredient: "Flour", lbs: 50 }],
+    doughballWeightOz: 8,
+    doughBatchYield: 100,
+    cartoned: "yes",
+    circles: "12in",
+  };
+
+  it.each([
+    {
+      label: "increased ingredient and packaging use",
+      actualCases: 15,
+      expectedDoughOnHand: 97,
+      expectedCirclesOnHand: 820,
+      expectedDoughCorrection: -1,
+      expectedCirclesCorrection: -60,
+    },
+    {
+      label: "decreased ingredient and packaging use",
+      actualCases: 5,
+      expectedDoughOnHand: 99,
+      expectedCirclesOnHand: 940,
+      expectedDoughCorrection: 1,
+      expectedCirclesCorrection: 60,
+    },
+    {
+      label: "sets actual cases to zero",
+      actualCases: 0,
+      expectedDoughOnHand: 100,
+      expectedCirclesOnHand: 1_000,
+      expectedDoughCorrection: 2,
+      expectedCirclesCorrection: 120,
+    },
+  ])("reconciles $label and remains idempotent on a repeated saved snapshot", async ({
+    actualCases,
+    expectedDoughOnHand,
+    expectedCirclesOnHand,
+    expectedDoughCorrection,
+    expectedCirclesCorrection,
+  }) => {
+    const runId = `inventory-correction-${actualCases}`;
+    const [dough] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "ingredient:Dough:batches",
+      category: "ingredient",
+      name: "Dough",
+      unit: "batches",
+    }).returning();
+    const [circles] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "packaging:circles:12in",
+      category: "packaging",
+      name: "12-inch circles",
+      unit: "circles",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      { scope: "live", itemId: dough.id, qtyReceived: 100, qtyRemaining: 100, lotNumber: "", receivedDate: DATE },
+      { scope: "live", itemId: circles.id, qtyReceived: 1_000, qtyRemaining: 1_000, lotNumber: "", receivedDate: DATE },
+    ]);
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            startedAt: 1_000,
+            endedAt: 2_000,
+            actualCases: 10,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: RUN_VALUES },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const consumed = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ runId, lines: [] }),
+    });
+    expect(consumed.status).toBe(200);
+    expect(await consumed.json()).toMatchObject({ applied: true, consumed: 2 });
+
+    const saveRunSnapshot = async (
+      senderId: string,
+      update: (current: Record<string, any>) => Record<string, unknown>,
+    ) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: authHeaders(),
+      });
+      expect(read.status).toBe(200);
+      const current = await read.json() as Record<string, any>;
+      const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+      expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+      const payload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId,
+        ...update(current),
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    };
+    const saveActualCases = (nextActualCases: number, senderId: string) =>
+      saveRunSnapshot(senderId, (current) => ({
+        dayState: {
+          ...current.dayState,
+          runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+            run.id === runId ? { ...run, actualCases: nextActualCases } : run,
+          ),
+        },
+        runValues: current.runValues,
+        runValuesUpdatedAt: current.runValuesUpdatedAt,
+      }));
+    const saveCartoningMode = (cartoned: string, senderId: string) =>
+      saveRunSnapshot(senderId, (current) => ({
+        dayState: current.dayState,
+        runValues: {
+          ...current.runValues,
+          [runId]: { ...current.runValues[runId], cartoned },
+        },
+        runValuesUpdatedAt: {
+          ...current.runValuesUpdatedAt,
+          [runId]: (Number(current.runValuesUpdatedAt?.[runId]) || 0) + 1,
+        },
+      }));
+
+    const saved = await saveActualCases(actualCases, "inventory-correction-test");
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      data: { dayState: { runs: [{ id: runId, actualCases }] } },
+    });
+
+    expect(await onHandForItem(dough.id)).toBe(expectedDoughOnHand);
+    expect(await onHandForItem(circles.id)).toBe(expectedCirclesOnHand);
+    const firstCorrectionEntries = await db.select().from(inventoryLedgerTable);
+    const corrections = firstCorrectionEntries.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    );
+    expect(corrections).toHaveLength(2);
+    expect(corrections.find((entry) => entry.itemId === dough.id)?.qtyDelta)
+      .toBe(expectedDoughCorrection);
+    expect(corrections.find((entry) => entry.itemId === circles.id)?.qtyDelta)
+      .toBe(expectedCirclesCorrection);
+
+    const retry = await saveActualCases(actualCases, "inventory-correction-test-retry");
+    expect(retry.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(expectedDoughOnHand);
+    expect(await onHandForItem(circles.id)).toBe(expectedCirclesOnHand);
+    const retryLedger = await db.select().from(inventoryLedgerTable);
+    expect(retryLedger.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    )).toHaveLength(2);
+
+    const reversed = await saveActualCases(10, "inventory-correction-test-reversal");
+    expect(reversed.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(98);
+    expect(await onHandForItem(circles.id)).toBe(880);
+    const reversalLedger = await db.select().from(inventoryLedgerTable);
+    const runCorrections = reversalLedger.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    );
+    expect(runCorrections).toHaveLength(4);
+    expect(runCorrections.slice(2).find((entry) => entry.itemId === dough.id)?.qtyDelta)
+      .toBe(-expectedDoughCorrection);
+    expect(runCorrections.slice(2).find((entry) => entry.itemId === circles.id)?.qtyDelta)
+      .toBe(-expectedCirclesCorrection);
+
+    const packagingDisabled = await saveCartoningMode("no", "inventory-packaging-disable");
+    expect(packagingDisabled.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(98);
+    expect(await onHandForItem(circles.id)).toBe(1_000);
+    const packagingRestored = await saveCartoningMode("yes", "inventory-packaging-restore");
+    expect(packagingRestored.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(98);
+    expect(await onHandForItem(circles.id)).toBe(880);
+    const packagingLedger = await db.select().from(inventoryLedgerTable);
+    expect(packagingLedger.filter((entry) =>
+      entry.runId === runId && entry.itemId === circles.id && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    ).map((entry) => entry.qtyDelta)).toEqual([
+      expectedCirclesCorrection,
+      -expectedCirclesCorrection,
+      120,
+      -120,
+    ]);
+  });
+
+  it("keeps multiple merged source and target baselines combined for later run corrections", async () => {
+    const runId = "inventory-correction-after-merge";
+    const firstSourceKey = "ingredient:Old Cheese:batches";
+    const secondSourceKey = "ingredient:Alternate Cheese:batches";
+    const targetKey = "ingredient:New Cheese:batches";
+    const [firstSource] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: firstSourceKey,
+      category: "ingredient",
+      name: "Old Cheese",
+      unit: "batches",
+    }).returning();
+    const [secondSource] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: secondSourceKey,
+      category: "ingredient",
+      name: "Alternate Cheese",
+      unit: "batches",
+    }).returning();
+    const [target] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: targetKey,
+      category: "ingredient",
+      name: "New Cheese",
+      unit: "batches",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      {
+        scope: "live", itemId: firstSource.id, qtyReceived: 100, qtyRemaining: 100,
+        lotNumber: "", receivedDate: DATE,
+      },
+      {
+        scope: "live", itemId: secondSource.id, qtyReceived: 100, qtyRemaining: 100,
+        lotNumber: "", receivedDate: DATE,
+      },
+      {
+        scope: "live", itemId: target.id, qtyReceived: 100, qtyRemaining: 100,
+        lotNumber: "", receivedDate: DATE,
+      },
+    ]);
+
+    // Three applicators consume different inventory IDs before the merge.
+    // After the merge, the corrected run uses the target name for every line.
+    const originalValues = {
+      ...RUN_VALUES,
+      app1BatchLbs: 16,
+      app1Type: "Old Cheese",
+      app2BatchLbs: 16,
+      app2Type: "Alternate Cheese",
+      app3BatchLbs: 16,
+      app3Type: "New Cheese",
+    };
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            startedAt: 1_000,
+            endedAt: 2_000,
+            actualCases: 10,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: originalValues },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const consumed = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ runId, lines: [] }),
+    });
+    expect(consumed.status).toBe(200);
+    expect(await consumed.json()).toMatchObject({ applied: true });
+
+    const [claimBeforeMerge] = await db.select().from(inventoryConsumedRunsTable)
+      .where(eq(inventoryConsumedRunsTable.runId, runId));
+    expect(claimBeforeMerge.baselineLines).toEqual(expect.arrayContaining([
+      { itemId: firstSource.id, qty: 1.25 },
+      { itemId: secondSource.id, qty: 1.25 },
+      { itemId: target.id, qty: 1.25 },
+    ]));
+    expect(claimBeforeMerge.baselineLines).toHaveLength(3);
+
+    const merged = await fetch(`${baseUrl}/api/inventory/merge`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        merges: [
+          {
+            fromKey: firstSourceKey,
+            toKey: targetKey,
+            toName: "New Cheese",
+            unit: "batches",
+            category: "ingredient",
+          },
+          {
+            fromKey: secondSourceKey,
+            toKey: targetKey,
+            toName: "New Cheese",
+            unit: "batches",
+            category: "ingredient",
+          },
+        ],
+      }),
+    });
+    expect(merged.status).toBe(200);
+    expect(await merged.json()).toMatchObject({ merged: 2 });
+    expect(await db.select().from(inventoryItemsTable)
+      .where(inArray(inventoryItemsTable.id, [firstSource.id, secondSource.id])))
+      .toHaveLength(0);
+
+    const [claimAfterMerge] = await db.select().from(inventoryConsumedRunsTable)
+      .where(eq(inventoryConsumedRunsTable.runId, runId));
+    expect(claimAfterMerge.baselineLines).toEqual([
+      { itemId: target.id, qty: 3.75 },
+    ]);
+    const onHandAfterMerge = await onHandForItem(target.id);
+    expect(onHandAfterMerge).toBe(296.25);
+
+    const saveCorrection = async (senderId: string) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: authHeaders(),
+      });
+      expect(read.status).toBe(200);
+      const current = await read.json() as Record<string, any>;
+      const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+      const nextValues = {
+        ...current.runValues[runId],
+        app1Type: "New Cheese",
+        app2Type: "New Cheese",
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId,
+          payload: {
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId,
+            dayState: {
+              ...current.dayState,
+              runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+                run.id === runId ? { ...run, actualCases: 15 } : run,
+              ),
+            },
+            runValues: { ...current.runValues, [runId]: nextValues },
+            runValuesUpdatedAt: {
+              ...current.runValuesUpdatedAt,
+              [runId]: Number(current.runValuesUpdatedAt?.[runId] ?? 0) + 1,
+            },
+          },
+        }),
+      });
+    };
+
+    const corrected = await saveCorrection("inventory-correction-after-merge");
+    expect(corrected.status).toBe(200);
+    // The run now consumes 5.625 batches total. Only the 1.875 increase
+    // beyond the combined original baseline is drawn from the merged stock.
+    expect(await onHandForItem(target.id)).toBe(294.375);
+    const correctionLedger = (await db.select().from(inventoryLedgerTable))
+      .filter((entry) => entry.runId === runId);
+    const originalConsumption = correctionLedger.filter((entry) =>
+      entry.type === "consume" && entry.note === "Auto-deducted on run completion",
+    );
+    expect(originalConsumption).toHaveLength(3);
+    expect(originalConsumption.every((entry) => entry.itemId === target.id)).toBe(true);
+    expect(originalConsumption.map((entry) => entry.qtyDelta).sort((a, b) => a - b))
+      .toEqual([-1.25, -1.25, -1.25]);
+    expect(correctionLedger.filter((entry) =>
+      entry.type === "adjust" && entry.note.startsWith("Run consumption correction:"),
+    ).map((entry) => ({ itemId: entry.itemId, qtyDelta: entry.qtyDelta })))
+      .toEqual([{ itemId: target.id, qtyDelta: -1.875 }]);
+
+    const targetLedger = (await db.select().from(inventoryLedgerTable))
+      .filter((entry) => entry.itemId === target.id);
+    expect(targetLedger.some((entry) => entry.note === "Merged from Old Cheese" && entry.qtyDelta === 0))
+      .toBe(true);
+    expect(targetLedger.some((entry) =>
+      entry.note === "Merged from Alternate Cheese" && entry.qtyDelta === 0,
+    )).toBe(true);
+
+    const retry = await saveCorrection("inventory-correction-after-merge-retry");
+    expect(retry.status).toBe(200);
+    expect(await onHandForItem(target.id)).toBe(294.375);
+    const retryLedger = (await db.select().from(inventoryLedgerTable))
+      .filter((entry) => entry.runId === runId);
+    expect(retryLedger.filter((entry) =>
+      entry.type === "adjust" && entry.note.startsWith("Run consumption correction:"),
+    )).toHaveLength(1);
+  });
+
+  it("captures the pre-edit baseline for a run consumed before baseline snapshots existed", async () => {
+    const runId = "legacy-inventory-correction";
+    const [dough] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "ingredient:Dough:batches",
+      category: "ingredient",
+      name: "Dough",
+      unit: "batches",
+    }).returning();
+    const [circles] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "packaging:circles:12in",
+      category: "packaging",
+      name: "12-inch circles",
+      unit: "circles",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      { scope: "live", itemId: dough.id, qtyReceived: 100, qtyRemaining: 98, lotNumber: "", receivedDate: DATE },
+      { scope: "live", itemId: circles.id, qtyReceived: 1_000, qtyRemaining: 880, lotNumber: "", receivedDate: DATE },
+    ]);
+    await db.insert(inventoryConsumedRunsTable).values({ runId, scope: "live" });
+    await db.insert(inventoryLedgerTable).values([
+      {
+        itemId: dough.id, scope: "live", lotId: null, type: "consume",
+        qtyDelta: -2, runId, note: "Auto-deducted on run completion",
+      },
+      {
+        itemId: circles.id, scope: "live", lotId: null, type: "consume",
+        qtyDelta: -120, runId, note: "Auto-deducted on run completion",
+      },
+    ]);
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            startedAt: 1_000,
+            endedAt: 2_000,
+            actualCases: 10,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: RUN_VALUES },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const saveActualCases = async (senderId: string) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: authHeaders(),
+      });
+      const current = await read.json() as Record<string, any>;
+      const payload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: read.headers.get("X-Sync-Snapshot"),
+        dayState: {
+          ...current.dayState,
+          runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+            run.id === runId ? { ...run, actualCases: 5 } : run,
+          ),
+        },
+        runValues: current.runValues,
+        runValuesUpdatedAt: current.runValuesUpdatedAt,
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    };
+
+    const corrected = await saveActualCases("legacy-inventory-correction");
+    expect(corrected.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(99);
+    expect(await onHandForItem(circles.id)).toBe(940);
+    const [claim] = await db.select().from(inventoryConsumedRunsTable)
+      .where(eq(inventoryConsumedRunsTable.runId, runId));
+    expect(claim.baselineLines).toEqual(expect.arrayContaining([
+      { itemId: dough.id, qty: 2 },
+      { itemId: circles.id, qty: 120 },
+    ]));
+
+    const retry = await saveActualCases("legacy-inventory-correction-retry");
+    expect(retry.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(99);
+    expect(await onHandForItem(circles.id)).toBe(940);
+    const entries = await db.select().from(inventoryLedgerTable);
+    expect(entries.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    )).toHaveLength(2);
+  });
 });
 
 describe("GET /sync/today — combined wake recovery", () => {
@@ -222,6 +810,76 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       : { skidsCompleted: 1, casesOnCurrentSkid: 2 },
     observedGeneration: `${runId}:1`, baseRevision: 0, resetEpoch: 0, deviceId: id, ...extra,
   });
+  const stockBaseline = {
+    app1BatchesMade: 9,
+    app1BatchAnchorNetSec: 0,
+    app1BatchCorrectionGeneration: 0,
+    app1StockLbs: 40,
+    app1StockAnchorNetSec: 0,
+    app1StockCorrectionGeneration: 0,
+  };
+  const seedStockRun = async () => db.update(dailySyncTable).set({
+    data: {
+      dayState: { date: DATE, runs: [{ id: "stock-run", startedAt: 1_000, pausedAt: 2_000, metaUpdatedAt: 3 }] },
+      runValues: {
+        "stock-run": {
+          app1Type: "Cheese",
+          app1BatchLbs: 50,
+          app1CheeseRecipe: [],
+          ...stockBaseline,
+          applicatorStockInitialized: false,
+        },
+      },
+    },
+    canonicalRevision: 0,
+  }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  const stockEdit = (id: string, pounds: number) => ({
+    id, date: DATE, runId: "stock-run", section: "app1",
+    values: {
+      app1StockLbs: pounds,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 1,
+    },
+    baseValues: stockBaseline,
+    observedGeneration: "stock-run:3", baseRevision: 0, resetEpoch: 0, deviceId: id,
+  });
+  const sauceStockBaseline = {
+    sauceStockBarrels: 0,
+    sauceStockAnchorNetSec: 0,
+    sauceStockCorrectionGeneration: 0,
+  };
+  const seedSauceStockRun = async () => db.update(dailySyncTable).set({
+    data: {
+      dayState: { date: DATE, runs: [{ id: "sauce-stock-run", startedAt: 1_000, metaUpdatedAt: 3 }] },
+      runValuesUpdatedAt: { "sauce-stock-run": 10 },
+      runValues: {
+        "sauce-stock-run": {
+          sauceBarrelsMade: 7,
+          sauceBarrelAnchorNetSec: 500,
+          sauceBarrelCorrectionGeneration: 0,
+          ...sauceStockBaseline,
+          sauceStockInitialized: false,
+        },
+      },
+    },
+    canonicalRevision: 0,
+  }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  const sauceStockEdit = (id: string, stock: number) => ({
+    id,
+    date: DATE,
+    runId: "sauce-stock-run",
+    section: "sauce-stock",
+    values: {
+      sauceStockBarrels: stock,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 1,
+    },
+    baseValues: sauceStockBaseline,
+    observedGeneration: "sauce-stock-run:3",
+    baseRevision: 0,
+    resetEpoch: 0,
+    deviceId: id,
+  });
 
   beforeEach(async () => {
     await db.update(dailySyncTable).set({ data: values(), canonicalRevision: 0 })
@@ -265,6 +923,146 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     const retry = await request(body);
     expect(retry.status).toBe(200);
     expect((await retry.json() as { duplicate?: boolean }).duplicate).toBe(true);
+  });
+
+  it("accepts a paused-run stock refill within capacity and preserves cumulative made history", async () => {
+    await seedStockRun();
+    const response = await request(stockEdit("stock-refill", 100));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { runValues: Record<string, Record<string, unknown>> } };
+    expect(body.data.runValues["stock-run"]).toMatchObject({
+      app1StockLbs: 100,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 1,
+      app1BatchesMade: 9,
+      applicatorStockInitialized: true,
+    });
+  });
+
+  it("rejects an operator stock adjustment above that slot's capacity", async () => {
+    await seedStockRun();
+    const response = await request(stockEdit("stock-over-cap", 100.01));
+    expect(response.status).toBe(400);
+    const [stored] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect((stored.data as any).runValues["stock-run"].app1StockLbs).toBe(40);
+    expect((stored.data as any).runValues["stock-run"].applicatorStockInitialized).toBe(false);
+  });
+
+  it("accepts fractional Sauce stock corrections without inventory writes and fences old ticks", async () => {
+    await seedSauceStockRun();
+    const response = await request(sauceStockEdit("sauce-stock-correction", 1.4));
+    expect(response.status).toBe(200);
+    const accepted = await response.json() as {
+      data: { runValues: Record<string, Record<string, unknown>>; autoTrackCoordination?: any };
+    };
+    expect(accepted.data.runValues["sauce-stock-run"]).toMatchObject({
+      sauceStockBarrels: 1.4,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 1,
+      sauceStockInitialized: true,
+      sauceBarrelsMade: 7,
+      sauceBarrelAnchorNetSec: 500,
+    });
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+
+    const stale = await fetch(`${baseUrl}/api/sync/auto-track/claim?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "old-sauce-stock-tick",
+        claim: {
+          version: 1,
+          runId: "sauce-stock-run",
+          channel: "sauce-stock",
+          generation: "sauce-stock-run:3",
+          sequence: 1,
+          eventId: "old-sauce-stock-tick:1",
+          dueAt: 1,
+          nextDueAt: 25,
+          baseUpdatedAt: 10,
+          correctionGeneration: 0,
+          mutations: [
+            { field: "sauceStockBarrels", from: 1.4, to: 1.3 },
+            { field: "sauceStockAnchorNetSec", from: 0, to: 1 },
+            { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+          ],
+        },
+      }),
+    });
+    expect(stale.status).toBe(200);
+    expect((await stale.json() as { outcome: string }).outcome).toBe("conflict");
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+  });
+
+  it("accepted Packaging correction survives a newer stale ordinary snapshot write", async () => {
+    const acceptedResponse = await request({
+      ...edit("packaging-hold"),
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 45 },
+      baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 2 },
+    });
+    expect(acceptedResponse.status).toBe(200);
+    const accepted = await acceptedResponse.json() as {
+      data: Record<string, any>;
+      serverTime: number;
+      snapshotId: string;
+    };
+    const acceptedProgress = accepted.data.packagingProgress["manual-run"];
+    expect(accepted.data.runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(acceptedProgress).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+    });
+    expect(acceptedProgress.manualOverrideUntil).toBeGreaterThan(accepted.serverTime);
+
+    const staleProgress = {
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 44,
+      correctionGeneration: 99,
+      updatedAt: accepted.serverTime + 5_000,
+      manualOverrideUntil: 0,
+    };
+    const stalePayload = {
+      ...accepted.data,
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: accepted.snapshotId,
+      runValues: {
+        ...accepted.data.runValues,
+        "manual-run": {
+          ...accepted.data.runValues["manual-run"],
+          skidsCompleted: staleProgress.skidsCompleted,
+          casesOnCurrentSkid: staleProgress.casesOnCurrentSkid,
+        },
+      },
+      runValuesUpdatedAt: { "manual-run": accepted.serverTime + 5_000 },
+      packagingProgress: { "manual-run": staleProgress },
+    };
+    const staleWrite = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "stale-packaging-peer", payload: stalePayload }),
+    });
+    expect(staleWrite.status).toBe(200);
+    const canonical = await staleWrite.json() as {
+      data: {
+        runValues: Record<string, Record<string, number>>;
+        packagingProgress: Record<string, Record<string, number>>;
+      };
+    };
+    expect(canonical.data.runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(canonical.data.packagingProgress["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+    });
   });
 
   it("same accepted id conflicts after reset epoch bump", async () => {
@@ -432,6 +1230,12 @@ function authHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(USER)}` };
 }
 
+async function onHandForItem(itemId: number): Promise<number> {
+  const lots = await db.select().from(inventoryLotsTable);
+  return lots.filter((lot) => lot.itemId === itemId)
+    .reduce((sum, lot) => sum + lot.qtyRemaining, 0);
+}
+
 function managerAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` };
 }
@@ -439,6 +1243,79 @@ function managerAuthHeaders(): Record<string, string> {
 function sandboxAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(SANDBOX)}` };
 }
+
+describe("factory purge retains QC history", () => {
+  it.each(["live", "sandbox"] as const)("preserves both QC scopes while purging only %s master data", async (scope) => {
+    await db.delete(qualityChecksTable);
+    await db.insert(qualityChecksTable).values([
+      { scope: "live", productType: "pizza", status: "pass", summary: "Live retained check", reviewerId: MANAGER },
+      { scope: "sandbox", productType: "pizza", status: "review", summary: "Sandbox retained check", reviewerId: SANDBOX },
+    ]);
+    await db.insert(qcWorkflowEventsTable).values([
+      {
+        scope: "live", operationId: "purge-live-qc", recordId: "purge-live-qc-record",
+        eventType: "lot", runId: "purge-run", actorId: MANAGER, payload: { lotNumber: "Live QC retained" },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-qc", recordId: "purge-sandbox-qc-record",
+        eventType: "lot", runId: "purge-run", actorId: SANDBOX, payload: { lotNumber: "Sandbox QC retained" },
+      },
+      {
+        scope: "live", operationId: "purge-live-allergen", recordId: "purge-live-allergen-record",
+        eventType: "allergen-review", runId: "purge-run", actorId: MANAGER,
+        payload: { footprintReviewed: true, footprint: { status: "complete", allergens: [], unknownIngredients: [], missingComponents: [] } },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-allergen", recordId: "purge-sandbox-allergen-record",
+        eventType: "allergen-review", runId: "purge-run", actorId: SANDBOX,
+        payload: { footprintReviewed: true, footprint: { status: "incomplete", allergens: [], unknownIngredients: ["Unknown"], missingComponents: [] } },
+      },
+      {
+        scope: "live", operationId: "purge-live-component-qc", recordId: "purge-live-component-qc-record",
+        eventType: "component-check", runId: "purge-run", actorId: MANAGER, payload: { outcome: "not-evaluated" },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-component-qc", recordId: "purge-sandbox-component-qc-record",
+        eventType: "component-check", runId: "purge-run", actorId: SANDBOX, payload: { outcome: "not-evaluated" },
+      },
+    ]);
+    await db.insert(inventoryItemsTable).values([
+      { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
+      { scope: "sandbox", key: "purge-sandbox-item", category: "ingredient", name: "Sandbox fixture", unit: "lbs" },
+    ]);
+    const [resetBefore] = await db.select().from(dataResetTable).where(eq(dataResetTable.scope, scope));
+    const res = await fetch(`${baseUrl}/api/sync/purge-all`, {
+      method: "POST", headers: scope === "live" ? managerAuthHeaders() : sandboxAuthHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { epoch: number };
+    expect(body.epoch).toBe((resetBefore?.epoch ?? 0) + 1);
+    const [resetAfter] = await db.select().from(dataResetTable).where(eq(dataResetTable.scope, scope));
+    expect(resetAfter.epoch).toBe(body.epoch);
+    const checks = await db.select().from(qualityChecksTable);
+    expect(checks.map((row) => row.summary).sort()).toEqual(["Live retained check", "Sandbox retained check"]);
+    expect(checks.map((row) => row.reviewerId).sort()).toEqual([MANAGER, SANDBOX].sort());
+    const workflowEvents = await db.select().from(qcWorkflowEventsTable);
+    expect(workflowEvents.filter((row) => row.eventType === "lot").map((row) => row.payload.lotNumber).sort())
+      .toEqual(["Live QC retained", "Sandbox QC retained"]);
+    expect(workflowEvents.filter((row) => row.eventType === "allergen-review").map((row) => row.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    expect(workflowEvents.filter((row) => row.eventType === "component-check").map((row) => row.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    const items = await db.select().from(inventoryItemsTable);
+    expect(items.map((row) => row.scope)).toEqual([scope === "live" ? "sandbox" : "live"]);
+  });
+
+  it("does not permit a staff purge or alter retained history on rejection", async () => {
+    await db.insert(qualityChecksTable).values({
+      scope: "live", productType: "pizza", status: "pass", summary: "Staff rejection check",
+    });
+    const before = await db.select().from(qualityChecksTable);
+    const res = await fetch(`${baseUrl}/api/sync/purge-all`, { method: "POST", headers: authHeaders() });
+    expect(res.status).toBe(403);
+    expect(await db.select().from(qualityChecksTable)).toEqual(before);
+  });
+});
 
 const EVIDENCE_DATE = "2030-03-10";
 const EVIDENCE_RUN = "evidence-run";
@@ -648,6 +1525,682 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
         DROP TRIGGER IF EXISTS reject_auto_applicator_evidence_trigger ON applicator_batch_evidence;
         DROP FUNCTION IF EXISTS reject_auto_applicator_evidence();
       `);
+    }
+  });
+
+  it("server-depletes initialized stock fractionally without changing cumulative-made history", async () => {
+    await seedServerApplicatorRun();
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = before.data as any;
+    data.runValues[TICK_RUN] = {
+      ...data.runValues[TICK_RUN],
+      app1BatchesMade: 13, // Demand cap reached; the separate historic register is not due.
+      app1StockLbs: 100,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    };
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(result.accepted).toBeGreaterThan(0);
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect((after.data as any).runValues[TICK_RUN]).toMatchObject({
+      app1StockLbs: 87.5,
+      app1StockAnchorNetSec: 15,
+      app1BatchesMade: 13,
+    });
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
+  });
+});
+
+describe("server auto-track tick recovery under database pressure", () => {
+  const TICK_DATE = "2030-03-10";
+  const TICK_RUN = "server-owned-applicator";
+  const TICK_NOW = new Date("2030-03-10T12:00:00.000Z").getTime();
+
+  async function seedTickRun(scope: "live" | "sandbox" = "live") {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: TICK_DATE,
+          currentIndex: 0,
+          runs: [{ id: TICK_RUN, subTab: "crusts", startedAt: TICK_NOW - 120_000, metaUpdatedAt: 1 }],
+        },
+        runValuesUpdatedAt: { [TICK_RUN]: 1 },
+        runValues: {
+          [TICK_RUN]: {
+            casesNeeded: 200, crustsPerCycle: 12, cycleSpeed: 600, speedAdjustment: 1,
+            approxLineSpeed: 400, freezerTime: 3, pizzasPerCase: 12, casesPerSkid: 48,
+            casesPerLayer: 12, doughballsPerTray: 36, crustsPerStack: 6, doughBatchYield: 150,
+            crustsPerCase: 12, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0,
+            batchesReady: 0, targetDoughballWeight: 8, doughRecipe: [],
+            sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+            sauceOzPerPizza: 0, frontlineRecipeName: "", frontlineRecipe: [],
+            app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+            app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
+            app1BatchCorrectionGeneration: 0,
+            app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
+            app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
+            app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
+            pep1Type: "", pep2Type: "", pep1Combined: true,
+          },
+        },
+      },
+    }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, scope)));
+  }
+
+  async function removeTickFailureTrigger() {
+    await db.execute(sql`
+      DROP TRIGGER IF EXISTS reject_auto_track_tick_trigger ON daily_sync;
+      DROP FUNCTION IF EXISTS reject_auto_track_tick_once();
+      DROP FUNCTION IF EXISTS reject_auto_track_tick_always();
+      DROP SEQUENCE IF EXISTS auto_track_tick_failure_seq;
+    `);
+  }
+
+  it("retries a transient date-transaction failure without duplicating accepted effects", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await seedTickRun();
+    await db.execute(sql`
+      CREATE SEQUENCE auto_track_tick_failure_seq;
+      CREATE FUNCTION reject_auto_track_tick_once() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.date = '2030-03-10' AND NEW.scope = 'live'
+          AND nextval('auto_track_tick_failure_seq') = 1 THEN
+          RAISE EXCEPTION 'injected transient tick failure' USING ERRCODE = '57P01';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER reject_auto_track_tick_trigger
+      BEFORE UPDATE ON daily_sync
+      FOR EACH ROW EXECUTE FUNCTION reject_auto_track_tick_once();
+    `);
+
+    try {
+      const result = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+      expect(result.outcomes.error).toBeUndefined();
+      expect(result.accepted).toBeGreaterThan(0);
+
+      const [row] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect((row.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(1);
+      expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(1);
+      const [ledgerCount] = await db.select({ value: count() }).from(operationalIntentLedgerTable)
+        .where(and(
+          eq(operationalIntentLedgerTable.scope, "live"),
+          eq(operationalIntentLedgerTable.date, TICK_DATE),
+        ));
+      expect(ledgerCount.value).toBeGreaterThan(0);
+      expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
+        .toMatchObject({ status: "ok", recentFailureCount: 0 });
+    } finally {
+      await removeTickFailureTrigger();
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+  });
+
+  it("replays a committed date transaction after losing its reply without duplicating effects", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await seedTickRun();
+    const [sauceItem] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: sauceItem.id,
+      qtyReceived: 100,
+      qtyRemaining: 100,
+    });
+
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const seededData = before.data as any;
+    seededData.runValues[TICK_RUN] = {
+      ...seededData.runValues[TICK_RUN],
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 2,
+      frontlineRecipeName: "BBQ Sauce",
+      frontlineRecipe: [],
+      sauceBarrelLbs: 10,
+    };
+    await db.update(dailySyncTable).set({ data: seededData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    // The real PostgreSQL transaction commits first. Throwing a transient
+    // connection error before the operation returns models the caller losing
+    // that commit reply, so runBackgroundOperation replays the same date pass.
+    const transactionDb = db as unknown as {
+      transaction: (...args: any[]) => Promise<any>;
+    };
+    const realTransaction = transactionDb.transaction.bind(db);
+    let transactionAttempts = 0;
+    let lostReplyInjected = false;
+    let applyingManagerEdit = false;
+    let managerEditStamp: number | undefined;
+    let managerEditStatus: number | undefined;
+    transactionDb.transaction = async (...args: any[]) => {
+      if (!applyingManagerEdit) transactionAttempts += 1;
+      const committed = await realTransaction(...args);
+      if (!lostReplyInjected) {
+        lostReplyInjected = true;
+        applyingManagerEdit = true;
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          const read = await fetch(`${baseUrl}/api/sync/today?today=${TICK_DATE}`, {
+            headers: authHeaders(),
+          });
+          expect(read.status).toBe(200);
+          const current = await read.json() as Record<string, any>;
+          const serverClock = vi.spyOn(Date, "now").mockReturnValue(TICK_NOW + 1);
+          try {
+            const correction = await fetch(
+              `${baseUrl}/api/sync/today?today=${TICK_DATE}&epoch=0`,
+              {
+                method: "PUT",
+                headers: { ...authHeaders(), "content-type": "application/json" },
+                body: JSON.stringify({
+                  senderId: "manager-recovery-correction",
+                  payload: {
+                    syncVersion: 1,
+                    completeness: "partial",
+                    baseSnapshotId: read.headers.get("X-Sync-Snapshot"),
+                    runValues: {
+                      [TICK_RUN]: { ...current.runValues[TICK_RUN], app1BatchesMade: 7 },
+                    },
+                    runValuesUpdatedAt: {
+                      [TICK_RUN]: Number(current.runValuesUpdatedAt[TICK_RUN]) + 1,
+                    },
+                  },
+                }),
+              },
+            );
+            managerEditStatus = correction.status;
+            expect(correction.status).toBe(200);
+            const corrected = await correction.json() as {
+              data?: { runValuesUpdatedAt?: Record<string, number> };
+            };
+            managerEditStamp = corrected.data?.runValuesUpdatedAt?.[TICK_RUN];
+          } finally {
+            serverClock.mockRestore();
+          }
+        } finally {
+          applyingManagerEdit = false;
+        }
+        throw Object.assign(
+          new Error("injected lost database reply after transaction commit"),
+          { code: "08006" },
+        );
+      }
+      return committed;
+    };
+
+    try {
+      await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+    } finally {
+      transactionDb.transaction = realTransaction;
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+
+    expect(lostReplyInjected).toBe(true);
+    expect(transactionAttempts).toBeGreaterThanOrEqual(2);
+    expect(managerEditStatus).toBe(200);
+    expect(managerEditStamp).toBeGreaterThan(TICK_NOW);
+
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const finalData = after.data as any;
+    expect(finalData.runValues[TICK_RUN]).toMatchObject({
+      app1BatchesMade: 7,
+      sauceBarrelsMade: 1,
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
+    });
+    expect(finalData.runValuesUpdatedAt[TICK_RUN]).toBe(managerEditStamp);
+    expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"]).toMatchObject({
+      generation: `manual:${managerEditStamp}`,
+      sequence: 0,
+      nextDueAt: 0,
+    });
+
+    const automaticEvidence = (await db.select().from(applicatorBatchEvidenceTable))
+      .filter((row) => row.source === "automatic-observation");
+    expect(automaticEvidence).toHaveLength(1);
+
+    const tickLedger = (await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track");
+    for (const channel of [
+      "app1-batch", "sauce-barrel", "sauce-stock", "tray-consume", "batch-consume",
+    ]) {
+      expect(tickLedger.filter((entry) => (entry.actionData as any)?.channel === channel))
+        .toHaveLength(1);
+    }
+    const appBatchEntry = tickLedger.find(
+      (entry) => (entry.actionData as any)?.channel === "app1-batch",
+    );
+    const sauceEntry = tickLedger.find(
+      (entry) => (entry.actionData as any)?.channel === "sauce-barrel",
+    );
+    const appBatchEventId = (appBatchEntry?.actionData as any)?.eventId;
+    const sauceEventId = (sauceEntry?.actionData as any)?.eventId;
+    expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].acceptedEventId)
+      .toBeUndefined();
+    expect(finalData.autoTrackCoordination.runs[TICK_RUN]["sauce-barrel"].acceptedEventId)
+      .toBe(sauceEventId);
+    expect(automaticEvidence[0]?.operationId).toBe(`auto:${createHash("sha256")
+      .update(JSON.stringify([TICK_DATE, TICK_RUN, 1, appBatchEventId]))
+      .digest("hex")}`);
+
+    const [remainingLot] = await db.select().from(inventoryLotsTable);
+    expect(remainingLot.qtyRemaining).toBe(90);
+    expect(await db.select().from(inventoryLedgerTable)).toMatchObject([
+      { type: "consume", qtyDelta: -10, runId: TICK_RUN },
+    ]);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+
+    const tickWakeups = await db.select().from(syncOutboxEventsTable);
+    // The first tick commits the Sauce/applicator claims. The concurrent
+    // manager correction gets its own revision, then the retry accepts the
+    // distinct wall-clock claims that did not fit the first pass's claim
+    // budget. Each write must retain its own ordered wakeup.
+    expect(tickWakeups).toHaveLength(3);
+    expect(tickWakeups).toMatchObject([
+      { scope: "live", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+      {
+        scope: "live", cursor: 2, kind: "day-state", date: TICK_DATE,
+        senderId: "manager-recovery-correction",
+      },
+      { scope: "live", cursor: 3, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+    ]);
+    expect(await db.select().from(syncOutboxCursorsTable))
+      .toMatchObject([{ scope: "live", cursor: 3 }]);
+    expect(await db.select().from(dataResetTable))
+      .toMatchObject([{ scope: "live", epoch: 0 }]);
+  });
+
+  it("keeps a retried sandbox date transaction isolated from same-date live state", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await seedTickRun();
+    await db.insert(dailySyncTable).values({
+      ...dayRow(TICK_DATE),
+      scope: "sandbox",
+    });
+    await seedTickRun("sandbox");
+
+    const [liveSauceItem] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    const [sandboxSauceItem] = await db.insert(inventoryItemsTable).values({
+      scope: "sandbox",
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      { scope: "live", itemId: liveSauceItem.id, qtyReceived: 50, qtyRemaining: 50 },
+      { scope: "sandbox", itemId: sandboxSauceItem.id, qtyReceived: 100, qtyRemaining: 100 },
+    ]);
+
+    const [liveBefore] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    await db.insert(dataResetTable).values({
+      scope: "live",
+      epoch: 17,
+      resetAt: new Date("2030-03-10T10:00:00.000Z"),
+    });
+    const liveBeforeState = {
+      data: liveBefore.data,
+      canonicalRevision: liveBefore.canonicalRevision,
+      updatedAt: liveBefore.updatedAt,
+    };
+    const liveBeforeInventory = {
+      items: await db.select().from(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.scope, "live")),
+      lots: await db.select().from(inventoryLotsTable)
+        .where(eq(inventoryLotsTable.scope, "live")),
+      ledger: await db.select().from(inventoryLedgerTable)
+        .where(eq(inventoryLedgerTable.scope, "live")),
+      consumedRuns: await db.select().from(inventoryConsumedRunsTable)
+        .where(eq(inventoryConsumedRunsTable.scope, "live")),
+    };
+    const liveBeforeEvidence = await db.select().from(applicatorBatchEvidenceTable)
+      .where(eq(applicatorBatchEvidenceTable.scope, "live"));
+    const liveBeforeIntentLedger = await db.select().from(operationalIntentLedgerTable)
+      .where(eq(operationalIntentLedgerTable.scope, "live"));
+    const liveBeforeReset = await db.select().from(dataResetTable)
+      .where(eq(dataResetTable.scope, "live"));
+    const liveBeforeOutbox = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"));
+    const liveBeforeOutboxCursor = await db.select().from(syncOutboxCursorsTable)
+      .where(eq(syncOutboxCursorsTable.scope, "live"));
+
+    const sandboxData = (await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox"))))[0]!.data as any;
+    sandboxData.runValues[TICK_RUN] = {
+      ...sandboxData.runValues[TICK_RUN],
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 2,
+      frontlineRecipeName: "BBQ Sauce",
+      frontlineRecipe: [],
+      sauceBarrelLbs: 10,
+    };
+    await db.update(dailySyncTable).set({ data: sandboxData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
+
+    const transactionDb = db as unknown as {
+      transaction: (...args: any[]) => Promise<any>;
+    };
+    const realTransaction = transactionDb.transaction.bind(db);
+    let transactionAttempts = 0;
+    let lostReplyInjected = false;
+    transactionDb.transaction = async (...args: any[]) => {
+      transactionAttempts += 1;
+      const committed = await realTransaction(...args);
+      if (!lostReplyInjected) {
+        lostReplyInjected = true;
+        throw Object.assign(
+          new Error("injected sandbox lost database reply after transaction commit"),
+          { code: "08006" },
+        );
+      }
+      return committed;
+    };
+
+    try {
+      await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "sandbox", date: TICK_DATE,
+      });
+    } finally {
+      transactionDb.transaction = realTransaction;
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+
+    expect(lostReplyInjected).toBe(true);
+    expect(transactionAttempts).toBeGreaterThanOrEqual(2);
+
+    const [sandboxAfter] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
+    const sandboxFinalData = sandboxAfter.data as any;
+    expect(sandboxFinalData.runValues[TICK_RUN]).toMatchObject({
+      app1BatchesMade: 1,
+      sauceBarrelsMade: 1,
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
+    });
+    expect(sandboxFinalData.runValuesUpdatedAt[TICK_RUN]).toBe(TICK_NOW);
+
+    const [liveAfter] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect({
+      data: liveAfter.data,
+      canonicalRevision: liveAfter.canonicalRevision,
+      updatedAt: liveAfter.updatedAt,
+    }).toEqual(liveBeforeState);
+
+    const automaticEvidence = await db.select().from(applicatorBatchEvidenceTable);
+    expect(automaticEvidence).toHaveLength(1);
+    expect(automaticEvidence[0]).toMatchObject({ scope: "sandbox", date: TICK_DATE });
+
+    const tickLedger = (await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track");
+    expect(tickLedger.every((entry) => entry.scope === "sandbox" && entry.date === TICK_DATE)).toBe(true);
+    const acceptedTickLedger = tickLedger.filter((entry) => entry.outcome === "accepted");
+    for (const channel of [
+      "app1-batch", "sauce-barrel", "sauce-stock", "tray-consume", "batch-consume",
+    ]) {
+      expect(acceptedTickLedger.filter((entry) => (entry.actionData as any)?.channel === channel))
+        .toHaveLength(1);
+    }
+
+    const sandboxLots = await db.select().from(inventoryLotsTable)
+      .where(eq(inventoryLotsTable.scope, "sandbox"));
+    expect(sandboxLots).toMatchObject([{ qtyRemaining: 90 }]);
+    expect(await db.select().from(inventoryLedgerTable))
+      .toMatchObject([{ scope: "sandbox", type: "consume", qtyDelta: -10, runId: TICK_RUN }]);
+    const sandboxConsumedRuns = await db.select().from(inventoryConsumedRunsTable);
+    expect(sandboxConsumedRuns).toHaveLength(1);
+    expect(sandboxConsumedRuns[0]).toMatchObject({
+      scope: "sandbox",
+      runId: expect.stringContaining(`${TICK_RUN}:sauce-event:`),
+    });
+
+    expect({
+      items: await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.scope, "live")),
+      lots: await db.select().from(inventoryLotsTable).where(eq(inventoryLotsTable.scope, "live")),
+      ledger: await db.select().from(inventoryLedgerTable).where(eq(inventoryLedgerTable.scope, "live")),
+      consumedRuns: await db.select().from(inventoryConsumedRunsTable)
+        .where(eq(inventoryConsumedRunsTable.scope, "live")),
+    }).toEqual(liveBeforeInventory);
+    expect(await db.select().from(applicatorBatchEvidenceTable)
+      .where(eq(applicatorBatchEvidenceTable.scope, "live"))).toEqual(liveBeforeEvidence);
+    expect(await db.select().from(operationalIntentLedgerTable)
+      .where(eq(operationalIntentLedgerTable.scope, "live"))).toEqual(liveBeforeIntentLedger);
+
+    const resetRows = await db.select().from(dataResetTable);
+    expect(Object.fromEntries(resetRows.map((row) => [row.scope, row.epoch])))
+      .toEqual({ live: 17, sandbox: 0 });
+    expect(await db.select().from(dataResetTable).where(eq(dataResetTable.scope, "live")))
+      .toEqual(liveBeforeReset);
+
+    expect(await db.select().from(syncOutboxEventsTable))
+      .toMatchObject([
+        { scope: "sandbox", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+        { scope: "sandbox", cursor: 2, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+      ]);
+    expect(await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"))).toEqual(liveBeforeOutbox);
+    expect(await db.select().from(syncOutboxCursorsTable))
+      .toMatchObject([{ scope: "sandbox", cursor: 2 }]);
+    expect(await db.select().from(syncOutboxCursorsTable)
+      .where(eq(syncOutboxCursorsTable.scope, "live"))).toEqual(liveBeforeOutboxCursor);
+  });
+
+  it("keeps persistent failures visible even when another date succeeds", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await db.insert(dailySyncTable).values({
+      ...dayRow(TICK_DATE),
+      scope: "sandbox",
+      updatedAt: new Date(0),
+    });
+    await db.execute(sql`
+      CREATE FUNCTION reject_auto_track_tick_always() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.date = '2030-03-10' AND NEW.scope = 'live' THEN
+          RAISE EXCEPTION 'injected persistent tick failure' USING ERRCODE = '57P01';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER reject_auto_track_tick_trigger
+      BEFORE UPDATE ON daily_sync
+      FOR EACH ROW EXECUTE FUNCTION reject_auto_track_tick_always();
+    `);
+
+    try {
+      const firstFailure = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 8,
+      });
+      expect(firstFailure.outcomes.error).toBe(1);
+      const firstDeferred = getAutoTrackDeferredDiagnostic(TICK_NOW);
+      expect(firstDeferred).toMatchObject({
+        deferredDateCount: 1,
+        deferredDateCountCapped: false,
+      });
+      const firstRetryAt = Date.parse(firstDeferred.nextEligibleRetryAt!);
+      expect(firstRetryAt).toBeGreaterThanOrEqual(TICK_NOW + 500);
+      expect(firstRetryAt).toBeLessThanOrEqual(TICK_NOW + 1_000);
+      expect(await db.select({
+        deferredDateCount: automaticTrackingDeferredDiagnosticsTable.deferredDateCount,
+        deferredDateCountCapped: automaticTrackingDeferredDiagnosticsTable.deferredDateCountCapped,
+        nextEligibleRetryAt: automaticTrackingDeferredDiagnosticsTable.nextEligibleRetryAt,
+      }).from(automaticTrackingDeferredDiagnosticsTable)).toMatchObject([{
+        deferredDateCount: 1,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: new Date(firstRetryAt),
+      }]);
+
+      const [healthyDate] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, "2030-03-11"), eq(dailySyncTable.scope, "live")));
+      const [healthyScope] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
+      expect(healthyDate.updatedAt.getTime()).toBeGreaterThan(0);
+      expect(healthyScope.updatedAt.getTime()).toBeGreaterThan(0);
+
+      const tooSoon = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 499, maxClaims: 8,
+      });
+      expect(tooSoon.outcomes.error).toBeUndefined();
+      expect(tooSoon.outcomes.backoff).toBe(1);
+
+      const secondFailure = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 1_000, maxClaims: 8,
+      });
+      expect(secondFailure.outcomes.error).toBe(1);
+      const secondTooSoon = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 1_999, maxClaims: 8,
+      });
+      expect(secondTooSoon.outcomes.backoff).toBe(1);
+      const secondDeferred = getAutoTrackDeferredDiagnostic(TICK_NOW + 1_999);
+      expect(secondDeferred).toMatchObject({
+        deferredDateCount: 1,
+        deferredDateCountCapped: false,
+      });
+      const secondRetryAt = Date.parse(secondDeferred.nextEligibleRetryAt!);
+      expect(secondRetryAt).toBeGreaterThanOrEqual(TICK_NOW + 2_000);
+      expect(secondRetryAt).toBeLessThanOrEqual(TICK_NOW + 3_000);
+
+      const thirdFailure = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 3_000, maxClaims: 8,
+      });
+      expect(thirdFailure.outcomes.error).toBe(1);
+
+      const diagnostic = (await getBackgroundOperationDiagnostics())["server-auto-track-tick"];
+      expect(diagnostic).toMatchObject({
+        status: "warning",
+        recentFailureCount: 3,
+        threshold: 3,
+        errorCode: "57P01",
+      });
+      const [failedDate] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect(failedDate.canonicalRevision).toBe(0);
+      expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+
+      const scopedSuccess = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 7_000, maxClaims: 8, scope: "sandbox",
+      });
+      expect(scopedSuccess.outcomes.error).toBeUndefined();
+      expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
+        .toMatchObject({ status: "warning", recentFailureCount: 3 });
+    } finally {
+      await removeTickFailureTrigger();
+    }
+
+    try {
+      const recovered = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 7_000, maxClaims: 8,
+      });
+      expect(recovered.outcomes.error).toBeUndefined();
+      expect(recovered.outcomes.backoff).toBeUndefined();
+      expect(getAutoTrackDeferredDiagnostic(TICK_NOW + 7_000)).toEqual({
+        deferredDateCount: 0,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: null,
+      });
+      expect(await db.select({
+        deferredDateCount: automaticTrackingDeferredDiagnosticsTable.deferredDateCount,
+        deferredDateCountCapped: automaticTrackingDeferredDiagnosticsTable.deferredDateCountCapped,
+        nextEligibleRetryAt: automaticTrackingDeferredDiagnosticsTable.nextEligibleRetryAt,
+      }).from(automaticTrackingDeferredDiagnosticsTable)).toMatchObject([{
+        deferredDateCount: 0,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: null,
+      }]);
+      expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
+        .toMatchObject({ status: "ok", recentFailureCount: 0 });
+    } finally {
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+  });
+
+  it("shows another API worker's deferred dates in the shared diagnostic without exposing row identity", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    try {
+      const diagnosticNow = new Date("2031-06-15T12:00:00.000Z").getTime();
+      const firstRetryAt = diagnosticNow + 5_000;
+      const earlierRetryAt = diagnosticNow + 2_000;
+      await db.insert(automaticTrackingDeferredDiagnosticsTable).values([
+        {
+          sourceInstance: "peer-api-worker-a",
+          deferredDateCount: 2,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: new Date(firstRetryAt),
+          updatedAt: new Date(diagnosticNow),
+        },
+        {
+          sourceInstance: "peer-api-worker-b",
+          deferredDateCount: 3,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: new Date(earlierRetryAt),
+          updatedAt: new Date(diagnosticNow),
+        },
+        {
+          sourceInstance: "stale-api-worker",
+          deferredDateCount: 90,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: new Date(diagnosticNow + 1_000),
+          updatedAt: new Date(diagnosticNow - 61_000),
+        },
+      ]);
+
+      const diagnostic = await getSharedAutoTrackDeferredDiagnostic(diagnosticNow);
+
+      expect(diagnostic).toEqual({
+        deferredDateCount: 5,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: new Date(earlierRetryAt).toISOString(),
+      });
+      const diagnosticText = JSON.stringify(diagnostic);
+      expect(diagnosticText).not.toContain("peer-api-worker");
+      expect(diagnosticText).not.toContain(TICK_DATE);
+      expect(diagnosticText).not.toContain(TICK_RUN);
+
+      await db.update(automaticTrackingDeferredDiagnosticsTable)
+        .set({ deferredDateCount: 100 })
+        .where(eq(
+          automaticTrackingDeferredDiagnosticsTable.sourceInstance,
+          "peer-api-worker-b",
+        ));
+      expect(await getSharedAutoTrackDeferredDiagnostic(diagnosticNow)).toEqual({
+        deferredDateCount: 100,
+        deferredDateCountCapped: true,
+        nextEligibleRetryAt: new Date(earlierRetryAt).toISOString(),
+      });
+    } finally {
+      await clearBackgroundOperationDiagnosticsForTests();
     }
   });
 });
@@ -899,9 +2452,34 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(20);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
   });
+
+  it("rejects an intent whose production date differs from the client-local date", async () => {
+    const body = finalization("offline:wrong-date");
+    body.intent.date = "2030-03-11";
+    const response = await postFinalization(body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Invalid operational intent or production date",
+    });
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+  });
 });
 
 describe("GET /sync/operational-intents/cursor", () => {
+  it("returns an empty page and preserves invalid-cursor errors", async () => {
+    const empty = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=0`, {
+      headers: authHeaders(),
+    });
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ cursor: 0, hasMore: false, mutations: [] });
+
+    const invalid = await fetch(`${baseUrl}/api/sync/operational-intents/cursor?after=-1`, {
+      headers: authHeaders(),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ error: "Invalid mutation cursor" });
+  });
+
   it("pages materialized receipts and never leaks another scope", async () => {
     await db.insert(operationalIntentLedgerTable).values([
       ...Array.from({ length: 101 }, (_, index) => ({
@@ -1045,6 +2623,11 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
 
   it("reports a healthy bounded contract without exposing canonical payloads", async () => {
     await seedHealthyDocument();
+    // Legacy-write telemetry is process-scoped by design.  Other integration
+    // cases may exercise the compatibility path before this sentinel runs, so
+    // assert that the health check does not add an observation rather than
+    // assuming a fresh process-wide counter.
+    const legacyWritesBeforeCheck = legacySyncReadinessSnapshot("accept").acceptedLegacyWrites;
     const response = await getHealth();
     expect(response.status).toBe(200);
     const body = await response.json() as any;
@@ -1062,7 +2645,7 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
       legacySyncReadiness: {
         compatibilityMode: "accept",
         status: "not-ready",
-        acceptedLegacyWrites: 0,
+        acceptedLegacyWrites: legacyWritesBeforeCheck,
         requiredAcceptedLegacyWrites: 0,
         fullWindowObserved: false,
         windowMs: 86_400_000,
@@ -1237,6 +2820,149 @@ describe("POST /sync/operational-intents — canonical transitions", () => {
     expect(stale.canonicalRevision).toBe(5);
     expect(stale.data.dayState.runs.find((run: any) => run.id === RUN).pausedAt).toBeUndefined();
   });
+
+  it("serializes concurrent retries of one stable intent ID to one committed receipt", async () => {
+    const initialData = {
+      dayState: { date: DATE, runs: [{ id: RUN, startedAt: 1, metaUpdatedAt: 10 }] },
+      runValues: { [RUN]: { traysOnLine: 2 } },
+    };
+    await db.insert(dailySyncTable).values({
+      date: DATE,
+      scope: "live",
+      canonicalRevision: 4,
+      data: initialData,
+    }).onConflictDoUpdate({
+      target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { canonicalRevision: 4, data: initialData },
+    });
+    const body = intent("same-intent", `${RUN}:10`, "correction", {
+      values: { traysOnLine: 7 },
+    });
+    const [first, second] = await Promise.all([post(body), post(body)]);
+    expect([first.duplicate, second.duplicate].sort()).toEqual([false, true]);
+    expect([first.outcome, second.outcome]).toEqual(["accepted", "accepted"]);
+    expect(new Set([first.cursor, second.cursor]).size).toBe(1);
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(1);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect(stored.canonicalRevision).toBe(5);
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(7);
+  });
+});
+
+describe("operational intent service boundary", () => {
+  it("reconciles a validated command under a caller-owned transaction without Express", async () => {
+    const date = "2030-03-10";
+    const runId = "service-run";
+    const storedData = {
+      dayState: { date, runs: [{ id: runId, startedAt: 1, metaUpdatedAt: 10 }] },
+      runValues: { [runId]: { traysOnLine: 2 } },
+    };
+    await db.insert(dailySyncTable).values({
+      date,
+      scope: "live",
+      canonicalRevision: 4,
+      data: storedData,
+    }).onConflictDoUpdate({
+      target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { canonicalRevision: 4, data: storedData },
+    });
+    await db.insert(dataResetTable).values({ scope: "live", epoch: 0, resetAt: new Date() });
+
+    const result = await db.transaction((tx) => reconcileOperationalIntentInTransaction(tx, {
+      scope: "live",
+      now: Date.now(),
+      command: {
+        actorId: USER,
+        deviceId: "service-test",
+        baseRevision: 4,
+        actionData: { action: "correction", runId, values: { traysOnLine: 7 } },
+      },
+      intent: {
+        version: 1,
+        id: "offline:service-test",
+        date,
+        runId,
+        observedGeneration: `${runId}:10`,
+        resetEpoch: 0,
+        effectiveAt: Date.now(),
+        action: "correction",
+        values: { traysOnLine: 7 },
+      },
+      consumeRun: async () => ({ applied: false, consumed: 0 }),
+    }));
+
+    expect(result).toMatchObject({
+      outcome: "accepted",
+      duplicate: false,
+      canonicalRevision: 5,
+    });
+    expect(result.cursor).toBeTypeOf("number");
+    expect(result.data.runValues[runId].traysOnLine).toBe(7);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, date),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[runId].traysOnLine).toBe(7);
+  });
+
+  it("leaves state and receipts unchanged when an in-transaction side effect fails", async () => {
+    const date = "2030-03-10";
+    const runId = "service-failure-run";
+    const data = {
+      dayState: { date, runs: [{ id: runId, startedAt: 1, metaUpdatedAt: 10 }] },
+      runValues: {},
+    };
+    await db.insert(dailySyncTable).values({
+      date,
+      scope: "live",
+      canonicalRevision: 4,
+      data,
+    }).onConflictDoUpdate({
+      target: [dailySyncTable.date, dailySyncTable.scope],
+      set: { canonicalRevision: 4, data },
+    });
+    await db.insert(dataResetTable).values({
+      scope: "live", epoch: 0, resetAt: new Date(),
+    }).onConflictDoNothing();
+
+    await expect(db.transaction((tx) => reconcileOperationalIntentInTransaction(tx, {
+      scope: "live",
+      now: Date.now(),
+      command: {
+        actorId: USER,
+        deviceId: "service-test",
+        baseRevision: 4,
+        actionData: { action: "lifecycle", lifecycle: "end", runId },
+      },
+      intent: {
+        version: 1,
+        id: "offline:service-failure",
+        date,
+        runId,
+        observedGeneration: `${runId}:10`,
+        resetEpoch: 0,
+        effectiveAt: Date.now(),
+        action: "lifecycle",
+        lifecycle: "end",
+        inventoryLines: [],
+      },
+      consumeRun: async () => {
+        throw new Error("injected transactional side-effect failure");
+      },
+    }))).rejects.toThrow("injected transactional side-effect failure");
+
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, date),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect(stored.canonicalRevision).toBe(4);
+    expect((stored.data as any).dayState.runs[0].endedAt).toBeUndefined();
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(0);
+  });
 });
 
 describe("POST /sync/auto-track/claim", () => {
@@ -1263,6 +2989,23 @@ describe("POST /sync/auto-track/claim", () => {
     headers: { ...authHeaders(), "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  const executeDirect = (
+    body: ReturnType<typeof event>,
+    suppliedEpoch = 0,
+    dependencies = autoTrackClaimDependencies,
+  ) => executeAutoTrackClaim({
+    scope: "live",
+    date: DATE,
+    claim: body.claim as AutoTrackClaim,
+    suppliedEpoch,
+    command: {
+      actorId: USER,
+      deviceId: body.senderId,
+      baseRevision: 0,
+      actionData: { claim: body.claim },
+    },
+    senderId: body.senderId,
+  }, dependencies);
 
   beforeEach(async () => {
     await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
@@ -1303,6 +3046,88 @@ describe("POST /sync/auto-track/claim", () => {
     expect(new Set(receipts.map((receipt) => receipt.deviceId))).toEqual(new Set(["tab-a", "tab-b"]));
   });
 
+  it("direct service serializes competing claims and returns the accepted retry as a duplicate", async () => {
+    const a = event("service-a", "service-a:tray:1");
+    const b = event("service-b", "service-b:tray:1");
+    const [first, second] = await Promise.all([executeDirect(a), executeDirect(b)]);
+
+    expect([first.outcome, second.outcome].sort()).toEqual(["accepted", "stale"]);
+    expect(first.values.traysOnLine).toBe(9);
+    expect(second.values.traysOnLine).toBe(9);
+
+    const accepted = first.outcome === "accepted" ? a : b;
+    const duplicate = await executeDirect(accepted);
+    expect(duplicate).toMatchObject({ outcome: "duplicate", duplicate: true });
+    expect(duplicate.values.traysOnLine).toBe(9);
+  });
+
+  it("direct service rejects an outdated lifecycle generation without changing the run values", async () => {
+    const staleGeneration = event("service-stale", "service-stale:tray:1");
+    staleGeneration.claim.generation = `${RUN}:old`;
+
+    const result = await executeDirect(staleGeneration);
+
+    expect(result.outcome).toBe("stale");
+    expect(result.values.traysOnLine).toBe(10);
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(10);
+  });
+
+  it("direct service records an outdated reset epoch without applying the claim", async () => {
+    await db.update(dataResetTable).set({ epoch: 3 }).where(eq(dataResetTable.scope, "live"));
+    const result = await executeDirect(event("service-reset", "service-reset:tray:1"), 0);
+
+    expect(result).toMatchObject({ outcome: "stale", resetStale: 3, duplicate: false });
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(10);
+    const [receipt] = await db.select().from(operationalIntentLedgerTable);
+    expect(receipt.outcome).toBe("stale");
+  });
+
+  it("direct service rolls back a claim when its transactional evidence write fails", async () => {
+    const appClaim = {
+      senderId: "service-failure",
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "app1-batch",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId: "service-failure:app1:1",
+        dueAt: 60,
+        nextDueAt: 120,
+        baseUpdatedAt: 1,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "app1BatchesMade", from: 0, to: 1 },
+          { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
+          { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    };
+    const dependencies: AutoTrackClaimServiceDependencies = {
+      ...autoTrackClaimDependencies,
+      appendAutomaticApplicatorEvidence: async () => {
+        throw new Error("injected evidence write failure");
+      },
+    };
+
+    await expect(executeDirect(appClaim, 0, dependencies)).rejects.toThrow("injected evidence write failure");
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].app1BatchesMade).toBeUndefined();
+    expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
+  });
+
   it("returns duplicate for an accepted retry and rejects a stale-base event after manual correction", async () => {
     const body = event("tab-a", "tab-a:retryable:1");
     const first = await (await post(body)).json() as { outcome: string };
@@ -1331,6 +3156,38 @@ describe("POST /sync/auto-track/claim", () => {
     // pending automatic event is rejected as stale before value comparison.
     expect(staleBase.outcome).toBe("stale");
     expect(staleBase.values.traysOnLine).toBe(14);
+  });
+
+  it("returns the established stale response when the claim epoch is behind the server reset", async () => {
+    await db.update(dataResetTable).set({ epoch: 4 }).where(eq(dataResetTable.scope, "live"));
+
+    const response = await post(event("reset-peer", "reset-peer:tray:1"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Sync-Response")).toBe("stale");
+    expect(await response.json()).toMatchObject({ ok: true, stale: true, epoch: 4 });
+    const [stored] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.date, DATE),
+      eq(dailySyncTable.scope, "live"),
+    ));
+    expect((stored.data as any).runValues[RUN].traysOnLine).toBe(10);
+  });
+
+  it("records a conflict under its event ID so clients must rebase with a fresh identity", async () => {
+    const staleBase = event("tab-a", "tab-a:conflict:1");
+    staleBase.claim.baseUpdatedAt = 999;
+    const first = await (await post(staleBase)).json() as { outcome: string };
+    const replay = await (await post(staleBase)).json() as {
+      outcome: string;
+      duplicate: boolean;
+      values: { traysOnLine: number };
+    };
+
+    expect(first.outcome).toBe("conflict");
+    expect(replay).toMatchObject({
+      outcome: "conflict",
+      duplicate: true,
+      values: { traysOnLine: 10 },
+    });
   });
 
   it("atomically coordinates applicator batches without consuming inventory", async () => {
@@ -1386,6 +3243,72 @@ describe("POST /sync/auto-track/claim", () => {
     expect((await (await post(winner)).json() as { outcome: string }).outcome).toBe("duplicate");
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
     expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(1);
+  });
+
+  it("accepts only one competing applicator stock depletion per run and slot", async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          currentIndex: 0,
+          runs: [{
+            id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2,
+            subTab: "crusts",
+          }],
+        },
+        runValuesUpdatedAt: { [RUN]: 1 },
+        runValues: {
+          [RUN]: {
+            casesNeeded: 200, crustsPerCycle: 12, cycleSpeed: 600, speedAdjustment: 1,
+            approxLineSpeed: 400, freezerTime: 3, pizzasPerCase: 12, casesPerSkid: 48,
+            casesPerLayer: 12, doughballsPerTray: 36, crustsPerStack: 6, doughBatchYield: 150,
+            crustsPerCase: 12, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0,
+            batchesReady: 0, targetDoughballWeight: 8, doughRecipe: [],
+            app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+            app1CheeseRecipe: [], app1BatchesMade: 9,
+            app1StockLbs: 50, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
+          },
+        },
+      },
+      canonicalRevision: 0,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const stockEvent = (senderId: string, eventId: string) => ({
+      senderId,
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "app1-stock",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId,
+        dueAt: 15,
+        nextDueAt: 30,
+        baseUpdatedAt: 1,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "app1StockLbs", from: 50, to: 37.5 },
+          { field: "app1StockAnchorNetSec", from: 0, to: 15 },
+          { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    });
+    const [a, b] = await Promise.all([
+      post(stockEvent("stock-station-a", "stock-station-a:app1:1")),
+      post(stockEvent("stock-station-b", "stock-station-b:app1:1")),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      outcome: string;
+      values: Record<string, number>;
+    }>;
+    expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
+    expect(bodies.every(({ values }) =>
+      values.app1StockLbs === 37.5
+      && values.app1StockAnchorNetSec === 15
+      && values.app1BatchesMade === 9
+    )).toBe(true);
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
   });
 
   it("atomically advances one Sauce barrel and deducts its inventory once across competing stations", async () => {
@@ -1516,7 +3439,11 @@ describe("POST /sync/auto-track/claim", () => {
       data: { runValuesUpdatedAt: Record<string, number> };
     };
     sauceClaim.claim.baseUpdatedAt = retrySeedResponse.data.runValuesUpdatedAt[RUN];
-    expect((await post(sauceClaim)).status).toBe(500);
+    const rejected = await post(sauceClaim);
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toEqual({
+      error: "Sauce inventory is not configured. Check Sauce setup, then retry.",
+    });
     const afterFailure = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       headers: authHeaders(),
     }).then((response) => response.json()) as {
@@ -1540,6 +3467,11 @@ describe("POST /sync/auto-track/claim", () => {
     expect(recovered.status).toBe(200);
     expect((await recovered.json() as { outcome: string }).outcome).toBe("accepted");
     expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(90);
+    const duplicate = await post(sauceClaim);
+    expect((await duplicate.json() as { outcome: string }).outcome).toBe("duplicate");
+    expect((await db.select().from(inventoryLotsTable))[0].qtyRemaining).toBe(90);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
 });
 
@@ -1798,6 +3730,8 @@ describe("/sync snapshot conditionals", () => {
       body: JSON.stringify({ senderId: "c1", payload }),
     });
     const firstBody = await first.json() as { data: unknown; snapshotId: string };
+    expect((firstBody.data as any).runValues["snapshot-run"])
+      .not.toHaveProperty("applicatorStockInitialized");
     expect(firstBody.snapshotId).toMatch(/^[a-f0-9]{64}$/);
 
     const unchanged = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
@@ -1808,6 +3742,125 @@ describe("/sync snapshot conditionals", () => {
     const body = await unchanged.json() as { unchanged?: boolean; data?: unknown; snapshotId?: string };
     expect(body).toMatchObject({ unchanged: true, snapshotId: firstBody.snapshotId });
     expect(body.data).toBeUndefined();
+  });
+
+  it("includes a fresh operational projection in an unchanged foreground read", async () => {
+    const startedAt = Date.now() - 60_000;
+    const activePayload = {
+      dayState: {
+        date: DATE,
+        currentIndex: 0,
+        runs: [{
+          id: "wake-projection-run",
+          brand: "Acme",
+          flavor: "Pep",
+          startedAt,
+        }],
+      },
+      runValues: { "wake-projection-run": { casesNeeded: 240 } },
+      runValuesUpdatedAt: { "wake-projection-run": 1 },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "wake-projection-writer", payload: activePayload }),
+    });
+    const written = await write.json() as { snapshotId?: string };
+    expect(write.ok).toBe(true);
+    expect(written.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${written.snapshotId}`,
+      { headers: authHeaders() },
+    );
+    const body = await response.json() as {
+      unchanged?: boolean;
+      snapshotId?: string;
+      canonicalRevision?: number;
+      serverTime?: number;
+      operationalProjection?: {
+        runId?: string;
+        serverTimeMs?: number;
+        facts?: { runStatus?: string };
+      } | null;
+    };
+    expect(response.headers.get("X-Sync-Response")).toBe("unchanged");
+    expect(body).toMatchObject({
+      unchanged: true,
+      snapshotId: written.snapshotId,
+      operationalProjection: {
+        runId: "wake-projection-run",
+        facts: { runStatus: "running" },
+      },
+    });
+    expect(body.canonicalRevision).toEqual(expect.any(Number));
+    expect(body.serverTime).toEqual(expect.any(Number));
+    expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
+  });
+
+  it("returns nonzero draining occupancy from an unchanged read of an ended run", async () => {
+    const now = Date.now();
+    const startedAt = now - 10 * 60_000;
+    const endedAt = now - 1_000;
+    const endedPayload = {
+      dayState: {
+        date: DATE,
+        currentIndex: 0,
+        runs: [{
+          id: "wake-draining-run",
+          brand: "Acme",
+          flavor: "Pep",
+          startedAt,
+          endedAt,
+        }],
+      },
+      runValues: {
+        "wake-draining-run": {
+          casesNeeded: 240,
+          cycleSpeed: 30,
+          crustsPerCycle: 2,
+          speedAdjustment: 1,
+          pizzasPerCase: 6,
+          freezerTime: 5,
+        },
+      },
+      runValuesUpdatedAt: { "wake-draining-run": 1 },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "wake-drain-writer", payload: endedPayload }),
+    });
+    const written = await write.json() as { snapshotId?: string };
+    expect(write.ok).toBe(true);
+    expect(written.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${written.snapshotId}`,
+      { headers: authHeaders() },
+    );
+    const body = await response.json() as {
+      unchanged?: boolean;
+      snapshotId?: string;
+      serverTime?: number;
+      operationalProjection?: {
+        runId?: string;
+        serverTimeMs?: number;
+        counters?: { casesOnLine?: number };
+        facts?: { runStatus?: string };
+      } | null;
+    };
+    expect(response.headers.get("X-Sync-Response")).toBe("unchanged");
+    expect(body).toMatchObject({
+      unchanged: true,
+      snapshotId: written.snapshotId,
+      operationalProjection: {
+        runId: "wake-draining-run",
+        facts: { runStatus: "ended" },
+      },
+    });
+    expect(body.operationalProjection?.counters?.casesOnLine).toBeGreaterThan(0);
+    expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
   });
 
   it("persists a changed explicit-date PUT even when it carries the prior snapshot ID", async () => {
@@ -2033,10 +4086,66 @@ describe("/sync partial payload contract", () => {
       }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ data: null, partialFallback: true });
+    const fallback = await res.json() as { data: null; partialFallback: true; snapshotId: string };
+    expect(fallback).toMatchObject({
+      data: null,
+      partialFallback: true,
+      snapshotId: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     const read = await fetch(`${baseUrl}/api/sync/2030-08-25`, { headers: authHeaders() });
     expect(await read.json()).toBeNull();
+
+    const retry = await fetch(`${baseUrl}/api/sync/today?today=2030-08-25`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "missing-row-retry",
+        payload: {
+          syncVersion: 1,
+          completeness: "complete",
+          baseSnapshotId: fallback.snapshotId,
+          dayState: { date: "2030-08-25", runs: [{ id: "must-land" }] },
+          runValues: { "must-land": { casesNeeded: 12 } },
+          runValuesUpdatedAt: { "must-land": 1 },
+        },
+      }),
+    });
+    expect(retry.status).toBe(200);
+    const retryBody = await retry.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> } };
+    expect(retryBody.data?.runValues?.["must-land"]?.casesNeeded).toBe(12);
   });
+
+  it("returns the authoritative fallback for a partial write without a canonical row", async () => {
+    const baseline = await fetch(`${baseUrl}/api/sync/today?today=2030-08-26`, {
+      headers: authHeaders(),
+    });
+    expect(baseline.status).toBe(200);
+    const emptySnapshotId = baseline.headers.get("x-sync-snapshot");
+    expect(emptySnapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const res = await fetch(`${baseUrl}/api/sync/today?today=2030-08-26`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "empty-baseline-client",
+        payload: {
+          syncVersion: 1,
+          completeness: "partial",
+          baseSnapshotId: emptySnapshotId,
+          dayState: { date: "2030-08-26", runs: [{ id: "bootstrapped-run", brand: "Acme", flavor: "Pep" }] },
+          runValues: { "bootstrapped-run": { casesNeeded: 12 } },
+          runValuesUpdatedAt: { "bootstrapped-run": 1 },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      data?: { dayState?: { runs?: Array<{ id?: string }> }; runValues?: Record<string, { casesNeeded?: number }> };
+      partialFallback?: boolean;
+    };
+    expect(body.partialFallback).toBe(true);
+    expect(body.data).toBeNull();
+  }, 60_000);
 });
 
 describe("/sync/today — complete-write causal fence", () => {
@@ -2054,6 +4163,7 @@ describe("/sync/today — complete-write causal fence", () => {
     baseSnapshotId: string,
     casesNeeded: number,
     stamp: number,
+    runMeta: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
       syncVersion: 1,
@@ -2061,7 +4171,7 @@ describe("/sync/today — complete-write causal fence", () => {
       baseSnapshotId,
       dayState: {
         date: DATE,
-        runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep" }],
+        runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep", ...runMeta }],
       },
       runValues: { "complete-fence-run": { casesNeeded } },
       runValuesUpdatedAt: { "complete-fence-run": stamp },
@@ -2102,6 +4212,56 @@ describe("/sync/today — complete-write causal fence", () => {
     expect(staleBody.partialFallback).toBe(true);
     expect(staleBody.canonicalRevision).toBe(currentBody.canonicalRevision);
     expect(staleBody.data.runValues["complete-fence-run"].casesNeeded).toBe(24);
+  });
+
+  it("accepts a current-base fast-clock write, then a normally stamped edit without losing terminal lifecycle", async () => {
+    const serverNow = Date.now();
+    const fastStamp = serverNow + 86_400_000;
+    const first = await put(
+      complete(emptyCompleteSnapshotId(DATE), 12, fastStamp, {
+        startedAt: serverNow - 10_000,
+        endedAt: serverNow - 1_000,
+        metaUpdatedAt: serverNow - 1_000,
+      }),
+      "fast-clock-device",
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as {
+      serverTime: number;
+      snapshotId: string;
+      data: {
+        dayState: { runs: Array<{ endedAt?: number }> };
+        runValues: Record<string, { casesNeeded?: number }>;
+        runValuesUpdatedAt: Record<string, number>;
+      };
+    };
+    expect(firstBody.data.runValues["complete-fence-run"].casesNeeded).toBe(12);
+    expect(firstBody.data.runValuesUpdatedAt["complete-fence-run"]).toBe(firstBody.serverTime);
+    expect(firstBody.data.runValuesUpdatedAt["complete-fence-run"]).toBeLessThan(fastStamp);
+    expect(firstBody.data.dayState.runs[0].endedAt).toBeDefined();
+
+    const normalStamp = Math.max(1, firstBody.serverTime - 1);
+    const laterEdit = await put(
+      complete(firstBody.snapshotId, 24, normalStamp, {
+        startedAt: serverNow - 10_000,
+        metaUpdatedAt: firstBody.serverTime + 1,
+      }),
+      "normal-clock-device",
+    );
+    expect(laterEdit.status).toBe(200);
+    const laterBody = await laterEdit.json() as {
+      partialFallback?: boolean;
+      serverTime: number;
+      data: {
+        dayState: { runs: Array<{ endedAt?: number }> };
+        runValues: Record<string, { casesNeeded?: number }>;
+        runValuesUpdatedAt: Record<string, number>;
+      };
+    };
+    expect(laterBody.partialFallback).not.toBe(true);
+    expect(laterBody.data.runValues["complete-fence-run"].casesNeeded).toBe(24);
+    expect(laterBody.data.runValuesUpdatedAt["complete-fence-run"]).toBe(laterBody.serverTime);
+    expect(laterBody.data.dayState.runs[0].endedAt).toBeDefined();
   });
 
   it("serializes concurrent complete writes from the same base with one winner", async () => {
@@ -2479,11 +4639,10 @@ describe("/sync large-day complete versus partial measurements", () => {
 });
 
 describe("/sync — per-run protective merge (data-loss guard)", () => {
-  // The server is now a per-run last-writer-wins register keyed on each run's
-  // edit stamp (runValuesUpdatedAt), not a blind blob overwrite. An empty run
-  // value paired with an EQUAL-or-older stamp must never overwrite a populated
-  // stored value — that is the recurring "I entered it, refreshed, it vanished"
-  // corruption. Only a strictly-newer-stamped edit changes a run.
+  // Writes without a validated base use per-run last-writer-wins stamps; writes
+  // from the exact current versioned base use snapshot causality and are stamped
+  // by the server. In both cases, an empty value must never overwrite populated
+  // data, the recurring "I entered it, refreshed, it vanished" corruption.
   const DATE = "2030-05-01";
   function put(payload: unknown) {
     return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
@@ -3803,6 +5962,288 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(bEvents).not.toContain("sender-A");
   });
 
+  it("skips an unchanged snapshot for a current peer but sends it to a stale peer", async () => {
+    const date = "2030-03-13";
+    clearCapacityTelemetryForTests();
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "no-op-seed",
+        payload: {
+          dayState: {
+            date,
+            runs: [{ id: "no-op-run", brand: "Acme", flavor: "Pep" }],
+            shiftNotes: "private shift note that must not appear in diagnostics",
+          },
+          runValues: { "no-op-run": { casesNeeded: 24 } },
+          runValuesUpdatedAt: { "no-op-run": 1 },
+        },
+      }),
+    });
+    expect(seed.status).toBe(200);
+    const seedBody = await seed.json() as { data: Record<string, any>; snapshotId: string };
+
+    const connectPeer = async (clientId: string) => {
+      const ctrl = new AbortController();
+      const response = await fetch(
+        `${baseUrl}/api/sync/events?clientId=${clientId}&today=${date}`,
+        { headers: authHeaders(), signal: ctrl.signal },
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const readFrame = async (predicate: (frame: Record<string, any>) => boolean) => {
+        for (;;) {
+          const boundary = buffer.indexOf("\n\n");
+          if (boundary >= 0) {
+            const raw = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const line = raw.split("\n").find((entry) => entry.startsWith("data: "));
+            if (line) {
+              const frame = JSON.parse(line.slice("data: ".length)) as Record<string, any>;
+              if (predicate(frame)) return frame;
+            }
+            continue;
+          }
+          const { value, done } = await reader.read();
+          if (done) throw new Error(`SSE stream for ${clientId} ended before the expected frame`);
+          buffer += decoder.decode(value, { stream: true });
+        }
+      };
+      const initial = await readFrame((frame) => frame.initial === true);
+      return { ctrl, reader, readFrame, initial };
+    };
+
+    const stalePeer = await connectPeer("no-op-stale-peer");
+    let currentPeer: Awaited<ReturnType<typeof connectPeer>> | undefined;
+    try {
+      expect(stalePeer.initial.snapshotId).toBe(seedBody.snapshotId);
+
+      // Model a peer that missed an earlier canonical update. Its live stream
+      // still has the original snapshot, while a newly connected peer will
+      // receive the updated snapshot as its initial baseline.
+      const stalePeerData = {
+        ...seedBody.data,
+        dayState: {
+          ...seedBody.data.dayState,
+          shiftNotes: "private canonical update missed by stale peer",
+        },
+      };
+      await db.update(dailySyncTable)
+        .set({ data: stalePeerData })
+        .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, date)));
+      const resultingSnapshotId = syncSnapshotId(stalePeerData);
+      expect(resultingSnapshotId).not.toBe(seedBody.snapshotId);
+
+      currentPeer = await connectPeer("no-op-current-peer");
+      expect(currentPeer.initial.snapshotId).toBe(resultingSnapshotId);
+
+      // Re-submit the exact current canonical data. The server accepts the
+      // write but does not change the document.
+      const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "no-op-writer",
+          snapshotId: resultingSnapshotId,
+          payload: {
+            ...stalePeerData,
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId: resultingSnapshotId,
+          },
+        }),
+      });
+      expect(write.status).toBe(200);
+      const writeBody = await write.json() as { snapshotId: string };
+      expect(writeBody.snapshotId).toBe(resultingSnapshotId);
+
+      const staleFrame = await stalePeer.readFrame((frame) => frame.senderId === "no-op-writer");
+      expect(staleFrame.snapshotId).toBe(resultingSnapshotId);
+      if (staleFrame.completeness === "partial") {
+        expect(staleFrame.baseSnapshotId).toBe(stalePeer.initial.snapshotId);
+      } else {
+        expect(staleFrame.completeness).toBe("complete");
+        expect(syncSnapshotId(staleFrame.data)).toBe(resultingSnapshotId);
+      }
+
+      const currentPeerReceivedDuplicate = await Promise.race([
+        currentPeer.readFrame((frame) => frame.senderId === "no-op-writer").then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250)),
+      ]);
+      expect(currentPeerReceivedDuplicate).toBe(false);
+
+      const diagnosticsResponse = await fetch(`${baseUrl}/api/sync/health?date=${date}`, {
+        headers: managerAuthHeaders(),
+      });
+      expect(diagnosticsResponse.status).toBe(200);
+      const diagnostics = await diagnosticsResponse.json() as Record<string, any>;
+      expect(diagnostics.syncPeerFrames).toMatchObject({
+        exactSnapshotSkipped: 1,
+      });
+      expect(
+        diagnostics.syncPeerFrames.partialSent + diagnostics.syncPeerFrames.completeSent,
+      ).toBe(1);
+      const diagnosticsText = JSON.stringify(diagnostics);
+      expect(diagnosticsText).not.toContain("no-op-writer");
+      expect(diagnosticsText).not.toContain("no-op-current-peer");
+      expect(diagnosticsText).not.toContain("no-op-run");
+      expect(diagnosticsText).not.toContain("private shift note");
+      expect(diagnosticsText).not.toContain("private canonical update");
+    } finally {
+      await stalePeer.reader.cancel().catch(() => {});
+      stalePeer.ctrl.abort();
+      if (currentPeer) {
+        await currentPeer.reader.cancel().catch(() => {});
+        currentPeer.ctrl.abort();
+      }
+    }
+  });
+
+  it("keeps a failed peer's baseline and recovers it with the next valid delta", async () => {
+    const date = "2030-03-14";
+    const runs = Array.from({ length: 32 }, (_, index) => ({
+      id: `failed-write-run-${index}`,
+      brand: "Acme",
+      flavor: `Flavor ${index}`,
+      metaUpdatedAt: 1_000 + index,
+    }));
+    const runValues = Object.fromEntries(runs.map((run, index) => [
+      run.id,
+      {
+        casesNeeded: 200 + index,
+        pizzasPerCase: 10,
+        doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
+          ingredient: `Ingredient ${ingredient}`,
+          lbs: ingredient + index + 1,
+        })),
+      },
+    ]));
+    const baselinePayload = {
+      dayState: { date, runs, shiftNotes: "baseline" },
+      runValues,
+      runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 1_000 + index])),
+      packagingProgress: Object.fromEntries(runs.map((run, index) => [
+        run.id, { skidsCompleted: index % 3, updatedAt: 1_000 + index },
+      ])),
+    };
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "failed-write-seed", payload: baselinePayload }),
+    });
+    expect(seed.status).toBe(200);
+    const seedBody = await seed.json() as { data: Record<string, any>; snapshotId: string };
+
+    const connectPeer = async (clientId: string, failSenderId?: string) => {
+      const ctrl = new AbortController();
+      const response = await fetch(
+        `${baseUrl}/api/sync/events?clientId=${clientId}&today=${date}`,
+        {
+          headers: {
+            ...authHeaders(),
+            ...(failSenderId ? { "x-test-fail-broadcast-sender-id": failSenderId } : {}),
+          },
+          signal: ctrl.signal,
+        },
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const readFrame = async (predicate: (frame: Record<string, any>) => boolean) => {
+        for (;;) {
+          const boundary = buffer.indexOf("\n\n");
+          if (boundary >= 0) {
+            const raw = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const line = raw.split("\n").find((entry) => entry.startsWith("data: "));
+            if (line) {
+              const frame = JSON.parse(line.slice("data: ".length)) as Record<string, any>;
+              if (predicate(frame)) return frame;
+            }
+            continue;
+          }
+          const { value, done } = await reader.read();
+          if (done) throw new Error(`SSE stream for ${clientId} ended before the expected frame`);
+          buffer += decoder.decode(value, { stream: true });
+        }
+      };
+      const initial = await readFrame((frame) => frame.initial === true);
+      return { ctrl, reader, readFrame, initial };
+    };
+
+    const failedPeer = await connectPeer("failed-write-peer", "first-failed-broadcast");
+    let healthyPeer: Awaited<ReturnType<typeof connectPeer>> | undefined;
+    try {
+      expect(failedPeer.initial.snapshotId).toBe(seedBody.snapshotId);
+      healthyPeer = await connectPeer("healthy-write-peer");
+      expect(healthyPeer.initial.snapshotId).toBe(seedBody.snapshotId);
+
+      const firstWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "first-failed-broadcast",
+          snapshotId: seedBody.snapshotId,
+          payload: {
+            ...seedBody.data,
+            dayState: { ...seedBody.data.dayState, shiftNotes: "first update missed" },
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId: seedBody.snapshotId,
+          },
+        }),
+      });
+      expect(firstWrite.status).toBe(200);
+      const firstBody = await firstWrite.json() as { data: Record<string, any>; snapshotId: string };
+      const healthyFirstFrame = await healthyPeer.readFrame(
+        (frame) => frame.senderId === "first-failed-broadcast",
+      );
+      expect(healthyFirstFrame.snapshotId).toBe(firstBody.snapshotId);
+      expect(injectedSseWriteFailures).toBe(1);
+
+      const recoveryWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "recovery-writer",
+          snapshotId: firstBody.snapshotId,
+          payload: {
+            ...firstBody.data,
+            dayState: { ...firstBody.data.dayState, shiftNotes: "recovered canonical state" },
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId: firstBody.snapshotId,
+          },
+        }),
+      });
+      expect(recoveryWrite.status).toBe(200);
+      const recoveryBody = await recoveryWrite.json() as { data: Record<string, any>; snapshotId: string };
+      const recoveryFrame = await failedPeer.readFrame((frame) => frame.senderId === "recovery-writer");
+
+      expect(recoveryFrame).toMatchObject({
+        completeness: "partial",
+        syncVersion: 1,
+        baseSnapshotId: seedBody.snapshotId,
+        snapshotId: recoveryBody.snapshotId,
+      });
+      const recovered = applySyncDeltaData(seedBody.data, recoveryFrame.data);
+      expect(recovered).not.toBeNull();
+      expect(syncSnapshotId(recovered)).toBe(recoveryBody.snapshotId);
+      expect(recovered).toEqual(recoveryBody.data);
+    } finally {
+      await failedPeer.reader.cancel().catch(() => {});
+      failedPeer.ctrl.abort();
+      if (healthyPeer) {
+        await healthyPeer.reader.cancel().catch(() => {});
+        healthyPeer.ctrl.abort();
+      }
+    }
+  });
+
   // Regression: a schedule import writes each day via PUT /sync/:date. TODAY's
   // write must broadcast to the live view, but the server only broadcasts when
   // `date === clientToday(req)`. If the import omits `?today=`, clientToday
@@ -3857,6 +6298,16 @@ describe("/sync/events — date-scoped broadcasts", () => {
       run.id,
       {
         casesNeeded: 200 + index,
+        pizzasPerCase: 10,
+        casesPerLayer: 0,
+        ...(index === 0
+          ? {
+              pep1Type: "Pepperoni",
+              pep1OzPerPizza: 1,
+              pep1Sticks: 0,
+              pep1BatchLbs: 10,
+            }
+          : {}),
         doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
           ingredient: `Ingredient ${ingredient}`,
           lbs: ingredient + index + 1,
@@ -3865,6 +6316,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     ]));
     const baselinePayload = {
       dayState: { date, runs },
+      pepTypes: ["Sausage"],
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 1_000 + index])),
       packagingProgress: Object.fromEntries(runs.map((run, index) => [
@@ -3919,11 +6371,22 @@ describe("/sync/events — date-scoped broadcasts", () => {
         ...baselinePayload.runValuesUpdatedAt,
         [changedRunId]: Date.now() + 1_000,
       },
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: seedBody.snapshotId,
     };
     const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "peer-writer", payload: changedPayload }),
+      // The HTTP snapshot is the complete-write handoff contract.  Supplying
+      // the receiver's baseline explicitly prevents this fixture from relying
+      // on legacy, unanchored-write behavior and makes the broadcast race
+      // deterministic.
+      body: JSON.stringify({
+        senderId: "peer-writer",
+        snapshotId: seedBody.snapshotId,
+        payload: changedPayload,
+      }),
     });
     const writeBody = await write.json() as { data: Record<string, unknown>; snapshotId: string };
     const received = await readFrame((frame) => frame.senderId === "peer-writer");
@@ -3952,10 +6415,18 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
     const removedRunId = runs[23].id;
     const afterChange = writeBody.data as typeof baselinePayload & {
+      packagingProgress?: Record<string, unknown>;
       deletedItems?: { runs?: string[] };
     };
+    const {
+      syncVersion: _syncVersion,
+      completeness: _completeness,
+      baseSnapshotId: _baseSnapshotId,
+      resultingSnapshotId: _resultingSnapshotId,
+      ...legacyRemovalBase
+    } = afterChange as Record<string, unknown>;
     const removalPayload = {
-      ...afterChange,
+      ...legacyRemovalBase,
       dayState: {
         ...afterChange.dayState,
         runs: afterChange.dayState.runs.filter((run) => run.id !== removedRunId),
@@ -3967,17 +6438,24 @@ describe("/sync/events — date-scoped broadcasts", () => {
         Object.entries(afterChange.runValuesUpdatedAt).filter(([runId]) => runId !== removedRunId),
       ),
       packagingProgress: Object.fromEntries(
-        Object.entries(afterChange.packagingProgress).filter(([runId]) => runId !== removedRunId),
+        Object.entries(afterChange.packagingProgress ?? {}).filter(([runId]) => runId !== removedRunId),
       ),
       deletedItems: {
         ...afterChange.deletedItems,
         runs: [...(afterChange.deletedItems?.runs ?? []), removedRunId],
       },
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: writeBody.snapshotId,
     };
     const removalWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "peer-remover", payload: removalPayload }),
+      body: JSON.stringify({
+        senderId: "peer-remover",
+        snapshotId: writeBody.snapshotId,
+        payload: removalPayload,
+      }),
     });
     const removalBody = await removalWrite.json() as {
       data: typeof removalPayload;
@@ -3988,34 +6466,78 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(removalFrame.frame.summaryStats).toEqual({ [removedRunId]: null });
     expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
 
-    let sharedInputPayload = removalBody.data;
+    let sharedInputPayload = removalBody.data as Record<string, any>;
+    let sharedSnapshotId = removalBody.snapshotId;
     // A 32-run day is a representative full shift. Keep each shared-input
     // refresh within 128 KiB on the wire: large enough for complete derived
     // maps for every run, while remaining a small bounded SSE message rather
     // than drifting toward the 10 MiB sync-write safety ceiling.
     const sharedSetupRefreshFrameBudgetBytes = 128 * 1024;
-    for (const field of derivedRunMapSharedDayStateFields) {
+    for (const field of derivedRunMapSharedInputFields) {
       const senderId = `peer-shared-${field}`;
-      const currentValue = sharedInputPayload.dayState[field];
-      const changedValue = Array.isArray(currentValue)
-        ? [...currentValue, `changed-${field}`]
-        : [`changed-${field}`];
+      const currentValue = sharedInputPayload[field];
+      // A nonempty valid list is required: empty pepTypes are normalized back
+      // to defaults. Adding Pepperoni changes its projection from batches to lbs.
+      const changedValue = field === "pepTypes"
+        ? [...(Array.isArray(currentValue) ? currentValue : []), "Pepperoni"]
+        : Array.isArray(currentValue)
+          ? [...currentValue, `changed-${field}`]
+          : [`changed-${field}`];
       sharedInputPayload = {
         ...sharedInputPayload,
-        dayState: { ...sharedInputPayload.dayState, [field]: changedValue },
+        [field]: changedValue,
       };
+      delete (sharedInputPayload as Record<string, unknown>).syncVersion;
+      delete (sharedInputPayload as Record<string, unknown>).completeness;
+      delete (sharedInputPayload as Record<string, unknown>).baseSnapshotId;
+      delete (sharedInputPayload as Record<string, unknown>).resultingSnapshotId;
+      const sharedBaseSnapshotId = sharedSnapshotId;
       const sharedInputWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
         method: "PUT",
         headers: { ...authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({ senderId, payload: sharedInputPayload }),
+        body: JSON.stringify({
+          senderId,
+          payload: {
+            ...sharedInputPayload,
+            syncVersion: 1,
+            completeness: "partial",
+            baseSnapshotId: sharedBaseSnapshotId,
+          },
+        }),
       });
       expect(sharedInputWrite.status).toBe(200);
+      const sharedInputBody = await sharedInputWrite.json() as {
+        data: Record<string, unknown>;
+        snapshotId: string;
+      };
+      sharedInputPayload = sharedInputBody.data;
+      sharedSnapshotId = sharedInputBody.snapshotId;
       const sharedInputFrame = await readFrame((frame) => frame.senderId === senderId);
-      const remainingRunIds = sharedInputPayload.dayState.runs.map((run) => run.id).sort();
-      expect(sharedInputFrame.frame.completeness).toBe("partial");
-      expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
+      const remainingRunIds = sharedInputPayload.dayState.runs
+        .map((run: { id: string }) => run.id)
+        .sort();
+      expect(["partial", "complete"]).toContain(sharedInputFrame.frame.completeness);
+      expect(sharedInputFrame.frame.data[field]).toEqual(changedValue);
+      if (sharedInputFrame.frame.completeness === "partial") {
+        expect(sharedInputFrame.frame).toMatchObject({
+          syncVersion: 1,
+          baseSnapshotId: sharedBaseSnapshotId,
+        });
+      } else {
+        expect(sharedInputFrame.frame).not.toHaveProperty("baseSnapshotId");
+      }
       expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
       expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+      if (field === "pepTypes") {
+        expect(sharedInputFrame.frame.runLines[runs[0].id]).toContainEqual({
+          itemKey: "ingredient:Pepperoni:lbs",
+          qty: 125,
+        });
+        expect(sharedInputFrame.frame.runLines[runs[0].id]).not.toContainEqual({
+          itemKey: "ingredient:Pepperoni:batches",
+          qty: 12.5,
+        });
+      }
       const sharedInputWireBytes = Buffer.byteLength(`data: ${sharedInputFrame.raw}\n\n`, "utf8");
       expect(
         sharedInputWireBytes,
@@ -4025,7 +6547,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
     await reader.cancel();
     ctrl.abort();
-  });
+  }, 90_000);
 
   it("keeps multi-peer delta savings and convergence through a synthetic full shift", async () => {
     const date = "2030-03-16";
@@ -4075,7 +6597,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
     };
     const peers = new Map<string, Peer>();
     let completeFrames = 0;
+    let initialFrames = 0;
+    let deliveredPeerFrames = 0;
     let partialFrames = 0;
+    let completePeerFrames = 0;
+    const completePeerSteps: number[] = [];
     let partialBytes = 0;
     let equivalentCompleteBytes = 0;
     type LifecycleKind = "start" | "add" | "end" | "remove";
@@ -4140,6 +6666,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
       peer.snapshotId = initial.frame.snapshotId;
       peers.set(id, peer);
       completeFrames += 1;
+      initialFrames += 1;
     };
 
     const disconnect = async (id: string) => {
@@ -4257,6 +6784,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
             runValuesUpdatedAt: remainingStamps,
           };
         }
+        const priorSnapshotId = syncSnapshotId(canonical);
         const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
           method: "PUT",
           headers: { ...authHeaders(), "content-type": "application/json" },
@@ -4264,7 +6792,17 @@ describe("/sync/events — date-scoped broadcasts", () => {
         });
         expect(write.status).toBe(200);
         const writeBody = await write.json() as { data: Record<string, any>; snapshotId: string };
+        if (step === 0) {
+          expect(writeBody.snapshotId).toBe(priorSnapshotId);
+        }
         canonical = writeBody.data;
+
+        if (writeBody.snapshotId === priorSnapshotId) {
+          // An exact-snapshot no-op is not broadcast. Peers already hold this
+          // baseline, so waiting for a frame here would block the whole soak.
+          expect(step).toBe(0);
+          continue;
+        }
 
         for (const peer of peers.values()) {
           if (peer.id === senderId) {
@@ -4287,6 +6825,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
             metrics.actualBytes += received.bytes;
             metrics.equivalentCompleteBytes += completeEquivalentBytes;
           }
+          deliveredPeerFrames += 1;
           if (received.frame.completeness === "partial") {
             partialFrames += 1;
             partialBytes += received.bytes;
@@ -4296,6 +6835,8 @@ describe("/sync/events — date-scoped broadcasts", () => {
             equivalentCompleteBytes += completeEquivalentBytes;
           } else {
             completeFrames += 1;
+            completePeerFrames += 1;
+            completePeerSteps.push(step);
             if (lifecycleKind) lifecycleMetrics[lifecycleKind].completeFallbacks += 1;
             expect(received.frame.data).toEqual(canonical);
             expect(received.frame.snapshotId).toBe(writeBody.snapshotId);
@@ -4313,15 +6854,25 @@ describe("/sync/events — date-scoped broadcasts", () => {
       steps: 48,
       peers: 3,
       reconnects: 3,
+      deliveredPeerFrames,
       partialFrames,
       completeFrames,
+      completePeerFrames,
+      completePeerSteps,
       partialBytes,
       equivalentCompleteBytes,
       savingsPercent: Number(savingsPercent.toFixed(2)),
       lifecycleMetrics,
     });
-    expect(partialFrames).toBe(96);
-    expect(completeFrames).toBeLessThanOrEqual(6);
+    // Step 0 leaves run-0's seeded skid value at 0, so the canonical snapshot
+    // does not change and no peer frame is sent. The remaining 47 writes each
+    // deliver a partial update to the other two peers.
+    expect(deliveredPeerFrames).toBe(94);
+    expect(completePeerSteps).toEqual([]);
+    expect(completePeerFrames).toBe(0);
+    expect(partialFrames).toBe(94);
+    expect(initialFrames).toBe(6);
+    expect(completeFrames).toBe(initialFrames + completePeerFrames);
     expect(partialBytes).toBeLessThan(equivalentCompleteBytes * 0.5);
     for (const kind of ["start", "add", "end", "remove"] as const) {
       const metrics = lifecycleMetrics[kind];

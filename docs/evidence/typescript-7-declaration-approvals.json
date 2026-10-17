@@ -3,15 +3,15 @@
   "approvals": [
     {
       "path": "lib/api-client-react/dist/generated/api.d.ts",
-      "baselineSha256": "14f65cd57190841aa81173f44604b51297fbb262ea8931a14cc786b88be0def4",
-      "candidateSha256": "f5a72b56352c1f21e0eea1d4fe7bfa5bd540f1342cda7afe7827b66216cd8c60",
-      "reason": "Reviewed: the generated source removed non-exported AwaitedInput/Awaited helper aliases; TypeScript 7 now differs only in equivalent quote delimiters for generated query and mutation key tuples, with the complete module bidirectionally assignable under TypeScript 6.0.3 and 7.0.2."
+      "baselineSha256": "caaa8edd8378a891be34337e6da971b9051376a3c0c14a3443ece98624b46d21",
+      "candidateSha256": "7166a38f8cf5a2d1a8e6e7b69974888466219a9230621e70ce76939647da439a",
+      "reason": "Reviewed: TypeScript 7 emits equivalent no-substitution template-literal types instead of string-literal types for generated query and mutation key tuples; the complete module is bidirectionally assignable under TypeScript 6.0.3 and 7.0.2."
     },
     {
       "path": "lib/api-zod/dist/generated/api.d.ts",
-      "baselineSha256": "2abb21d4de5408817c6e7b041187393dce68e4281a34685abafd5a5d21e6abea",
-      "candidateSha256": "9480239ec819437bf9c16aaa39da31282e6c45a9c4c4194b2c407d00daf9fedf",
-      "reason": "Reviewed: TypeScript 7 emits equivalent direct Zod namespace members instead of the z namespace alias and reorders object members; the complete module is bidirectionally assignable under both compilers."
+      "baselineSha256": "6e79d5b844c0fc5b972f2ac0e4a85ff77ceba70c962e51df9acf1b9bf046e601",
+      "candidateSha256": "3f560c6cd40b2ff90c9392c528f8a7f550c3e53cea880448200090235ba2e4ac",
+      "reason": "Reviewed: TypeScript 7 emits equivalent direct Zod namespace references instead of nested zod.z paths and reorders equivalent members; the complete module is bidirectionally assignable under TypeScript 6.0.3 and 7.0.2."
     },
     {
       "path": "lib/db/dist/schema/deniedMerges.d.ts",
@@ -45,7 +45,7 @@
     },
     {
       "path": "lib/db/dist/schema/specImportAliases.d.ts",
-      "baselineSha256": "9f30ff379b73da5b491d16a8eeaca3cbb7ae0ebdbb80747b241ceef84bbca902",
+      "baselineSha256": "cd029a6268d907401011b99811cc3f7c59d45d642338b1337a9689847e197817",
       "candidateSha256": "72a73739bf56928acbf88ca64e52ced2106437d2c4539cf71e67e65a809ed5f7",
       "reason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
     },

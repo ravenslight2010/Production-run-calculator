@@ -56,6 +56,18 @@ describe("day timeline", () => {
     expect(timeline.runs[1].startMs).toBe(at("07:00"));
   });
 
+  it("finishes a paused current run from now, not a stale paused timestamp", () => {
+    const timeline = calculateDayTimeline({
+      date: day,
+      productionStartTime: "06:00",
+      nowMs: at("12:00"),
+      currentRunId: "a",
+      currentRemainingSec: 600,
+      runs: [{ run: { id: "a", brand: "A", flavor: "", startedAt: at("06:00"), pausedAt: at("07:00") }, durationSec: 3600 }],
+    });
+    expect(timeline.runs[0].finishMs).toBe(at("12:10"));
+  });
+
   it("surfaces a deleted after-run reference instead of reassigning it", () => {
     const timeline = calculateDayTimeline({
       date: day,

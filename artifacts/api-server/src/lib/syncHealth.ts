@@ -13,7 +13,7 @@ import {
   applyTemporaryOverrides,
   type AutoTrackScheduleInput,
 } from "@workspace/live-calc";
-import type { LegacySyncReadiness } from "./capacityTelemetry";
+import type { LegacySyncReadiness, SyncPeerFrameTelemetry } from "./capacityTelemetry";
 
 export const SYNC_HEALTH_CONTRACT_VERSION = 1 as const;
 export const SYNC_HEALTH_MAX_LEDGER_ROWS = 100;
@@ -51,6 +51,7 @@ export type SyncHealthReport = {
     historyRowsTruncated: boolean;
   };
   legacySyncReadiness: LegacySyncReadiness;
+  syncPeerFrames: SyncPeerFrameTelemetry;
 };
 
 type Executor = Pick<typeof import("@workspace/db").db, "select">;
@@ -91,6 +92,7 @@ export async function buildSyncHealthReport(
   date: string,
   at = new Date(),
   legacySyncReadiness: LegacySyncReadiness,
+  syncPeerFrames: SyncPeerFrameTelemetry,
 ): Promise<SyncHealthReport> {
   const [rows, ledgerRows, historyRows] = await Promise.all([
     executor.select({
@@ -312,5 +314,6 @@ export async function buildSyncHealthReport(
       historyRowsTruncated: historyTruncated,
     },
     legacySyncReadiness,
+    syncPeerFrames,
   };
 }

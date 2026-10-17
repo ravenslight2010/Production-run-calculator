@@ -114,6 +114,16 @@ describe("calculator performance diagnostics", () => {
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
 
+  it.each(["TimeoutError", "AbortError"])("uses the same bounded timeout/abort source for %s without retaining reasons", async (name) => {
+    const failure = new DOMException("private cancellation reason", name);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
+    await expect(fetchWithDiagnostics("/api/items?private=query")).rejects.toBe(failure);
+    expect(getPerformanceDiagnostics()).toEqual([
+      expect.objectContaining({ name: "api-failure:/api/items:timeout", kind: "api" }),
+    ]);
+    expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private");
+  });
+
   it("declares a delivery-failure instrumentation policy for every known diagnostic transport", () => {
     expect(Object.values(DIAGNOSTIC_INGESTION_TRANSPORTS)).toEqual([
       {

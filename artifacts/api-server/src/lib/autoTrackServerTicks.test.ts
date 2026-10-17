@@ -40,8 +40,91 @@ describe("server auto-track claim builders", () => {
 
   it("builds one advancing net-second claim per eligible due channel", () => {
     const claims = buildNetSecondServerClaims(payload(), NOW);
-    expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "app1-batch"]);
-    expect(claims.every((claim) => claim.mutations[0]!.to === claim.mutations[0]!.from + 1)).toBe(true);
+    expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "sauce-stock", "app1-batch"]);
+    expect(claims.find((claim) => claim.channel === "sauce-barrel")?.mutations[0]?.to)
+      .toBe(claims.find((claim) => claim.channel === "sauce-barrel")?.mutations[0]?.from! + 1);
+    expect(claims.find((claim) => claim.channel === "sauce-stock")?.mutations[0]).toMatchObject({
+      field: "sauceStockBarrels",
+      from: 0,
+      to: 2,
+    });
+    expect(claims.find((claim) => claim.channel === "app1-batch")?.mutations[0]?.to)
+      .toBe(claims.find((claim) => claim.channel === "app1-batch")?.mutations[0]?.from! + 1);
+  });
+
+  it("initializes legacy Sauce stock once, then claims tenths without inventory effects", () => {
+    const source = payload({
+      sauceStockBarrels: 0,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: false,
+    });
+    const initialClaim = buildNetSecondServerClaims(source, NOW)
+      .find((claim) => claim.channel === "sauce-stock")!;
+    expect(initialClaim.mutations).toEqual([
+      { field: "sauceStockBarrels", from: 0, to: 2 },
+      { field: "sauceStockAnchorNetSec", from: 0, to: initialClaim.dueAt },
+      { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+    ]);
+    const initialized = applyAutoTrackClaim(source as never, initialClaim, NOW);
+    expect(initialized.outcome).toBe("accepted");
+    expect(initialized.values).toMatchObject({
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
+      sauceStockAnchorNetSec: initialClaim.dueAt,
+      sauceBarrelsMade: 0,
+    });
+    expect(initialized.inventoryConsumption).toBeUndefined();
+    expect(applyAutoTrackClaim(initialized.data, initialClaim, NOW).outcome).toBe("duplicate");
+
+    const secondsUntilNext = initialClaim.nextDueAt - initialClaim.dueAt;
+    const nextClaim = buildNetSecondServerClaims(
+      initialized.data,
+      NOW + secondsUntilNext * 1000,
+    ).find((claim) => claim.channel === "sauce-stock")!;
+    expect(nextClaim.mutations[0]).toEqual({
+      field: "sauceStockBarrels",
+      from: 2,
+      to: 1.9,
+    });
+    expect(nextClaim.mutations[1]).toMatchObject({
+      field: "sauceStockAnchorNetSec",
+      to: nextClaim.dueAt,
+    });
+    const depleted = applyAutoTrackClaim(
+      initialized.data,
+      nextClaim,
+      NOW + secondsUntilNext * 1000,
+    );
+    expect(depleted.outcome).toBe("accepted");
+    expect(depleted.values.sauceStockBarrels).toBe(1.9);
+    expect(depleted.values.sauceBarrelsMade).toBe(0);
+    expect(depleted.inventoryConsumption).toBeUndefined();
+  });
+
+  it("initializes legacy Sauce stock even when the current sauce rate is zero", () => {
+    const source = payload({ sauceOzPerPizza: 0, sauceStockInitialized: false });
+    const claim = buildNetSecondServerClaims(source, NOW)
+      .find((entry) => entry.channel === "sauce-stock")!;
+    expect(claim).toBeDefined();
+    expect(claim.nextDueAt - claim.dueAt).toBe(1);
+    expect(applyAutoTrackClaim(source as never, claim, NOW).outcome).toBe("accepted");
+  });
+
+  it("keeps a pass identity when rebuilding a claim after a committed event", () => {
+    const source = payload();
+    const tickNow = NOW + 180_000;
+    const namespace = "tick-retry-identity";
+    const first = buildNetSecondServerClaims(source, tickNow, namespace)
+      .find((claim) => claim.channel === "app1-batch")!;
+    const committed = applyAutoTrackClaim(source as never, first, tickNow);
+    expect(committed.outcome).toBe("accepted");
+
+    const rebuilt = buildNetSecondServerClaims(committed.data, tickNow, namespace)
+      .find((claim) => claim.channel === "app1-batch");
+    expect(rebuilt).toBeDefined();
+    expect(rebuilt?.sequence).toBe(first.sequence + 1);
+    expect(rebuilt?.eventId).toBe(first.eventId);
   });
 
   it("uses the cumulative Sauce requirement as the lifetime cap, not the staged cap", () => {
@@ -108,7 +191,12 @@ describe("server auto-track claim builders", () => {
   });
 
   it("does not build net-second claims for invalid rates or paused runs", () => {
-    expect(buildNetSecondServerClaims(payload({ sauceOzPerPizza: 0, app1OzPerPizza: 0 }), NOW)).toEqual([]);
+    expect(buildNetSecondServerClaims(payload({
+      sauceOzPerPizza: 0,
+      app1OzPerPizza: 0,
+      sauceStockBarrels: 0,
+      sauceStockInitialized: true,
+    }), NOW)).toEqual([]);
     const paused = payload();
     (paused.dayState.runs[0] as Record<string, unknown>).pausedAt = NOW - 1;
     expect(buildNetSecondServerClaims(paused, NOW)).toEqual([]);
@@ -264,15 +352,32 @@ describe("server auto-track claim builders", () => {
     expect(plan?.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
   });
 
-  it("emits only one persisted wall-clock beat and advances its arm", () => {
-    const source = payload();
+  it("does not let an overdue legacy case arm advance ahead of freezer eligibility", () => {
+    const source = payload({ freezerTime: 3 });
     (source as Record<string, unknown>).autoTrackServerState = {
       wallClockBookkeeping: { [RUN]: { lifecycleGeneration: `${RUN}:1`, caseNextDueMs: NOW - 1 } },
     };
     const plan = buildWallClockServerClaims(source, NOW)!;
+    expect(plan.claims.filter((claim) => claim.channel === "case")).toEqual([]);
+    expect(plan.bookkeeping.lastExpectedCases).toBe(0);
+    expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+  });
+
+  it("emits a freezer-authorized legacy case beat and advances its arm", () => {
+    const source = payload({ freezerTime: 3 });
+    const dueAt = NOW + 150_000;
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: { [RUN]: { lifecycleGeneration: `${RUN}:1`, caseNextDueMs: dueAt - 1 } },
+    };
+    const plan = buildWallClockServerClaims(source, dueAt)!;
     const caseClaim = plan.claims.find((claim) => claim.channel === "case")!;
     expect(caseClaim.mutations).toHaveLength(2);
-    expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+    expect(caseClaim.mutations[1]).toEqual({
+      field: "casesOnCurrentSkid",
+      from: 0,
+      to: 33,
+    });
+    expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(dueAt);
   });
 
   it("continues canonical case beats during the bounded post-End freezer drain", () => {
@@ -401,7 +506,7 @@ describe("server auto-track claim builders", () => {
   });
 
   it("honors only matching-generation dough pause control while case continues", () => {
-    const source = payload();
+    const source = payload({ freezerTime: 0 });
     (source as Record<string, unknown>).doughTimerControls = {
       [RUN]: { generation: `${RUN}:1`, pausedAt: NOW - 1000, resumeAt: 0, updatedAt: NOW - 1000 },
     };

@@ -21,6 +21,8 @@ import {
   setNotificationPrefs,
   setUserRole,
   updateRoleCapabilities,
+  canManagePasswordResetFor,
+  getUserCapabilities,
   type Capability,
 } from "../lib/roles";
 import {
@@ -28,11 +30,11 @@ import {
   declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
-import { db, usersTable } from "@workspace/db";
+import { db, rolesTable, userRolesTable, usersTable } from "@workspace/db";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { getUserById } from "../lib/users";
 import { revokeSessionsForUser } from "../lib/authSessions";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createInvitation, listInvitations, revokeInvitation } from "../lib/invitations";
 import { rotateSignupCode, setSignupCodeEnabled, signupCodeStatus } from "../lib/signupAccessCode";
 import { logAuditEvent, writeAuditEvent } from "./auditLogs";
@@ -275,20 +277,70 @@ router.patch("/users/:userId/status", requireLiveScope, requireCapability("manag
     res.status(404).json({ error: "Staff member not found." });
     return;
   }
+  const targetCapabilities = await getUserCapabilities(targetUserId);
+  if (!(await canManagePasswordResetFor(targetUserId, (req.capabilities ?? []) as Capability[])) ||
+      (targetUserId !== req.userId && targetCapabilities.includes("manage-staff"))) {
+    res.status(403).json({ error: "Cannot change a higher-privileged account." });
+    return;
+  }
   if (targetUserId === req.userId && req.body.disabled) {
     res.status(409).json({ error: "You cannot disable your own account." });
     return;
   }
-  await db.update(usersTable).set({
-    disabled: req.body.disabled,
-    disabledAt: req.body.disabled ? new Date() : null,
-  }).where(eq(usersTable.id, targetUserId));
-  if (req.body.disabled) await revokeSessionsForUser(targetUserId);
-  await writeAuditEvent(db, {
-    action: req.body.disabled ? "account_disabled" : "account_enabled",
-    resource: `user:${targetUserId}`,
-    changes: { outcome: "success", targetId: targetUserId },
+  const changed = await db.transaction(async (tx) => {
+    // Serialize all staff lifecycle changes, then re-read the enabled
+    // manage-staff holders while holding row locks. This closes the
+    // check-then-disable race between two concurrent manager requests.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`);
+    const [lockedTarget] = await tx.select({ id: usersTable.id, disabled: usersTable.disabled })
+      .from(usersTable).where(eq(usersTable.id, targetUserId)).for("update");
+    if (!lockedTarget) return { ok: false as const, conflict: false };
+    const [currentTargetRole] = await tx.select({ capabilities: rolesTable.capabilities })
+      .from(userRolesTable)
+      .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+      .where(eq(userRolesTable.userId, targetUserId));
+    const currentCapabilities = currentTargetRole?.capabilities ?? [];
+    const actorCapabilities = new Set<string>(req.capabilities ?? []);
+    const currentTargetAuthorized = currentCapabilities.every((capability) =>
+      actorCapabilities.has(capability),
+    );
+    if (!currentTargetAuthorized ||
+        (targetUserId !== req.userId && currentCapabilities.includes("manage-staff"))) {
+      return { ok: false as const, conflict: false, forbidden: true };
+    }
+    const targetCurrentlyManagesStaff = currentCapabilities.includes("manage-staff");
+    if (req.body.disabled && targetCurrentlyManagesStaff) {
+      const holders = await tx.select({ id: usersTable.id }).from(usersTable)
+        .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
+        .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+        .where(sql`${usersTable.disabled} = false AND ${rolesTable.capabilities} ? 'manage-staff'`)
+        .for("update");
+      if (holders.length <= 1) return { ok: false as const, conflict: true };
+    }
+    await tx.update(usersTable).set({
+      disabled: req.body.disabled,
+      disabledAt: req.body.disabled ? new Date() : null,
+    }).where(eq(usersTable.id, targetUserId));
+    await writeAuditEvent(tx, {
+      action: req.body.disabled ? "account_disabled" : "account_enabled",
+      resource: `user:${targetUserId}`,
+      changes: { outcome: "success", targetId: targetUserId },
+    });
+    return { ok: true as const };
   });
+  if (!changed.ok) {
+    if ("forbidden" in changed && changed.forbidden) {
+      res.status(403).json({ error: "Cannot change a higher-privileged account." });
+      return;
+    }
+    if (changed.conflict) {
+      res.status(409).json({ error: "Cannot disable the last enabled staff manager." });
+      return;
+    }
+    res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  if (req.body.disabled) await revokeSessionsForUser(targetUserId);
   res.json({ disabled: req.body.disabled });
 });
 
@@ -301,6 +353,12 @@ router.post("/users/:userId/revoke-sessions", requireLiveScope, requireCapabilit
   const target = await getUserById(targetUserId);
   if (!target) {
     res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  const targetCapabilities = await getUserCapabilities(targetUserId);
+  if (!(await canManagePasswordResetFor(targetUserId, (req.capabilities ?? []) as Capability[])) ||
+      (targetUserId !== req.userId && targetCapabilities.includes("manage-staff"))) {
+    res.status(403).json({ error: "Cannot revoke sessions for a higher-privileged account." });
     return;
   }
   await revokeSessionsForUser(targetUserId);
@@ -332,6 +390,7 @@ router.put(
   }
   const previous = await getStaffMember(targetUserId);
   const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`);
     const changed = await setUserRole(targetUserId, parsed.data.role,
       (req.capabilities ?? []) as Capability[], tx);
     if (changed.ok && previous.role !== changed.row.role) {

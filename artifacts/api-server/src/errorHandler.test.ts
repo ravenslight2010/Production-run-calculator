@@ -12,7 +12,9 @@
 // the body parser BEFORE the router/auth/DB run, so no database is needed.
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import express from "express";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { enhancedErrorMessages } from "./middlewares/errorMessagesEnhanced";
 
 // Silence the pino logger (and avoid spinning up its transport worker).
 vi.mock("./lib/logger", async () => {
@@ -22,6 +24,8 @@ vi.mock("./lib/logger", async () => {
 
 let server: Server;
 let baseUrl: string;
+let nonErrorServer: Server;
+let nonErrorBaseUrl: string;
 
 beforeAll(async () => {
   const app = (await import("./app")).default;
@@ -32,10 +36,31 @@ beforeAll(async () => {
       resolve();
     });
   });
+
+  // Keep these deliberately failing routes out of the production app while
+  // sending their raw rejection values through the same terminal middleware.
+  const nonErrorApp = express();
+  nonErrorApp.get("/api/test-error/string", async () => {
+    throw "sensitive string details";
+  });
+  nonErrorApp.get("/api/test-error/object", async () => {
+    throw { message: "sensitive object details", stack: "SECRET_STACK_TRACE" };
+  });
+  nonErrorApp.use(enhancedErrorMessages);
+  await new Promise<void>((resolve) => {
+    nonErrorServer = nonErrorApp.listen(0, () => {
+      const { port } = nonErrorServer.address() as AddressInfo;
+      nonErrorBaseUrl = `http://127.0.0.1:${port}`;
+      resolve();
+    });
+  });
 });
 
 afterAll(async () => {
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (nonErrorServer) {
+    await new Promise<void>((resolve) => nonErrorServer.close(() => resolve()));
+  }
 });
 
 describe("central JSON error handler", () => {
@@ -64,4 +89,23 @@ describe("central JSON error handler", () => {
     const body = (await res.json()) as { error?: unknown };
     expect(typeof body.error).toBe("string");
   });
+
+  it.each(["string", "object"] as const)(
+    "safely handles a route rejection with a raw %s value",
+    async (valueType) => {
+      const res = await fetch(`${nonErrorBaseUrl}/api/test-error/${valueType}`);
+
+      expect(res.status).toBe(500);
+      expect(res.headers.get("content-type")).toMatch(/application\/json/);
+      const body = (await res.json()) as { error?: unknown };
+      expect(typeof body.error).toBe("string");
+      expect(body.error).toBe(
+        "Something went wrong on the server. Our team has been notified. Please try again later.",
+      );
+      expect(Object.keys(body)).toEqual(["error"]);
+      expect(JSON.stringify(body)).not.toMatch(
+        /sensitive string details|sensitive object details|SECRET_STACK_TRACE/,
+      );
+    },
+  );
 });

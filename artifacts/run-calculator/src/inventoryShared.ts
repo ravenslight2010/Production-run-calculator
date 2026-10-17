@@ -1,4 +1,6 @@
 import type { FormValues } from "./types";
+import type { GetFieldChecksParams, FieldChecksReportPopulation } from "@workspace/api-client-react";
+export type { GetFieldChecksParams } from "@workspace/api-client-react";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
@@ -10,6 +12,7 @@ import {
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
+  computeRunDemandImpact as computeRunDemandImpactShared,
   deriveCandidateItems as deriveCandidateItemsShared,
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
@@ -116,6 +119,21 @@ export const computeRunLines = (vals: FormValues) =>
 
 export const computeRunConsumptionLines = (vals: FormValues) =>
   computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
+
+/** Compare two run forms through the same canonical math and substitution overlay as inventory consumption. */
+export const computeRunDemandImpact = (
+  before: FormValues,
+  after: FormValues,
+  items: readonly Pick<InventoryItem, "key" | "onHand">[] | null,
+) =>
+  computeRunDemandImpactShared(
+    {
+      before: toRunLinesInput(before),
+      after: toRunLinesInput(after),
+      inventory: items?.map(({ key, onHand }) => ({ key, onHand })) ?? null,
+    },
+    DEFAULT_PEP_TYPES,
+  );
 
 export type WarehouseCoverageStatus = "covered" | "short" | "conversion" | "missing";
 export type WarehouseTransferSource = {
@@ -1031,23 +1049,29 @@ export type Role = string;
 export const CAPABILITIES = [
   "manage-staff",
   "manage-inventory",
+  "manage-allergens",
   "manage-factory-settings",
   "edit-production-rules",
   "approve-password-resets",
   "review-incidents",
   "use-ai-tools",
   "manage-profiles",
+  "record-qc",
+  "manage-qc",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   "manage-staff": "Manage staff & roles",
   "manage-inventory": "Manage inventory",
+  "manage-allergens": "Manage ingredient allergens",
   "manage-factory-settings": "Manage factory settings",
   "edit-production-rules": "Edit production rules",
   "approve-password-resets": "Approve password resets",
   "review-incidents": "Review incidents",
   "use-ai-tools": "Use AI tools",
   "manage-profiles": "Manage setup profiles",
+  "record-qc": "Record and view QC workflows",
+  "manage-qc": "Manage QC settings, sign-offs, and exports",
 };
 export type RoleDefinition = {
   name: string;
@@ -1262,7 +1286,8 @@ export const declinePasswordReset = (id: string) =>
     { method: "POST" },
   );
 
-export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+export const fetchInventory = (signal?: AbortSignal) =>
+  api<InventoryItem[]>("/inventory", signal ? { signal } : undefined);
 
 // Server-authority warehouse advisory snapshot. The server pre-computes the
 // reorder list, use-first list, and transfer warnings from canonical sync data
@@ -1541,7 +1566,17 @@ export const submitFieldCheckObservations = async (
     }
     throw error;
   }
-  return (await res.json()) as { accepted: number; duplicate: number };
+  const result: unknown = await res.json();
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("Field-check delivery confirmation unavailable");
+  }
+  const counts = result as { accepted?: unknown; duplicate?: unknown };
+  if (!Number.isSafeInteger(counts.accepted) || (counts.accepted as number) < 0 ||
+      !Number.isSafeInteger(counts.duplicate) || (counts.duplicate as number) < 0 ||
+      (counts.accepted as number) + (counts.duplicate as number) !== observations.length) {
+    throw new Error("Field-check delivery confirmation unavailable");
+  }
+  return { accepted: counts.accepted as number, duplicate: counts.duplicate as number };
 };
 
 export type FieldCheckFailure = {
@@ -1555,11 +1590,14 @@ export type FieldCheckSummary = {
   name: string;
   label: string;
   status: "healthy" | "collecting" | "needs-review" | "unsupported";
+  coverage: "never-observed" | "current" | "stale" | "no-success";
   observedBy: "browser" | "hardware";
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
+  lastSuccessfulMetrics: Record<string, number> | null;
   lastObservedAt: string | null;
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -1573,11 +1611,17 @@ export type FieldChecksReport = {
   checks: FieldCheckSummary[];
   overallStatus: "healthy" | "collecting" | "needs-review" | "unsupported";
   actionableCount: number;
+  population: FieldChecksReportPopulation;
 };
 
 // Incident and field-check review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
-export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
+export const fetchFieldChecks = (filters: GetFieldChecksParams = {}) => {
+  const query = new URLSearchParams();
+  if (filters.appBuild !== undefined) query.set("appBuild", filters.appBuild);
+  if (filters.deviceCategory !== undefined) query.set("deviceCategory", filters.deviceCategory);
+  return api<FieldChecksReport>(`/field-checks${query.size ? `?${query}` : ""}`);
+};
 export const confirmHardwareFieldCheck = (body: {
   checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
     "safe-area-clearance" | "camera-file-selection" | "update-handoff" |

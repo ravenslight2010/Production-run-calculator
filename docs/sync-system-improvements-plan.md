@@ -1,6 +1,6 @@
 # Sync System Improvements — Plan
 
-**Updated:** 2026-09-21 (reconciled after complete-write snapshot fencing and measurement work)
+**Updated:** 2026-10-08 (reconciled after stale-sync convergence and operator recovery work)
 **Related:** [unified reliability plan](sync-reliability-unified-plan-2026-09-19.md), [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md), [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md), [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md), [idea-backlog.md](idea-backlog.md) §16
 
 ## Current State
@@ -17,24 +17,25 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 - **Conditional partial peer SSE** — peers receive a partial frame when the delta is safe and materially smaller; complete initial/recovery and fallback frames remain available
 - **Snapshot unchanged short-circuit** — matching snapshot requests avoid retransmitting the document
 - **Offline queue** — `syncPushQueue` (web) queues mutations while offline and drains on reconnect; `operationalMutationCursor` tracks replay position
+- **Operator status and recovery** — merged tasks #1053 and #2800 added visible sync state, safe retry, canonical recovery, and stale-queued-edit rebasing
 - **Daily-reset session fence** — `sessionBoundary.ts` force-expires stale tokens at the facility-local reset boundary (`applyResetBoundary`, `resetBoundaryAt`)
 - **Server-authoritative live-calc** — auto-track ticks, wall-clock claims, and the operational projection are computed server-side and streamed, not trusted from clients
 - **Resilience and measurement** — bounded pool acquisition, idle-client recovery, privacy-safe sync/pool-pressure telemetry, and `/healthz` responsiveness under pool exhaustion
 
-### What's Genuinely Still Missing
+### What's Genuinely Still Missing (reconciled 2026-10-08)
 
-1. **No current production adoption baseline** — telemetry exists, but retained results still need exact published revision and deployment identity
-2. **Repeated-offline convergence needs explicit confirmation** — complete conflicts are fenced, but repeated queued edits and retries need bounded regression evidence
+1. **Published behavior is only partly evidenced** — the 2026-10-08 record captures build identity and readiness, but prepared-source equivalence and authenticated live SSE/topology behavior remain unproven
+2. **Database capacity budget is open** — the same production investigation used a read replica and did not expose the primary connection ceiling, effective pool override, or serving-instance count; continue active task #2808 through authorized Replit sources
 3. **Partial coverage remains coarse** — expand only for measured hot paths; JSON Patch is optional, not prerequisite
-4. **No complete per-device sync health view** — `GET /sync/health` and aggregate conflict stats exist, but managers still cannot compare every device's last-seen time, queue depth, and revision lag
-5. **No field-specific conflict reconciliation UI** — server conflict logging/stats exist, but a device whose value loses a successful merge still lacks a direct explanation
+4. **No complete per-device sync health view** — user-facing sync status/retry exists, but managers still cannot compare every device's last-seen time, queue depth, and revision lag
+5. **No field-specific conflict explanation** — generic recovery/conflict visibility exists; a device whose value loses a successful merge still lacks a direct field-level explanation
 6. **No selective sync** — partial wire frames are not the same as per-run read scope
 
 ---
 
 ## Why Complete-Write Causality and Measurement Are the Priority
 
-`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT, complete-write snapshot fencing, and conditional partial peer SSE address causal and eligible wire-growth risks. Current production measurements and repeated-offline convergence evidence are still required before broader sparse sections or JSON Patch are considered.
+`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT, complete-write snapshot fencing, and conditional partial peer SSE address causal and eligible wire-growth risks. Merged task #2800 and focused tests cover repeated-offline convergence in the repository; this is not production-device evidence. Current production distributions are still required before broader sparse sections or JSON Patch are considered.
 
 **Standard approaches:**
 
@@ -73,9 +74,9 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 
 **Benefit:** Turns "the tablet in the freezer hasn't synced in 20 minutes" from a mystery into something a manager can act on before it becomes a lost-run-data incident.
 
-### 3. Conflict Visibility (new)
+### 3. Field-Specific Conflict Explanation (partial)
 
-**What:** When `protectRunValues` / `capMergedResult` reject or reconcile a device's write (correctly, per existing LWW rules), that device currently has no signal anything happened — it just silently receives the canonical (different) state back.
+**What:** The sync UI now exposes generic conflict/recovery status, but it does not identify which field another device's accepted value replaced or explain that decision at the field level.
 
 **How:**
 
@@ -106,12 +107,12 @@ Client `DEFAULT_VALUES` and server `CURRENT_BLANK_RUN_VALUE` are currently field
 4. Keep readiness provider-key detection aligned with the active adapter independently of AI dependency policy
 5. Retain evidence-safe complete/partial/fallback/SSE and pool measurements
 
-### Phase 2: Deployment Evidence and Visibility
+### Phase 2: Deployment Evidence and Remaining Visibility
 
-6. Refresh the authenticated published SSE probe for the exact release; retain the deterministic two-process fanout test
-7. Compute the database pool budget from capacity and maximum-instance inputs
+6. Check current published identity/readiness and obtain an authenticated SSE probe for the exact release; the 2026-10-08 production record is not a complete SSE probe
+7. Continue the active database-capacity investigation using authorized capacity, pool, and instance-count sources; do not ask the owner to manually transcribe data Replit can retrieve
 8. **Per-device sync health** panel using the existing read-only health and conflict evidence
-9. **Conflict visibility** toast
+9. **Field-specific conflict explanation** beyond the current generic status/retry path
 
 ### Phase 3: Deferred
 

@@ -35,7 +35,12 @@ function stateHarness() {
     fenceReleased: false,
   };
   const before = structuredClone(state);
-  const adoptUnchanged = vi.fn((body: { snapshotId: string; canonicalRevision?: number }) => {
+  const adoptUnchanged = vi.fn((body: {
+    snapshotId: string;
+    canonicalRevision?: number;
+    operationalProjection?: SyncPayload["operationalProjection"];
+    serverTime?: number;
+  }) => {
     state.snapshotId = body.snapshotId;
     state.canonicalRevision = body.canonicalRevision ?? state.canonicalRevision;
   });
@@ -157,6 +162,38 @@ describe("foreground recovery response transaction", () => {
     expect(harness.state.canonicalRevision).toBe(8);
     expect(harness.state.runValues).toEqual(payload.runValues);
     expect(harness.state.queuedWrite.pending).toBe(false);
+    expect(harness.state.fenceReleased).toBe(true);
+  });
+
+  it("adopts the live projection delivered with an unchanged wake response", async () => {
+    const harness = stateHarness();
+    const snapshotId = "a".repeat(64);
+    harness.state.snapshotId = snapshotId;
+    const operationalProjection = {
+      runId: "run-1",
+      serverTimeMs: 10_000,
+      capturedAtServerMs: 10_000,
+    } as NonNullable<SyncPayload["operationalProjection"]>;
+    const response = new Response(JSON.stringify({
+      unchanged: true,
+      snapshotId,
+      canonicalRevision: 5,
+      operationalProjection,
+      serverTime: 10_000,
+      resetEpoch: 0,
+      rollover: false,
+    }), { status: 200 });
+
+    const result = await harness.consume(response);
+
+    expect(result).toEqual({ accepted: true, kind: "unchanged", snapshotId });
+    expect(harness.adoptUnchanged).toHaveBeenCalledWith({
+      snapshotId,
+      canonicalRevision: 5,
+      operationalProjection,
+      serverTime: 10_000,
+    });
+    expect(harness.state.canonicalRevision).toBe(5);
     expect(harness.state.fenceReleased).toBe(true);
   });
 

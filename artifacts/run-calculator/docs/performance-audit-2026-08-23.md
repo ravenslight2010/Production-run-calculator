@@ -147,7 +147,7 @@ before the run and were reachable through the configured preview.
 
 | Journey | Result | Evidence |
 | --- | --- | --- |
-| Authenticated management performance | **FAIL** (1 test, repeated) | Authenticated desktop startup completed; staff surface stayed deferred, API requests and browser navigation diagnostics were captured. `management:staff-first-visit` measured 313–320 ms against the 250 ms transition budget. |
+| Authenticated management performance | **FAIL** (1 test, repeated; outcome retained) | Authenticated desktop startup completed; staff surface stayed deferred, API requests and browser navigation diagnostics were captured. `management:staff-first-visit` measured 313–320 ms. This row originally compares it with the 250 ms general transition budget, which conflicts with the separately documented 350 ms first-visit budget above; the retained record does not explain the mismatch. Do not treat this as a verified failure against the applicable scoped budget or revise the historical test outcome without its original assertion output. |
 | Production / warehouse / QC / management navigation | **BLOCKED** (0/2 viewport tests) | Both desktop and phone runs timed out waiting for the authenticated `More` control before department navigation. |
 | Phone layout and import controls | **PASS** (7 passed, 1 expected skip) | 375×812, 390×844, and 568×320 authenticated layout journeys passed; the physical Android test was skipped because no device endpoint was configured. The manager import-control/review path was exercised in the phone suite. |
 | Sync convergence | **PARTIAL** (3/4) | Desktop and phone deletion/reload convergence passed; one desktop reset-epoch test received a null `dayState` payload while asserting the empty reset state. |

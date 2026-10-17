@@ -20,6 +20,8 @@ interface ConsumeForegroundRecoveryResponseOptions {
   adoptUnchanged: (body: {
     snapshotId: string;
     canonicalRevision?: number;
+    operationalProjection?: SyncPayload["operationalProjection"];
+    serverTime?: number;
   }) => void | Promise<void>;
   adoptCanonical: (payload: SyncPayload, snapshotId: string) => void | Promise<void>;
   adoptReset: (body: { resetEpoch: number; rollover: boolean }) => boolean | Promise<boolean>;
@@ -48,6 +50,8 @@ export async function consumeForegroundRecoveryResponse({
     unchanged?: boolean;
     snapshotId?: string;
     canonicalRevision?: number;
+    operationalProjection?: SyncPayload["operationalProjection"];
+    serverTime?: number;
     resetEpoch?: number;
     rollover?: boolean;
   } | null;
@@ -77,7 +81,12 @@ export async function consumeForegroundRecoveryResponse({
       return { accepted: false, reason: "reset" };
     }
     if (!isCurrent()) return { accepted: false, reason: "obsolete" };
-    await adoptUnchanged({ snapshotId, canonicalRevision: body.canonicalRevision });
+    await adoptUnchanged({
+      snapshotId,
+      canonicalRevision: body.canonicalRevision,
+      operationalProjection: body.operationalProjection,
+      serverTime: body.serverTime,
+    });
     return { accepted: true, kind: "unchanged", snapshotId };
   }
 

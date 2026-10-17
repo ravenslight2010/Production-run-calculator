@@ -1,13 +1,13 @@
 ---
 name: db-schema-change
-description: Compatibility router for any Postgres schema change under lib/db/src/schema/*. Use whenever modifying, adding, or removing a Drizzle table/column, or when a migration/db push is needed. For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.
+description: Route Postgres/Drizzle schema work that needs additive-safety, API/codegen, typecheck, push-force, or data-heal guidance. For a new field or column on an existing table, use schema-change-checklist directly as the canonical procedure; use this router for new tables and other schema changes.
 ---
 
 # DB Schema Change
 
-This is the compatibility entry point for all schema work. The detailed,
+Use this entry point for new tables and other schema work. The detailed,
 ordered procedure for adding a field or column to an existing table lives in
-`.agents/skills/schema-change-checklist/SKILL.md`; read and follow that skill
+`.agents/skills/schema-change-checklist/SKILL.md`; go directly to that skill
 instead of maintaining a second checklist.
 
 ## Route first

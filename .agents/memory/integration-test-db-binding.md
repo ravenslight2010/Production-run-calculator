@@ -21,3 +21,26 @@ DATABASE_URL *before* `beforeAll` repoints it at the throwaway DB.
 after setting `DATABASE_URL`, exactly like `db`, the router, and
 `clearUserValidityCache` are loaded. Only db-free modules (e.g. `lib/auth`
 `signToken`) are safe as static imports.
+
+The central `enhancedErrorMessages` middleware is not db-free: its telemetry
+dependency imports the database module. Integration tests that mount it must
+also dynamically import it after selecting the disposable URL.
+
+**Why:** An error middleware can appear unrelated to persistence while a
+transitive observability dependency still initializes the singleton pool.
+
+**How to apply:** Treat production middleware imports the same as route imports;
+check their full dependency chain before placing them at test-file scope.
+
+When an integration test exercises one route family, mount that family with
+the production-wide middleware it needs instead of importing the full API
+composition.
+
+**Why:** A cold Vitest import of the full API router graph exceeded the setup
+hook budget before sync assertions ran. Mounting only the sync router with its
+cache, readiness, and authentication middleware kept the test bounded without
+weakening route behavior.
+
+**How to apply:** Confirm requests stay within that family, then mount its
+router after the relevant production middleware. Keep database binding after
+the disposable URL is selected and retain finite setup and runner timeouts.

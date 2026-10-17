@@ -7,6 +7,7 @@ import { logger } from "./logger";
 import { installPoolTelemetry } from "./capacityTelemetry";
 import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 import type { StartupHealthSnapshot } from "./startupHealth";
+import type { GeminiFallbackTrigger, GeminiRequestResult } from "@workspace/integrations-openai-ai-server";
 
 export type OperationOutcome = "success" | "error" | "degraded";
 export type CacheMaintenanceOutcome = "success" | "error";
@@ -29,6 +30,15 @@ const CACHE_MAINTENANCE_OPERATION = "prune" as const;
 const CACHE_MAINTENANCE_SCOPES: CacheMaintenanceScope[] = ["live", "sandbox"];
 const CACHE_MAINTENANCE_SHARED_MAX_ROWS = CACHE_MAINTENANCE_FAILURE_MAX_EVENTS;
 const CACHE_MAINTENANCE_SHARED_TIMEOUT_MS = 1_000;
+export const GEMINI_FALLBACK_EXHAUSTION_THRESHOLD = 3;
+export const GEMINI_FALLBACK_EXHAUSTION_WINDOW_MS = 5 * 60 * 1000;
+const GEMINI_FALLBACK_EXHAUSTION_MAX_EVENTS = 100;
+const GEMINI_FALLBACK_TRIGGER_LABELS: readonly GeminiFallbackTrigger[] = [
+  "rate_limited",
+  "service_unavailable",
+  "retired_model",
+  "empty_response",
+];
 // Keep the PostgreSQL deadline shorter than the caller's fallback deadline.
 // Promise.race alone only stops waiting for a query; it does not stop the
 // transaction that owns the pool connection.
@@ -36,6 +46,8 @@ const CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS =
   CACHE_MAINTENANCE_SHARED_TIMEOUT_MS - 100;
 const cacheMaintenanceFailureTimes = new Map<string, number[]>();
 const cacheMaintenanceAlerts = new Set<string>();
+const geminiFallbackExhaustionTimes = new Map<string, number[]>();
+const geminiFallbackExhaustionAlerts = new Set<string>();
 // The cache path records diagnostics fire-and-forget so telemetry can never
 // block a cache operation. Track the in-flight shared-failure writes so test
 // isolation can wait for them before asserting on the shared events table.
@@ -45,8 +57,73 @@ const sharedCacheMaintenancePersistence = createSharedDiagnosticPersistence({
   timeoutMessage: "cache maintenance diagnostics timed out",
 });
 
+type GeminiFallbackAlertLogger = Pick<Logger, "warn">;
+
+/**
+ * Alert once per trigger-label episode when fallback exhaustion recurs within
+ * a short fixed window. Only adapter-owned result/trigger enums enter the
+ * aggregate or warning; request/provider content is never accepted here.
+ */
+export function recordGeminiFallbackResult(
+  fields: {
+    requestResult: GeminiRequestResult;
+    fallbackTrigger: GeminiFallbackTrigger | null;
+  },
+  log: GeminiFallbackAlertLogger = logger,
+  now = Date.now(),
+): void {
+  if (fields.requestResult !== "fallback_exhausted") return;
+  if (
+    fields.fallbackTrigger !== null &&
+    !GEMINI_FALLBACK_TRIGGER_LABELS.includes(fields.fallbackTrigger)
+  ) {
+    return;
+  }
+
+  const key = fields.fallbackTrigger ?? "none";
+  const cutoff = now - GEMINI_FALLBACK_EXHAUSTION_WINDOW_MS;
+  const recent = (geminiFallbackExhaustionTimes.get(key) ?? [])
+    .filter((timestamp) => timestamp >= cutoff)
+    .slice(-GEMINI_FALLBACK_EXHAUSTION_MAX_EVENTS);
+  recent.push(now);
+  const boundedRecent = recent.slice(-GEMINI_FALLBACK_EXHAUSTION_MAX_EVENTS);
+  geminiFallbackExhaustionTimes.set(key, boundedRecent);
+
+  const shouldAlert =
+    boundedRecent.length >= GEMINI_FALLBACK_EXHAUSTION_THRESHOLD &&
+    !geminiFallbackExhaustionAlerts.has(key);
+  if (boundedRecent.length >= GEMINI_FALLBACK_EXHAUSTION_THRESHOLD) {
+    geminiFallbackExhaustionAlerts.add(key);
+  } else {
+    geminiFallbackExhaustionAlerts.delete(key);
+  }
+  if (!shouldAlert) return;
+
+  try {
+    log.warn(
+      {
+        event: "gemini_fallback_exhaustion",
+        requestResult: "fallback_exhausted",
+        fallbackTrigger: fields.fallbackTrigger,
+        recentExhaustedCount: boundedRecent.length,
+        threshold: GEMINI_FALLBACK_EXHAUSTION_THRESHOLD,
+        windowMs: GEMINI_FALLBACK_EXHAUSTION_WINDOW_MS,
+      },
+      "Gemini fallback exhaustion may disrupt spec imports",
+    );
+  } catch {
+    // Telemetry must never change an AI/import operation's result.
+  }
+}
+
+/** Reset process-local Gemini alert aggregation between isolated tests. */
+export function clearGeminiFallbackDiagnosticsForTests(): void {
+  geminiFallbackExhaustionTimes.clear();
+  geminiFallbackExhaustionAlerts.clear();
+}
+
 const OPERATION_NAMES: Array<[RegExp, string]> = [
-  [/^\/(?:api\/)?(?:healthz|readyz|livez)\/?$/, "health"],
+  [/^\/(?:api\/)?(?:healthz|readyz|livez|build-info)\/?$/, "health"],
   [/^\/api\/?$/, "health"],
   [/\/sync(?:\/|$)/, "sync"],
   [/\/(?:ai|photo|quality|label|waste)/, "ai"],

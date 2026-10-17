@@ -16,6 +16,11 @@ export type ImportOperationResult<T = unknown> = {
   affectedCount?: number;
 };
 
+export type ImportOperationSourceEvidence = {
+  sourceText: string;
+  parseVersion: string;
+};
+
 export class ImportOperationError extends Error {
   constructor(
     message: string,
@@ -169,6 +174,7 @@ export function applyImportOperation<T>(
     sourceKey?: string;
     sourceLabel: string;
     changes: Record<string, unknown>;
+    sourceEvidence?: ImportOperationSourceEvidence;
     expectedStateHash?: string;
     requestHash?: string;
   },

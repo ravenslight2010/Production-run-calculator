@@ -24,7 +24,13 @@ export default function BackgroundOperationWarning() {
     },
   });
 
-  if (isLoading || !canView || !query.data?.warnings.length) return null;
+  const warnings = query.data?.warnings ?? [];
+  const deferred = query.data?.automaticTrackingBackoff;
+  if (
+    isLoading
+    || !canView
+    || (!warnings.length && !deferred?.deferredDateCount)
+  ) return null;
 
   return (
     <section
@@ -35,24 +41,47 @@ export default function BackgroundOperationWarning() {
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div>
-          <h3 className="text-sm font-semibold">Background work needs attention</h3>
-          <p className="mt-0.5 text-xs">
-            Some automated work has failed repeatedly. The warning clears automatically when failures age out.
-          </p>
-          <ul className="mt-2 space-y-1 text-xs">
-            {query.data.warnings.map((warning) => (
-              <li
-                key={warning.operation}
-                data-testid={`background-operation-${warning.operation}`}
-              >
-                <span className="font-medium">{operationLabels[warning.operation]}</span>
-                {" — latest failure "}
-                <time dateTime={warning.lastFailureAt}>
-                  {new Date(warning.lastFailureAt).toLocaleString()}
-                </time>
-              </li>
-            ))}
-          </ul>
+          <h3 className="text-sm font-semibold">
+            {warnings.length > 0
+              ? "Background work needs attention"
+              : "Background work status"}
+          </h3>
+          {warnings.length > 0 && (
+            <p className="mt-0.5 text-xs">
+              Some automated work has failed repeatedly. The warning clears automatically when failures age out.
+            </p>
+          )}
+          {deferred && deferred.deferredDateCount > 0 && (
+            <p className="mt-2 text-xs" data-testid="automatic-tracking-backoff">
+              Automatic tracking is temporarily waiting to retry for{" "}
+              {deferred.deferredDateCount}{deferred.deferredDateCountCapped ? "+" : ""}{" "}
+              {deferred.deferredDateCount === 1 && !deferred.deferredDateCountCapped ? "date" : "dates"}.
+              {deferred.nextEligibleRetryAt && (
+                <>
+                  {" "}Next retry is eligible{" "}
+                  <time dateTime={deferred.nextEligibleRetryAt}>
+                    {new Date(deferred.nextEligibleRetryAt).toLocaleString()}
+                  </time>.
+                </>
+              )}
+            </p>
+          )}
+          {warnings.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs">
+              {warnings.map((warning) => (
+                <li
+                  key={warning.operation}
+                  data-testid={`background-operation-${warning.operation}`}
+                >
+                  <span className="font-medium">{operationLabels[warning.operation]}</span>
+                  {" — latest failure "}
+                  <time dateTime={warning.lastFailureAt}>
+                    {new Date(warning.lastFailureAt).toLocaleString()}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </section>

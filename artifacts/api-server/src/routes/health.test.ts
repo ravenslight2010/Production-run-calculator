@@ -39,7 +39,12 @@ const mocks = vi.hoisted(() => ({
     connect: vi.fn(),
   },
   info: vi.fn(),
+  buildInfo: vi.fn(),
+  scheduledQueueDiagnostics: vi.fn(),
+  syncOutboxLagDiagnostics: vi.fn(),
 }));
+
+vi.mock("../lib/buildInfo", () => ({ getBuildInfo: mocks.buildInfo }));
 
 vi.mock("@workspace/db", () => ({
   db: { execute: mocks.execute },
@@ -50,12 +55,22 @@ vi.mock("../lib/logger", () => ({
   logger: { info: mocks.info },
 }));
 
+vi.mock("../lib/serverJobs", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/serverJobs")>(),
+  getScheduledEvaluationQueueDiagnostics: mocks.scheduledQueueDiagnostics,
+}));
+
+vi.mock("../lib/syncOutbox", () => ({
+  getSyncOutboxLagDiagnostics: mocks.syncOutboxLagDiagnostics,
+}));
+
 let server: Server;
 let baseUrl: string;
 const providerEnvKeys = [
   "AI_INTEGRATIONS_GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "OPENAI_API_KEY",
+  "LOCAL_AI_BASE_URL",
 ] as const;
 const previousProviderEnv = Object.fromEntries(
   providerEnvKeys.map((key) => [key, process.env[key]]),
@@ -94,50 +109,117 @@ beforeEach(async () => {
   resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
+  mocks.buildInfo.mockReturnValue(null);
+  mocks.scheduledQueueDiagnostics.mockReturnValue({
+    status: "pending",
+    queued: 0,
+    running: 0,
+    terminalLastWindow: { succeeded: 0, failed: 0, cancelled: 0 },
+    duplicateTimeBucketGroups: 0,
+    duplicateGroupsTruncated: false,
+    warningCodes: [],
+    sampleCount: 0,
+    windowMs: 300_000,
+  });
+  mocks.syncOutboxLagDiagnostics.mockReturnValue({
+    status: "ok",
+    lagging: false,
+    pendingEvents: 0,
+    lagMs: 0,
+    warningThresholdMs: 30_000,
+  });
   setProviderEnv({ AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" });
 });
 
-describe("GET /readyz Gemini provider configuration", () => {
+describe("public GET /build-info", () => {
+  it("reports unavailable without database access or authentication", async () => {
+    const response = await fetch(`${baseUrl}/build-info`);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "Build version is unavailable.", status: "unavailable" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("returns the sealed version while startup is incomplete, without querying the database", async () => {
+    beginStartup();
+    const info = {
+      schemaVersion: 1, kind: "app-build-info",
+      appBuildId: "app-build:00000000-0000-0000-0000-000000000000",
+      sourcePolicy: "production-source-v3", sourceFingerprintSha256: "a".repeat(64),
+      gitRevision: null, gitBinding: "unavailable", buildMode: "release",
+      completedAt: new Date().toISOString(), platformDeploymentId: null,
+      platformBuildId: null, platformIdentitySource: "unavailable",
+    };
+    mocks.buildInfo.mockReturnValue(info);
+    const response = await fetch(`${baseUrl}/build-info`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(info);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /readyz optional AI capability", () => {
   it.each([
     {
       name: "Replit Gemini credentials",
       env: { AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" },
       expectedStatus: 200,
       expectedDependency: "ok",
+      expectedAiStatus: "configured",
     },
     {
       name: "a direct Gemini credential",
       env: { GOOGLE_API_KEY: "test-direct-gemini-key" },
       expectedStatus: 200,
       expectedDependency: "ok",
+      expectedAiStatus: "configured",
     },
     {
       name: "only an unused OpenAI credential",
       env: { OPENAI_API_KEY: "test-unused-openai-key" },
-      expectedStatus: 503,
-      expectedDependency: "error",
+      expectedStatus: 200,
+      expectedDependency: "warning",
+      expectedAiStatus: "not_configured",
+    },
+    {
+      name: "only a proposed local endpoint",
+      env: { LOCAL_AI_BASE_URL: "http://127.0.0.1:11434/v1" },
+      expectedStatus: 200,
+      expectedDependency: "warning",
+      expectedAiStatus: "not_configured",
     },
     {
       name: "no AI credential",
       env: {},
-      expectedStatus: 503,
-      expectedDependency: "error",
+      expectedStatus: 200,
+      expectedDependency: "warning",
+      expectedAiStatus: "not_configured",
     },
   ])("classifies $name", async ({
     env,
     expectedStatus,
     expectedDependency,
+    expectedAiStatus,
   }) => {
     setProviderEnv(env);
 
     const response = await fetch(`${baseUrl}/readyz`);
     const body = (await response.json()) as {
       checks: Record<string, string>;
+      capabilities: { ai: { status: string; detail?: string } };
     };
 
     expect(response.status).toBe(expectedStatus);
     expect(body.checks.dependencies).toBe(expectedDependency);
+    expect(body.capabilities.ai.status).toBe(expectedAiStatus);
+    if (expectedAiStatus === "not_configured") {
+      expect(body.capabilities.ai.detail).toBe("ai_provider_not_configured");
+      expect(body.checks.dependencies).toBe("warning");
+    }
     expect(JSON.stringify(body)).not.toContain("test-");
+    expect(JSON.stringify(mocks.info.mock.calls)).not.toContain("test-");
   });
 });
 
@@ -184,7 +266,37 @@ describe("GET /healthz cache maintenance diagnostics", () => {
 });
 
 describe("GET /healthz background operation diagnostics", () => {
-  it("returns 503 after sustained failures and recovers after a successful pass", async () => {
+  it("surfaces sustained sync delivery lag without blocking core readiness or exposing scope data", async () => {
+    mocks.syncOutboxLagDiagnostics.mockReturnValue({
+      status: "warning",
+      lagging: true,
+      pendingEvents: 12,
+      lagMs: 45_000,
+      warningThresholdMs: 30_000,
+      lastObservedAt: "2031-06-15T12:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      diagnostics: { syncOutboxLag: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.backgroundWorkers).toBe("warning");
+    expect(body.diagnostics.syncOutboxLag).toMatchObject({
+      status: "warning",
+      lagging: true,
+      pendingEvents: 12,
+      lagMs: 45_000,
+    });
+    expect(JSON.stringify(body.diagnostics.syncOutboxLag)).not.toContain("scope");
+    expect(JSON.stringify(body.diagnostics.syncOutboxLag)).not.toContain("payload");
+  });
+
+  it("reports sustained failures without blocking core readiness and recovers after success", async () => {
     for (let i = 0; i < BACKGROUND_OPERATION_FAILURE_THRESHOLD; i += 1) {
       await expect(runBackgroundOperation("daily-rollover", async () => {
         throw Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
@@ -193,11 +305,13 @@ describe("GET /healthz background operation diagnostics", () => {
 
     let response = await fetch(`${baseUrl}/readyz`);
     let body = (await response.json()) as {
+      status: string;
       checks: Record<string, string>;
       diagnostics: { backgroundOperations: Record<string, { status: string; recentFailureCount: number }> };
     };
-    expect(response.status).toBe(503);
-    expect(body.checks.backgroundWorkers).toBe("error");
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.backgroundWorkers).toBe("warning");
     expect(body.diagnostics.backgroundOperations["daily-rollover"]).toMatchObject({
       status: "warning",
       recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
@@ -211,6 +325,169 @@ describe("GET /healthz background operation diagnostics", () => {
     expect(response.status).toBe(200);
     expect(body.checks.backgroundWorkers).toBe("ok");
     vi.useRealTimers();
+  });
+
+  it("reports a scheduled-evaluation warning without blocking core readiness", async () => {
+    mocks.scheduledQueueDiagnostics.mockReturnValue({
+      status: "warning",
+      sampleAvailability: "available",
+      queued: 4,
+      running: 1,
+      terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
+      duplicateTimeBucketGroups: 101,
+      duplicateGroupsTruncated: true,
+      duplicateGroupTrend: {
+        direction: "increasing",
+        firstCount: 97,
+        latestCount: 101,
+        change: 4,
+      },
+      duplicateBucketInventory: [{
+        bucketFingerprint: "a".repeat(24),
+        rowCount: 2,
+        statuses: { queued: 1, running: 1, succeeded: 0, failed: 0, cancelled: 0 },
+        queuedRunnable: 1,
+        queuedExhausted: 0,
+        runningWithValidLease: 1,
+        runningWithoutLease: 0,
+        runningLeaseExpiredRetryable: 0,
+        runningLeaseExpiredExhausted: 0,
+        candidateCounts: {
+          preserveQueuedRunnable: 1,
+          preserveValidLease: 1,
+          preserveExpiredRetryableLease: 0,
+          workerResolutionRequired: 0,
+          manualReviewRequired: 0,
+          preserveTerminalHistory: 0,
+          safeRemoval: 0,
+        },
+        reviewClass: "preserve_runnable_or_leased",
+      }],
+      duplicateBucketInventoryTruncated: true,
+      duplicateBucketReviewRules: [
+        "Preserve queued jobs with attempts remaining and running jobs with a valid lease.",
+        "No rows are automatically designated safe to remove; cleanup requires a separate owner-approved, audited transaction.",
+      ],
+      warningCodes: ["backlog_stalled"],
+      sampleCount: 6,
+      windowMs: 300_000,
+      lastSampleAt: "2026-10-08T12:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      diagnostics: { scheduledEvaluationQueue: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.backgroundWorkers).toBe("warning");
+    expect(body.diagnostics.scheduledEvaluationQueue).toMatchObject({
+      status: "warning",
+      queued: 4,
+      running: 1,
+      duplicateTimeBucketGroups: 101,
+      duplicateGroupsTruncated: true,
+      duplicateGroupTrend: {
+        direction: "increasing",
+        firstCount: 97,
+        latestCount: 101,
+        change: 4,
+      },
+      duplicateBucketInventoryTruncated: true,
+      duplicateBucketInventory: [{
+        bucketFingerprint: "a".repeat(24),
+        rowCount: 2,
+        reviewClass: "preserve_runnable_or_leased",
+        candidateCounts: {
+          preserveQueuedRunnable: 1,
+          preserveValidLease: 1,
+          safeRemoval: 0,
+        },
+      }],
+      duplicateBucketReviewRules: expect.arrayContaining([
+        expect.stringContaining("Preserve queued jobs"),
+        expect.stringContaining("No rows are automatically designated safe to remove"),
+      ]),
+      warningCodes: ["backlog_stalled"],
+    });
+    expect(JSON.stringify(body.diagnostics.scheduledEvaluationQueue))
+      .not.toMatch(/scope|idempotency|input|result/i);
+  });
+
+  it("distinguishes an unavailable queue sample from a measured backlog warning", async () => {
+    mocks.scheduledQueueDiagnostics.mockReturnValue({
+      status: "ok",
+      sampleAvailability: "unavailable",
+      queued: 4,
+      running: 1,
+      terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
+      duplicateTimeBucketGroups: 0,
+      duplicateGroupsTruncated: false,
+      duplicateGroupTrend: {
+        direction: "unavailable",
+        firstCount: null,
+        latestCount: null,
+        change: null,
+      },
+      warningCodes: [],
+      sampleCount: 6,
+      windowMs: 300_000,
+      lastSampleAt: "2026-10-08T12:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = await response.json() as {
+      checks: Record<string, string>;
+      diagnostics: { scheduledEvaluationQueue: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.checks.backgroundWorkers).toBe("warning");
+    expect(body.diagnostics.scheduledEvaluationQueue).toMatchObject({
+      status: "ok",
+      sampleAvailability: "unavailable",
+      queued: 4,
+      warningCodes: [],
+      duplicateGroupTrend: {
+        direction: "unavailable",
+        firstCount: null,
+        latestCount: null,
+        change: null,
+      },
+    });
+    expect(mocks.info.mock.calls.at(-1)?.[0]).toMatchObject({
+      checks: { backgroundWorkers: "warning" },
+    });
+  });
+});
+
+describe("core readiness gates", () => {
+  it("returns 503 when the database is unavailable without exposing its error", async () => {
+    const rawDatabaseError = "private database connection string";
+    mocks.execute.mockRejectedValueOnce(
+      Object.assign(new Error(rawDatabaseError), { code: "ECONNREFUSED" }),
+    );
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      diagnostics: { auditProtection: { status: string; detail?: string } };
+    };
+
+    expect(response.status).toBe(503);
+    expect(body.status).toBe("degraded");
+    expect(body.checks.database).toBe("error");
+    expect(body.checks.auditProtection).toBe("error");
+    expect(body.diagnostics.auditProtection).toEqual({
+      status: "error",
+      detail: "database_unreachable",
+    });
+    expect(JSON.stringify(body)).not.toContain(rawDatabaseError);
+    expect(JSON.stringify(mocks.info.mock.calls)).not.toContain(rawDatabaseError);
   });
 });
 
@@ -263,6 +540,7 @@ describe("startup probes", () => {
     let body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
+      capabilities: { ai: { status: string } };
       startup: {
         phase: string;
         stage: string | null;
@@ -277,8 +555,11 @@ describe("startup probes", () => {
       checks: {
         startup: "error",
         database: "pending",
+        auditProtection: "pending",
         dependencies: "pending",
+        backgroundWorkers: "pending",
       },
+      capabilities: { ai: { status: "pending" } },
       startup: { phase: "starting", stage: null },
     });
     expect(body.correlationId).toBeTruthy();
@@ -292,8 +573,11 @@ describe("startup probes", () => {
       checks: {
         startup: "error",
         database: "pending",
+        auditProtection: "pending",
         dependencies: "pending",
+        backgroundWorkers: "pending",
       },
+      capabilities: { ai: { status: "pending" } },
       startup: {
         phase: "failed",
         stage: "data_heals",

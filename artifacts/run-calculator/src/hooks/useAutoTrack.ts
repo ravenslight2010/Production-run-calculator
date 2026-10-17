@@ -9,6 +9,16 @@ import {
 } from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
+  APPLICATOR_STOCK_REGISTERS,
+  applicatorStockFields,
+  applicatorStockRegisterForChannel,
+  capApplicatorStock,
+  computeApplicatorStockCadenceSeconds,
+  computeApplicatorStockCapacityLbs,
+  depleteApplicatorStock,
+  capSauceStock,
+  computeSauceStockStepSeconds,
+  depleteSauceStock,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
@@ -76,6 +86,10 @@ interface AutoTrackValues {
   sauceOzPerPizza: number;
   sauceBarrelAnchorNetSec: number;
   sauceBarrelCorrectionGeneration: number;
+  sauceStockBarrels: number;
+  sauceStockAnchorNetSec: number;
+  sauceStockCorrectionGeneration: number;
+  sauceStockInitialized: boolean;
   app1Type: string; app1OzPerPizza: number; app1BatchLbs: number; app1CheeseRecipe: Array<{ lbs: number }>;
   app1BatchesMade: number; app1BatchAnchorNetSec: number; app1BatchCorrectionGeneration: number;
   app2Type: string; app2OzPerPizza: number; app2BatchLbs: number; app2CheeseRecipe: Array<{ lbs: number }>;
@@ -84,6 +98,17 @@ interface AutoTrackValues {
   app3BatchesMade: number; app3BatchAnchorNetSec: number; app3BatchCorrectionGeneration: number;
   app4Type: string; app4OzPerPizza: number; app4BatchLbs: number; app4CheeseRecipe: Array<{ lbs: number }>;
   app4BatchesMade: number; app4BatchAnchorNetSec: number; app4BatchCorrectionGeneration: number;
+  app1StockLbs: number; app1StockAnchorNetSec: number; app1StockCorrectionGeneration: number;
+  app2StockLbs: number; app2StockAnchorNetSec: number; app2StockCorrectionGeneration: number;
+  app3StockLbs: number; app3StockAnchorNetSec: number; app3StockCorrectionGeneration: number;
+  app4StockLbs: number; app4StockAnchorNetSec: number; app4StockCorrectionGeneration: number;
+  pep1Type: string; pep1OzPerPizza: number; pep1TypeB: string; pep1OzPerPizzaB: number;
+  pep2Type: string; pep2OzPerPizza: number; pep2TypeB: string; pep2OzPerPizzaB: number;
+  pep1Combined: boolean; applicatorStockInitialized: boolean;
+  pep1StockLbs: number; pep1StockAnchorNetSec: number; pep1StockCorrectionGeneration: number;
+  pep1bStockLbs: number; pep1bStockAnchorNetSec: number; pep1bStockCorrectionGeneration: number;
+  pep2StockLbs: number; pep2StockAnchorNetSec: number; pep2StockCorrectionGeneration: number;
+  pep2bStockLbs: number; pep2bStockAnchorNetSec: number; pep2bStockCorrectionGeneration: number;
 }
 
 export type AutoTrackChannel =
@@ -94,18 +119,30 @@ export type AutoTrackChannel =
   | "batch-produce"
   | "hopper"
   | "sauce-barrel"
+  | "sauce-stock"
   | "app1-batch"
   | "app2-batch"
   | "app3-batch"
-  | "app4-batch";
+  | "app4-batch"
+  | "app1-stock" | "app2-stock" | "app3-stock" | "app4-stock"
+  | "pep1-stock" | "pep1b-stock" | "pep2-stock" | "pep2b-stock";
 
 export type AutoTrackMutation = {
   field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady"
     | "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration"
+    | "sauceStockBarrels" | "sauceStockAnchorNetSec" | "sauceStockCorrectionGeneration"
     | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
     | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
     | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
-    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration";
+    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration"
+    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration"
+    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration"
+    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration"
+    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration"
+    | "pep1StockLbs" | "pep1StockAnchorNetSec" | "pep1StockCorrectionGeneration"
+    | "pep1bStockLbs" | "pep1bStockAnchorNetSec" | "pep1bStockCorrectionGeneration"
+    | "pep2StockLbs" | "pep2StockAnchorNetSec" | "pep2StockCorrectionGeneration"
+    | "pep2bStockLbs" | "pep2bStockAnchorNetSec" | "pep2bStockCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -205,6 +242,7 @@ interface AutoTrackParams {
    * newly adopted manual-override deadline.
    */
   onPackagingProgressAutoAdvance?: (
+    runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ) => boolean;
@@ -233,6 +271,15 @@ interface AutoTrackParams {
    */
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  /** Reports only automatic claim outcomes; manual corrections use Home's existing error path. */
+  onAutomaticClaimFailure?: (
+    claim: AutoTrackEventClaim,
+    kind?: "transient" | "permanent",
+  ) => void;
+  onAutomaticClaimSuccess?: (
+    claim: AutoTrackEventClaim,
+    outcome: AutoTrackEventResult["outcome"],
+  ) => void;
   /**
    * The server is the sole automatic writer for synchronized clients. In this
    * mode the hook still computes suggestions and countdowns, but never submits
@@ -266,6 +313,7 @@ interface AutoTrackResult {
    * counter in the same render as the resume action.
    */
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
+  retryFailedAutomaticClaim: () => void;
   /**
    * Wall-clock ms timestamps of each counter's next tick — read-only refs for
    * countdown displays (0 = not yet armed). The UI derives "next tick in m:ss"
@@ -346,6 +394,8 @@ export function useAutoTrack({
   autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutomaticClaimFailure,
+  onAutomaticClaimSuccess,
   authoritativeServerAutoTrack = false,
   autoTrackProgressEnabled,
   nextRunPrepActive = false,
@@ -446,6 +496,7 @@ export function useAutoTrack({
   const resumeRearmPendingRef = useRef(false);
   const coordinationSequenceRef = useRef<Partial<Record<AutoTrackChannel, number>>>({});
   const coordinationRetryEventRef = useRef<Partial<Record<AutoTrackChannel, string>>>({});
+  const blockedAutomaticClaimsRef = useRef(new Set<string>());
   const coordinationPendingRef = useRef<Set<AutoTrackChannel>>(new Set());
   // Claims for different channels can become due in the same render. Keep
   // them FIFO so the later claim is built from the first acknowledgement's
@@ -455,11 +506,22 @@ export function useAutoTrack({
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
   // Net-elapsed seconds (not a wall-clock display due time) for sauce claims.
   const sauceNextDueNetSecRef = useRef(0);
+  const sauceStockNextDueNetSecRef = useRef(0);
   const appNextDueNetSecRefs = {
     app1: useRef(0),
     app2: useRef(0),
     app3: useRef(0),
     app4: useRef(0),
+  };
+  const stockNextDueNetSecRefs = {
+    app1: useRef(0),
+    app2: useRef(0),
+    app3: useRef(0),
+    app4: useRef(0),
+    pep1: useRef(0),
+    pep1b: useRef(0),
+    pep2: useRef(0),
+    pep2b: useRef(0),
   };
   // Fresh, non-canonical server schedule entries temporarily own net-second
   // writes. The lease intentionally expires so disconnected/stale clients
@@ -483,10 +545,13 @@ export function useAutoTrack({
     if (channel === "batch-consume") return batchNextDueMsRef;
     if (channel === "batch-produce") return batchProdNextDueMsRef;
     if (channel === "sauce-barrel") return sauceNextDueNetSecRef;
+    if (channel === "sauce-stock") return sauceStockNextDueNetSecRef;
     if (channel === "app1-batch") return appNextDueNetSecRefs.app1;
     if (channel === "app2-batch") return appNextDueNetSecRefs.app2;
     if (channel === "app3-batch") return appNextDueNetSecRefs.app3;
     if (channel === "app4-batch") return appNextDueNetSecRefs.app4;
+    const stockRegister = applicatorStockRegisterForChannel(channel);
+    if (stockRegister) return stockNextDueNetSecRefs[stockRegister];
     return hopperProdNextDueMsRef;
   };
 
@@ -623,12 +688,15 @@ useEffect(() => {
     previousPackagingAutoTrackActiveRef.current = packagingAutoTrackActive;
     coordinationSequenceRef.current = {};
     coordinationRetryEventRef.current = {};
+    blockedAutomaticClaimsRef.current.clear();
     coordinationPendingRef.current.clear();
     sauceNextDueNetSecRef.current = 0;
+    sauceStockNextDueNetSecRef.current = 0;
     appNextDueNetSecRefs.app1.current = 0;
     appNextDueNetSecRefs.app2.current = 0;
     appNextDueNetSecRefs.app3.current = 0;
     appNextDueNetSecRefs.app4.current = 0;
+    for (const ref of Object.values(stockNextDueNetSecRefs)) ref.current = 0;
     // Schedule leases are run-scoped. Never let an ended/switched run's
     // server verdict suppress the next run before it receives its own frame.
     clearServerSchedule();
@@ -666,7 +734,12 @@ useEffect(() => {
     // cleared so the first completed interval cannot replay paused elapsed time.
     doughTimerPausedRef.current = 0;
     doughTimerResumeAtRef.current = 0;
-    doughAutoSuppressUntilRef.current = 0;
+    // A cadence rebase must not cancel an in-progress manual correction.
+    // Explicit Resume clears this deadline before rearming, while run changes
+    // clear it in resetBookkeeping(). Here only discard an expired deadline.
+    if (doughAutoSuppressUntilRef.current <= nowMs) {
+      doughAutoSuppressUntilRef.current = 0;
+    }
     setIsDoughTimerPaused(false);
     trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
     batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
@@ -700,7 +773,7 @@ useEffect(() => {
       const nextSkids = values.skidsCompleted;
       const nextCases = values.casesOnCurrentSkid;
       if (typeof nextSkids === "number" && typeof nextCases === "number") {
-        if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) === false) return;
+        if (onPackagingProgressAutoAdvance?.(runId, nextSkids, nextCases) === false) return;
         form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
         form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
       }
@@ -719,6 +792,13 @@ useEffect(() => {
       if (typeof values.sauceBarrelCorrectionGeneration === "number") {
         form.setValue("sauceBarrelCorrectionGeneration", values.sauceBarrelCorrectionGeneration, { shouldDirty: true });
       }
+      for (const field of ["sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration"] as const) {
+        const value = values[field];
+        if (typeof value === "number") form.setValue(field, value, { shouldDirty: true });
+      }
+      if (channel === "sauce-stock") {
+        form.setValue("sauceStockInitialized", true, { shouldDirty: true });
+      }
       (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
         const made = values[`${slot}BatchesMade` as keyof FormValues];
         const anchor = values[`${slot}BatchAnchorNetSec` as keyof FormValues];
@@ -727,6 +807,15 @@ useEffect(() => {
         if (typeof anchor === "number") form.setValue(`${slot}BatchAnchorNetSec` as keyof FormValues, anchor as never, { shouldDirty: true });
         if (typeof generation === "number") form.setValue(`${slot}BatchCorrectionGeneration` as keyof FormValues, generation as never, { shouldDirty: true });
       });
+      for (const register of APPLICATOR_STOCK_REGISTERS) {
+        const fields = applicatorStockFields(register);
+        for (const field of [fields.stock, fields.anchor, fields.correctionGeneration]) {
+          const value = values[field as keyof FormValues];
+          if (typeof value === "number") {
+            form.setValue(field as keyof FormValues, value as never, { shouldDirty: true });
+          }
+        }
+      }
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
     if (authoritativeServerAutoTrack) {
@@ -744,8 +833,12 @@ useEffect(() => {
     if (coordinationPendingRef.current.has(channel)) return;
 
     const claimIdentity = coordinationIdentity;
+    const blockedIdentity = `${claimIdentity}:${channel}`;
+    if (blockedAutomaticClaimsRef.current.has(blockedIdentity)) return;
     const correctionMutation = mutations.find((mutation) =>
-      mutation.field === "sauceBarrelCorrectionGeneration" || mutation.field.endsWith("BatchCorrectionGeneration"),
+      mutation.field === "sauceBarrelCorrectionGeneration"
+      || mutation.field.endsWith("BatchCorrectionGeneration")
+      || mutation.field.endsWith("StockCorrectionGeneration"),
     );
     coordinationPendingRef.current.add(channel);
     setCoordinationPendingCount(coordinationPendingRef.current.size);
@@ -779,25 +872,29 @@ useEffect(() => {
         const correctionGeneration = correctionMutation?.from;
         coordinationRetryEventRef.current[channel] = eventId;
         setCoordinationDelayed(false);
+        const claim: AutoTrackEventClaim = {
+          version: 1,
+          runId,
+          channel,
+          generation,
+          sequence,
+          eventId,
+          dueAt,
+          nextDueAt,
+          // Home replaces this placeholder with its last adopted canonical stamp.
+          baseUpdatedAt: 0,
+          correctionGeneration,
+          mutations: claimMutations,
+        };
         try {
-          const result = await claimAutoTrackEvent({
-            version: 1,
-            runId,
-            channel,
-            generation,
-            sequence,
-            eventId,
-            dueAt,
-            nextDueAt,
-            // Home replaces this placeholder with its last adopted canonical stamp.
-            baseUpdatedAt: 0,
-            correctionGeneration,
-            mutations: claimMutations,
-          });
+          const result = await claimAutoTrackEvent(claim);
           // The hook shares one form across selected runs. A response from the
           // previously selected run must not write into the new run or advance
           // its coordination bookkeeping.
           if (coordinationIdentityRef.current !== claimIdentity) return;
+          if (result.outcome === "accepted" || result.outcome === "duplicate") {
+            onAutomaticClaimSuccess?.(claim, result.outcome);
+          }
           // A manual correction can happen while this request is in flight. Its
           // incremented generation is the local authority until that snapshot
           // reaches the server, so never let the older acknowledgement restore
@@ -809,11 +906,25 @@ useEffect(() => {
             coordinationRetryEventRef.current[channel] = undefined;
             return;
           }
-          // A concurrent channel or peer may have advanced the shared run-value
-          // stamp after this claim was queued. Treat that canonical conflict like
-          // a failed claim so the catch path retries from the newly adopted values
-          // instead of accepting the unchanged server value and waiting for the
-          // next production interval.
+          // A conflict/stale response is durably recorded against this event ID
+          // by the server. Replaying it can only return the same rejection, not
+          // recover like a lost transport response. Adopt its canonical values,
+          // retire this event, and wait for an explicit operator retry.
+          if (
+            channel === "sauce-barrel"
+            && (result.outcome === "conflict" || result.outcome === "stale")
+          ) {
+            coordinationSequenceRef.current[channel] = Math.max(
+              coordinationSequenceRef.current[channel] ?? 0,
+              result.state.sequence,
+            );
+            coordinationRetryEventRef.current[channel] = undefined;
+            blockedAutomaticClaimsRef.current.add(blockedIdentity);
+            applyValues(result.values);
+            onAutomaticClaimFailure?.(claim, "permanent");
+            setCoordinationDelayed(false);
+            return;
+          }
           if (result.outcome === "conflict") {
             throw new Error("Automatic tracking claim conflicted with a newer value");
           }
@@ -825,8 +936,13 @@ useEffect(() => {
           dueRef.current = result.state.nextDueAt;
           coordinationRetryEventRef.current[channel] = undefined;
           applyValues(result.values);
-        } catch {
+        } catch (error) {
           if (coordinationIdentityRef.current !== claimIdentity) return;
+          if (channel === "sauce-barrel") {
+            const retryable = (error as { retryable?: unknown })?.retryable !== false;
+            if (!retryable) blockedAutomaticClaimsRef.current.add(blockedIdentity);
+            onAutomaticClaimFailure?.(claim, retryable ? "transient" : "permanent");
+          }
           const dueRef = dueRefForChannel(channel);
           dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
           // A failed coordinated case claim did not actually apply the mutation.
@@ -854,10 +970,17 @@ useEffect(() => {
     endedAt,
     form,
     onPackagingProgressAutoAdvance,
+    onAutomaticClaimFailure,
+    onAutomaticClaimSuccess,
     runGeneration,
     runId,
     runStatus,
   ]);
+
+  const retryFailedAutomaticClaim = useCallback(() => {
+    blockedAutomaticClaimsRef.current.delete(`${coordinationIdentity}:sauce-barrel`);
+    setCoordinationDelayed(false);
+  }, [coordinationIdentity]);
 
   // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
   // Does not affect the cases/skids counter or the global auto-track toggle.
@@ -1194,7 +1317,13 @@ useEffect(() => {
           rebaseAfterForegroundSync();
         } else {
           rearmCaseTimer(nowTime.getTime());
-          rearmDoughTimers(nowTime.getTime());
+          // A wake acknowledgement can land immediately after an operator
+          // correction. Preserve its independent Dough pause; its timed
+          // expiry (or explicit Resume) will re-arm the Dough channels from
+          // a full interval without replaying hidden time.
+          if (doughTimerPausedRef.current === 0) {
+            rearmDoughTimers(nowTime.getTime());
+          }
         }
         wakeRebaseAppliedRef.current = true;
       }
@@ -1298,10 +1427,99 @@ useEffect(() => {
     v.pizzasPerCase,
   ]);
 
-  // Persisted anchors are the authoritative rebase points. In particular, a
-  // manual +/- may happen while a prior automatic event is due: resetting this
-  // slot's due time to the new anchor prevents that stale event from writing
-  // the old anchor back after the suppression fence expires.
+  const previousSauceStockCorrectionGenerationRef = useRef(v.sauceStockCorrectionGeneration);
+  useEffect(() => {
+    const cadence = computeSauceStockStepSeconds(
+      v.sauceOzPerPizza,
+      calc.ppm,
+      calc.sauceEffBarrel,
+    );
+    const anchor = Math.max(0, Number(v.sauceStockAnchorNetSec) || 0);
+    sauceStockNextDueNetSecRef.current =
+      v.sauceStockInitialized === true && cadence > 0 ? anchor + cadence : 0;
+    if (previousSauceStockCorrectionGenerationRef.current !== v.sauceStockCorrectionGeneration) {
+      coordinationSequenceRef.current["sauce-stock"] = 0;
+      coordinationRetryEventRef.current["sauce-stock"] = undefined;
+      previousSauceStockCorrectionGenerationRef.current = v.sauceStockCorrectionGeneration;
+    }
+  }, [
+    calc.ppm,
+    calc.sauceEffBarrel,
+    v.sauceOzPerPizza,
+    v.sauceStockAnchorNetSec,
+    v.sauceStockCorrectionGeneration,
+    v.sauceStockInitialized,
+  ]);
+
+  // This register is independent of the full-barrel inventory claim above:
+  // each accepted event consumes one tenth on line and resets its countdown.
+  useEffect(() => {
+    const initialize = v.sauceStockInitialized !== true;
+    if (
+      !claimAutoTrackEvent ||
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      (!productionNeedsAvailable && !initialize) ||
+      runStatus !== "running" ||
+      endedAt != null ||
+      calc.pressDone ||
+      nextRunPrepActive ||
+      Date.now() < autoSuppressUntilRef.current ||
+      serverOwnsChannel("sauce-stock") ||
+      !Number.isFinite(elapsedBatchSec)
+    ) return;
+    const cadence = computeSauceStockStepSeconds(
+      v.sauceOzPerPizza,
+      calc.ppm,
+      calc.sauceEffBarrel,
+    );
+    const onHand = initialize ? 0 : Number(v.sauceStockBarrels);
+    if (
+      !Number.isFinite(onHand)
+      || (!initialize && (onHand <= 0 || capSauceStock(onHand) !== onHand))
+      || (!initialize && cadence <= 0)
+    ) return;
+    const anchor = Math.max(0, Number(v.sauceStockAnchorNetSec) || 0);
+    const dueAt = initialize
+      ? elapsedBatchSec
+      : sauceStockNextDueNetSecRef.current || anchor + cadence;
+    if (elapsedBatchSec < dueAt) return;
+    const correctionGeneration = Math.max(0, Number(v.sauceStockCorrectionGeneration) || 0);
+    sauceStockNextDueNetSecRef.current = dueAt;
+    commitAutomatic("sauce-stock", dueAt, dueAt + Math.max(cadence, 1), [
+      { field: "sauceStockBarrels", from: onHand, to: initialize ? 2 : depleteSauceStock(onHand) },
+      { field: "sauceStockAnchorNetSec", from: initialize ? 0 : anchor, to: dueAt },
+      { field: "sauceStockCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
+    ]);
+  }, [
+    autoSuppressUntilRef,
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    productionNeedsAvailable,
+    calc.pressDone,
+    calc.ppm,
+    calc.sauceEffBarrel,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    endedAt,
+    nextRunPrepActive,
+    runGeneration,
+    runId,
+    runStatus,
+    v.sauceOzPerPizza,
+    v.sauceStockAnchorNetSec,
+    v.sauceStockBarrels,
+    v.sauceStockCorrectionGeneration,
+    v.sauceStockInitialized,
+  ]);
+
+  // The cumulative made-count register remains an independent historical
+  // observation. Its display controls were replaced by stock-on-hand controls;
+  // it is intentionally never used as the stock value.
   useEffect(() => {
     if (!productionNeedsAvailable) {
       appNextDueNetSecRefs.app1.current = 0;
@@ -1329,10 +1547,95 @@ useEffect(() => {
     });
   }, [calc.ppm, productionNeedsAvailable, v]);
 
-  // Applicator batches use the same provider-owned, net-production clock as
-  // Sauce. Each slot has its own effective batch and therefore its own cadence;
-  // this deliberately does not use the dough batch cadence or add controls to
-  // mix/lb-only rows.
+  useEffect(() => {
+    if (
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      !productionNeedsAvailable ||
+      runStatus !== "running" ||
+      endedAt != null ||
+      calc.pressDone ||
+      Date.now() < autoSuppressUntilRef.current ||
+      !Number.isFinite(elapsedBatchSec)
+    ) return;
+    const values = v as FormValues;
+    for (const slot of ["app1", "app2", "app3", "app4"] as const) {
+      const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
+      const info = computeAppSlotInfo({
+        type: String(values[`${slot}Type` as keyof FormValues] ?? ""),
+        recipe,
+        batchLbs: Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0,
+        ozPerPizza: Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0,
+        casesNeeded: Number(v.casesNeeded) || 0,
+        pizzasPerCase: Number(v.pizzasPerCase) || 0,
+        ppm: calc.ppm,
+      });
+      if (!info.validForClaim || !Number.isFinite(info.cadence) || info.cadence <= 0) continue;
+      const channel = `${slot}-batch` as AutoTrackChannel;
+      const madeField = `${slot}BatchesMade` as keyof FormValues;
+      const anchorField = `${slot}BatchAnchorNetSec` as keyof FormValues;
+      const correctionField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
+      const made = Math.max(0, Number(values[madeField]) || 0);
+      const anchor = Math.max(0, Number(values[anchorField]) || 0);
+      const correctionGeneration = Math.max(0, Number(values[correctionField]) || 0);
+      const dueAt = dueRefForChannel(channel).current || anchor + info.cadence;
+      if (
+        elapsedBatchSec < dueAt
+        || made >= Math.ceil(info.required)
+        || serverOwnsChannel(channel)
+      ) continue;
+      dueRefForChannel(channel).current = dueAt;
+      commitAutomatic(channel, dueAt, dueAt + info.cadence, [
+        { field: madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(info.required), made + 1) },
+        { field: anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
+        { field: correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+      ]);
+    }
+  }, [
+    autoSuppressUntilRef,
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    productionNeedsAvailable,
+    autoTrackWakeAcknowledgement,
+    calc,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    endedAt,
+    runGeneration,
+    runId,
+    runStatus,
+    v,
+  ]);
+
+  // Persisted anchors are authoritative rebase points for each pounds-on-hand
+  // register. A correction updates its own anchor and generation, so no
+  // elapsed production before the correction can be replayed.
+  useEffect(() => {
+    const values = v as unknown as Record<string, unknown>;
+    for (const register of APPLICATOR_STOCK_REGISTERS) {
+      const fields = applicatorStockFields(register);
+      const capacity = computeApplicatorStockCapacityLbs(values, register);
+      const onHand = Number(values[fields.stock]) || 0;
+      const cadence = computeApplicatorStockCadenceSeconds(values, register, calc.ppm);
+      const channel = `${register}-stock` as AutoTrackChannel;
+      dueRefForChannel(channel).current =
+        productionNeedsAvailable
+        && values.applicatorStockInitialized === true
+        && capacity > 0
+        && onHand > 0
+        && onHand <= capacity
+        && cadence > 0
+          ? Math.max(0, Number(values[fields.anchor]) || 0) + cadence
+          : 0;
+    }
+  }, [calc.ppm, productionNeedsAvailable, v]);
+
+  // Applicator stock is consumed fractionally from the actual per-pizza usage
+  // and line speed. Only live, unpaused production can claim a decrease.
   useEffect(() => {
     if (
       !claimAutoTrackEvent ||
@@ -1342,52 +1645,38 @@ useEffect(() => {
       !autoTrackProgress ||
       !productionNeedsAvailable ||
       runStatus !== "running" ||
+      endedAt != null ||
       calc.pressDone ||
       Date.now() < autoSuppressUntilRef.current ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
-    const formValues = v as FormValues;
-    const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
-      const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const info = computeAppSlotInfo({
-        type: String(formValues[`${slot}Type` as keyof FormValues] ?? ""),
-        recipe,
-        batchLbs: Number(formValues[`${slot}BatchLbs` as keyof FormValues]) || 0,
-        ozPerPizza: Number(formValues[`${slot}OzPerPizza` as keyof FormValues]) || 0,
-        casesNeeded: Number(v.casesNeeded) || 0,
-        pizzasPerCase: Number(v.pizzasPerCase) || 0,
+    const values = v as unknown as Record<string, unknown>;
+    if (values.applicatorStockInitialized !== true) return;
+    for (const register of APPLICATOR_STOCK_REGISTERS) {
+      const fields = applicatorStockFields(register);
+      const capacity = computeApplicatorStockCapacityLbs(values, register);
+      const onHand = Number(values[fields.stock]) || 0;
+      const anchor = Math.max(0, Number(values[fields.anchor]) || 0);
+      const correctionGeneration = Math.max(0, Number(values[fields.correctionGeneration]) || 0);
+      const cadence = computeApplicatorStockCadenceSeconds(values, register, calc.ppm);
+      const channel = `${register}-stock` as AutoTrackChannel;
+      if (capacity <= 0 || onHand <= 0 || onHand > capacity || cadence <= 0) continue;
+      const dueAt = dueRefForChannel(channel).current || anchor + cadence;
+      if (elapsedBatchSec < dueAt || serverOwnsChannel(channel)) continue;
+      const ozField = register.endsWith("b")
+        ? `${register.slice(0, -1)}OzPerPizzaB`
+        : `${register}OzPerPizza`;
+      const nextOnHand = capApplicatorStock(depleteApplicatorStock({
+        onHandLbs: onHand,
+        elapsedSeconds: dueAt - anchor,
+        ozPerPizza: Number(values[ozField]) || 0,
         ppm: calc.ppm,
-      });
-      return {
-        slot,
-        channel: `${slot}-batch` as AutoTrackChannel,
-        madeField: `${slot}BatchesMade` as keyof FormValues,
-        anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
-        correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
-        valid: info.validForClaim,
-        cadence: info.cadence,
-        required: info.required,
-      };
-    });
-    for (const slot of slots) {
-      if (!slot.valid || !Number.isFinite(slot.cadence) || slot.cadence <= 0) continue;
-      const made = Math.max(0, Number(formValues[slot.madeField]) || 0);
-      const anchor = Math.max(0, Number(formValues[slot.anchorField]) || 0);
-      const correctionGeneration = Math.max(0, Number(formValues[slot.correctionField]) || 0);
-      const dueAt = dueRefForChannel(slot.channel).current || anchor + slot.cadence;
-      // At most one sequenced event is claimed at a time. The canonical
-      // acknowledgement advances the persisted anchor, then this effect claims
-      // the next overdue fractional cadence without losing accumulated time.
-      if (
-        elapsedBatchSec < dueAt
-        || made >= Math.ceil(slot.required)
-        || serverOwnsChannel(slot.channel)
-      ) continue;
-      dueRefForChannel(slot.channel).current = dueAt;
-      commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
-        { field: slot.madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(slot.required), made + 1) },
-        { field: slot.anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
-        { field: slot.correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+      }), capacity);
+      dueRefForChannel(channel).current = dueAt;
+      commitAutomatic(channel, dueAt, dueAt + cadence, [
+        { field: fields.stock as AutoTrackMutation["field"], from: onHand, to: nextOnHand },
+        { field: fields.anchor as AutoTrackMutation["field"], from: anchor, to: dueAt },
+        { field: fields.correctionGeneration as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
       ]);
     }
   }, [
@@ -1402,6 +1691,7 @@ useEffect(() => {
     commitAutomatic,
     disabled,
     elapsedBatchSec,
+    endedAt,
     runStatus,
     v,
   ]);
@@ -1726,6 +2016,7 @@ useEffect(() => {
     autoSuppressUntilRef,
     doughAutoSuppressUntilRef,
     fireAutoTrackNow,
+    retryFailedAutomaticClaim,
     tickDueRefs: tickDueRefsRef.current,
     isDoughTimerPaused,
     pauseDoughTimers,

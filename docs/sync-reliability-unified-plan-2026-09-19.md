@@ -1,8 +1,8 @@
 # Sync Reliability Unified Plan
 
 **Date:** 2026-09-19  
-**Status:** Active reliability authority; complete-write snapshot fencing, provider-key alignment, safe measurements, and deterministic multi-process SSE verification are implemented in the repository
-**Reconciled:** 2026-09-21
+**Status:** Active reliability authority; complete-write fencing, stale-queue convergence, operator-visible recovery, provider-key alignment, safe measurements, and deterministic multi-process SSE verification are implemented in the repository
+**Reconciled:** 2026-10-08
 **Inputs:** [sync contract](sync-deep-dive-2026-09-19.md), [reconnect research](reconnect-reliability-deep-dive-2026-09-19.md), [server research](server-research-deep-dive-2026-09-19.md), [existing improvements plan](sync-system-improvements-plan.md), [operations deep dive](../research/sync-reliability-operations-deep-dive-2026-09-19.md), [integrated continuation](../research/deep-dive-research-continuation-2026-09-19.md), and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 ## 1. Purpose
@@ -31,7 +31,7 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 | SSE | Same-process streaming and recovery plus deterministic two-process isolation behavior are implemented; current published topology still requires revision-bound evidence |
 | Pooling | Default per-process pool maximum is 10 with a 900 ms acquisition timeout; production capacity inputs are unknown |
 | Readiness | Provider-key detection is aligned with the active Gemini adapter; hard-versus-soft dependency policy remains separate |
-| AI policy | Whether AI should block global readiness is an owner decision, not a repository fact |
+| AI policy | Soft readiness is the current roadmap contract; changing it requires owner approval. Provider resilience is still partial. |
 
 ### Corrections and superseded claims
 
@@ -76,7 +76,9 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 
 **Exit:** Every later phase has explicit evidence fields and sanitization rules.
 
-### Phase 1 — Prove and close complete-write causality — implemented in repository
+### Phase 1 — Prove complete-write causality and stale-queue convergence — implemented in repository
+
+**Reconciled 2026-10-08:** merged tasks #2800 and #2830 and the focused convergence integration tests now cover interleaved offline edits, stale-base recovery/rebase, reload, and duplicate delivery. This is repository evidence, not proof of published-device behavior.
 
 **Goal:** Prevent an unfenced stale complete body from winning through a larger client stamp.
 
@@ -128,6 +130,8 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 
 ### Phase 3 — Add bounded sync and pool measurements
 
+**Status (2026-10-08):** privacy-safe measurement paths exist. The published 2026-10-08 evidence records build identity and bounded log/database aggregates, but source fingerprint mismatch and unavailable primary/pool/instance inputs leave the production adoption baseline and connection budget incomplete. Continue active task #2808; the read-replica evidence does not establish headroom or prove every timeout's cause.
+
 **Goal:** Replace payload and capacity assumptions with distributions.
 
 Measure separately:
@@ -145,6 +149,8 @@ Report p50, p95, p99, and maximum by mode. Extend fixture coverage for empty, 1-
 **Exit:** The team can identify hot sections, fallback tails, and pool contention without inspecting operational content.
 
 ### Phase 4 — Verify the published SSE topology
+
+**Status (2026-10-08):** the owner selected one always-on API process (see [uptime decision](uptime-and-operational-backlog-decision-2026-10-02.md)). The current published Autoscale deployment has not been shown to enforce that policy. The deterministic two-process test establishes the process-local boundary, not production routing; an approved deployment change and bounded verification remain.
 
 **Goal:** Establish actual behavior of the active Autoscale deployment.
 
@@ -164,14 +170,16 @@ Run a deterministic two-process test where the write enters process A and the pe
 
 **Decision after evidence:**
 
-- If one verified serving process is the intended constraint, document and enforce it.
-- If multiple processes must deliver live notifications, add shared fanout while retaining snapshot recovery.
+- The recorded choice is one always-on API process. Enforce and verify it only after separate owner approval for a compatible deployment change.
+- Shared fanout is not selected; revisit it only after a separate owner decision, retaining snapshot recovery.
 - Consider Reserved VM only as a topology choice, not an automatic SSE fix.
 - Add proxy-specific headers only if the probe demonstrates a need.
 
 **Exit:** Cross-instance delivery, buffering, heartbeat survival, and reconnect behavior are measured rather than inferred.
 
 ### Phase 5 — Compute and validate the database budget
+
+**Status (2026-10-08):** not complete. The production investigation used read-only replica aggregates and bounded logs; the primary connection ceiling, deployed pool override, effective Autoscale instance count, and live pool state were unavailable.
 
 **Goal:** Size each process from total deployment capacity.
 
@@ -197,10 +205,10 @@ Retain headroom, then run isolated saturation and two-process fanout tests. Do n
 
 **Goal:** Align traffic eligibility with operational requirements.
 
-Owner decision:
+Current roadmap contract (change requires owner approval):
 
-- **Recommended default:** startup, database, and sustained core-worker failures govern global readiness; AI exposes named capability health and degrades only AI-assisted routes.
-- **Alternative:** keep AI as a hard readiness dependency only if specific retained AI workflows are contractually mandatory for all production operation.
+- **Current contract:** startup, database, and audit-protection failures govern global readiness; AI and worker degradation are warnings, with capability-specific failure for affected routes. Route tests and the 2026-10-08 warning-only production probe support this behavior.
+- **Alternative:** making AI a hard readiness dependency would require an explicit owner change to the current roadmap contract.
 
 Provider calls should have bounded timeout, selective retry, and circuit-breaker behavior regardless of the readiness policy.
 

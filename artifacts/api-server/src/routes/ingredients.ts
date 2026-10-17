@@ -10,9 +10,11 @@ import {
   SaveIngredientsBody,
   DeleteIngredientsBody,
   MergeIngredientsBody,
+  UpdateIngredientAllergenMappingBody,
 } from "@workspace/api-zod";
 import {
   ingredientNameKey,
+  normalizeIngredientAllergens,
   normalizeIngredient,
   type Ingredient,
   unionIngredientCategories,
@@ -86,12 +88,15 @@ async function repointIngredientBatchWeights(
 }
 
 function toApiItem(row: IngredientRow): Ingredient {
+  const mapping = normalizeIngredientAllergens(row.allergens);
   return {
     id: row.id,
     name: row.name,
     categories: row.categories ?? [],
     mergedInto: row.mergedInto ?? null,
     enabled: row.enabled,
+    allergens: mapping.allergens,
+    allergensReviewed: row.allergensReviewed && mapping.valid,
   };
 }
 
@@ -103,6 +108,8 @@ function toDbValues(item: Ingredient) {
     categories: item.categories,
     mergedInto: item.mergedInto ?? null,
     enabled: item.enabled,
+    allergens: [],
+    allergensReviewed: false,
     updatedAt: new Date(),
   };
 }
@@ -126,6 +133,53 @@ router.get("/ingredients", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to list ingredients" });
   }
 });
+
+router.put(
+  "/ingredients/:id/allergen-mapping",
+  requireCapability("manage-allergens"),
+  async (req: Request, res: Response) => {
+    const id = typeof req.params.id === "string" ? req.params.id.trim() : "";
+    const parsed = UpdateIngredientAllergenMappingBody.safeParse(req.body);
+    if (
+      !id ||
+      id.length > 200 ||
+      !parsed.success ||
+      new Set(parsed.success ? parsed.data.allergens : []).size !==
+        (parsed.success ? parsed.data.allergens.length : 0)
+    ) {
+      res.status(400).json({ error: "Invalid allergen mapping" });
+      return;
+    }
+
+    try {
+      const scope = currentScope();
+      const [updated] = await db
+        .update(ingredientsTable)
+        .set({
+          allergens: parsed.data.allergens,
+          allergensReviewed: parsed.data.reviewed,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(ingredientsTable.id, id),
+            eq(ingredientsTable.scope, scope),
+          ),
+        )
+        .returning();
+      if (!updated) {
+        res.status(404).json({ error: "Ingredient not found" });
+        return;
+      }
+      invalidateMasterDataBootstrapCache();
+      broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "master-data");
+      res.json(toApiItem(updated));
+    } catch (err) {
+      req.log.error({ err }, "failed to update ingredient allergen mapping");
+      res.status(500).json({ error: "Failed to update ingredient allergen mapping" });
+    }
+  },
+);
 
 router.post(
   "/ingredients",

@@ -13,7 +13,10 @@ export interface AuditLog {
   actor: string;
   /** Allowlisted action name */
   action: string;
-  /** Resource identifier */
+  /**
+     * Resource identifier
+     * @nullable
+     */
   resource: string | null;
   /** Allowlisted, redacted evidence object no larger than 8192 bytes. */
   changes: AuditLogChanges;

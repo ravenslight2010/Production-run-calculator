@@ -231,13 +231,21 @@ router.post("/auth/sign-in", authRateLimit, async (req, res): Promise<void> => {
 
 // Sign out — clears the web session cookie. Mobile simply discards its stored
 // token; the stateless token naturally expires.
-router.post("/auth/sign-out", (req, res): void => {
+router.post("/auth/sign-out", async (req, res): Promise<void> => {
   const bearer = req.headers.authorization?.startsWith("Bearer ")
     ? req.headers.authorization.slice(7).trim()
     : undefined;
   const cookie = (req.cookies as Record<string, string> | undefined)?.[SESSION_COOKIE];
   const token = bearer || cookie;
-  if (token) void revokeSession(token);
+  if (token) {
+    try {
+      await revokeSession(token);
+    } catch (err) {
+      req.log.error({ err }, "Failed to revoke sign-out session");
+      res.status(503).json({ error: "Could not sign out safely; please try again." });
+      return;
+    }
+  }
   res.clearCookie(SESSION_COOKIE, { path: "/" });
   res.status(204).end();
 });

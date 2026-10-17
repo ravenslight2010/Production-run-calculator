@@ -3,13 +3,17 @@ import { webkitLaunchOptions } from "./webkit-runtime.ts";
 
 const previousConfigured = process.env.PLAYWRIGHT_WEBKIT_LIBRARY_PATH;
 const previousLibraryPath = process.env.LD_LIBRARY_PATH;
+const previousGioModules = process.env.GIO_EXTRA_MODULES;
 const previousHostValidation =
   process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS;
+const previousCi = process.env.CI;
 
 try {
   process.env.PLAYWRIGHT_WEBKIT_LIBRARY_PATH =
     "  /configured/webkit:/configured/extra  ";
   process.env.LD_LIBRARY_PATH = "/existing/lib";
+  process.env.GIO_EXTRA_MODULES = "  /configured/gio/modules  ";
+  process.env.CI = "true";
   delete process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS;
 
   const options = webkitLaunchOptions();
@@ -23,6 +27,16 @@ try {
     options.env.LD_LIBRARY_PATH,
     "/configured/webkit:/configured/extra:/existing/lib",
     "the TypeScript launcher must preserve the trimmed configured path before inherited libraries",
+  );
+  assert.equal(
+    options.env.GIO_EXTRA_MODULES,
+    "/configured/gio/modules",
+    "the WebKit launch must keep the configured GIO TLS modules",
+  );
+  assert.equal(
+    process.env.GIO_EXTRA_MODULES,
+    options.env.GIO_EXTRA_MODULES,
+    "the browser child and Playwright host must receive the same GIO modules",
   );
   assert.equal(
     process.env.LD_LIBRARY_PATH,
@@ -45,11 +59,21 @@ try {
   } else {
     process.env.LD_LIBRARY_PATH = previousLibraryPath;
   }
+  if (previousGioModules === undefined) {
+    delete process.env.GIO_EXTRA_MODULES;
+  } else {
+    process.env.GIO_EXTRA_MODULES = previousGioModules;
+  }
   if (previousHostValidation === undefined) {
     delete process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS;
   } else {
     process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS =
       previousHostValidation;
+  }
+  if (previousCi === undefined) {
+    delete process.env.CI;
+  } else {
+    process.env.CI = previousCi;
   }
 }
 

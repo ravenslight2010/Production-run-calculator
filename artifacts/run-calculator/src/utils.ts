@@ -83,9 +83,10 @@ export function fmtElapsed(ms: number): string {
 
 export function fmtTime(totalSec: number): string {
   if (!isFinite(totalSec) || totalSec < 0) return "—";
+  totalSec = Math.round(totalSec);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
-  const s = Math.round(totalSec % 60);
+  const s = totalSec % 60;
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;

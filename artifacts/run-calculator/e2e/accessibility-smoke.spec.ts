@@ -419,18 +419,17 @@ test.beforeAll(async () => {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("a11y_run");
-  const date = new Date().toISOString().slice(0, 10);
-  const now = Date.now();
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    await db.query(
-      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
-      [date],
-    );
-  } finally {
-    await db.end().catch(() => {});
-  }
+  const { date, now } = await page.evaluate(() => {
+    const current = new Date();
+    return {
+      date: [
+        current.getFullYear(),
+        String(current.getMonth() + 1).padStart(2, "0"),
+        String(current.getDate()).padStart(2, "0"),
+      ].join("-"),
+      now: current.getTime(),
+    };
+  });
   const stoppages = [
     {
       id: `${runId}-active`,
@@ -499,21 +498,44 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.setItem("run-calc-day", JSON.stringify(seed.payload.dayState));
   }, { payload, runId });
-  await page.route("**/api/sync/today**", async (route) => {
-    if (route.request().method() !== "GET") {
-      await route.continue();
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      headers: {
-        "X-Sync-Canonical-Revision": "1",
-        "X-Sync-Server-Time": String(now),
-      },
-      body: JSON.stringify(payload),
+  // Seed the canonical server snapshot as well as browser storage. The app's
+  // initial SSE reconciliation can otherwise replace this local-only fixture
+  // with the server's empty day state before the workflow reaches its checks.
+  const serverSeed = await page.evaluate(async ({ date, payload, senderId }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", {
+      credentials: "same-origin",
     });
-  });
+    if (!epochResponse.ok) {
+      return {
+        ok: false,
+        step: "reading the sync reset epoch",
+        status: epochResponse.status,
+        body: await epochResponse.text(),
+      };
+    }
+
+    const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
+    const response = await fetch(
+      `/api/sync/today?today=${encodeURIComponent(date)}&epoch=${encodeURIComponent(String(epoch))}`,
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      },
+    );
+    return {
+      ok: response.ok,
+      step: "writing the canonical today sync snapshot",
+      status: response.status,
+      body: response.ok ? "" : await response.text(),
+    };
+  }, { date, payload, senderId: `a11y-${runId}` });
+  if (!serverSeed.ok) {
+    throw new Error(
+      `Fixture ${serverSeed.step} failed (HTTP ${serverSeed.status}): ${serverSeed.body.slice(0, 300)}`,
+    );
+  }
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect
@@ -545,10 +567,12 @@ async function seedBreakSchedule(): Promise<{
   runIds: [string, string];
   deletedRunId: string;
 }> {
+  await requireIsolatedTestDatabase("break scheduling browser seed");
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL must be configured for break scheduling browser tests.");
   }
-  const date = new Date().toISOString().slice(0, 10);
+  const nowDate = new Date();
+  const date = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
   const runIds: [string, string] = [
     uniqueTestId("break_run_one"),
     uniqueTestId("break_run_two"),
@@ -653,7 +677,7 @@ test.describe("accessibility smoke", () => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
     await page.evaluate((fixtures) => {
-      const root = document.createElement("main");
+      const root = document.createElement("div");
       root.id = "operational-contrast-audit";
       root.innerHTML = fixtures
         .map(
@@ -663,6 +687,18 @@ test.describe("accessibility smoke", () => {
         .join("");
       document.body.append(root);
     }, OPERATIONAL_CONTRAST_FIXTURES);
+
+    for (const fixture of OPERATIONAL_CONTRAST_FIXTURES) {
+      const label = page.locator(`#${fixture.theme}-${fixture.id} > span`);
+      await expect(
+        label,
+        `${fixture.theme} ${fixture.id} contrast label should be rendered`,
+      ).toHaveCount(1);
+      await expect(
+        label,
+        `${fixture.theme} ${fixture.id} contrast label should retain its text`,
+      ).toHaveText(fixture.text);
+    }
 
     const violations: string[] = [];
     for (const theme of ["dark", "light"] as const) {
@@ -701,14 +737,25 @@ test.describe("accessibility smoke", () => {
     await expect(stoppageLog.getByText("Stop", { exact: true }).first()).toBeVisible();
     await expect(stoppageLog.getByText("Manual", { exact: true })).toBeVisible();
     await expect(stoppageLog.getByText("Pause", { exact: true })).toBeVisible();
-    const stoppageContrast = await new AxeBuilder({ page })
-      .include('[data-testid="stoppage-log"]')
-      .withRules(["color-contrast"])
-      .analyze();
-    expect(
-      stoppageContrast.violations,
-      "Rendered stoppage log color contrast audit",
-    ).toEqual([]);
+    const originalDarkTheme = await page.evaluate(() =>
+      document.documentElement.classList.contains("dark"),
+    );
+    for (const theme of ["dark", "light"] as const) {
+      await page.evaluate((activeTheme) => {
+        document.documentElement.classList.toggle("dark", activeTheme === "dark");
+      }, theme);
+      const stoppageContrast = await new AxeBuilder({ page })
+        .include('[data-testid="stoppage-log"]')
+        .withRules(["color-contrast"])
+        .analyze();
+      expect(
+        stoppageContrast.violations,
+        `Rendered stoppage log color contrast audit (${theme} theme)`,
+      ).toEqual([]);
+    }
+    await page.evaluate((darkTheme) => {
+      document.documentElement.classList.toggle("dark", darkTheme);
+    }, originalDarkTheme);
     await page.getByTestId("tab-run").click();
     await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
@@ -857,14 +904,16 @@ test.describe("accessibility smoke", () => {
     await page.getByRole("button", { name: "More" }).click();
     await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
     const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
-    await expect(scheduledDaysDialog).toBeVisible();
-    await scheduledDaysDialog.getByRole("button", { name: "Schedule New Day" }).click();
+    await scheduledDaysDialog
+      .getByRole("button", { name: "Schedule New Day", exact: true })
+      .click();
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     await assertDialogContract(page, scheduleEditor, "schedule editor");
     const scheduleDateTrigger = scheduleEditor.getByRole("button", {
       name: "Choose production date",
     });
     await expect(scheduleDateTrigger).toBeVisible();
+    const initialDate = await scheduleDateTrigger.getAttribute("data-date-value");
     await scheduleDateTrigger.focus();
     await page.keyboard.press("Enter");
     const scheduleCalendar = page.locator('[data-slot="calendar"]');
@@ -872,10 +921,29 @@ test.describe("accessibility smoke", () => {
     await scan(page, "schedule calendar", [], '[data-slot="calendar"]');
     const selectedDay = scheduleCalendar.locator('button[data-selected-single="true"]');
     await expect(selectedDay).toBeVisible();
+    const selectedDate = await selectedDay.getAttribute("data-day");
+    expect(selectedDate).toBeTruthy();
     await selectedDay.focus();
     await page.keyboard.press("ArrowRight");
+    // React Day Picker moves focus asynchronously. Enter before the new day
+    // receives focus can activate the old day (or no day) and leave the
+    // calendar open while the test appears to have exercised its keyboard path.
+    await expect.poll(() => page.evaluate((previousDate) => {
+      const focused = document.activeElement;
+      return focused instanceof HTMLButtonElement
+        && focused.matches('button[data-day]:not([disabled])')
+        && focused.getAttribute("data-day") !== previousDate;
+    }, selectedDate)).toBe(true);
     await page.keyboard.press("Enter");
+    await expect(scheduleDateTrigger).not.toHaveAttribute(
+      "data-date-value",
+      initialDate ?? "",
+    );
+    await expect(scheduleEditor).toBeVisible();
     await expect(scheduleCalendar).toBeHidden();
+    await page.locator("#replit-dev-banner").evaluateAll((nodes) => {
+      for (const node of nodes) node.remove();
+    });
     await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
     await expect(scheduleEditor).toBeHidden();
   });
@@ -892,21 +960,27 @@ test.describe("accessibility smoke", () => {
         if (key?.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     await page.getByRole("button", { name: "More" }).click();
-    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const scheduleMenuItem = page.getByRole("menuitem", { name: "Schedule", exact: true });
+    await expect(scheduleMenuItem).toBeVisible();
+    await scheduleMenuItem.click();
     const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
-    await expect(scheduledDaysDialog).toBeVisible();
     await scheduledDaysDialog
       .getByTestId("schedule-today-card")
       .getByRole("button", { name: "Edit", exact: true })
       .click();
-
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
     await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) {
+      await expect(breakToggle).toHaveText("Add breaks");
+      await breakToggle.click();
+      await expect(breakToggle).toHaveText("Hide breaks");
+    }
     await expect(breakEditor.getByText("Break 1", { exact: true })).toBeVisible();
     await expect(breakEditor.getByText("Break 2", { exact: true })).toBeVisible();
     await expect(breakEditor.getByText("Break 3", { exact: true })).toBeVisible();
@@ -948,6 +1022,12 @@ test.describe("accessibility smoke", () => {
       .click();
     const reloadedEditor = page.getByRole("dialog", { name: /Plan for/ });
     const reloadedBreakEditor = reloadedEditor.getByTestId("schedule-breaks");
+    await expect(reloadedBreakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const reloadedBreakToggle = reloadedBreakEditor.getByTestId("schedule-break-toggle");
+    if (await reloadedBreakToggle.isVisible()) {
+      await reloadedBreakToggle.click();
+      await expect(reloadedBreakToggle).toHaveText("Hide breaks");
+    }
     for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
       await expect(
         reloadedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
@@ -990,6 +1070,94 @@ test.describe("accessibility smoke", () => {
     await operatorPage.close();
   });
 
+  test("Android-sized PWA schedule editor exposes the break planner and preserves placements", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 412, height: 915 });
+    await signUp(page);
+    await seedBreakSchedule();
+    await page.evaluate(() => {
+      for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const openScheduleEditor = async (): Promise<Locator> => {
+      await page.getByRole("button", { name: "More" }).click();
+      const scheduleMenuItem = page.getByRole("menuitem", { name: "Schedule", exact: true });
+      await expect(scheduleMenuItem).toBeVisible();
+      await scheduleMenuItem.click();
+      const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      await scheduledDaysDialog
+        .getByTestId("schedule-today-card")
+        .getByRole("button", { name: "Edit", exact: true })
+        .click();
+      return page.getByRole("dialog", { name: /Plan for/ });
+    };
+
+    const scheduleEditor = await openScheduleEditor();
+    const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) {
+      await expect(breakToggle).toHaveText("Add breaks");
+      await breakToggle.click();
+      await expect(breakToggle).toHaveText("Hide breaks");
+    } else {
+      await expect(
+        breakEditor.getByRole("combobox", { name: "Break 1 placement" }),
+      ).toBeVisible();
+    }
+    for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
+      await breakEditor
+        .getByRole("combobox", { name: `Break ${slot} placement` })
+        .selectOption("at-time");
+      await breakEditor.getByLabel(`Break ${slot} time`).fill(time);
+    }
+    await scan(page, "Android schedule break planner", [], '[data-testid="schedule-breaks"]');
+
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/sync/today") &&
+        response.request().method() === "PUT",
+    );
+    await scheduleEditor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    expect((await saveResponse).ok()).toBe(true);
+
+    // Closing the document and opening a new page models an installed PWA
+    // relaunch while retaining the authenticated cookie and persisted plan.
+    const context = page.context();
+    await page.close();
+    const reopened = await context.newPage();
+    await reopened.setViewportSize({ width: 412, height: 915 });
+    await reopened.goto("/", { waitUntil: "domcontentloaded" });
+    await reopened.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
+    await reopened.getByRole("button", { name: "More" }).click();
+    await reopened.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const reopenedScheduledDays = reopened.getByRole("dialog", { name: "Scheduled Days" });
+    await reopenedScheduledDays
+      .getByTestId("schedule-today-card")
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+
+    const reopenedEditor = reopened.getByRole("dialog", { name: /Plan for/ });
+    const reopenedBreakEditor = reopenedEditor.getByTestId("schedule-breaks");
+    await expect(reopenedBreakEditor.getByTestId("schedule-break-toggle")).toHaveText("Add breaks");
+    await expect(reopenedBreakEditor.getByTestId("schedule-break-summary")).toContainText(
+      "Break 1 · 07:00 · Break 2 · 09:00 · Break 3 · 11:00",
+    );
+    await reopenedBreakEditor.getByTestId("schedule-break-toggle").click();
+    for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
+      await expect(
+        reopenedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
+      ).toHaveValue("at-time");
+      await expect(reopenedBreakEditor.getByLabel(`Break ${slot} time`)).toHaveValue(time);
+    }
+    await reopened.close();
+  });
+
   test("authorized supervisors can save all break slots without manager-only controls", async ({
     page,
   }) => {
@@ -1001,7 +1169,7 @@ test.describe("accessibility smoke", () => {
         if (key?.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     await page.getByRole("button", { name: "More" }).click();
@@ -1017,6 +1185,17 @@ test.describe("accessibility smoke", () => {
       .click();
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) {
+      await expect(breakToggle).toHaveText("Add breaks");
+      await breakToggle.click();
+      await expect(breakToggle).toHaveText("Hide breaks");
+    } else {
+      await expect(
+        breakEditor.getByRole("combobox", { name: "Break 1 placement" }),
+      ).toBeVisible();
+    }
     for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
       await breakEditor
         .getByRole("combobox", { name: `Break ${slot} placement` })
@@ -1033,7 +1212,7 @@ test.describe("accessibility smoke", () => {
     expect((await saveResponse).ok()).toBe(true);
     await expect(scheduledDaysDialog.getByTestId("schedule-today-card")).toBeVisible();
 
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     await page.getByRole("button", { name: "More" }).click();
     await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toHaveCount(0);

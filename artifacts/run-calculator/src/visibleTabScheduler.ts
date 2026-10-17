@@ -20,7 +20,7 @@ export class VisibleTabScheduler {
   private started = false;
   private running: Promise<void> | null = null;
   private foregroundQueued = false;
-  private lastForegroundAt = 0;
+  private lastForegroundAt = Number.NEGATIVE_INFINITY;
 
   register(job: VisibleTabJob): () => void {
     const now = Date.now();
@@ -64,7 +64,7 @@ export class VisibleTabScheduler {
   };
 
   private queueForeground(): void {
-    const now = Date.now();
+    const now = performance.now();
     if (now - this.lastForegroundAt < 500) return;
     this.lastForegroundAt = now;
     this.foregroundQueued = true;

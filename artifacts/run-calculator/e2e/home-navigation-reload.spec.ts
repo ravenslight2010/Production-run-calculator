@@ -90,6 +90,21 @@ async function pressBrowserBack(page: Page): Promise<void> {
   await page.evaluate(() => history.back());
 }
 
+async function scrollPageDown(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.body.style.minHeight = `${window.innerHeight * 2}px`;
+    window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(0);
+}
+
+async function openMore(page: Page): Promise<void> {
+  await page.locator('button[title="More"]').click();
+  await expect(page.getByRole("menu")).toBeVisible();
+}
+
 test.describe("Home navigation persistence", () => {
   test("restores a non-Run tab after reload", async ({ page }) => {
     const username = uid();
@@ -113,13 +128,18 @@ test.describe("Home navigation persistence", () => {
 
     await page.getByTestId("tab-sauce").click();
     await expectSelected(page, "sauce");
+    await scrollPageDown(page);
     await page.getByTestId("tab-frontline").click();
     await expectSelected(page, "frontline");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await scrollPageDown(page);
     await page.getByTestId("tab-packaging").click();
     await expectSelected(page, "packaging");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 
     await pressBrowserBack(page);
     await expectSelected(page, "frontline");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     await pressBrowserBack(page);
     await expectSelected(page, "sauce");
     await pressBrowserBack(page);
@@ -129,6 +149,31 @@ test.describe("Home navigation persistence", () => {
     await pressBrowserBack(page);
     await expectSelected(page, "run");
     expect(page.url()).toBe(urlBeforeFinalBack);
+  });
+
+  test("resets page scroll for a tab-backed More-menu destination", async ({ page }) => {
+    const username = uid();
+    testUsernames.add(username);
+    await signUp(page, username);
+
+    await page.getByTestId("tab-dough").click();
+    await expectSelected(page, "dough");
+    await scrollPageDown(page);
+
+    await openMore(page);
+    await scrollPageDown(page);
+    const summaryMenuItem = page.getByRole("menuitem", {
+      name: "Summary",
+      exact: true,
+    });
+    await expect(summaryMenuItem).toBeVisible();
+    await summaryMenuItem.evaluate((item) => (item as HTMLElement).click());
+
+    await expect(page.getByRole("menu")).toBeHidden();
+    await expect
+      .poll(() => page.evaluate((key) => localStorage.getItem(key), ACTIVE_TAB_KEY))
+      .toBe("summary");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   });
 
   test("falls back to Run when the stored tab is invalid", async ({ page }) => {

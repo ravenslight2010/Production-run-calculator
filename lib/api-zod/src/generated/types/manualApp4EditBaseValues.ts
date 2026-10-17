@@ -10,4 +10,7 @@ export type ManualApp4EditBaseValues = {
   app4BatchesMade: number;
   app4BatchAnchorNetSec: number;
   app4BatchCorrectionGeneration: number;
+  app4StockLbs: number;
+  app4StockAnchorNetSec: number;
+  app4StockCorrectionGeneration: number;
 };

@@ -44,29 +44,13 @@ downloads. The repository check is intentionally conservative and will fail a
 future workflow that introduces a recognizable binary/archive download without
 the required attestation gate.
 
-## Published container image evidence
+## Container builds are test-only
 
-The trusted `docker-publish` job in `ci.yml` publishes exactly three images:
-the API runtime, API migration, and web images. Each image is labeled with
-`org.opencontainers.image.revision=${{ github.sha }}` and the Buildx output
-digest is checked after publication by pulling the immutable
-`image@sha256:digest` reference. The check requires both the pulled
-`RepoDigest` and the revision label to match the current `github.sha`.
-
-The check writes only image names, immutable digests, the expected/observed
-revision, and bounded pass/fail fields to
-`release-evidence-container-images.txt`. The file is retained as
-`release-evidence-container-images-${{ github.run_id }}` for 14 days; registry
-credentials are never written to the report.
-
-Production image promotion is a separate manual workflow protected by the
-`production` environment. The operator supplies the trusted publisher run ID,
-reviewed revision, and publisher artifact digest. The workflow verifies that
-the source run was a successful push of `main` through `ci.yml`, downloads only
-that run-scoped artifact, compares GitHub's artifact digest, and validates all
-three image records before producing a handoff. It also requires the exact
-publisher job to have succeeded and hashes the downloaded archive bytes before
-extracting its single bounded evidence file. The handoff contains only
-`repository@sha256:digest` references for the API, migration, and web images.
+The required `Docker image` job in `ci.yml` builds the API runtime, API
+migration, and web targets with `push: false`. It is a build check only: it does
+not log in to a registry, publish an image, create a production-image handoff,
+or prove which build is live. GitHub Actions has no production deployment or
+promotion authority for the active application; the Replit deployment is the
+only authorized current production publisher.
 It does not deploy, rebuild, accept tags, or receive registry/deployment
 credentials.

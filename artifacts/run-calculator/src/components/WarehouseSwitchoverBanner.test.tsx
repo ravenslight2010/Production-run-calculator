@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import {
@@ -79,10 +78,14 @@ describe("WarehouseSwitchoverBanner", () => {
   });
 
   it("keeps the alert out of the Run tab after the presentation moves to Warehouse", () => {
-    const runTabSource = readFileSync(
-      "src/components/live-stations/LiveRunTabContent.tsx",
-      "utf8",
-    );
+    const runTabSource = Object.values(
+      import.meta.glob("./live-stations/LiveRunTabContent.tsx", {
+        eager: true,
+        query: "?raw",
+        import: "default",
+      }),
+    )[0] as string | undefined;
+    expect(runTabSource).toBeDefined();
     expect(runTabSource).not.toContain('data-testid="banner-warehouse-switchover"');
   });
 });

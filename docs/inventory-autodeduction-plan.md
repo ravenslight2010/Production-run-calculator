@@ -1,7 +1,7 @@
 # Inventory Auto-Deduction — Comprehensive Plan
 
-**Status:** Core physical-event accounting built
-**Updated:** 2026-09-20
+**Status:** Core physical-event accounting is implemented; remaining work is bounded verification, final-total reconciliation, and approved waste/return flows
+**Updated:** 2026-10-08
 **Related:** [Idea backlog](idea-backlog.md#4-inventory-system-gap-fixes), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 **Authority rule:** each physical inventory event uses one server-authoritative, idempotent transaction. Do not add an independent client-side stock mutation path.
@@ -12,8 +12,26 @@
 - **Eligible production stock:** automatic ingredient and packaging consumption draws only from the scope's location marked `isOnsite`; legacy lots with no location are treated as onsite. Offsite and freezer stock are excluded.
 - **Confirmed finished-case surplus:** run consumption already charges all ingredients and packaging for `actualCases`, including excess cases. Surplus confirmation creates the freezer finished-case asset only; it never charges ingredients again.
 - **Freezer reuse:** allocation reduces or moves the finished-case freezer asset. It does not consume the underlying ingredients a second time.
+- **Finished-case damage and returns:** an inventory manager records a reasoned, idempotent event against one dated surplus lot. Damage may remove only currently available cases. A return must cite a started/completed run allocation from that same lot and cannot exceed its not-yet-returned cases.
+- **Finished-case corrections:** accepted events are immutable. A manager corrects a mistake by appending a linked correction for up to the original event's uncorrected quantity; reversing a return also requires the cases to remain available in that lot.
+- **Adjustment audit:** the scoped event history records the stable event ID, event type, lot, quantity, reason, authenticated actor, timestamp, and any run or correction link. The event and both stock representations commit or roll back together.
 - **Prep mix and already-made mix:** the day-start event charges components for fresh mix actually made. `amountAlreadyMade` reduces fresh production and therefore does not trigger a second component charge.
 - **Packaging:** packaging lines are part of the same completed-run consumption event and use the same actual-case scale and onsite drawdown.
+
+## Current reconciliation (2026-10-08)
+
+The status and priorities below supersede the implementation-status snapshot in the older proposal sections that follow.
+
+| Area | Current status | Evidence / remaining work |
+|---|---|---|
+| Actual-case run consumption | **Implemented in source; verification partial** | Server uses persisted `actualCases` when positive, with planned-value fallback; focused integration coverage for the scaled quantity was not located. |
+| Mix/prep-mix and surplus | **Implemented for recorded day-start events** | `inventory.integration.test.ts` covers idempotent drawdown, rollback/retry, and surplus creation; broader reconciliation remains. |
+| Freezer pull | **Core path implemented; allocation parity verified** | `freezerSurplus.integration.test.ts` verifies dated surplus and finished-case stock through confirmation, allocation, identical retry, replacement, release, and over-allocation rejection, including inventory-ledger movement counts. |
+| Packaging | **Formula paths implemented; verification partial** | `computeRunLines` covers package lines and `computeDailySupplyConsumptionLines` covers daily supplies; focused tests do not assert every item/mode combination. |
+| Finished-case damage, returns, and corrections | **Defined and implemented** | Manager-authorized, idempotent events keep dated surplus and freezer inventory in the same transaction. Returns are bounded by a started/completed run allocation; corrections are linked compensating events. Server integration coverage verifies stock parity, authorization, scope, audit data, retry safety, and rejected quantities. |
+| QC packaging lots | **Gated** | Depends on approved QC lot/check scope. |
+
+In particular, surplus confirmation creates a finished-case asset and does **not** trigger a second ingredient deduction. Use this reconciliation and the current source/tests—not the older proposal wording below—as the implementation guide.
 
 ## Idempotent physical events
 
@@ -24,23 +42,24 @@
 | Already-made mix reuse | Existing mix surplus allocation/carry | Reduce fresh mix need only; no new component charge |
 | Finished-case surplus confirmation | Surplus lot ID | Create the dated freezer asset and matching freezer inventory lot; no ingredient charge |
 | Finished-case freezer allocation | Run and surplus lot identity | Reduce freezer finished-case stock only; no ingredient charge |
+| Finished-case damage, return, or correction | Caller-supplied event ID and dated lot | Append the actor/reason audit event and update dated surplus plus freezer inventory; no ingredient charge |
 | Sauce auto-track consumption | Run and sauce event identity | Lock onsite lots and append stock ledger rows atomically with accepted progress |
 
 The idempotency claim, stock locks, quantity updates, surplus/carry updates, and ledger rows commit or roll back together. A failed attempt leaves no claim, so a retry can safely apply the event once.
 
-## The Core Problem
+## Historical problem statement (superseded by 2026-10-08 reconciliation)
 Inventory consumption is a **single-point event** at run-end, computed from the **planned** `casesNeeded`. Multiple production activities that consume ingredients or packaging are not reflected in inventory. This causes inventory to drift from reality over time.
 
 ---
 
-## A. Overproduction Inventory Deduction (Critical)
+## A. Historical overproduction proposal (superseded by actual-case run consumption)
 
-**Status**: Built through actual-case run consumption plus freezer surplus asset creation
-**What**: When actual production exceeds the planned target, extra ingredients are consumed but not deducted.
+**Current status**: Actual-case run consumption and freezer surplus asset paths exist; see the current reconciliation above. The steps below are a superseded proposal.
+**Historical problem (resolved)**: Earlier, excess-case ingredients were not deducted when actual production exceeded the planned target.
 
-**When**: At surplus confirmation moment (end of run, manager confirms extra cases).
+**Historical proposal trigger**: Surplus confirmation at run end. Current deduction happens during run consumption using persisted `actualCases`, not at surplus confirmation.
 
-**How it works**:
+**Original proposal steps (superseded)**:
 1. Run ends with `casesCompleted` > `casesNeeded`
 2. Surplus panel appears: "You have X extra cases. Store in freezer?"
 3. Manager confirms surplus
@@ -52,13 +71,13 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 5. Deducts the extra ingredients from inventory (onsite location lots only)
 6. Creates ledger entries: type "consume", note "Overproduction: {X} cases → deducted {qty} {item}"
 
-**Key invariant**: Surplus cases become a **freezer surplus asset** (not re-deducted when reused). The overproduction deduction is the only time those ingredients are charged.
+**Current invariant**: Ingredients and packaging are charged once in the run-consumption event. Surplus confirmation and later allocation create/update finished-case assets and do not charge ingredients again.
 
 ---
 
-## B. Mix / Prep Mix Deduction (Critical)
+## B. Mix / Prep Mix Deduction (current day-start path; historical run-end proposal follows)
 
-**Status**: Built
+**Status**: Built for recorded day-start events; see the current reconciliation above.
 
 **What**: When prep mixes are made, the component ingredients need to be accounted for. Also, leftover ("Already Made") mix needs to offset future deductions without double-charging.
 
@@ -72,11 +91,13 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 freshMixNeeded = plannedMixNeed - alreadyMade
 ```
 
-The ingredients for "Already Made" were already deducted at the time the mix was originally made (overproduction of mix in a prior run — see B2). No new ingredient charge.
+The ingredients for "Already Made" were already deducted when the mix was originally made. No new ingredient charge.
 
 **UI**: When "Already Made" is entered for a mix slot, the system adjusts the deduction to only cover `freshMixNeeded`. If `alreadyMade > plannedMixNeed`, `freshMixNeeded = 0` (no fresh mix made).
 
-### B2. Overproduction of Mix (made more than needed)
+### B2. Historical run-end overproduction proposal (not current implementation guidance)
+
+Current reconciliation evidence covers recorded day-start mix production and surplus. Do not assume the per-run "Actual Made" field and run-end deduction steps below are implemented.
 
 Similar to Feature A but for mixes specifically.
 
@@ -98,50 +119,47 @@ Similar to Feature A but for mixes specifically.
 
 ## C. Freezer Pull → Inventory Sync (Medium)
 
-**Status**: Built
+**Status**: Core server path built; direct parity-test coverage is in place.
 
-**Problem**: When warehouse pulls items from the freezer for a run, the pull is tracked in the freezer surplus system but doesn't move inventory lots. This causes double-counting — the same stock appears in both inventory and freezer surplus.
+**Current behavior**: Allocation updates the dated freezer surplus lot/allocation and the finished-case inventory stock. Replacing or releasing an allocation restores the prior quantity before applying the new selection.
 
-**When**: At allocation confirmation in `FreezerSurplusPanel`.
-
-**How it works**:
-1. Manager confirms "Use on Next Run" in the freezer surplus panel
-2. Server deducts the allocated cases from the **freezer location's** inventory lots (not onsite)
-3. Creates ledger entry: type "transfer", note "freezer pull for run {id}"
-4. The freezer surplus system tracks the allocation — inventory just moves the lot location
-
-**Key invariant**: This is a **lot movement only**, not an ingredient deduction. The surplus cases were already paid for at overproduction time (Feature A). No ingredient charge happens here.
+**Key invariant**: This changes finished-case stock/allocation only; it does not deduct the underlying ingredients again. The server integration test asserts that surplus balance, finished-case on-hand stock, and net inventory-ledger movements stay aligned through confirm, allocation, identical retry, replacement, release, and over-allocation rejection.
 
 ---
 
-## D. Actual Cases Instead of Planned (Medium)
+## C1. Finished-case damage, returns, and corrections
 
-**Status**: Built
+**Authorization:** only callers with `manage-inventory` may record adjustments. Each request is scoped to the caller's live or sandbox facility.
 
-**Problem**: `findExpectedConsumptionForRun` reads the planned `casesNeeded` from form values. When actual production differs, inventory is wrong.
+**Damage:** the manager enters a positive whole-case count and reason for cases physically damaged while still available in the freezer. The server rejects a quantity larger than the dated lot's remaining balance or matching freezer inventory. Cases already allocated to a run are outside this event; run consumption already owns ingredient/packaging deduction.
 
-**When**: At run end, during the `POST /inventory/consume` call.
+**Return:** the manager enters a positive whole-case count, reason, and run ID. The server requires an allocation for that exact run and dated lot and requires the run to have started or ended so its allocation cannot still be revised. Cumulative returns cannot exceed allocated cases. The cases are restored to that same dated lot and freezer inventory.
 
-**How it works**:
-1. Read `casesCompleted` from the run's stored values
-2. If `casesCompleted > 0` AND `casesCompleted ≠ casesNeeded`:
-   - Compute scale factor: `scale = casesCompleted / casesNeeded`
-   - Apply to ALL consumption lines: `actualQty = plannedQty × scale`
-3. If `casesCompleted = 0` or missing: use planned values (backward-compatible)
+**Correction:** no accepted event is edited or deleted. A manager appends a correction referencing an earlier damage or return from the same lot. Corrections are limited to the original event's not-yet-corrected quantity. Reversing damage restores stock, up to the lot's original total; reversing a return removes stock only when enough cases remain available.
 
-**Scale applies to**: every ingredient and packaging line — dough, sauce, applicators, pepperoni, circles, shippers, cartons, labels, pallets, etc. No exceptions.
+Every request includes a stable UUID event ID and a non-empty reason. Replaying the same event ID and payload is a no-op; using the ID for a different payload returns a conflict. The immutable event record includes actor, timestamp, lot, type, quantity, reason, and its run/correction link. Managers with `manage-inventory` can read the 500 most recent events through a separate scoped endpoint; it is not added to the general signed-in surplus response. A single transaction locks the event identity and dated lot, validates the source/quantity, writes the event, changes the dated surplus balance, and writes the matching freezer inventory movement. Failure rolls back all effects. No adjustment deducts ingredients again.
 
 ---
 
-## E. Full Packaging Consumption (Medium)
+## D. Actual cases instead of planned (source path implemented; verification partial)
 
-**Status**: Built
+**Status**: Source implementation exists; direct actual-case scaling coverage was not located.
 
-**Problem**: Only circles, shippers, and cartons are consumed from inventory. All other packaging items (slip sheets, grip sheets, labels, pallets, tape, glue, ink, shipper labels) are missing.
+**Current behavior**: At `POST /inventory/consume`, the server reads the run's persisted `actualCases`. When it is positive and differs from `casesNeeded`, all consumption lines are scaled by `actualCases / casesNeeded`. If `actualCases` is absent or zero, planned cases remain the backward-compatible basis.
 
-### E1. New Profile Field: Carton Size
+**Evidence gap**: Existing integration tests cover server-authoritative finalization and idempotency, but do not directly assert the scaled quantity for `actualCases`. Add that focused regression before marking this behavior fully verified.
 
-Add `cartonSize` to FormValues and the packaging profile:
+---
+
+## E. Full packaging consumption (formula paths exist; tests partial)
+
+**Status**: Formula paths exist; direct test coverage is partial.
+
+**Evidence gap**: The formula paths include circles, shippers, cartons, slip/grip sheets, labels, pallets, shipper labels, and daily supplies. Focused tests do not yet assert every item and supported packaging mode.
+
+### E1. Carton Size
+
+`cartonSize` is already part of the form/profile input used by the packaging calculation:
 - "single" (default) = 1 pizza per carton
 - "double" = 2 pizzas per carton
 - "triple" = 3 pizzas per carton
@@ -226,7 +244,7 @@ Deducted at daily reset for that day's production runs (not per-run).
 
 ---
 
-## Implementation Order
+## Historical implementation order (superseded by 2026-10-08 reconciliation)
 
 ### Phase 1: Core Consumption Fixes (A + D)
 1. Extend `findExpectedConsumptionForRun` to use actual cases (D)

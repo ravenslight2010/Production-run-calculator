@@ -99,6 +99,16 @@ describe("readiness evidence projection", () => {
     expect(JSON.stringify(handoff)).not.toMatch(
       /url|response|credential|password|diagnostic|provider/i,
     );
+    expect(
+      validateReadinessDeploymentHandoff(
+        deploymentHandoff({ databaseOwner: "approved_source_owner" }),
+      ),
+    ).toMatchObject({ databaseOwner: "approved_source_owner" });
+    expect(() =>
+      validateReadinessDeploymentHandoff(
+        deploymentHandoff({ databaseOwner: "owner with spaces" }),
+      ),
+    ).toThrow("Readiness deployment handoff database owner is malformed");
 
     expect(() =>
       validateReadinessDeploymentHandoff(

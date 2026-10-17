@@ -16,7 +16,37 @@ import { loadRunValues } from "../storage";
 import { withTempOverrides, DEFAULT_VALUES, type RunMeta } from "../types";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import { Factory, ArrowRight, Droplets, Layers, Clock, AlertTriangle, BarChart2, Warehouse } from "lucide-react";
+import type { ScreenSyncStatus } from "../screenSyncState";
 
+function ScreenSyncIndicator({ status }: { status: ScreenSyncStatus }) {
+  const label = status === "live"
+    ? "Live sync"
+    : status === "reconnecting"
+      ? "Reconnecting"
+      : "Stale data";
+  const description = status === "live"
+    ? "Live sync connected; the canonical production state is current."
+    : status === "reconnecting"
+      ? "Reconnecting and adopting the latest canonical production state."
+      : "The display may be out of date. Waiting for an authorized sync connection.";
+  const color = status === "live"
+    ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
+    : status === "reconnecting"
+      ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
+      : "text-red-400 border-red-500/40 bg-red-500/10";
+  return (
+    <span
+      className={`rounded-full border px-2.5 py-1 text-xs sm:text-sm font-semibold whitespace-nowrap ${color}`}
+      role="status"
+      aria-label={label}
+      title={description}
+      data-testid="screen-sync-status"
+      data-status={status}
+    >
+      {label}
+    </span>
+  );
+}
 
 export default function ScreenModeView() {
   const {
@@ -33,6 +63,7 @@ export default function ScreenModeView() {
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
+    screenSyncStatus,
   } = useLiveRun();
 
   if (screenMode === "dashboard") {
@@ -50,7 +81,10 @@ export default function ScreenModeView() {
             </div>
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Production Dashboard</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Run name + status */}
@@ -150,7 +184,10 @@ export default function ScreenModeView() {
             <Droplets className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Dough Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
@@ -273,7 +310,10 @@ export default function ScreenModeView() {
             <Layers className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Frontline Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Run name + status */}
@@ -376,7 +416,10 @@ export default function ScreenModeView() {
             <Clock className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Backline Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Current run block */}
@@ -505,7 +548,10 @@ export default function ScreenModeView() {
             <Droplets className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Sauce Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Run name + status */}
@@ -573,7 +619,10 @@ export default function ScreenModeView() {
             <Warehouse className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Warehouse</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         <h1 className="text-4xl font-black">Warehouse Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
@@ -636,7 +685,10 @@ export default function ScreenModeView() {
             <BarChart2 className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Shift Summary</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
           {dayState.runs.map((run: any, i: any) => {

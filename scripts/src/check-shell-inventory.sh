@@ -76,6 +76,11 @@ is_excluded_shell_file() {
 
 declare -a maintained_files=()
 while IFS= read -r path; do
+  # Git still lists an unstaged deletion in its index. The inventory should
+  # describe files that exist in the current working tree.
+  if [[ ! -f "${REPO_ROOT}/${path}" ]]; then
+    continue
+  fi
   if ! is_excluded_shell_file "$path"; then
     maintained_files+=("$path")
   fi

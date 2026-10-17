@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-09-15",
-  "sourceRevision": "4a42e35e4632f32472b9580fb2ac0a2edde30e93",
+  "capturedAt": "2026-09-21",
+  "sourceRevision": "72383c601448d234b7813451618c293ebdca7ac8",
   "environment": {
     "os": "Linux",
     "architecture": "x86_64",
-    "node": "24.13.0",
+    "node": "24.20.0",
     "pnpm": "11.5.2",
     "reportedProcessors": 8,
     "cpu": "Intel Xeon Platinum 8581C CPU @ 2.30GHz",
@@ -95,16 +95,16 @@
     }
   ],
   "declarations": {
-    "baselineFileCount": 729,
-    "candidateFileCount": 729,
-    "textuallyChangedFileCount": 205,
+    "baselineFileCount": 795,
+    "candidateFileCount": 795,
+    "textuallyChangedFileCount": 217,
     "removedLineCount": 2664,
     "addedLineCount": 2664,
     "fullDiffLineCount": 13723,
     "changedFilesByPackage": {
       "api-client-react": 2,
-      "api-zod": 142,
-      "db": 61,
+      "api-zod": 150,
+      "db": 65,
       "other": 0
     }
   },

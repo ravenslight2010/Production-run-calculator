@@ -12,12 +12,16 @@ import type { ImportHistorySummary } from './importHistorySummary';
 export interface ImportHistory {
   id: number;
   importType: ImportHistoryImportType;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel: string;
+  /** @nullable */
   customerScope?: string | null;
   status: ImportHistoryStatus;
   summary: ImportHistorySummary;
+  /** @nullable */
   snapshotId?: number | null;
+  /** @nullable */
   operationId?: string | null;
   /** Epoch milliseconds */
   createdAt: number;

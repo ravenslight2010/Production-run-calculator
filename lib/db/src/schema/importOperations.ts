@@ -1,5 +1,8 @@
 import { pgTable, text, jsonb, timestamp, index } from "drizzle-orm/pg-core";
 
+export const IMPORT_SOURCE_RETENTION_DAYS = 90;
+export const IMPORT_SOURCE_RETENTION_MS = IMPORT_SOURCE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
 /** Durable idempotency and guarded-recovery record for a reviewed import apply. */
 export const importOperationsTable = pgTable(
   "import_operations",
@@ -16,6 +19,7 @@ export const importOperationsTable = pgTable(
     status: text("status").notNull().default("applying"),
     beforeSnapshot: jsonb("before_snapshot").notNull().default({}),
     afterSnapshot: jsonb("after_snapshot").notNull().default({}),
+    distillEvidence: jsonb("distill_evidence").notNull().default({}).$type<Record<string, unknown>>(),
     affectedEntities: jsonb("affected_entities").notNull().default({}),
     result: jsonb("result").notNull().default({}),
     undoneAt: timestamp("undone_at", { withTimezone: true }),

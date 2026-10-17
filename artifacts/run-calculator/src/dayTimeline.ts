@@ -131,7 +131,11 @@ export function calculateDayTimeline(input: {
     let status: TimelineRunProjection["status"];
     if (run.id === input.currentRunId && run.startedAt) {
       const remaining = Math.max(0, Number(input.currentRemainingSec ?? item.durationSec));
-      finishMs = run.pausedAt ? run.pausedAt + remaining * 1000 : input.nowMs + remaining * 1000;
+      // A pause can outlive the original projected finish.  Never place the
+      // resumed finish in the past or downstream runs will be scheduled there.
+      finishMs = run.pausedAt
+        ? Math.max(input.nowMs, run.pausedAt) + remaining * 1000
+        : input.nowMs + remaining * 1000;
       status = run.pausedAt ? "paused" : "current";
       cursor = Math.max(cursor, run.startedAt);
     } else if (run.startedAt) {

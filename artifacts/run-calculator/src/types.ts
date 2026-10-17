@@ -62,26 +62,55 @@ export const formSchema = z.object({
   sauceBarrelsMade: z.coerce.number().min(0).default(0),
   sauceBarrelAnchorNetSec: z.coerce.number().min(0).default(0),
   sauceBarrelCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  sauceStockBarrels: z.coerce.number().min(0).max(2).default(0),
+  sauceStockAnchorNetSec: z.coerce.number().min(0).default(0),
+  sauceStockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  sauceStockInitialized: z.boolean().default(false),
   app1OzPerPizza: z.coerce.number().min(0).default(0),
   app1BatchLbs: z.coerce.number().min(0).default(0),
   app1BatchesMade: z.coerce.number().min(0).default(0),
   app1BatchAnchorNetSec: z.coerce.number().min(0).default(0),
   app1BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app1StockLbs: z.coerce.number().min(0).default(0),
+  app1StockAnchorNetSec: z.coerce.number().min(0).default(0),
+  app1StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app2OzPerPizza: z.coerce.number().min(0).default(0),
   app2BatchLbs: z.coerce.number().min(0).default(0),
   app2BatchesMade: z.coerce.number().min(0).default(0),
   app2BatchAnchorNetSec: z.coerce.number().min(0).default(0),
   app2BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app2StockLbs: z.coerce.number().min(0).default(0),
+  app2StockAnchorNetSec: z.coerce.number().min(0).default(0),
+  app2StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app3OzPerPizza: z.coerce.number().min(0).default(0),
   app3BatchLbs: z.coerce.number().min(0).default(0),
   app3BatchesMade: z.coerce.number().min(0).default(0),
   app3BatchAnchorNetSec: z.coerce.number().min(0).default(0),
   app3BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app3StockLbs: z.coerce.number().min(0).default(0),
+  app3StockAnchorNetSec: z.coerce.number().min(0).default(0),
+  app3StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   app4OzPerPizza: z.coerce.number().min(0).default(0),
   app4BatchLbs: z.coerce.number().min(0).default(0),
   app4BatchesMade: z.coerce.number().min(0).default(0),
   app4BatchAnchorNetSec: z.coerce.number().min(0).default(0),
   app4BatchCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  app4StockLbs: z.coerce.number().min(0).default(0),
+  app4StockAnchorNetSec: z.coerce.number().min(0).default(0),
+  app4StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  applicatorStockInitialized: z.boolean().default(false),
+  pep1StockLbs: z.coerce.number().min(0).default(0),
+  pep1StockAnchorNetSec: z.coerce.number().min(0).default(0),
+  pep1StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  pep1bStockLbs: z.coerce.number().min(0).default(0),
+  pep1bStockAnchorNetSec: z.coerce.number().min(0).default(0),
+  pep1bStockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  pep2StockLbs: z.coerce.number().min(0).default(0),
+  pep2StockAnchorNetSec: z.coerce.number().min(0).default(0),
+  pep2StockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  pep2bStockLbs: z.coerce.number().min(0).default(0),
+  pep2bStockAnchorNetSec: z.coerce.number().min(0).default(0),
+  pep2bStockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
   pep1Sticks: z.coerce.number().min(0).default(0),
   pep1OzPerPizza: z.coerce.number().min(0).default(0),
   pep1BatchLbs: z.coerce.number().min(0).default(0),
@@ -209,26 +238,55 @@ export const DEFAULT_VALUES: FormValues = {
   sauceBarrelsMade: 0,
   sauceBarrelAnchorNetSec: 0,
   sauceBarrelCorrectionGeneration: 0,
+  sauceStockBarrels: 0,
+  sauceStockAnchorNetSec: 0,
+  sauceStockCorrectionGeneration: 0,
+  sauceStockInitialized: false,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
   app1BatchesMade: 0,
   app1BatchAnchorNetSec: 0,
   app1BatchCorrectionGeneration: 0,
+  app1StockLbs: 0,
+  app1StockAnchorNetSec: 0,
+  app1StockCorrectionGeneration: 0,
   app2OzPerPizza: 0,
   app2BatchLbs: 0,
   app2BatchesMade: 0,
   app2BatchAnchorNetSec: 0,
   app2BatchCorrectionGeneration: 0,
+  app2StockLbs: 0,
+  app2StockAnchorNetSec: 0,
+  app2StockCorrectionGeneration: 0,
   app3OzPerPizza: 0,
   app3BatchLbs: 0,
   app3BatchesMade: 0,
   app3BatchAnchorNetSec: 0,
   app3BatchCorrectionGeneration: 0,
+  app3StockLbs: 0,
+  app3StockAnchorNetSec: 0,
+  app3StockCorrectionGeneration: 0,
   app4OzPerPizza: 0,
   app4BatchLbs: 0,
   app4BatchesMade: 0,
   app4BatchAnchorNetSec: 0,
   app4BatchCorrectionGeneration: 0,
+  app4StockLbs: 0,
+  app4StockAnchorNetSec: 0,
+  app4StockCorrectionGeneration: 0,
+  applicatorStockInitialized: false,
+  pep1StockLbs: 0,
+  pep1StockAnchorNetSec: 0,
+  pep1StockCorrectionGeneration: 0,
+  pep1bStockLbs: 0,
+  pep1bStockAnchorNetSec: 0,
+  pep1bStockCorrectionGeneration: 0,
+  pep2StockLbs: 0,
+  pep2StockAnchorNetSec: 0,
+  pep2StockCorrectionGeneration: 0,
+  pep2bStockLbs: 0,
+  pep2bStockAnchorNetSec: 0,
+  pep2bStockCorrectionGeneration: 0,
   pep1Sticks: 0,
   pep1OzPerPizza: 0,
   pep1BatchLbs: 0,
@@ -469,6 +527,7 @@ export type DayState = {
   // Exactly three optional, fixed-duration break slots. This is day schedule
   // data, not master data; legacy days may omit it.
   breaks?: DayBreaks;
+  breaksUpdatedAt?: number;
 };
 
 export type SyncPayload = {
@@ -485,7 +544,7 @@ export type SyncPayload = {
   /** Server-owned wake recovery metadata; transported beside the persisted snapshot. */
   resetEpoch?: number;
   rollover?: boolean;
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase; breaks?: DayBreaks };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase; breaks?: DayBreaks; breaksUpdatedAt?: number };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a
   // stale remote that would clobber a fresher local edit (the "click away and my
@@ -500,7 +559,9 @@ export type SyncPayload = {
     version: 1;
     runs: Record<string, Partial<Record<
        "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper"
-       | "sauce-barrel" | "app1-batch" | "app2-batch" | "app3-batch" | "app4-batch",
+        | "sauce-barrel" | "sauce-stock" | "app1-batch" | "app2-batch" | "app3-batch" | "app4-batch"
+        | "app1-stock" | "app2-stock" | "app3-stock" | "app4-stock"
+        | "pep1-stock" | "pep1b-stock" | "pep2-stock" | "pep2b-stock",
       {
         generation: string;
         sequence: number;
@@ -521,6 +582,14 @@ export type SyncPayload = {
         updatedAt: number;
       }
     >>>;
+  };
+  /** Server-written ownership proof for authoritative net-time auto-track claims. */
+  autoTrackServerState?: {
+    netOwnership?: Record<string, Record<string, {
+      generation?: string;
+      sequence?: number;
+      updatedAt?: number;
+    }>>;
   };
   doughTimerControls?: Record<string, {
     generation: string;

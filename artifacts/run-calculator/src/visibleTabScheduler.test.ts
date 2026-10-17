@@ -45,6 +45,29 @@ describe("VisibleTabScheduler", () => {
     scheduler.stop();
   });
 
+  it("does not suppress a real wake when the wall clock moves backward", async () => {
+    const wake = vi.fn();
+    const scheduler = new VisibleTabScheduler();
+    scheduler.register({ id: "wake", runOnForeground: true, order: 0, run: wake });
+    scheduler.start();
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(wake).toHaveBeenCalledTimes(1);
+
+    setHidden(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(501);
+    vi.setSystemTime(new Date("2026-09-08T11:00:00Z"));
+    setHidden(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(wake).toHaveBeenCalledTimes(2);
+    scheduler.stop();
+  });
+
   it("runs one bounded foreground pass after a long sleep, wake first", async () => {
     const calls: string[] = [];
     const scheduler = new VisibleTabScheduler();

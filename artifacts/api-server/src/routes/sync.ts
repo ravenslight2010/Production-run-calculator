@@ -39,7 +39,6 @@ import {
   inventorySettingsTable,
   sandboxMetaTable,
   productionRunsTable,
-  qualityChecksTable,
   proactiveAlertSettingsTable,
   auditLogsTable,
   syncConflictLogsTable,
@@ -54,23 +53,44 @@ import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
+import { executeAutoTrackClaim } from "../lib/autoTrackClaimService";
 import {
   buildNetSecondServerClaims,
   buildWallClockServerClaims,
 } from "../lib/autoTrackServerTicks";
-import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
-import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
+import { parseOperationalIntent } from "../lib/operationalIntents";
+import {
+  reconcileOperationalIntentInTransaction,
+  type OperationalIntentTransactionResult,
+} from "../lib/operationalIntentService";
+import { readOperationalIntentCursorPage } from "../lib/operationalIntentCursorService";
+import {
+  broadcastInventoryChange,
+  consumeRunInTransaction,
+  consumeSauceBarrelInTransaction,
+  SauceInventoryConfigurationError,
+  reconcileRunConsumptionInTransaction,
+} from "./inventory";
 import { logger } from "../lib/logger";
 import {
   recordSseFrame,
+  recordSsePeerFrameSkippedExactSnapshot,
   recordLegacySyncWrite,
   recordSyncPut,
   recordSyncTransaction,
   legacySyncReadinessSnapshot,
+  syncPeerFrameTelemetrySnapshot,
   syncRunCountBucket,
   type SyncPutMode,
 } from "../lib/capacityTelemetry";
-import { runBackgroundOperation } from "../lib/backgroundOperations";
+import {
+  createBackgroundOperationBackoff,
+  persistAutoTrackDeferredDiagnostic,
+  recordAutoTrackDeferredRetries,
+  recordBackgroundOperationSuccess,
+  runBackgroundOperation,
+  type BackgroundOperationBackoff,
+} from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
   buildSyncWriteEnvelope,
@@ -83,6 +103,7 @@ import {
 } from "../lib/syncContract";
 import {
   computeAutoTrackSchedule,
+  computeAutoTrackElapsedMs,
   buildOperationalProjection,
   computeServerCalc,
   applyTemporaryOverrides,
@@ -90,6 +111,10 @@ import {
   type AutoTrackScheduleInput,
   type OperationalProjection,
   type ServerCalcResult,
+  APPLICATOR_STOCK_REGISTERS,
+  applicatorStockFields,
+  computeApplicatorStockCapacityLbs,
+  capSauceStock,
 } from "@workspace/live-calc";
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
@@ -108,6 +133,14 @@ import {
   isSyncRecord,
   type ManualSection,
 } from "@workspace/sync-contract";
+import {
+  appendSyncOutboxEvent,
+  isLocalSyncOutboxEvent,
+  recordSyncOutboxEvent,
+  registerSyncOutboxScope,
+  startSyncOutboxListener,
+  type StoredSyncOutboxEvent,
+} from "../lib/syncOutbox";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
@@ -121,6 +154,7 @@ type SseClient = {
   watchDate: string;
   resetEpoch: number;
   lastData: unknown;
+  lastSnapshotId?: string;
   lastCanonicalRevision: number;
   lastCalcEmitMs: number;
 };
@@ -141,8 +175,9 @@ function broadcastManualSectionEvent(
   ownerId: string,
   scope: Scope,
   date: string,
+  serverTime = Date.now(),
 ): void {
-  const frame = { type: "manual-section-lock", event, runId, section, ownerId, scope, date, serverTime: Date.now() };
+  const frame = { type: "manual-section-lock", event, runId, section, ownerId, scope, date, serverTime };
   for (const client of clients) {
     if (client.scope !== scope || client.watchDate !== date || client.clientId === ownerId) continue;
     try { client.res.write(`data: ${JSON.stringify(frame)}\n\n`); } catch {}
@@ -187,6 +222,7 @@ function requestedSnapshot(req: Request): string | undefined {
 type ProtectedUpsertResult = {
   data: unknown;
   wrote: boolean;
+  inventoryChanged?: boolean;
   partialFallback: boolean;
   retries: number;
   canonicalRevision: number;
@@ -428,16 +464,16 @@ const serverCalcCache = new Map<string, ServerCalcResult>();
 const CACHE_MAX_SIZE = 128;
 
 /**
- * Day-level inputs shared by every run's summaryStats and runLines derivation.
+ * Shared payload inputs used by every run's summaryStats and runLines derivation.
  * Keep this as the single dependency contract for both calculation and compact
  * SSE projection so adding a shared input cannot leave unchanged runs stale.
  */
-export const DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS = ["pepTypes"] as const;
+export const DERIVED_RUN_MAP_SHARED_INPUT_FIELDS = ["pepTypes"] as const;
 
-function sharedDerivedRunInputs(dayState: Record<string, unknown> | undefined) {
+function sharedDerivedRunInputs(payload: Record<string, unknown> | undefined) {
   const sharedInputs = Object.fromEntries(
-    DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.map((field) => [field, dayState?.[field]]),
-  ) as Record<(typeof DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS)[number], unknown>;
+    DERIVED_RUN_MAP_SHARED_INPUT_FIELDS.map((field) => [field, payload?.[field]]),
+  ) as Record<(typeof DERIVED_RUN_MAP_SHARED_INPUT_FIELDS)[number], unknown>;
   return {
     pepTypes: Array.isArray(sharedInputs.pepTypes)
       ? sharedInputs.pepTypes.filter((value: unknown): value is string => typeof value === "string")
@@ -501,8 +537,7 @@ function computeServerLiveState(
     const summaryStatsMap: Record<string, SummaryStats> = {};
     const runLinesMap: Record<string, Array<{ itemKey: string; qty: number }>> = {};
     if (payload?.dayState?.runs && payload?.runValues) {
-      const ds = payload.dayState as Record<string, unknown> | undefined;
-      const { pepTypes } = sharedDerivedRunInputs(ds);
+      const { pepTypes } = sharedDerivedRunInputs(payload as unknown as Record<string, unknown>);
       for (const run of payload.dayState.runs) {
         const rid = run.id;
         if (typeof rid !== "string") continue;
@@ -545,24 +580,45 @@ function broadcast(
   senderId: string,
   scope: Scope,
   date: string,
-  meta: { canonicalRevision?: number; serverTime?: number } = {},
+  meta: {
+    canonicalRevision?: number;
+    serverTime?: number;
+    operationalProjection?: ReturnType<typeof computeServerLiveState>["operationalProjection"];
+    canonicalReconcile?: boolean;
+    outboxCursor?: number;
+    force?: boolean;
+    onlyClient?: SseClient;
+  } = {},
 ): void {
   data = completeSyncData(data);
-  const liveState = computeServerLiveState(
+  const snapshotId = data == null ? undefined : syncSnapshotId(data);
+  const computedLiveState = computeServerLiveState(
     data,
     meta.serverTime ?? Date.now(),
     meta.canonicalRevision ?? 0,
   );
+  const liveState = Object.prototype.hasOwnProperty.call(meta, "operationalProjection")
+    ? { ...computedLiveState, operationalProjection: meta.operationalProjection ?? null }
+    : computedLiveState;
   for (const client of clients) {
+    if (meta.onlyClient && client !== meta.onlyClient) continue;
     if (client.scope === scope && client.watchDate === date) {
-      if (client.clientId === senderId) {
+      if (senderId && client.clientId === senderId) {
         // The sender adopts the canonical HTTP response rather than its own
         // SSE echo, but its connection baseline must advance in lockstep so
         // the next peer update is generated from the snapshot it now holds.
         if (data != null) {
           client.lastData = data;
+          client.lastSnapshotId = snapshotId;
           client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
         }
+        continue;
+      }
+      // An accepted write can leave the canonical document unchanged. Do not
+      // send a redundant frame to a peer whose exact baseline is already that
+      // document; stale peers still need the normal delta/complete recovery.
+      if (!meta.force && snapshotId && client.lastSnapshotId === snapshotId) {
+        recordSsePeerFrameSkippedExactSnapshot();
         continue;
       }
       const complete = {
@@ -571,8 +627,15 @@ function broadcast(
         scope,
         date,
         completeness: "complete" as const,
-        snapshotId: data == null ? undefined : syncSnapshotId(data),
+        snapshotId,
         canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+        ...(meta.canonicalReconcile ? {
+          canonicalReconcile: true,
+          masterDataChanged: true,
+          configurationInvalidated: true,
+          family: "master-data" as const,
+          ...(meta.outboxCursor === undefined ? {} : { outboxCursor: meta.outboxCursor }),
+        } : {}),
         ...liveState,
       };
       const delta = data != null ? buildSyncPeerDelta(client.lastData, data) : null;
@@ -589,7 +652,7 @@ function broadcast(
       const partialLiveState = delta
         ? compactPeerLiveState(liveState, deltaData)
         : liveState;
-      const frame = delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
+      const frame = !meta.canonicalReconcile && delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
         ? {
             data: deltaData,
             senderId,
@@ -600,6 +663,7 @@ function broadcast(
             snapshotId: deltaResultingSnapshotId,
             baseSnapshotId: deltaBaseSnapshotId,
             canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+            ...(meta.canonicalReconcile ? { canonicalReconcile: true } : {}),
             ...partialLiveState,
           }
         : complete;
@@ -613,12 +677,14 @@ function broadcast(
           frameBytes: Buffer.byteLength(frameText),
           durationMs: performance.now() - frameStartedAt,
           outcome: "sent",
+          peerUpdate: true,
         });
         // Advance only after the write succeeds. A failed stream must not
         // poison its baseline and cause the next recipient delta to be
         // generated against data the peer never received.
         if (data != null) {
           client.lastData = data;
+          client.lastSnapshotId = snapshotId;
           client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
         }
       } catch {
@@ -640,11 +706,7 @@ function compactPeerLiveState(
   // These maps are derived from runValues. Sending every run on each peer
   // update erased most of the savings from the canonical sparse delta.
   // Any shared dependency change needs complete derived maps.
-  const changedDayState = isSyncRecord(deltaData.dayState) ? deltaData.dayState : null;
-  if (
-    changedDayState
-    && DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.some((field) => Object.hasOwn(changedDayState, field))
-  ) {
+  if (DERIVED_RUN_MAP_SHARED_INPUT_FIELDS.some((field) => Object.hasOwn(deltaData, field))) {
     return liveState;
   }
   const changedValues = deltaData.runValues;
@@ -710,14 +772,25 @@ export function shouldReceiveConfigurationInvalidation(
   senderId: string,
   scope: Scope,
 ): boolean {
-  return client.scope === scope && client.clientId !== senderId;
+  return client.scope === scope && (!senderId || client.clientId !== senderId);
 }
 
 export function broadcastMasterDataChanged(
   senderId: string,
   scope: Scope = currentScope(),
   family: ConfigurationInvalidationFamily = "master-data",
+  outboxAlreadyPersisted = false,
 ): void {
+  if (!outboxAlreadyPersisted) {
+    void recordSyncOutboxEvent({
+      kind: "configuration",
+      scope,
+      senderId,
+      family,
+    }).catch(() => {
+      logger.error({ event: "sync_outbox_write", kind: "configuration" }, "Configuration invalidation could not be retained");
+    });
+  }
   const msg = `data: ${JSON.stringify(configurationInvalidationPayload(senderId, family))}\n\n`;
   for (const client of clients) {
     if (shouldReceiveConfigurationInvalidation(client, senderId, scope)) {
@@ -733,20 +806,109 @@ export function broadcastMasterDataChanged(
 function broadcastReset(scope: Scope, resetEpoch: number): void {
   const msg = `data: ${JSON.stringify({ reset: true, resetEpoch })}\n\n`;
   for (const client of clients) {
-    if (client.scope === scope) {
-      try { client.res.write(msg); } catch {}
-    }
+    if (client.scope !== scope || resetEpoch <= client.resetEpoch) continue;
+    client.resetEpoch = resetEpoch;
+    try { client.res.write(msg); } catch {}
   }
 }
 
 function broadcastRollover(scope: Scope, resetEpoch: number): void {
   for (const client of clients) {
-    if (client.scope !== scope) continue;
+    if (client.scope !== scope || resetEpoch <= client.resetEpoch) continue;
     try {
       client.res.write(`data: ${JSON.stringify({ rollover: true, resetEpoch })}\n\n`);
       client.resetEpoch = resetEpoch;
     } catch {
       clients.delete(client);
+    }
+  }
+}
+
+async function reconcileOutboxGap(scope: Scope, latestCursor: number): Promise<void> {
+  const resetState = await getResetState(scope);
+  const scopedClients = [...clients].filter((client) => client.scope === scope);
+  for (const client of scopedClients) {
+    if (resetState.epoch > client.resetEpoch) {
+      client.resetEpoch = resetState.epoch;
+      try {
+        client.res.write(`data: ${JSON.stringify({
+          [resetState.rollover ? "rollover" : "reset"]: true,
+          resetEpoch: resetState.epoch,
+        })}\n\n`);
+      } catch {}
+    }
+  }
+  for (const date of new Set(scopedClients.map((client) => client.watchDate))) {
+    const [row] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, scope),
+      eq(dailySyncTable.date, date),
+    ));
+    broadcast(
+      completeSyncData(row?.data ?? emptySyncData(date)),
+      "",
+      scope,
+      date,
+      {
+        canonicalRevision: row?.canonicalRevision ?? 0,
+        force: true,
+        canonicalReconcile: true,
+        outboxCursor: latestCursor,
+      },
+    );
+  }
+}
+
+async function dispatchSyncOutboxEvent(event: StoredSyncOutboxEvent): Promise<void> {
+  if (isLocalSyncOutboxEvent(event)) return;
+  switch (event.kind) {
+    case "day-state": {
+      const [row] = await db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, event.scope),
+        eq(dailySyncTable.date, event.date),
+      ));
+      if (row) {
+        broadcast(row.data, event.senderId, event.scope, event.date, {
+          canonicalRevision: row.canonicalRevision,
+        });
+      }
+      return;
+    }
+    case "reset":
+      broadcastReset(event.scope, event.resetEpoch);
+      return;
+    case "rollover": {
+      broadcastRollover(event.scope, event.resetEpoch);
+      const [row] = await db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, event.scope),
+        eq(dailySyncTable.date, event.date),
+      ));
+      if (row) {
+        broadcast(row.data, "", event.scope, event.date, {
+          canonicalRevision: row.canonicalRevision,
+          force: true,
+        });
+      }
+      return;
+    }
+    case "manual-section":
+      if (event.event === "acquired" && Date.now() - event.createdAt.getTime() >= 35_000) return;
+      broadcastManualSectionEvent(
+        event.event,
+        event.runId,
+        event.section as ManualSection,
+        event.ownerId,
+        event.scope,
+        event.date,
+        event.createdAt.getTime(),
+      );
+      return;
+    case "configuration": {
+      const msg = `data: ${JSON.stringify(configurationInvalidationPayload(event.senderId, event.family))}\n\n`;
+      for (const client of clients) {
+        if (shouldReceiveConfigurationInvalidation(client, event.senderId, event.scope)) {
+          try { client.res.write(msg); } catch {}
+        }
+      }
     }
   }
 }
@@ -920,6 +1082,12 @@ export async function runDailyRollover(
       .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date(nowMs) })
       .where(eq(dataResetTable.scope, scope))
       .returning();
+    await appendSyncOutboxEvent(tx, {
+      kind: "rollover",
+      scope,
+      date: toDate,
+      resetEpoch: nextReset?.epoch ?? 0,
+    });
     return {
       scope,
       fromDate: prior?.date ?? null,
@@ -1232,6 +1400,7 @@ async function upsertProtected(
   date: string,
   scope: Scope,
   payload: unknown,
+  senderId: string,
   clientTodayDate: string,
   expectedEpoch: number,
   clientIp?: string,
@@ -1286,6 +1455,7 @@ async function upsertProtected(
             legacyRejected: true,
           };
         }
+        let currentBaseSnapshotValidated = false;
         // Complete protocol writes are also causally tied to the exact snapshot
         // the client adopted. A future-skewed per-run timestamp must not let an
         // offline client overwrite a canonical edit it never observed.
@@ -1307,6 +1477,15 @@ async function upsertProtected(
             canonicalRevision: existing?.canonicalRevision ?? 0,
             serverTime,
           };
+        }
+        if (
+          payload
+          && typeof payload === "object"
+          && !Array.isArray(payload)
+          && (payload as Record<string, unknown>).completeness === "complete"
+          && (payload as Record<string, unknown>).baseSnapshotId === completeBaseSnapshotId
+        ) {
+          currentBaseSnapshotValidated = true;
         }
         // A partial payload is a delta over the exact locked snapshot. Inherit
         // omitted cold sections (such as history) from that snapshot before the
@@ -1334,6 +1513,7 @@ async function upsertProtected(
               serverTime,
             };
           }
+          currentBaseSnapshotValidated = true;
         }
         // Only a FUTURE scheduled row may use resetAt to replace its run list.
         // Today's row must always be additive/tombstone-driven: a new device can
@@ -1342,11 +1522,41 @@ async function upsertProtected(
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
+          // The exact locked snapshot is the causal ordering signal for
+          // versioned writes. Changed run values from that base are accepted
+          // regardless of client clock order and receive a server-time stamp.
+          acceptCurrentBaseRunValueEdits: currentBaseSnapshotValidated,
+          nowMs: serverTime,
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
         const changed = currentSnapshotId !== syncSnapshotId(m);
         const canonicalRevision = (existing?.canonicalRevision ?? 0) + (changed ? 1 : 0);
+        let inventoryChanged = false;
+        if (changed && canonicalExisting) {
+          const previousRuns = (canonicalExisting as any).dayState?.runs;
+          const nextRuns = m.dayState?.runs;
+          if (Array.isArray(previousRuns) && Array.isArray(nextRuns)) {
+            const nextById = new Map(
+              nextRuns.filter((run: any) => typeof run?.id === "string")
+                .map((run: any) => [run.id, run]),
+            );
+            for (const previousRun of previousRuns) {
+              if (
+                typeof previousRun?.id !== "string" ||
+                !previousRun.endedAt
+              ) continue;
+              const nextRun = nextById.get(previousRun.id);
+              if (!nextRun?.endedAt) continue;
+              inventoryChanged = await reconcileRunConsumptionInTransaction(
+                tx,
+                previousRun.id,
+                canonicalExisting,
+                m,
+              ) || inventoryChanged;
+            }
+          }
+        }
         if (existing && changed) {
           await tx
             .update(dailySyncTable)
@@ -1357,6 +1567,15 @@ async function upsertProtected(
             .insert(dailySyncTable)
             .values({ date, scope, data: m as any, canonicalRevision, updatedAt: new Date() });
         }
+        if (changed || !existing) {
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state",
+            scope,
+            date,
+            senderId: typeof senderId === "string" ? senderId.slice(0, 160) : "",
+            canonicalRevision,
+          });
+        }
         return {
           data: m,
           // An accepted merge may intentionally preserve the canonical
@@ -1364,6 +1583,7 @@ async function upsertProtected(
           // accepted signal true so conflict evidence and peer convergence
           // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
+          inventoryChanged,
           partialFallback: false,
           retries: attempt,
           canonicalRevision,
@@ -1409,14 +1629,16 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
+  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (unchangedResponse(res, data, requestedSnapshot(req), {
     resetEpoch: resetState.epoch,
     rollover: resetState.rollover,
     canonicalRevision,
+    serverTime,
+    operationalProjection: liveState.operationalProjection,
   })) return;
   res.setHeader("X-Sync-Response", "complete");
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
-  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (!liveState.operationalProjection) {
     // Preserve the empty-baseline response shape for clients that have no
     // selected run yet. The server-time headers still provide the anchor.
@@ -1514,6 +1736,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     today,
     scope,
     sanitized,
+    senderId,
     today,
     expectedEpoch,
     req.ip,
@@ -1541,6 +1764,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   if (result.wrote) broadcast(merged, senderId, scope, today, result);
+  if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? "unchanged"
@@ -1551,6 +1775,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(today))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   const telemetryMode: SyncPutMode = result.partialFallback
@@ -1628,6 +1855,18 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     res.status(400).json({ error: "Complete section baseline is required" }); return;
   }
   const ownerId = String(deviceId ?? req.userId ?? "unknown");
+  await recordSyncOutboxEvent({
+    kind: "manual-section",
+    scope,
+    date,
+    senderId: ownerId.slice(0, 160),
+    event: "acquired",
+    runId: runId as string,
+    section: section as ManualSection,
+    ownerId: ownerId.slice(0, 160),
+  }).catch(() => {
+    logger.error({ event: "sync_outbox_write", kind: "manual-section" }, "Manual-section notice could not be retained");
+  });
   broadcastManualSectionEvent("acquired", runId as string, section as ManualSection, ownerId, scope, date);
   let result: { status: number; data: Record<string, any>; revision: number; duplicate: boolean; serverTime: number };
   try {
@@ -1653,6 +1892,87 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
     }
     const currentValues = current.runValues?.[runId] ?? {};
+    const stockRegisters = section === "app1" || section === "app2" || section === "app3" || section === "app4"
+      ? [section as "app1" | "app2" | "app3" | "app4"]
+      : section === "pep1" ? ["pep1", "pep1b"] as const
+      : section === "pep2" ? ["pep2", "pep2b"] as const
+      : [];
+    const stockUpdates: Array<{ register: (typeof APPLICATOR_STOCK_REGISTERS)[number]; stock: number; anchor: number; generation: number }> = [];
+    for (const register of stockRegisters) {
+      const fields = applicatorStockFields(register);
+      const hasStockField = [fields.stock, fields.anchor, fields.correctionGeneration]
+        .some((field) => Object.prototype.hasOwnProperty.call(values, field));
+      if (!hasStockField) continue;
+      if (![fields.stock, fields.anchor, fields.correctionGeneration]
+        .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+      const onHand = Number((values as Record<string, unknown>)[fields.stock]);
+      const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
+      const correctionGeneration = Number((values as Record<string, unknown>)[fields.correctionGeneration]);
+      const previousStock = Number(currentValues[fields.stock]) || 0;
+      const previousAnchor = Number(currentValues[fields.anchor]) || 0;
+      const previousGeneration = Number(currentValues[fields.correctionGeneration]) || 0;
+      const capacity = computeApplicatorStockCapacityLbs(currentValues, register);
+      const maxAnchor = computeAutoTrackElapsedMs({
+        startedAt: Number(run.startedAt) || 0,
+        pausedAt: Number(run.pausedAt) || undefined,
+        nowMs: serverTime,
+        stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : [],
+      }) / 1000;
+      if (
+        !run.startedAt
+        || run.endedAt
+        || capacity <= 0
+        || !Number.isFinite(onHand)
+        || onHand < 0
+        || onHand > capacity
+        || !Number.isFinite(anchor)
+        || anchor < previousAnchor
+        || anchor > maxAnchor + 2
+        || !Number.isSafeInteger(correctionGeneration)
+        || correctionGeneration !== previousGeneration + 1
+      ) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+      stockUpdates.push({ register, stock: onHand, anchor, generation: correctionGeneration });
+    }
+    const sauceStockFields = [
+      "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration",
+    ] as const;
+    const hasSauceStockUpdate = section === "sauce-stock" && sauceStockFields.some((field) =>
+      Object.prototype.hasOwnProperty.call(values, field));
+    if (hasSauceStockUpdate) {
+      if (!sauceStockFields.every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+      const onHand = Number((values as Record<string, unknown>).sauceStockBarrels);
+      const anchor = Number((values as Record<string, unknown>).sauceStockAnchorNetSec);
+      const correctionGeneration = Number((values as Record<string, unknown>).sauceStockCorrectionGeneration);
+      const previousAnchor = Number(currentValues.sauceStockAnchorNetSec) || 0;
+      const previousGeneration = Number(currentValues.sauceStockCorrectionGeneration) || 0;
+      const maxAnchor = computeAutoTrackElapsedMs({
+        startedAt: Number(run.startedAt) || 0,
+        pausedAt: Number(run.pausedAt) || undefined,
+        nowMs: serverTime,
+        stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : [],
+      }) / 1000;
+      if (
+        !run.startedAt
+        || run.endedAt
+        || !Number.isFinite(onHand)
+        || onHand < 0
+        || onHand > 2
+        || capSauceStock(onHand) !== onHand
+        || !Number.isFinite(anchor)
+        || anchor < previousAnchor
+        || anchor > maxAnchor + 2
+        || !Number.isSafeInteger(correctionGeneration)
+        || correctionGeneration !== previousGeneration + 1
+      ) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+    }
     for (const key of allowed) {
       const expected = (baseValues as Record<string, unknown>)[key];
       if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
@@ -1660,8 +1980,38 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       }
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
-    next.runValues = { ...(next.runValues ?? {}), [runId]: { ...(next.runValues?.[runId] ?? {}), ...values } };
-    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: Date.now() };
+    const updatedRunValues = { ...(next.runValues?.[runId] ?? {}), ...values };
+    if (stockUpdates.length) updatedRunValues.applicatorStockInitialized = true;
+    if (hasSauceStockUpdate) updatedRunValues.sauceStockInitialized = true;
+    next.runValues = { ...(next.runValues ?? {}), [runId]: updatedRunValues };
+    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
+    if (section === "packaging") {
+      const progressMap = current.packagingProgress
+        && typeof current.packagingProgress === "object"
+        && !Array.isArray(current.packagingProgress)
+        ? current.packagingProgress as Record<string, any>
+        : {};
+      const previousProgress = progressMap[runId];
+      const previousGeneration =
+        Number.isSafeInteger(previousProgress?.correctionGeneration)
+        && previousProgress.correctionGeneration >= 0
+          ? previousProgress.correctionGeneration as number
+          : 0;
+      const correctionGeneration = Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
+      const canonicalValues = next.runValues[runId] ?? {};
+      const canonicalCounter = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+      next.packagingProgress = {
+        ...progressMap,
+        [runId]: {
+          skidsCompleted: canonicalCounter(canonicalValues.skidsCompleted),
+          casesOnCurrentSkid: canonicalCounter(canonicalValues.casesOnCurrentSkid),
+          correctionGeneration,
+          updatedAt: serverTime,
+          manualOverrideUntil: serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
+        },
+      };
+    }
     const revision = currentRevision + 1;
     if (existing) {
       await tx.update(dailySyncTable).set({ data: next, canonicalRevision: revision, updatedAt: new Date() })
@@ -1675,12 +2025,31 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
       canonicalRevision: revision, actionData: { runId, section, values, baseValues }, serverReceivedAt: new Date(),
     });
+    await appendSyncOutboxEvent(tx, {
+      kind: "day-state",
+      scope,
+      date,
+      senderId: ownerId.slice(0, 160),
+      canonicalRevision: revision,
+    });
     return { status: 200, data: next, revision, duplicate: false, serverTime };
     });
     if (result.status === 200 && !result.duplicate) {
       broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
     }
   } finally {
+    await recordSyncOutboxEvent({
+      kind: "manual-section",
+      scope,
+      date,
+      senderId: ownerId.slice(0, 160),
+      event: "released",
+      runId: runId as string,
+      section: section as ManualSection,
+      ownerId: ownerId.slice(0, 160),
+    }).catch(() => {
+      logger.error({ event: "sync_outbox_write", kind: "manual-section" }, "Manual-section release could not be retained");
+    });
     broadcastManualSectionEvent("released", runId as string, section as ManualSection, ownerId, scope, date);
   }
   if (requestAborted) return;
@@ -1723,183 +2092,16 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
   }
   const scope = currentScope();
   try {
-    let result: (ReturnType<typeof applyOperationalIntent> & {
-      cursor?: number;
-      canonicalRevision: number;
-      serverTime: number;
-    }) | undefined;
+    let result: OperationalIntentTransactionResult | undefined;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        result = await db.transaction(async (tx) => {
-          const serverTime = Date.now();
-          // Fence reset and intent under one transaction. A reset that wins
-          // this lock makes the command review-required; it cannot resurrect
-          // state between a preflight epoch read and the document write.
-          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
-            .onConflictDoNothing();
-          const [reset] = await tx.select().from(dataResetTable)
-            .where(eq(dataResetTable.scope, scope)).for("update");
-          const [existing] = await tx.select().from(dailySyncTable)
-            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope))).for("update");
-          const [seen] = await tx.select().from(operationalIntentLedgerTable)
-            .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, intent.date), eq(operationalIntentLedgerTable.intentId, intent.id)))
-            .for("update");
-          // A duplicate must return the snapshot produced by its original
-          // transaction, rather than whichever later command currently owns
-          // the daily document. This is the idempotency boundary clients use
-          // after a timeout or a process restart.
-          if (seen) return {
-            data: seen.snapshot ?? existing?.data ?? emptySyncData(intent.date),
-            outcome: seen.outcome as any,
-            duplicate: true,
-            cursor: seen.sequence,
-            canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
-            serverTime: seen.serverReceivedAt?.getTime() ?? serverTime,
-          };
-          if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
-            const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
-            const snapshot = existing?.data ?? emptySyncData(intent.date);
-            if (existing) {
-              await tx.update(dailySyncTable)
-                .set({ canonicalRevision, updatedAt: new Date(serverTime) })
-                .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
-            } else {
-              await tx.insert(dailySyncTable).values({
-                scope,
-                date: intent.date,
-                data: snapshot as any,
-                canonicalRevision,
-                updatedAt: new Date(serverTime),
-              });
-            }
-            const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
-              scope, date: intent.date, intentId: intent.id, outcome: "review-required",
-              snapshot: snapshot as any,
-              commandType: "operational-intent",
-              actorId: command.actorId,
-              deviceId: command.deviceId,
-              baseRevision: command.baseRevision,
-              canonicalRevision,
-              actionData: command.actionData,
-              serverReceivedAt: new Date(serverTime),
-            }).returning({ sequence: operationalIntentLedgerTable.sequence });
-            return {
-              data: snapshot,
-              outcome: "review-required" as const,
-              duplicate: false,
-              cursor: receipt!.sequence,
-              canonicalRevision,
-              serverTime,
-            };
-          }
-          const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
-          applied.data.dayState = { ...applied.data.dayState, date: intent.date };
-          if (
-            applied.outcome === "accepted" &&
-            intent.action === "lifecycle" &&
-            intent.lifecycle === "end"
-          ) {
-            const [legacyCompletion] = await tx.select().from(completedRunHistoryTable).where(and(
-              eq(completedRunHistoryTable.scope, scope),
-              eq(completedRunHistoryTable.date, intent.date),
-              eq(completedRunHistoryTable.runId, intent.runId),
-            )).for("update");
-            const lockedRun = (existing?.data as any)?.dayState?.runs?.find(
-              (run: any) => run?.id === intent.runId,
-            );
-            const legacySnapshotRun = (legacyCompletion?.snapshot as any)?.dayState?.runs?.filter(
-              (run: any) => run?.id === intent.runId,
-            );
-            const legacyAgeMs = legacyCompletion
-              ? now - legacyCompletion.createdAt.getTime()
-              : Number.POSITIVE_INFINITY;
-            const compatibleLegacyCompletion = !!legacyCompletion
-              && legacyCompletion.operationId === `completed:${intent.date}:${intent.runId}`
-              && legacyAgeMs >= 0
-              && legacyAgeMs <= 10 * 60_000
-              && Array.isArray(legacySnapshotRun)
-              && legacySnapshotRun.length === 1
-              && Number(legacySnapshotRun[0].startedAt) === Number(lockedRun?.startedAt)
-              && Number(legacySnapshotRun[0].endedAt) === legacyCompletion.completedAt.getTime()
-              && legacyCompletion.completedAt.getTime() >= Number(lockedRun?.startedAt)
-              && Math.abs(legacyCompletion.completedAt.getTime() - intent.effectiveAt) <= 10 * 60_000;
-            // During the bounded migration window, an older client may have
-            // uploaded immutable history just before its canonical End intent.
-            // Only that exact, recently server-observed, fact-compatible record
-            // may bridge the migration; arbitrary history never controls a run.
-            if (compatibleLegacyCompletion) {
-              applied.data.dayState = {
-                ...applied.data.dayState,
-                runs: (applied.data.dayState.runs as Array<Record<string, unknown>>).map((run) =>
-                  run.id === intent.runId
-                    ? { ...run, endedAt: legacyCompletion!.completedAt.getTime() }
-                    : run
-                ),
-              };
-            } else if (legacyCompletion) {
-              applied.data = (existing?.data ?? emptySyncData(intent.date)) as Record<string, any>;
-              applied.outcome = "review-required";
-            }
-            if (applied.outcome === "accepted") {
-              const snapshot = JSON.parse(JSON.stringify(applied.data, (_key, value) => value)) as Record<string, unknown>;
-              const stable = (value: unknown): unknown => {
-                if (Array.isArray(value)) return value.map(stable);
-                if (value && typeof value === "object") {
-                  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([key, child]) => [key, stable(child)]));
-                }
-                return value;
-              };
-              const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
-              const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
-              const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
-                .find((run) => run.id === intent.runId);
-              const completedAt = Number(canonicalRun?.endedAt);
-              if (!compatibleLegacyCompletion) {
-                await tx.insert(completedRunHistoryTable).values({
-                  id: randomUUID(),
-                  scope,
-                  operationId: intent.id,
-                  runId: intent.runId,
-                  date: intent.date,
-                  completedAt: new Date(completedAt),
-                  snapshot: canonicalSnapshot,
-                  snapshotHash,
-                  actorId: req.userId ?? "unknown",
-                });
-              }
-              await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
-            }
-          }
-          const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
-          if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
-            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
-          else await tx.insert(dailySyncTable).values({
-            date: intent.date,
-            scope,
-            data: applied.data as any,
-            canonicalRevision,
-            updatedAt: new Date(),
-          });
-          if (existing) {
-            await tx.update(dailySyncTable)
-              .set({ canonicalRevision, updatedAt: new Date() })
-              .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
-          }
-          const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
-            scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
-            snapshot: applied.data as any,
-            commandType: "operational-intent",
-            actorId: command.actorId,
-            deviceId: command.deviceId,
-            baseRevision: command.baseRevision,
-            canonicalRevision,
-            actionData: command.actionData,
-            serverReceivedAt: new Date(serverTime),
-          }).returning({ sequence: operationalIntentLedgerTable.sequence });
-          return { ...applied, cursor: receipt!.sequence, canonicalRevision, serverTime };
-        });
+        result = await db.transaction((tx) => reconcileOperationalIntentInTransaction(tx, {
+          intent,
+          command,
+          scope,
+          now,
+          consumeRun: consumeRunInTransaction,
+        }));
         break;
       } catch (error) {
         if (isUniqueViolation(error) && attempt < 3) continue;
@@ -1945,250 +2147,7 @@ router.get("/sync/operational-intents/cursor", async (req: Request, res: Respons
   }
   const scope = currentScope();
   try {
-    const rows = await db.select({
-      cursor: operationalIntentLedgerTable.sequence,
-      date: operationalIntentLedgerTable.date,
-      outcome: operationalIntentLedgerTable.outcome,
-      snapshot: operationalIntentLedgerTable.snapshot,
-      commandType: operationalIntentLedgerTable.commandType,
-      actorId: operationalIntentLedgerTable.actorId,
-      deviceId: operationalIntentLedgerTable.deviceId,
-      baseRevision: operationalIntentLedgerTable.baseRevision,
-      canonicalRevision: operationalIntentLedgerTable.canonicalRevision,
-      serverReceivedAt: operationalIntentLedgerTable.serverReceivedAt,
-      createdAt: operationalIntentLedgerTable.createdAt,
-    }).from(operationalIntentLedgerTable)
-      .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
-      .orderBy(asc(operationalIntentLedgerTable.sequence))
-      .limit(100);
-    // Cursor recovery must be monotonic across pages. Never mix a compacted
-    // receipt's current materialization with a later retained historical
-    // snapshot: every adoptable receipt in this page points at the current
-    // scoped materialization for its date.
-    const dates = [...new Set(rows.map((row) => row.date))];
-    const materialized = dates.length
-      ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data }).from(dailySyncTable)
-        .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
-      : [];
-    const byDate = new Map(materialized.map((row) => [row.date, row.data]));
-    res.json({
-      cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
-      hasMore: rows.length === 100,
-      mutations: rows.map(({ snapshot: _historical, ...row }) => {
-        const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
-        const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
-        return {
-          ...row,
-          snapshot,
-          materializedSnapshotId: snapshot ? syncSnapshotId(snapshot) : null,
-        };
-      }),
-    });
-  } catch (error) {
-    req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
-    res.status(500).json({ error: "Mutation cursor could not sync" });
-  }
-});
-
-// Offline operational commands are not snapshots. Their stable ID is retained
-// with a bounded outcome trail so retries after a timeout/restart return the
-// original answer instead of applying a second pause or correction.
-router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
-  const now = Date.now();
-  const intent = parseOperationalIntent(req.body?.intent, now);
-  if (!intent || intent.date !== clientToday(req)) {
-    res.status(400).json({ error: "Invalid operational intent or production date" }); return;
-  }
-  const scope = currentScope();
-  try {
-    let result: (ReturnType<typeof applyOperationalIntent> & { cursor?: number }) | undefined;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        result = await db.transaction(async (tx) => {
-          // Fence reset and intent under one transaction. A reset that wins
-          // this lock makes the command review-required; it cannot resurrect
-          // state between a preflight epoch read and the document write.
-          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
-            .onConflictDoNothing();
-          const [reset] = await tx.select().from(dataResetTable)
-            .where(eq(dataResetTable.scope, scope)).for("update");
-          const [existing] = await tx.select().from(dailySyncTable)
-            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope))).for("update");
-          const [seen] = await tx.select().from(operationalIntentLedgerTable)
-            .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, intent.date), eq(operationalIntentLedgerTable.intentId, intent.id)))
-            .for("update");
-          // A duplicate must return the snapshot produced by its original
-          // transaction, rather than whichever later command currently owns
-          // the daily document. This is the idempotency boundary clients use
-          // after a timeout or a process restart.
-          if (seen) return {
-            data: seen.snapshot ?? existing?.data ?? emptySyncData(intent.date),
-            outcome: seen.outcome as any,
-            duplicate: true,
-            cursor: seen.sequence,
-          };
-          if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
-            const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
-              scope, date: intent.date, intentId: intent.id, outcome: "review-required",
-              snapshot: (existing?.data ?? emptySyncData(intent.date)) as any,
-            }).returning({ sequence: operationalIntentLedgerTable.sequence });
-            return {
-              data: existing?.data ?? emptySyncData(intent.date),
-              outcome: "review-required" as const,
-              duplicate: false,
-              cursor: receipt!.sequence,
-            };
-          }
-          const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
-          applied.data.dayState = { ...applied.data.dayState, date: intent.date };
-          if (
-            applied.outcome === "accepted" &&
-            intent.action === "lifecycle" &&
-            intent.lifecycle === "end"
-          ) {
-            const [legacyCompletion] = await tx.select().from(completedRunHistoryTable).where(and(
-              eq(completedRunHistoryTable.scope, scope),
-              eq(completedRunHistoryTable.date, intent.date),
-              eq(completedRunHistoryTable.runId, intent.runId),
-            )).for("update");
-            const lockedRun = (existing?.data as any)?.dayState?.runs?.find(
-              (run: any) => run?.id === intent.runId,
-            );
-            const legacySnapshotRun = (legacyCompletion?.snapshot as any)?.dayState?.runs?.filter(
-              (run: any) => run?.id === intent.runId,
-            );
-            const legacyAgeMs = legacyCompletion
-              ? now - legacyCompletion.createdAt.getTime()
-              : Number.POSITIVE_INFINITY;
-            const compatibleLegacyCompletion = !!legacyCompletion
-              && legacyCompletion.operationId === `completed:${intent.date}:${intent.runId}`
-              && legacyAgeMs >= 0
-              && legacyAgeMs <= 10 * 60_000
-              && Array.isArray(legacySnapshotRun)
-              && legacySnapshotRun.length === 1
-              && Number(legacySnapshotRun[0].startedAt) === Number(lockedRun?.startedAt)
-              && Number(legacySnapshotRun[0].endedAt) === legacyCompletion.completedAt.getTime()
-              && legacyCompletion.completedAt.getTime() >= Number(lockedRun?.startedAt)
-              && Math.abs(legacyCompletion.completedAt.getTime() - intent.effectiveAt) <= 10 * 60_000;
-            // During the bounded migration window, an older client may have
-            // uploaded immutable history just before its canonical End intent.
-            // Only that exact, recently server-observed, fact-compatible record
-            // may bridge the migration; arbitrary history never controls a run.
-            if (compatibleLegacyCompletion) {
-              applied.data.dayState = {
-                ...applied.data.dayState,
-                runs: (applied.data.dayState.runs as Array<Record<string, unknown>>).map((run) =>
-                  run.id === intent.runId
-                    ? { ...run, endedAt: legacyCompletion!.completedAt.getTime() }
-                    : run
-                ),
-              };
-            } else if (legacyCompletion) {
-              applied.data = (existing?.data ?? emptySyncData(intent.date)) as Record<string, any>;
-              applied.outcome = "review-required";
-            }
-            if (applied.outcome === "accepted") {
-              const snapshot = JSON.parse(JSON.stringify(applied.data, (_key, value) => value)) as Record<string, unknown>;
-              const stable = (value: unknown): unknown => {
-                if (Array.isArray(value)) return value.map(stable);
-                if (value && typeof value === "object") {
-                  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([key, child]) => [key, stable(child)]));
-                }
-                return value;
-              };
-              const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
-              const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
-              const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
-                .find((run) => run.id === intent.runId);
-              const completedAt = Number(canonicalRun?.endedAt);
-              if (!compatibleLegacyCompletion) {
-                await tx.insert(completedRunHistoryTable).values({
-                  id: randomUUID(),
-                  scope,
-                  operationId: intent.id,
-                  runId: intent.runId,
-                  date: intent.date,
-                  completedAt: new Date(completedAt),
-                  snapshot: canonicalSnapshot,
-                  snapshotHash,
-                  actorId: req.userId ?? "unknown",
-                });
-              }
-              await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
-            }
-          }
-          if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
-            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
-          else await tx.insert(dailySyncTable).values({ date: intent.date, scope, data: applied.data as any, updatedAt: new Date() });
-          const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
-            scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
-            snapshot: applied.data as any,
-          }).returning({ sequence: operationalIntentLedgerTable.sequence });
-          return { ...applied, cursor: receipt!.sequence };
-        });
-        break;
-      } catch (error) {
-        if (isUniqueViolation(error) && attempt < 3) continue;
-        throw error;
-      }
-    }
-    if (!result) throw new Error("Operational intent did not complete");
-    if (!result.duplicate) broadcast(result.data, typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "", scope, intent.date);
-    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, cursor: result.cursor, data: result.data, snapshotId: syncSnapshotId(result.data) });
-  } catch (error) {
-    req.log.error({ err: error, event: "operational_intent" }, "Operational intent reconciliation failed");
-    res.status(500).json({ error: "Operational intent could not sync. Please retry." });
-  }
-});
-
-// Compact accepted command history for clients that have a cursor. The payload
-// is intentionally materialized snapshots, not executable operations: replay
-// cannot re-consume inventory or re-run a lifecycle transition. The existing
-// POST endpoint remains synchronous for older clients.
-router.get("/sync/operational-intents/cursor", async (req: Request, res: Response): Promise<void> => {
-  const raw = req.query.after;
-  const after = raw === undefined ? 0 : Number(raw);
-  if (!Number.isSafeInteger(after) || after < 0) {
-    res.status(400).json({ error: "Invalid mutation cursor" });
-    return;
-  }
-  const scope = currentScope();
-  try {
-    const rows = await db.select({
-      cursor: operationalIntentLedgerTable.sequence,
-      date: operationalIntentLedgerTable.date,
-      outcome: operationalIntentLedgerTable.outcome,
-      snapshot: operationalIntentLedgerTable.snapshot,
-      createdAt: operationalIntentLedgerTable.createdAt,
-    }).from(operationalIntentLedgerTable)
-      .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
-      .orderBy(asc(operationalIntentLedgerTable.sequence))
-      .limit(100);
-    // Cursor recovery must be monotonic across pages. Never mix a compacted
-    // receipt's current materialization with a later retained historical
-    // snapshot: every adoptable receipt in this page points at the current
-    // scoped materialization for its date.
-    const dates = [...new Set(rows.map((row) => row.date))];
-    const materialized = dates.length
-      ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data }).from(dailySyncTable)
-        .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
-      : [];
-    const byDate = new Map(materialized.map((row) => [row.date, row.data]));
-    res.json({
-      cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
-      hasMore: rows.length === 100,
-      mutations: rows.map(({ snapshot: _historical, ...row }) => {
-        const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
-        const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
-        return {
-          ...row,
-          snapshot,
-          materializedSnapshotId: snapshot ? syncSnapshotId(snapshot) : null,
-        };
-      }),
-    });
+    res.json(await readOperationalIntentCursorPage(scope, after));
   } catch (error) {
     req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
     res.status(500).json({ error: "Mutation cursor could not sync" });
@@ -2221,171 +2180,26 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
     res.status(400).json({ error: "Invalid or oversized automatic command" });
     return;
   }
+  const rawEpoch = req.query.epoch;
+  const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
+  const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
   try {
-    let result:
-      | (ReturnType<typeof applyAutoTrackClaim> & {
-        canonicalRevision: number;
-        serverTime: number;
-        duplicate: boolean;
-        resetStale?: number;
-      })
-      | undefined;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        result = await db.transaction(async (tx) => {
-          const serverTime = Date.now();
-          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(serverTime) })
-            .onConflictDoNothing();
-          const [reset] = await tx.select().from(dataResetTable)
-            .where(eq(dataResetTable.scope, scope)).for("update");
-          const [existing] = await tx
-            .select()
-            .from(dailySyncTable)
-            .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
-            .for("update");
-          const commandId = `auto-track:${claim.eventId}`;
-          const [seen] = await tx.select().from(operationalIntentLedgerTable)
-            .where(and(
-              eq(operationalIntentLedgerTable.scope, scope),
-              eq(operationalIntentLedgerTable.date, date),
-              eq(operationalIntentLedgerTable.intentId, commandId),
-            ))
-            .for("update");
-          if (seen) {
-            const snapshot = (seen.snapshot ?? existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
-            const state = ((snapshot as any).autoTrackCoordination?.runs?.[claim.runId]?.[claim.channel] ?? {
-              generation: claim.generation,
-              sequence: claim.sequence,
-              nextDueAt: claim.nextDueAt,
-              updatedAt: seen.serverReceivedAt.getTime(),
-            }) as ReturnType<typeof applyAutoTrackClaim>["channelState"];
-            const values = ((snapshot as any).runValues?.[claim.runId] ?? {}) as Record<string, unknown>;
-            return {
-              data: snapshot,
-              outcome: (seen.outcome === "accepted" ? "duplicate" : seen.outcome) as ReturnType<typeof applyAutoTrackClaim>["outcome"],
-              channelState: state,
-              values,
-              canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
-              serverTime: seen.serverReceivedAt.getTime(),
-              duplicate: true,
-              ...(seen.outcome === "stale" ? { resetStale: reset?.epoch ?? 0 } : {}),
-            };
-          }
-          const rawEpoch = req.query.epoch;
-          const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
-          if (!Number.isSafeInteger(suppliedEpoch) || suppliedEpoch < 0
-            || (reset?.epoch ?? 0) !== suppliedEpoch) {
-            const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
-            const snapshot = (existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
-            if (existing) {
-              await tx.update(dailySyncTable)
-                .set({ canonicalRevision, updatedAt: new Date(serverTime) })
-                .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-            } else {
-              await tx.insert(dailySyncTable).values({
-                scope,
-                date,
-                data: snapshot as any,
-                canonicalRevision,
-                updatedAt: new Date(serverTime),
-              });
-            }
-            await tx.insert(operationalIntentLedgerTable).values({
-              scope,
-              date,
-              intentId: commandId,
-              outcome: "stale",
-              snapshot: snapshot as any,
-              commandType: "auto-track",
-              actorId: command.actorId,
-              deviceId: command.deviceId,
-              baseRevision: command.baseRevision,
-              canonicalRevision,
-              actionData: command.actionData,
-              serverReceivedAt: new Date(serverTime),
-            });
-            return {
-              data: snapshot,
-              outcome: "stale" as const,
-              channelState: {
-                generation: claim.generation,
-                sequence: 0,
-                nextDueAt: claim.nextDueAt,
-                updatedAt: serverTime,
-              },
-              values: {},
-              canonicalRevision,
-              serverTime,
-              duplicate: false,
-              resetStale: reset?.epoch ?? 0,
-            };
-          }
-          const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
-          if (applied.outcome === "accepted" && /^app[1-4]-batch$/.test(claim.channel)) {
-            const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
-            if (mutation) {
-              await appendAutomaticApplicatorEvidence(tx, {
-                scope,
-                date,
-                runId: claim.runId,
-                slot: Number(claim.channel[3]),
-                observedTotal: mutation.to,
-                eventId: claim.eventId,
-              });
-            }
-          }
-          if (applied.outcome === "accepted") {
-             if (applied.inventoryConsumption?.kind === "sauce-barrel") {
-               const consumption = applied.inventoryConsumption;
-               await consumeSauceBarrelInTransaction(
-                 tx,
-                 consumption.runId,
-                 consumption.barrelIndex,
-                 consumption.itemKey,
-                 consumption.qty,
-                 true,
-                 consumption.eventId,
-               );
-             }
-          }
-          const canonicalRevision = (existing?.canonicalRevision ?? 0) + 1;
-          if (existing) {
-            await tx.update(dailySyncTable)
-              .set({ data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) })
-              .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-          } else {
-            await tx.insert(dailySyncTable)
-              .values({ date, scope, data: applied.data as any, canonicalRevision, updatedAt: new Date(serverTime) });
-          }
-          await tx.insert(operationalIntentLedgerTable).values({
-            scope,
-            date,
-            intentId: commandId,
-            outcome: applied.outcome,
-            snapshot: applied.data as any,
-            commandType: "auto-track",
-            actorId: command.actorId,
-            deviceId: command.deviceId,
-            baseRevision: command.baseRevision,
-            canonicalRevision,
-            actionData: command.actionData,
-            serverReceivedAt: new Date(serverTime),
-          });
-          return { ...applied, canonicalRevision, serverTime, duplicate: false };
-        });
-        break;
-      } catch (error) {
-        if (isUniqueViolation(error) && attempt < 3) continue;
-        throw error;
-      }
-    }
-    if (!result) throw new Error("Auto-track claim did not complete");
+    const result = await executeAutoTrackClaim({
+      scope,
+      date,
+      claim,
+      suppliedEpoch,
+      command,
+      senderId,
+    }, {
+      appendAutomaticApplicatorEvidence,
+      consumeSauceBarrelInTransaction,
+    });
     if (result.resetStale !== undefined) {
       res.setHeader("X-Sync-Response", "stale");
       res.json(await staleEpochResponse(scope, result.resetStale));
       return;
     }
-    const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
     if (result.outcome === "accepted") {
       broadcast(result.data, senderId, scope, date, result);
     }
@@ -2421,6 +2235,10 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       channel: claim.channel,
       durationMs: Date.now() - startedAt,
     }, "Auto-track claim failed");
+    if (error instanceof SauceInventoryConfigurationError) {
+      res.status(409).json({ error: "Sauce inventory is not configured. Check Sauce setup, then retry." });
+      return;
+    }
     res.status(500).json({ error: "Automatic tracking could not sync. Please try again." });
   }
 });
@@ -2447,6 +2265,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  await registerSyncOutboxScope(scope);
   res.flushHeaders();
 
   const [[row], initialResetState] = await Promise.all([
@@ -2497,12 +2316,49 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  client = {
+  const registeredClient: SseClient = {
     res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch,
-    lastData: data, lastCanonicalRevision: row?.canonicalRevision ?? 0,
+    lastData: data, lastSnapshotId: snapshotId, lastCanonicalRevision: row?.canonicalRevision ?? 0,
     lastCalcEmitMs: initialServerTime,
   };
-  clients.add(client);
+  client = registeredClient;
+  clients.add(registeredClient);
+
+  // Close the gap between the initial canonical read and stream registration.
+  // A write committed in that interval may have been drained before this client
+  // entered the process-local registry, so reconcile only this new stream once.
+  try {
+    const [[registeredRow], registeredReset] = await Promise.all([
+      db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope))),
+      getResetState(scope),
+    ]);
+    if (closed) return;
+    if (registeredReset.epoch > registeredClient.resetEpoch) {
+      registeredClient.resetEpoch = registeredReset.epoch;
+      res.write(`data: ${JSON.stringify({
+        [registeredReset.rollover ? "rollover" : "reset"]: true,
+        resetEpoch: registeredReset.epoch,
+      })}\n\n`);
+    }
+    const registeredData = completeSyncData(registeredRow?.data ?? emptySyncData(watchDate));
+    const registeredSnapshotId = syncSnapshotId(registeredData);
+    const registeredRevision = registeredRow?.canonicalRevision ?? 0;
+    if (
+      registeredSnapshotId !== registeredClient.lastSnapshotId
+      || registeredRevision !== registeredClient.lastCanonicalRevision
+    ) {
+      broadcast(registeredData, "", scope, watchDate, {
+        canonicalRevision: registeredRevision,
+        force: true,
+        canonicalReconcile: true,
+        onlyClient: registeredClient,
+      });
+    }
+  } catch (error) {
+    req.log.warn({ err: error, event: "sync_stream_registration_reconcile" },
+      "Initial sync stream reconciliation failed; the stream remains open for retry");
+  }
 
   // Refresh schedule leases on the established heartbeat. A schedule never
   // outlives its SSE freshness window: a failed read simply sends a normal
@@ -2624,32 +2480,42 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       ));
     });
   }
-  const summary = await runAutoTrackServerTicks({ nowMs, scope, date });
-  // A deterministic E2E clock step is also an authoritative projection frame.
-  // Production heartbeats publish this frame even when no counter cadence is
-  // due; without it, a test step inside the freezer-fill window would leave the
-  // browser displaying the projection captured at the previous server beat.
-  // Keep this fixture scoped exactly like the normal SSE path.
+  const summary = req.body?.skipAutoTrack === true
+    ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
+    : await runAutoTrackServerTicks({ nowMs, scope, date });
+  // Compute counters at the fixture clock, but timestamp the read model at the
+  // real server clock. This keeps deterministic elapsed-time tests from
+  // manufacturing a future server timestamp that a later wake cannot adopt.
   const [row] = await db.select().from(dailySyncTable).where(and(
     eq(dailySyncTable.scope, scope),
     eq(dailySyncTable.date, date),
   ));
-  if (row) {
-    broadcast(row.data, "server:e2e-clock", scope, date, {
-      canonicalRevision: row.canonicalRevision ?? 0,
-      serverTime: nowMs,
-    });
-  }
+  const serverTime = Date.now();
   const authoritative = row
     ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
     : null;
+  const operationalProjection = authoritative?.operationalProjection
+    ? {
+        ...authoritative.operationalProjection,
+        serverTimeMs: serverTime,
+        capturedAtServerMs: serverTime,
+      }
+    : null;
+  if (row) {
+    broadcast(row.data, "server:e2e-clock", scope, date, {
+      canonicalRevision: row.canonicalRevision ?? 0,
+      serverTime,
+      operationalProjection,
+    });
+  }
   res.json({
     ...summary,
     canonicalRevision: row?.canonicalRevision ?? 0,
-    serverTime: nowMs,
+    serverTime,
     projected: !!row,
+    snapshotId: row ? syncSnapshotId(row.data) : undefined,
     autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
-    operationalProjection: authoritative?.operationalProjection ?? null,
+    operationalProjection,
   });
 });
 
@@ -2715,6 +2581,7 @@ router.get(
         date,
         new Date(),
         legacySyncReadinessSnapshot(legacyCompleteWritesRejected() ? "reject" : "accept"),
+        syncPeerFrameTelemetrySnapshot(),
       );
       logger.info({
         event: "sync_health_check",
@@ -2797,6 +2664,7 @@ router.put(
     date,
     scope,
     sanitized,
+    senderId,
     clientToday(req),
     expectedEpoch,
     req.ip,
@@ -2818,6 +2686,7 @@ router.put(
   if (result.wrote && date === clientToday(req)) {
     broadcast(merged, senderId, scope, date, result);
   }
+  if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? "unchanged"
@@ -2828,6 +2697,9 @@ router.put(
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(date))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
@@ -2857,7 +2729,7 @@ router.delete("/sync/:date", requireCapability("manage-factory-settings"), async
 router.post(
   "/sync/reset",
   requireCapability("manage-staff"),
-  async (_req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     const scope = currentScope();
     const epoch = await db.transaction(async (tx) => {
       // Every writer locks this scope fence before a daily row. Establish it
@@ -2872,8 +2744,10 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-       await logAuditEvent(scope, "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
-       return row?.epoch ?? 0;
+      const epoch = row?.epoch ?? 0;
+      await appendSyncOutboxEvent(tx, { kind: "reset", scope, resetEpoch: epoch });
+       await logAuditEvent(scope, req.userId ?? "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
+       return epoch;
     });
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
@@ -2881,14 +2755,15 @@ router.post(
 );
 
 // ── Full FACTORY purge (admin-only) ──────────────────────────────────────────
-// Wipes EVERYTHING except accounts: all day-state (like /sync/reset) PLUS every
+// Wipes factory setup and day-state, but retains accounts and QC history: every
 // server master-data pool — profiles, recipes (cheese/dough/sauce), mixes,
 // ingredients, learned aliases/corrections, AI memory, incidents, inventory,
 // production rules, templates, saved import sheets, settings. `users`/`roles`/
 // `user_roles` (and pending password-reset requests) are untouched. Scoped
-// tables are cleared for the CALLER's scope only; the few scope-less
-// operational tables (legacy saved runs, quality history, alert settings) are
-// cleared outright. The reset epoch is bumped and broadcast exactly like
+// tables are cleared for the CALLER's scope only; the scope-less tables below
+// retain their existing cleanup behavior. QC/quality history survives both
+// factory purge and daily reset; any QC deletion requires a separate explicitly
+// authorized retention operation. The reset epoch is bumped and broadcast like
 // /sync/reset, so every populated client wipes its local `run-calc*` copy and
 // reloads instead of re-uploading stale data.
 router.post(
@@ -2926,7 +2801,6 @@ router.post(
       cycleCountSchedulesTable,
       // Operational tables that are now scope-isolated.
       productionRunsTable,
-      qualityChecksTable,
       proactiveAlertSettingsTable,
       completedRunHistoryTable,
       // Inventory tables child-first so FK constraints never block the wipe.
@@ -2965,7 +2839,9 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-      return row?.epoch ?? 0;
+      const epoch = row?.epoch ?? 0;
+      await appendSyncOutboxEvent(tx, { kind: "reset", scope, resetEpoch: epoch });
+      return epoch;
     });
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
@@ -2975,6 +2851,15 @@ router.post(
 const SERVER_TICK_DEFAULT_MS = 15_000;
 const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
+const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
+
+export function clearServerTickDateBackoffsForTests(): void {
+  serverTickDateBackoffs.clear();
+}
+
+function serverTickBackoffKey(scope: Scope, date: string): string {
+  return `${scope}:${date}`;
+}
 
 function serverTickStartDate(nowMs: number): string {
   const date = new Date(nowMs - SERVER_TICK_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -3008,16 +2893,40 @@ export async function runAutoTrackServerTicks(opts: {
   ));
   let builtClaims = 0;
   let accepted = 0;
+  // Scoped invocations can recover their own date, but cannot certify health
+  // for dates or scopes they did not examine.
+  let passComplete = opts.scope === undefined && opts.date === undefined;
   const outcomes: Record<string, number> = {};
   for (const row of rows) {
-    if (builtClaims >= maxClaims) break;
+    if (builtClaims >= maxClaims) {
+      passComplete = false;
+      break;
+    }
     if (row.scope !== "live" && row.scope !== "sandbox") {
       outcomes.invalidScope = (outcomes.invalidScope ?? 0) + 1;
+      passComplete = false;
       continue;
     }
     const scope: Scope = row.scope;
+    const backoffKey = serverTickBackoffKey(scope, row.date);
+    let backoff = serverTickDateBackoffs.get(backoffKey);
+    if (!backoff) {
+      backoff = createBackgroundOperationBackoff({ jitter: true });
+      serverTickDateBackoffs.set(backoffKey, backoff);
+    }
+    if (!backoff.isReady(nowMs)) {
+      outcomes.backoff = (outcomes.backoff ?? 0) + 1;
+      passComplete = false;
+      continue;
+    }
     try {
-      const result = await runWithScope(scope, () => db.transaction(async (tx) => {
+      // A transaction retry must keep the same event identity. If the database
+      // committed but its reply was lost, the ledger then fences the rebuilt
+      // claim instead of applying the operational effect a second time.
+      const claimIdNamespace = `tick-${randomUUID()}`;
+      const result = await runBackgroundOperation(
+        "server-auto-track-tick",
+        () => runWithScope(scope, () => db.transaction(async (tx) => {
         const serverTime = Date.now();
         await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(serverTime) })
           .onConflictDoNothing();
@@ -3026,8 +2935,8 @@ export async function runAutoTrackServerTicks(opts: {
         const [locked] = await tx.select().from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope))).for("update");
         const stored = locked?.data ?? emptySyncData(row.date);
-        const wall = buildWallClockServerClaims(stored, nowMs);
-        const netClaims = buildNetSecondServerClaims(stored, nowMs);
+        const wall = buildWallClockServerClaims(stored, nowMs, claimIdNamespace);
+        const netClaims = buildNetSecondServerClaims(stored, nowMs, claimIdNamespace);
         const remainingBudget = maxClaims - builtClaims;
         // Never persist an arm-state that has advanced past a claim omitted by
         // this pass's global budget. A later pass must see that due event.
@@ -3106,7 +3015,7 @@ export async function runAutoTrackServerTicks(opts: {
               });
             }
             acceptedNet.push(claim);
-          } else if (claim.channel === "sauce-barrel") {
+          } else if (claim.channel === "sauce-barrel" || claim.channel === "sauce-stock") {
             acceptedNet.push(claim);
           }
           acceptedHere++;
@@ -3117,7 +3026,9 @@ export async function runAutoTrackServerTicks(opts: {
         const allWallAccepted = !!wall && wallFitsBudget
           && wall.claims.every((claim) => {
             const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
-            return state?.acceptedEventId === claim.eventId;
+            return state?.generation === claim.generation
+              && state?.sequence === claim.sequence
+              && state?.acceptedEventId === claim.eventId;
           });
         if (wall && (wall.claims.length === 0 || allWallAccepted)) {
           const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
@@ -3146,6 +3057,15 @@ export async function runAutoTrackServerTicks(opts: {
           updatedAt: new Date(serverTime),
         })
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope)));
+        if (acceptedHere > 0) {
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state",
+            scope,
+            date: row.date,
+            senderId: "server:tick",
+            canonicalRevision,
+          });
+        }
         return {
           data,
           claims: rawClaims.length,
@@ -3154,7 +3074,10 @@ export async function runAutoTrackServerTicks(opts: {
           canonicalRevision,
           serverTime,
         };
-      }));
+        })),
+        { recordSuccess: false },
+      );
+      backoff.recordSuccess(nowMs);
       builtClaims += result.claims;
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
@@ -3162,9 +3085,39 @@ export async function runAutoTrackServerTicks(opts: {
         broadcast(result.data, "server:tick", scope, row.date, result);
       }
     } catch (err) {
+      backoff.recordFailure(nowMs);
       logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;
+      passComplete = false;
     }
+  }
+  if (opts.scope === undefined && opts.date === undefined) {
+    const currentDates = new Set(rows.flatMap((row) =>
+      row.scope === "live" || row.scope === "sandbox"
+        ? [serverTickBackoffKey(row.scope, row.date)]
+        : [],
+    ));
+    for (const key of serverTickDateBackoffs.keys()) {
+      if (!currentDates.has(key)) serverTickDateBackoffs.delete(key);
+    }
+  } else if (opts.scope !== undefined && opts.date === undefined) {
+    const currentDates = new Set(rows.map((row) => serverTickBackoffKey(opts.scope!, row.date)));
+    for (const key of serverTickDateBackoffs.keys()) {
+      if (key.startsWith(`${opts.scope}:`) && !currentDates.has(key)) {
+        serverTickDateBackoffs.delete(key);
+      }
+    }
+  }
+  recordAutoTrackDeferredRetries(
+    [...serverTickDateBackoffs.values()]
+      .map((backoff) => backoff.nextRetryAt(nowMs))
+      .filter((retryAt): retryAt is number => retryAt !== undefined),
+  );
+  // Persist only the bounded aggregate, after all per-date transactions have
+  // completed; diagnostic writes must not join an automatic-tracking tx.
+  await persistAutoTrackDeferredDiagnostic(nowMs);
+  if (passComplete && outcomes.error === undefined) {
+    recordBackgroundOperationSuccess("server-auto-track-tick");
   }
   return { examinedDates: rows.length, builtClaims, accepted, outcomes };
 }
@@ -3212,6 +3165,15 @@ export function startDailyRolloverScheduler(
   ));
   timer.unref();
   return { stop: () => clearInterval(timer) };
+}
+
+const stopSyncOutboxListener = startSyncOutboxListener(
+  dispatchSyncOutboxEvent,
+  reconcileOutboxGap,
+);
+
+export function stopSyncOutboxFanout(): void {
+  stopSyncOutboxListener();
 }
 
 export default router;

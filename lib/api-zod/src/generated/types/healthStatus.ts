@@ -5,7 +5,24 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { HealthStatusCapabilities } from './healthStatusCapabilities';
+import type { HealthStatusChecks } from './healthStatusChecks';
+import type { HealthStatusDiagnostics } from './healthStatusDiagnostics';
+import type { HealthStatusStartup } from './healthStatusStartup';
+import type { HealthStatusStatus } from './healthStatusStatus';
 
+/**
+ * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ */
 export interface HealthStatus {
-  status: string;
+  /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */
+  status: HealthStatusStatus;
+  /** Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200. */
+  checks: HealthStatusChecks;
+  capabilities: HealthStatusCapabilities;
+  startup?: HealthStatusStartup;
+  /** Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with counts by status, attempt state, lease validity, and keep/review disposition. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs. The duplicateGroupTrend summary contains only aggregate firstCount, latestCount, change, and direction values. Direction is insufficient_samples before two observations and unavailable when no current sample is available; unavailable trend counts are null. */
+  diagnostics?: HealthStatusDiagnostics;
+  correlationId: string;
+  timestamp: Date;
 }

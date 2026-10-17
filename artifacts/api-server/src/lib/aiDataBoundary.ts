@@ -168,13 +168,22 @@ export function safeAiErrorMetadata(err: unknown): {
 } {
   if (!err || typeof err !== "object") return { errorType: typeof err };
   const value = err as { status?: unknown; code?: unknown; name?: unknown };
+  const safeToken = (candidate: unknown): string | number | undefined => {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(candidate)) {
+      return candidate;
+    }
+    return undefined;
+  };
+  const status = safeToken(value.status);
+  const code = safeToken(value.code);
+  const errorType =
+    typeof value.name === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(value.name)
+      ? value.name
+      : "Error";
   return {
-    ...(typeof value.status === "string" || typeof value.status === "number"
-      ? { status: value.status }
-      : {}),
-    ...(typeof value.code === "string" || typeof value.code === "number"
-      ? { code: value.code }
-      : {}),
-    errorType: typeof value.name === "string" ? value.name.slice(0, 80) : "Error",
+    ...(status !== undefined ? { status } : {}),
+    ...(code !== undefined ? { code } : {}),
+    errorType,
   };
 }

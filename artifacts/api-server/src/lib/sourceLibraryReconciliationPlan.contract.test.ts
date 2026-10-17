@@ -6,6 +6,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256,
   SOURCE_LIBRARY_RECONCILIATION_V1_EXPECTED_PLAN_SHA256,
 } from "./sourceLibraryReconciliationHeal";
+import { buildReviewedReplacementPatch } from "./repairs/sourceLibraryReconciliationRepair";
 
 describe("source-library v1 immutable plan contract", () => {
   it("uses runtime-stable base64 bytes for the canonical payload", () => {
@@ -22,5 +23,23 @@ describe("source-library v1 immutable plan contract", () => {
     expect(Object.isFrozen(SOURCE_LIBRARY_RECONCILIATION_PLAN)).toBe(true);
     expect(Object.isFrozen(SOURCE_LIBRARY_RECONCILIATION_PLAN.replacements)).toBe(true);
     expect(Object.isFrozen(SOURCE_LIBRARY_RECONCILIATION_PLAN.replacements[0].after)).toBe(true);
+  });
+
+  it("does not overwrite a same-id/name row whose reviewed components changed", () => {
+    const result = buildReviewedReplacementPatch(
+      { id: "mix-1", name: "Reviewed Mix", components: [{ ingredient: "old", lbs: 1 }] },
+      { components: [{ ingredient: "approved", lbs: 2 }] },
+      { id: "mix-1", name: "Reviewed Mix", components: [{ ingredient: "operator", lbs: 9 }] },
+    );
+    expect(result).toEqual({ conflict: "stale" });
+  });
+
+  it("does not apply after-fields absent from the retained before snapshot", () => {
+    const result = buildReviewedReplacementPatch(
+      { id: "cheese-1", name: "Reviewed Cheese", components: [{ ingredient: "old", lbs: 1 }] },
+      { components: [{ ingredient: "approved", lbs: 2 }], notes: "unreviewed metadata" },
+      { id: "cheese-1", name: "Reviewed Cheese", components: [{ ingredient: "old", lbs: 1 }], notes: "operator note" },
+    );
+    expect(result).toEqual({ conflict: "unreviewed" });
   });
 });

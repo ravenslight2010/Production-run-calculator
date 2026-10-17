@@ -17,8 +17,7 @@ bytes, latency, merge time, retries, and convergence.
 From the repository root:
 
 ```sh
-pnpm --filter @workspace/api-server exec vitest run \
-  src/routes/sync.convergence.integration.test.ts
+pnpm --filter @workspace/api-server run test:sync-convergence:isolated
 ```
 
 Run the large-day comparison with:
@@ -38,9 +37,12 @@ complete fixture. Compare the `requestSavingsPercent` and
 `responseSavingsPercent` fields over repeated runs; server load can make
 latencies noisier than the deterministic byte savings.
 
-The test requires the same development `DATABASE_URL` used by the other API
-integration suites. The database is created, schema-pushed, used, and dropped
-with `WITH (FORCE)` during teardown.
+The focused convergence suite starts a temporary local PostgreSQL cluster and
+creates a uniquely named disposable database. It discards any inherited
+`DATABASE_URL`, runs only against that database, and removes the cluster when
+the test exits. The test refuses to run unless the isolated runner's explicit
+test markers and loopback database name are present. Do not run this suite
+directly with a development or production database URL.
 
 ## What it exercises
 
@@ -66,7 +68,9 @@ dependency validation, and response-envelope classification.
 
 ## Interpreting the report
 
-The test prints a `[sync convergence soak]` object containing:
+The isolated runner captures the suite output and prints only a sanitized
+pass/fail status and elapsed time on success. The underlying suite computes a
+`[sync convergence soak]` object containing:
 
 - `requests`: all HTTP requests made by the simulated clients; this has a
   bounded assertion to catch request storms.
@@ -78,7 +82,8 @@ The test prints a `[sync convergence soak]` object containing:
 - `divergentFields`: JSON paths that differ from the canonical client after
   convergence; this must be empty.
 
-If the test fails, inspect the first divergent path and whether requests or
-retries crossed their bounds. A reset failure should show a stale response with
-the new epoch and an empty current-date row; a date failure usually presents as
-the future run appearing in the current-date row.
+If the test fails, the runner prints a redacted diagnostic excerpt. Check the
+first divergent path and whether requests or retries crossed their bounds. A
+reset failure should show a stale response with the new epoch and an empty
+current-date row; a date failure usually presents as the future run appearing
+in the current-date row.

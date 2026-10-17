@@ -96,6 +96,7 @@ async function promoteToManager(username: string): Promise<void> {
       [JSON.stringify([
         "manage-inventory",
         "manage-profiles",
+        "review-incidents",
         "use-ai-tools",
         "manage-factory-settings",
       ])],
@@ -123,6 +124,24 @@ async function masterDataSnapshot(page: Page): Promise<MasterDataSnapshot> {
     );
     return Object.fromEntries(entries);
   });
+}
+
+async function workflowFieldCheck(page: Page, name: string): Promise<{
+  lastSuccessfulMetrics?: Record<string, number> | null;
+  recentFailures?: Array<{ outcome: string }>;
+}> {
+  return page.evaluate(async (checkName) => {
+    const response = await fetch("/api/field-checks", { cache: "no-store" });
+    if (!response.ok) throw new Error(`field-check report returned ${response.status}`);
+    const report = await response.json() as {
+      checks?: Array<{
+        name: string;
+        lastSuccessfulMetrics?: Record<string, number> | null;
+        recentFailures?: Array<{ outcome: string }>;
+      }>;
+    };
+    return report.checks?.find((check) => check.name === checkName) ?? {};
+  }, name);
 }
 
 async function openPhotoImport(page: Page): Promise<void> {
@@ -276,6 +295,13 @@ test("keeps photographed pages editable and canceling review leaves master data 
   expect(transcriptionImageCount).toBe(2);
   expect(structuredParseCount).toBeGreaterThanOrEqual(1);
   await expect.poll(() => masterDataSnapshot(page)).toEqual(before);
+  await expect.poll(async () => {
+    const check = await workflowFieldCheck(page, "spec-import-review-commit");
+    return check.recentFailures?.[0]?.outcome;
+  }, { timeout: 15_000 }).toBe("incomplete");
+  expect(
+    (await workflowFieldCheck(page, "spec-import-review-commit")).recentFailures?.[0]?.outcome,
+  ).not.toBe("failure");
 });
 
 test("applies photographed review edits to the authenticated profile and recipe pools", async ({
@@ -374,6 +400,11 @@ test("applies photographed review edits to the authenticated profile and recipe 
   await expect(review).toContainText(`${EDITED_BRAND} — ${RAW_FLAVOR}`);
   await review.getByLabel(`Name for recipe ${RAW_RECIPE}`).fill(EDITED_RECIPE);
 
+  const savedSpecSheetsResponse = page.waitForResponse((response) =>
+    response.url().endsWith("/api/spec-sheets") &&
+    response.request().method() === "POST",
+    { timeout: 15_000 },
+  );
   await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
   // The commit path recomputes the authoritative diff. If another master-data
   // refresh changes that diff while the dialog is open, the safe behavior is to
@@ -397,6 +428,14 @@ test("applies photographed review edits to the authenticated profile and recipe 
     await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
   }
   await expect(review).toBeHidden({ timeout: 20_000 });
+  const savedSpecSheets = await savedSpecSheetsResponse;
+  expect(savedSpecSheets.status()).toBe(200);
+  const savedSpecSheetRecords = ((await savedSpecSheets.json()) as {
+    specSheets?: Array<{ id: number }>;
+  }).specSheets ?? [];
+  expect(savedSpecSheetRecords.length).toBeGreaterThan(0);
+  const savedSpecSheetId = savedSpecSheetRecords[0]?.id;
+  expect(savedSpecSheetId).toEqual(expect.any(Number));
 
   expect(imageRequestCount).toBe(1);
   expect(transcriptionImageCount).toBe(2);
@@ -439,10 +478,60 @@ test("applies photographed review edits to the authenticated profile and recipe 
     };
   }, { timeout: 20_000 }).toEqual({
     profile: {
-      brand: EDITED_BRAND.toLowerCase(),
-      flavor: RAW_FLAVOR.toLowerCase(),
+      brand: EDITED_BRAND,
+      flavor: RAW_FLAVOR,
     },
     recipe: { name: EDITED_RECIPE },
+  });
+
+  await expect.poll(async () => {
+    const check = await workflowFieldCheck(page, "spec-import-review-commit");
+    return check.lastSuccessfulMetrics ?? null;
+  }, { timeout: 15_000 }).toEqual(expect.objectContaining({
+    durationMs: expect.any(Number),
+  }));
+  expect(Object.keys(
+    (await workflowFieldCheck(page, "spec-import-review-commit")).lastSuccessfulMetrics ?? {},
+  )).toEqual(["durationMs"]);
+
+  // Reopen the committed saved-source review through import history. This
+  // deterministic reconciliation endpoint is separate from paid AI parsing.
+  const history = page.getByTestId("import-history-panel");
+  await expect(history).toBeVisible();
+  const savedRow = history
+    .locator('[data-testid^="import-history-"]')
+    .filter({ hasText: `${FIXTURE_SUFFIX}-apply-page-one.png` })
+    .first();
+  await expect.poll(async () => {
+    await history.getByRole("button", { name: /Refresh/ }).click().catch(() => {});
+    return savedRow.count();
+  }, { timeout: 15_000, intervals: [500, 1_000] }).toBeGreaterThan(0);
+  await savedRow.getByRole("button").first().click();
+  const reopenResponse = page.waitForResponse((response) =>
+    response.url().includes("/api/operations-insights/spec-reconciliation") &&
+    response.request().method() === "POST",
+  );
+  await savedRow.getByRole("button", { name: "Reopen saved review / scoped repair" }).click();
+  const reopened = await reopenResponse;
+  expect(reopened.ok()).toBe(true);
+  expect((reopened.request().postDataJSON() as { specSheetId?: number }).specSheetId)
+    .toBe(savedSpecSheetId);
+  await expect(page.getByText("Saved import review reopened", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("spec-reconcile-result").filter({ hasText: "Sheet differences" }),
+  ).toBeVisible();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  const reloadedMasterData = await masterDataSnapshot(page);
+  expect(reloadedMasterData["/api/brand-profiles"]).toMatchObject({
+    items: expect.arrayContaining([expect.objectContaining({
+      brand: EDITED_BRAND,
+      flavor: RAW_FLAVOR,
+    })]),
+  });
+  expect(reloadedMasterData["/api/dough-recipes"]).toMatchObject({
+    items: expect.arrayContaining([expect.objectContaining({ name: EDITED_RECIPE })]),
   });
 });
 

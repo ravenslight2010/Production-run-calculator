@@ -104,11 +104,12 @@ function workbookBuffer(rows: string[][], sheetName = "Specs"): ArrayBuffer {
 }
 
 /** Workbook whose sheet "Specs" row 1 holds a cell longer than the prompt clamp. */
-const truncatedBuffer = () => workbookBuffer([[LONG_CELL, "brand list"]]);
+const truncatedBuffer = () =>
+  workbookBuffer([[LONG_CELL, "Pizza recipe", "brand list"]]);
 
 /** Workbook whose sheet "Specs" row 1 has a real cell past the 60-column cap. */
 const overflowBuffer = () =>
-  workbookBuffer([[...Array.from({ length: 60 }, () => "c"), "lost cell"]]);
+  workbookBuffer([["Pizza recipe", ...Array.from({ length: 59 }, () => "c"), "lost cell"]]);
 
 /** Workbook that reads but has no readable content → per-file parse throws. */
 const brokenBuffer = () => workbookBuffer([[""]], "Empty");

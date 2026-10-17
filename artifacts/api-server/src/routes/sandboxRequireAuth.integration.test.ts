@@ -232,10 +232,23 @@ beforeEach(async () => {
   await db.insert(userRolesTable).values({ userId: REGULAR_USER_ID, role: "manager" });
 });
 
+// Mint before simulating a production request. The application's test-only
+// signing guard stays intact, and NODE_ENV is restored before any async work.
+function mintLegacyFixtureToken(userId: string): string {
+  const original = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = "test";
+    return signLegacyTokenForTests(userId);
+  } finally {
+    if (original === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = original;
+  }
+}
+
 function authedRequest(userId: string, method: string, path: string): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${signLegacyTokenForTests(userId)}` },
+    headers: { Authorization: `Bearer ${mintLegacyFixtureToken(userId)}` },
   });
 }
 
@@ -484,7 +497,7 @@ describe("cold in-process cache after a simulated server restart", () => {
     // reading the DB, this would incorrectly return 200.
     const res = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signLegacyTokenForTests(SANDBOX_USER_ID)}` },
+      headers: { Authorization: `Bearer ${mintLegacyFixtureToken(SANDBOX_USER_ID)}` },
     });
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string };
@@ -499,7 +512,7 @@ describe("cold in-process cache after a simulated server restart", () => {
     // return false and let the request through.
     const res = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signLegacyTokenForTests(REGULAR_USER_ID)}` },
+      headers: { Authorization: `Bearer ${mintLegacyFixtureToken(REGULAR_USER_ID)}` },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { userId: string };
@@ -513,14 +526,14 @@ describe("cold in-process cache after a simulated server restart", () => {
     // First request warms the cache entry (sandbox=true from DB).
     const res1 = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signLegacyTokenForTests(SANDBOX_USER_ID)}` },
+      headers: { Authorization: `Bearer ${mintLegacyFixtureToken(SANDBOX_USER_ID)}` },
     });
     expect(res1.status).toBe(401);
 
     // Second request hits the now-warm cache entry; must still be 401.
     const res2 = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signLegacyTokenForTests(SANDBOX_USER_ID)}` },
+      headers: { Authorization: `Bearer ${mintLegacyFixtureToken(SANDBOX_USER_ID)}` },
     });
     expect(res2.status).toBe(401);
     const body2 = (await res2.json()) as { error: string };
@@ -728,7 +741,7 @@ describe("cross-environment token replay: verifyToken rejects before sandbox gat
       // A correctly-signed token for the sandbox user. verifyToken will accept
       // it, so requireAuth proceeds past the signature check and MUST call
       // isSandboxUser before deciding to block the request.
-      const validSandboxToken = signLegacyTokenForTests(SANDBOX_USER_ID);
+      const validSandboxToken = mintLegacyFixtureToken(SANDBOX_USER_ID);
       const res = await fetch(`${baseUrl}/api/me`, {
         headers: { Authorization: `Bearer ${validSandboxToken}` },
       });

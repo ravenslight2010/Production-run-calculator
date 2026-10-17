@@ -35,6 +35,8 @@ import type {
   ApplicatorBatchEvidenceMutationResult,
   ApplicatorBatchFinalization,
   ApplyAiRetentionCleanup200,
+  ApplyScheduledJobCleanupPlan,
+  ApplyScheduledJobCleanupResult,
   ApprovePasswordResetResult,
   AuditAiMemoryHealth200,
   AuditLogPage,
@@ -45,6 +47,7 @@ import type {
   AutoTrackClaimResponse,
   BackgroundOperationDiagnostics,
   BrandProfileList,
+  BuildInfo,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
   CheeseRecipeList,
@@ -80,6 +83,7 @@ import type {
   DuplicateReviewList,
   ExportAuditLogsCsvParams,
   ExportAuditLogsPdfParams,
+  ExportQcHistoryCsvParams,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -90,11 +94,17 @@ import type {
   FollowUpRunSuggestion200,
   ForgotPasswordRequest,
   FreezerPullItemList,
+  FreezerSurplusAdjustmentList,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
+  GetBuildInfo503,
+  GetFieldChecksParams,
   GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
+  GetQcAllergenActivityParams,
+  GetQcHistoryParams,
+  GetQcTargetsParams,
   GetShiftHandoffDigestParams,
   GetSignupCodeStatus200,
   GetSyncTodayParams,
@@ -114,6 +124,7 @@ import type {
   IncidentClustersResult,
   IncidentDiagnosis,
   IncidentWorkflowUpdate,
+  Ingredient,
   IngredientBatchWeightList,
   IngredientList,
   InventoryItem,
@@ -128,6 +139,8 @@ import type {
   ListAuditLogsParams,
   ListCompletedHistoryParams,
   ListDeniedMergesParams,
+  ListDistillationApplyEvidence200,
+  ListDistillationApplyEvidenceParams,
   ListFinalizedOperationalReportsParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
@@ -180,10 +193,27 @@ import type {
   ProfileDataHealthApplyResult,
   PutSyncToday200,
   PutSyncTodayParams,
+  QcAllergenActivityResponse,
+  QcAllergenReviewInput,
+  QcCleaningInput,
+  QcComponentCheckInput,
+  QcComponentCheckResponse,
+  QcCorrectionInput,
+  QcEventResponse,
+  QcHistoryResponse,
+  QcLotInput,
+  QcNoteInput,
+  QcRedactionInput,
+  QcRunResponse,
+  QcRunSignoffInput,
+  QcTargetInput,
+  QcTargetsResponse,
+  QcWeightCheckInput,
   QualityCheckPhotoInput,
   QualityCheckRecord,
   QualityCheckRecordInput,
   QualityCheckResult,
+  RecordFreezerSurplusAdjustmentInput,
   RecordMixSurplusInput,
   ReplaceFreezerSurplusAllocationInput,
   ReplaceMixSurplusAllocationInput,
@@ -232,6 +262,7 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  ScheduledJobCleanupPlan,
   SearchFinalizedOperationalReportsParams,
   ServerJob,
   SetFloorMode,
@@ -239,6 +270,10 @@ import type {
   ShiftHandoffDigest,
   SignUpCredentials,
   SignupCodeStatusUpdate,
+  SourceLibraryCaptureError,
+  SourceLibraryReconciliationCaptureRequest,
+  SourceLibraryReconciliationDiagnostics,
+  SourceLibraryReconciliationEvidence,
   SpecImportAliasList,
   SpecReconcileInput,
   SpecReconcileResult,
@@ -257,6 +292,7 @@ import type {
   SyncWriteRequest,
   TransferInput,
   UnreviewedIncidentCount,
+  UpdateIngredientAllergenMappingInput,
   UpdateInventoryItemInput,
   UpdateInventoryLocationInput,
   UpdateInventorySettingsInput,
@@ -290,6 +326,108 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
+export const getGetBuildInfoUrl = () => {
+
+
+
+
+  return `/api/build-info`
+}
+
+/**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
+export const getBuildInfo = async ( options?: Parameters<typeof customFetch>[1]): Promise<BuildInfo> => {
+
+  return customFetch<BuildInfo>(getGetBuildInfoUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBuildInfoQueryKey = () => {
+    return [
+    `/api/build-info`
+    ] as const;
+    }
+
+
+export const getGetBuildInfoQueryOptions = <TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBuildInfoQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBuildInfo>>> = ({ signal }) => getBuildInfo({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetBuildInfoQueryResult = NonNullable<Awaited<ReturnType<typeof getBuildInfo>>>
+export type GetBuildInfoQueryError = ErrorType<GetBuildInfo503>
+
+
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBuildInfo>>,
+          TError,
+          Awaited<ReturnType<typeof getBuildInfo>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBuildInfo>>,
+          TError,
+          Awaited<ReturnType<typeof getBuildInfo>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Immutable application build version
+ */
+
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetBuildInfoQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getHealthCheckUrl = () => {
 
 
@@ -299,7 +437,7 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Returns server health status
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider. Scheduled-evaluation diagnostics report sample availability separately from the last measured queue state, report the exact duplicate-bucket group count, and include a bounded inventory with status, attempt-state, lease-validity, and keep/review candidate counts. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. They also report an aggregate duplicate-group trend with first and latest counts and their change over the bounded sample window; unavailable samples do not produce a trend.
  * @summary Health check
  */
 export const healthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
@@ -324,7 +462,7 @@ export const getHealthCheckQueryKey = () => {
     }
 
 
-export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -343,10 +481,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type HealthCheckQueryResult = NonNullable<Awaited<ReturnType<typeof healthCheck>>>
-export type HealthCheckQueryError = ErrorType<unknown>
+export type HealthCheckQueryError = ErrorType<HealthStatus>
 
 
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof healthCheck>>,
@@ -356,7 +494,7 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof healthCheck>>,
@@ -366,7 +504,7 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -374,12 +512,114 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  * @summary Health check
  */
 
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadinessCheckUrl = () => {
+
+
+
+
+  return `/api/readyz`
+}
+
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Scheduled-evaluation diagnostics distinguish pending, available, and unavailable samples from queue backlog warnings and include bounded duplicate-bucket status, attempt-state, lease-validity, and keep/review candidate counts. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. They also include an aggregate duplicate-group trend with first and latest counts and their change over the bounded sample window.
+ * @summary Core API readiness
+ */
+export const readinessCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
+
+  return customFetch<HealthStatus>(getReadinessCheckUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReadinessCheckQueryKey = () => {
+    return [
+    `/api/readyz`
+    ] as const;
+    }
+
+
+export const getReadinessCheckQueryOptions = <TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReadinessCheckQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof readinessCheck>>> = ({ signal }) => readinessCheck({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ReadinessCheckQueryResult = NonNullable<Awaited<ReturnType<typeof readinessCheck>>>
+export type ReadinessCheckQueryError = ErrorType<HealthStatus>
+
+
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof readinessCheck>>,
+          TError,
+          Awaited<ReturnType<typeof readinessCheck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof readinessCheck>>,
+          TError,
+          Awaited<ReturnType<typeof readinessCheck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Core API readiness
+ */
+
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getReadinessCheckQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -3882,6 +4122,1434 @@ export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQuali
 
 
 
+
+export const getGetQcTargetsUrl = (params: GetQcTargetsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/targets?${stringifiedParams}` : `/api/qc/targets`
+}
+
+/**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
+ * @summary Resolve explicit imported and reviewed QC weight targets
+ */
+export const getQcTargets = async (params: GetQcTargetsParams, options?: Parameters<typeof customFetch>[1]): Promise<QcTargetsResponse> => {
+
+  return customFetch<QcTargetsResponse>(getGetQcTargetsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcTargetsQueryKey = (params?: GetQcTargetsParams,) => {
+    return [
+    `/api/qc/targets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcTargetsQueryOptions = <TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcTargetsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcTargets>>> = ({ signal }) => getQcTargets(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcTargetsQueryResult = NonNullable<Awaited<ReturnType<typeof getQcTargets>>>
+export type GetQcTargetsQueryError = ErrorType<void>
+
+
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcTargets>>,
+          TError,
+          Awaited<ReturnType<typeof getQcTargets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcTargets>>,
+          TError,
+          Awaited<ReturnType<typeof getQcTargets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Resolve explicit imported and reviewed QC weight targets
+ */
+
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcTargetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetQcTargetUrl = () => {
+
+
+
+
+  return `/api/qc/targets`
+}
+
+/**
+ * Manager-only, append-only target setting. A null target, unit, and tolerance together clear the override and restore spec-import resolution.
+ * @summary Add a reviewed QC target override or clear an existing override
+ */
+export const setQcTarget = async (qcTargetInput: QcTargetInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSetQcTargetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcTargetInput)
+  }
+);}
+
+
+
+
+
+export const getSetQcTargetMutationKey = () => ['setQcTarget'] as const;
+
+export const getSetQcTargetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcTarget>>, TError,SetQcTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setQcTarget>>, TError,SetQcTargetMutationVariables, TContext> => {
+
+const mutationKey = getSetQcTargetMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setQcTarget>>, SetQcTargetMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setQcTarget(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetQcTargetMutationResult = NonNullable<Awaited<ReturnType<typeof setQcTarget>>>
+    export type SetQcTargetMutationBody = BodyType<QcTargetInput>
+    export type SetQcTargetMutationError = ErrorType<void>
+    export type SetQcTargetMutationVariables = {data: BodyType<QcTargetInput>}
+
+    /**
+ * @summary Add a reviewed QC target override or clear an existing override
+ */
+export const useSetQcTarget = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcTarget>>, TError,SetQcTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setQcTarget>>,
+        TError,
+        SetQcTargetMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetQcTargetMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcLotUrl = () => {
+
+
+
+
+  return `/api/qc/lots`
+}
+
+/**
+ * Multiple lots for the same run and ingredient are retained as separate events.
+ * @summary Record an ingredient lot for a production run
+ */
+export const recordQcLot = async (qcLotInput: QcLotInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcLotUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcLotInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcLotMutationKey = () => ['recordQcLot'] as const;
+
+export const getRecordQcLotMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcLot>>, TError,RecordQcLotMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcLot>>, TError,RecordQcLotMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcLotMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcLot>>, RecordQcLotMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcLot(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcLotMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcLot>>>
+    export type RecordQcLotMutationBody = BodyType<QcLotInput>
+    export type RecordQcLotMutationError = ErrorType<void>
+    export type RecordQcLotMutationVariables = {data: BodyType<QcLotInput>}
+
+    /**
+ * @summary Record an ingredient lot for a production run
+ */
+export const useRecordQcLot = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcLot>>, TError,RecordQcLotMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcLot>>,
+        TError,
+        RecordQcLotMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcLotMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcWeightCheckUrl = () => {
+
+
+
+
+  return `/api/qc/weight-checks`
+}
+
+/**
+ * The server resolves and snapshots the target. Missing, conflicting, or unit-mismatched targets produce not-evaluated, never an inferred result. Out-of-tolerance results require a note.
+ * @summary Record a pre-run or 30-minute ingredient weight check
+ */
+export const recordQcWeightCheck = async (qcWeightCheckInput: QcWeightCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcWeightCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcWeightCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcWeightCheckMutationKey = () => ['recordQcWeightCheck'] as const;
+
+export const getRecordQcWeightCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcWeightCheck>>, TError,RecordQcWeightCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcWeightCheck>>, TError,RecordQcWeightCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcWeightCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcWeightCheck>>, RecordQcWeightCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcWeightCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcWeightCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcWeightCheck>>>
+    export type RecordQcWeightCheckMutationBody = BodyType<QcWeightCheckInput>
+    export type RecordQcWeightCheckMutationError = ErrorType<void>
+    export type RecordQcWeightCheckMutationVariables = {data: BodyType<QcWeightCheckInput>}
+
+    /**
+ * @summary Record a pre-run or 30-minute ingredient weight check
+ */
+export const useRecordQcWeightCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcWeightCheck>>, TError,RecordQcWeightCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcWeightCheck>>,
+        TError,
+        RecordQcWeightCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcWeightCheckMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcComponentCheckUrl = () => {
+
+
+
+
+  return `/api/qc/component-checks`
+}
+
+/**
+ * The server resolves expected components from canonical per-run settings and same-day substitutions (or the immutable completed-run snapshot). The caller submits observations only; expected values and outcomes are never accepted from the client. Incomplete or ambiguous expected data cannot pass. This record does not block production or shipping.
+ * @summary Record an advisory run-component identity and presence checklist
+ */
+export const recordQcComponentCheck = async (qcComponentCheckInput: QcComponentCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcComponentCheckResponse>(getRecordQcComponentCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcComponentCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcComponentCheckMutationKey = () => ['recordQcComponentCheck'] as const;
+
+export const getRecordQcComponentCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcComponentCheck>>, TError,RecordQcComponentCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcComponentCheck>>, TError,RecordQcComponentCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcComponentCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcComponentCheck>>, RecordQcComponentCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcComponentCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcComponentCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcComponentCheck>>>
+    export type RecordQcComponentCheckMutationBody = BodyType<QcComponentCheckInput>
+    export type RecordQcComponentCheckMutationError = ErrorType<void>
+    export type RecordQcComponentCheckMutationVariables = {data: BodyType<QcComponentCheckInput>}
+
+    /**
+ * @summary Record an advisory run-component identity and presence checklist
+ */
+export const useRecordQcComponentCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcComponentCheck>>, TError,RecordQcComponentCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcComponentCheck>>,
+        TError,
+        RecordQcComponentCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcComponentCheckMutationOptions(options), queryClient);
+    }
+
+export const getGetQcRunUrl = (runId: string,) => {
+
+
+
+
+  return `/api/qc/runs/${runId}`
+}
+
+/**
+ * Staff see corrected/redacted markers but correction and redaction action rows omit actor IDs and payloads. Live-scope QC managers receive the actor and reason only, never replacement payloads or redacted source values.
+ * @summary Read QC records and review state for one run
+ */
+export const getQcRun = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<QcRunResponse> => {
+
+  return customFetch<QcRunResponse>(getGetQcRunUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcRunQueryKey = (runId: string,) => {
+    return [
+    `/api/qc/runs/${runId}`
+    ] as const;
+    }
+
+
+export const getGetQcRunQueryOptions = <TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcRunQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcRun>>> = ({ signal }) => getQcRun(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcRunQueryResult = NonNullable<Awaited<ReturnType<typeof getQcRun>>>
+export type GetQcRunQueryError = ErrorType<void>
+
+
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcRun>>,
+          TError,
+          Awaited<ReturnType<typeof getQcRun>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcRun>>,
+          TError,
+          Awaited<ReturnType<typeof getQcRun>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read QC records and review state for one run
+ */
+
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcRunQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetQcAllergenActivityUrl = (params?: GetQcAllergenActivityParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/allergen-activity?${stringifiedParams}` : `/api/qc/allergen-activity`
+}
+
+/**
+ * Read-only and non-blocking. Ended runs use immutable completion snapshots; active runs use the facility-local current-day snapshot. Manual run-allergen values remain separate from stored derived-footprint reviews. Missing source data is reported as unavailable, not inferred. Cleaning and verification appear only as recorded events; this response does not determine clearance, violations, near misses, label claims, or compliance. Correction and redaction reasons and actor IDs are included only for QC managers reading live-scope data; redacted source values are never included in those audit details.
+ * @summary Read recorded allergen activity for one facility production day
+ */
+export const getQcAllergenActivity = async (params?: GetQcAllergenActivityParams, options?: Parameters<typeof customFetch>[1]): Promise<QcAllergenActivityResponse> => {
+
+  return customFetch<QcAllergenActivityResponse>(getGetQcAllergenActivityUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcAllergenActivityQueryKey = (params?: GetQcAllergenActivityParams,) => {
+    return [
+    `/api/qc/allergen-activity`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcAllergenActivityQueryOptions = <TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcAllergenActivityQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcAllergenActivity>>> = ({ signal }) => getQcAllergenActivity(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcAllergenActivityQueryResult = NonNullable<Awaited<ReturnType<typeof getQcAllergenActivity>>>
+export type GetQcAllergenActivityQueryError = ErrorType<void>
+
+
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params: undefined |  GetQcAllergenActivityParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcAllergenActivity>>,
+          TError,
+          Awaited<ReturnType<typeof getQcAllergenActivity>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcAllergenActivity>>,
+          TError,
+          Awaited<ReturnType<typeof getQcAllergenActivity>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read recorded allergen activity for one facility production day
+ */
+
+export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQcAllergenActivity>>, TError = ErrorType<void>>(
+ params?: GetQcAllergenActivityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcAllergenActivity>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcAllergenActivityQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordQcAllergenReviewUrl = () => {
+
+
+
+
+  return `/api/qc/allergen-reviews`
+}
+
+/**
+ * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
+ * @summary Record the non-blocking pre-run allergen and staged-ingredient review
+ */
+export const recordQcAllergenReview = async (qcAllergenReviewInput: QcAllergenReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcAllergenReviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcAllergenReviewInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcAllergenReviewMutationKey = () => ['recordQcAllergenReview'] as const;
+
+export const getRecordQcAllergenReviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcAllergenReview>>, TError,RecordQcAllergenReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcAllergenReview>>, TError,RecordQcAllergenReviewMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcAllergenReviewMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcAllergenReview>>, RecordQcAllergenReviewMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcAllergenReview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcAllergenReviewMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcAllergenReview>>>
+    export type RecordQcAllergenReviewMutationBody = BodyType<QcAllergenReviewInput>
+    export type RecordQcAllergenReviewMutationError = ErrorType<void>
+    export type RecordQcAllergenReviewMutationVariables = {data: BodyType<QcAllergenReviewInput>}
+
+    /**
+ * @summary Record the non-blocking pre-run allergen and staged-ingredient review
+ */
+export const useRecordQcAllergenReview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcAllergenReview>>, TError,RecordQcAllergenReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcAllergenReview>>,
+        TError,
+        RecordQcAllergenReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcAllergenReviewMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcCleaningUrl = () => {
+
+
+
+
+  return `/api/qc/cleaning-records`
+}
+
+/**
+ * Cleaning is recorded without creating a production or shipping hold.
+ * @summary Record cleaning method and timing
+ */
+export const recordQcCleaning = async (qcCleaningInput: QcCleaningInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcCleaningUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcCleaningInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcCleaningMutationKey = () => ['recordQcCleaning'] as const;
+
+export const getRecordQcCleaningMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcCleaning>>, TError,RecordQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcCleaning>>, TError,RecordQcCleaningMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcCleaningMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcCleaning>>, RecordQcCleaningMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcCleaning(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcCleaningMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcCleaning>>>
+    export type RecordQcCleaningMutationBody = BodyType<QcCleaningInput>
+    export type RecordQcCleaningMutationError = ErrorType<void>
+    export type RecordQcCleaningMutationVariables = {data: BodyType<QcCleaningInput>}
+
+    /**
+ * @summary Record cleaning method and timing
+ */
+export const useRecordQcCleaning = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcCleaning>>, TError,RecordQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcCleaning>>,
+        TError,
+        RecordQcCleaningMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcCleaningMutationOptions(options), queryClient);
+    }
+
+export const getVerifyQcCleaningUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/cleaning-records/${eventId}/verification`
+}
+
+/**
+ * @summary Independently verify a cleaning record
+ */
+export const verifyQcCleaning = async (eventId: number,
+    qcNoteInput: QcNoteInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getVerifyQcCleaningUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcNoteInput)
+  }
+);}
+
+
+
+
+
+export const getVerifyQcCleaningMutationKey = () => ['verifyQcCleaning'] as const;
+
+export const getVerifyQcCleaningMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext> => {
+
+const mutationKey = getVerifyQcCleaningMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyQcCleaning>>, VerifyQcCleaningMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  verifyQcCleaning(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyQcCleaningMutationResult = NonNullable<Awaited<ReturnType<typeof verifyQcCleaning>>>
+    export type VerifyQcCleaningMutationBody = BodyType<QcNoteInput>
+    export type VerifyQcCleaningMutationError = ErrorType<void>
+    export type VerifyQcCleaningMutationVariables = {eventId: number;data: BodyType<QcNoteInput>}
+
+    /**
+ * @summary Independently verify a cleaning record
+ */
+export const useVerifyQcCleaning = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof verifyQcCleaning>>,
+        TError,
+        VerifyQcCleaningMutationVariables,
+        TContext
+      > => {
+      return useMutation(getVerifyQcCleaningMutationOptions(options), queryClient);
+    }
+
+export const getSignoffQcRunUrl = () => {
+
+
+
+
+  return `/api/qc/run-signoffs`
+}
+
+/**
+ * A new QC record after sign-off reopens review for that run.
+ * @summary Sign off the current QC record set for a run
+ */
+export const signoffQcRun = async (qcRunSignoffInput: QcRunSignoffInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSignoffQcRunUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcRunSignoffInput)
+  }
+);}
+
+
+
+
+
+export const getSignoffQcRunMutationKey = () => ['signoffQcRun'] as const;
+
+export const getSignoffQcRunMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signoffQcRun>>, TError,SignoffQcRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signoffQcRun>>, TError,SignoffQcRunMutationVariables, TContext> => {
+
+const mutationKey = getSignoffQcRunMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signoffQcRun>>, SignoffQcRunMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  signoffQcRun(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignoffQcRunMutationResult = NonNullable<Awaited<ReturnType<typeof signoffQcRun>>>
+    export type SignoffQcRunMutationBody = BodyType<QcRunSignoffInput>
+    export type SignoffQcRunMutationError = ErrorType<void>
+    export type SignoffQcRunMutationVariables = {data: BodyType<QcRunSignoffInput>}
+
+    /**
+ * @summary Sign off the current QC record set for a run
+ */
+export const useSignoffQcRun = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signoffQcRun>>, TError,SignoffQcRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof signoffQcRun>>,
+        TError,
+        SignoffQcRunMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSignoffQcRunMutationOptions(options), queryClient);
+    }
+
+export const getGetQcHistoryUrl = (params?: GetQcHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/history?${stringifiedParams}` : `/api/qc/history`
+}
+
+/**
+ * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
+ * @summary Read bounded, facility-scoped QC history
+ */
+export const getQcHistory = async (params?: GetQcHistoryParams, options?: Parameters<typeof customFetch>[1]): Promise<QcHistoryResponse> => {
+
+  return customFetch<QcHistoryResponse>(getGetQcHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcHistoryQueryKey = (params?: GetQcHistoryParams,) => {
+    return [
+    `/api/qc/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcHistory>>> = ({ signal }) => getQcHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getQcHistory>>>
+export type GetQcHistoryQueryError = ErrorType<void>
+
+
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params: undefined |  GetQcHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getQcHistory>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getQcHistory>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read bounded, facility-scoped QC history
+ */
+
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportQcHistoryCsvUrl = (params?: ExportQcHistoryCsvParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/history.csv?${stringifiedParams}` : `/api/qc/history.csv`
+}
+
+/**
+ * QC manager or app manager capability required. Live-scope exports include correction/redaction actors and reasons but omit replacement payloads and redacted source values. Sandbox exports omit overlay actors and payloads.
+ * @summary Export full filtered QC history as CSV
+ */
+export const exportQcHistoryCsv = async (params?: ExportQcHistoryCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportQcHistoryCsvUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportQcHistoryCsvQueryKey = (params?: ExportQcHistoryCsvParams,) => {
+    return [
+    `/api/qc/history.csv`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportQcHistoryCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportQcHistoryCsvQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportQcHistoryCsv>>> = ({ signal }) => exportQcHistoryCsv(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportQcHistoryCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportQcHistoryCsv>>>
+export type ExportQcHistoryCsvQueryError = ErrorType<void>
+
+
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params: undefined |  ExportQcHistoryCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export full filtered QC history as CSV
+ */
+
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportQcHistoryCsvQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCorrectQcEventUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/events/${eventId}/corrections`
+}
+
+/**
+ * @summary Append an audited correction to a QC record
+ */
+export const correctQcEvent = async (eventId: number,
+    qcCorrectionInput: QcCorrectionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getCorrectQcEventUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcCorrectionInput)
+  }
+);}
+
+
+
+
+
+export const getCorrectQcEventMutationKey = () => ['correctQcEvent'] as const;
+
+export const getCorrectQcEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext> => {
+
+const mutationKey = getCorrectQcEventMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof correctQcEvent>>, CorrectQcEventMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  correctQcEvent(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CorrectQcEventMutationResult = NonNullable<Awaited<ReturnType<typeof correctQcEvent>>>
+    export type CorrectQcEventMutationBody = BodyType<QcCorrectionInput>
+    export type CorrectQcEventMutationError = ErrorType<void>
+    export type CorrectQcEventMutationVariables = {eventId: number;data: BodyType<QcCorrectionInput>}
+
+    /**
+ * @summary Append an audited correction to a QC record
+ */
+export const useCorrectQcEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof correctQcEvent>>,
+        TError,
+        CorrectQcEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCorrectQcEventMutationOptions(options), queryClient);
+    }
+
+export const getRedactQcEventUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/events/${eventId}/redactions`
+}
+
+/**
+ * @summary Append a privacy redaction event for selected QC fields
+ */
+export const redactQcEvent = async (eventId: number,
+    qcRedactionInput: QcRedactionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRedactQcEventUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcRedactionInput)
+  }
+);}
+
+
+
+
+
+export const getRedactQcEventMutationKey = () => ['redactQcEvent'] as const;
+
+export const getRedactQcEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext> => {
+
+const mutationKey = getRedactQcEventMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof redactQcEvent>>, RedactQcEventMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  redactQcEvent(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RedactQcEventMutationResult = NonNullable<Awaited<ReturnType<typeof redactQcEvent>>>
+    export type RedactQcEventMutationBody = BodyType<QcRedactionInput>
+    export type RedactQcEventMutationError = ErrorType<void>
+    export type RedactQcEventMutationVariables = {eventId: number;data: BodyType<QcRedactionInput>}
+
+    /**
+ * @summary Append a privacy redaction event for selected QC fields
+ */
+export const useRedactQcEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof redactQcEvent>>,
+        TError,
+        RedactQcEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRedactQcEventMutationOptions(options), queryClient);
+    }
 
 export const getWasteInsightUrl = () => {
 
@@ -7400,6 +9068,108 @@ export const useConfirmFreezerSurplus = <TError = ErrorType<void>,
       return useMutation(getConfirmFreezerSurplusMutationOptions(options), queryClient);
     }
 
+export const getListFreezerSurplusAdjustmentsUrl = () => {
+
+
+
+
+  return `/api/freezer-surplus/adjustments`
+}
+
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
+export const listFreezerSurplusAdjustments = async ( options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusAdjustmentList> => {
+
+  return customFetch<FreezerSurplusAdjustmentList>(getListFreezerSurplusAdjustmentsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFreezerSurplusAdjustmentsQueryKey = () => {
+    return [
+    `/api/freezer-surplus/adjustments`
+    ] as const;
+    }
+
+
+export const getListFreezerSurplusAdjustmentsQueryOptions = <TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFreezerSurplusAdjustmentsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>> = ({ signal }) => listFreezerSurplusAdjustments({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFreezerSurplusAdjustmentsQueryResult = NonNullable<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>>
+export type ListFreezerSurplusAdjustmentsQueryError = ErrorType<void>
+
+
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>,
+          TError,
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>,
+          TError,
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
+
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFreezerSurplusAdjustmentsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getReplaceFreezerSurplusAllocationUrl = (runId: string,) => {
 
 
@@ -7487,6 +9257,96 @@ export const useReplaceFreezerSurplusAllocation = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReplaceFreezerSurplusAllocationMutationOptions(options), queryClient);
+    }
+
+export const getRecordFreezerSurplusAdjustmentUrl = (lotId: string,) => {
+
+
+
+
+  return `/api/freezer-surplus/lots/${lotId}/adjustments`
+}
+
+/**
+ * Manager-only physical event. Damage reduces currently available cases. A return must name a started or completed run with an allocation from this dated lot and cannot exceed the allocation less prior returns. Corrections append a compensating event linked to an earlier damage or return; the original event is never edited or deleted. Every event uses a stable eventId for retry safety and updates the dated lot and freezer inventory in the same transaction without deducting ingredients.
+ * @summary Record freezer damage, a run return, or a correction
+ */
+export const recordFreezerSurplusAdjustment = async (lotId: string,
+    recordFreezerSurplusAdjustmentInput: RecordFreezerSurplusAdjustmentInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FreezerSurplusMutationResponse>(getRecordFreezerSurplusAdjustmentUrl(lotId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(recordFreezerSurplusAdjustmentInput)
+  }
+);}
+
+
+
+
+
+export const getRecordFreezerSurplusAdjustmentMutationKey = () => ['recordFreezerSurplusAdjustment'] as const;
+
+export const getRecordFreezerSurplusAdjustmentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, TError,RecordFreezerSurplusAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, TError,RecordFreezerSurplusAdjustmentMutationVariables, TContext> => {
+
+const mutationKey = getRecordFreezerSurplusAdjustmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, RecordFreezerSurplusAdjustmentMutationVariables> = (props) => {
+          const {lotId,data} = props ?? {};
+
+          return  recordFreezerSurplusAdjustment(lotId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordFreezerSurplusAdjustmentMutationResult = NonNullable<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>>
+    export type RecordFreezerSurplusAdjustmentMutationBody = BodyType<RecordFreezerSurplusAdjustmentInput>
+    export type RecordFreezerSurplusAdjustmentMutationError = ErrorType<void>
+    export type RecordFreezerSurplusAdjustmentMutationVariables = {lotId: string;data: BodyType<RecordFreezerSurplusAdjustmentInput>}
+
+    /**
+ * @summary Record freezer damage, a run return, or a correction
+ */
+export const useRecordFreezerSurplusAdjustment = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, TError,RecordFreezerSurplusAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>,
+        TError,
+        RecordFreezerSurplusAdjustmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordFreezerSurplusAdjustmentMutationOptions(options), queryClient);
     }
 
 export const getListMixSurplusUrl = () => {
@@ -9805,6 +11665,96 @@ export const useDeleteIngredients = <TError = ErrorType<void>,
       return useMutation(getDeleteIngredientsMutationOptions(options), queryClient);
     }
 
+export const getUpdateIngredientAllergenMappingUrl = (id: string,) => {
+
+
+
+
+  return `/api/ingredients/${id}/allergen-mapping`
+}
+
+/**
+ * Sets the reviewed mapping for one existing ingredient within the authenticated facility scope. Only callers with manage-allergens may write this mapping. This is a mapping record, not a food-label claim or cleaning clearance.
+ * @summary Review an ingredient's mapped allergens
+ */
+export const updateIngredientAllergenMapping = async (id: string,
+    updateIngredientAllergenMappingInput: UpdateIngredientAllergenMappingInput, options?: Parameters<typeof customFetch>[1]): Promise<Ingredient> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Ingredient>(getUpdateIngredientAllergenMappingUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateIngredientAllergenMappingInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateIngredientAllergenMappingMutationKey = () => ['updateIngredientAllergenMapping'] as const;
+
+export const getUpdateIngredientAllergenMappingMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, TError,UpdateIngredientAllergenMappingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, TError,UpdateIngredientAllergenMappingMutationVariables, TContext> => {
+
+const mutationKey = getUpdateIngredientAllergenMappingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, UpdateIngredientAllergenMappingMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateIngredientAllergenMapping(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateIngredientAllergenMappingMutationResult = NonNullable<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>>
+    export type UpdateIngredientAllergenMappingMutationBody = BodyType<UpdateIngredientAllergenMappingInput>
+    export type UpdateIngredientAllergenMappingMutationError = ErrorType<void>
+    export type UpdateIngredientAllergenMappingMutationVariables = {id: string;data: BodyType<UpdateIngredientAllergenMappingInput>}
+
+    /**
+ * @summary Review an ingredient's mapped allergens
+ */
+export const useUpdateIngredientAllergenMapping = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, TError,UpdateIngredientAllergenMappingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateIngredientAllergenMapping>>,
+        TError,
+        UpdateIngredientAllergenMappingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateIngredientAllergenMappingMutationOptions(options), queryClient);
+    }
+
 export const getMergeIngredientsUrl = () => {
 
 
@@ -11928,6 +13878,299 @@ export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
       > => {
       return useMutation(getApplyProfileDataHealthRepairsMutationOptions(options), queryClient);
     }
+
+export const getGetPublishedSourceLibraryReconciliationCaptureUrl = () => {
+
+
+
+
+  return `/api/profile-data/source-library-reconciliation/capture`
+}
+
+/**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
+export const getPublishedSourceLibraryReconciliationCapture = async ( options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationEvidence> => {
+
+  return customFetch<SourceLibraryReconciliationEvidence>(getGetPublishedSourceLibraryReconciliationCaptureUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublishedSourceLibraryReconciliationCaptureQueryKey = () => {
+    return [
+    `/api/profile-data/source-library-reconciliation/capture`
+    ] as const;
+    }
+
+
+export const getGetPublishedSourceLibraryReconciliationCaptureQueryOptions = <TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublishedSourceLibraryReconciliationCaptureQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>> = ({ signal }) => getPublishedSourceLibraryReconciliationCapture({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPublishedSourceLibraryReconciliationCaptureQueryResult = NonNullable<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>>
+export type GetPublishedSourceLibraryReconciliationCaptureQueryError = ErrorType<SourceLibraryCaptureError>
+
+
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
+
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPublishedSourceLibraryReconciliationCaptureQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCaptureSourceLibraryReconciliationUrl = () => {
+
+
+
+
+  return `/api/profile-data/source-library-reconciliation/capture`
+}
+
+/**
+ * Manager-only and live-scope only. Validates a fresh schema-v2 published source handoff against the immutable identity of this running API build, then runs the reviewed verifier in one read-only production transaction. Returns only its bounded summary; no source rows or report payloads are persisted or logged. A 200 response may have ok=false and remains a valid capture result.
+ * @summary Capture bounded production source-library reconciliation evidence
+ */
+export const captureSourceLibraryReconciliation = async (sourceLibraryReconciliationCaptureRequest: SourceLibraryReconciliationCaptureRequest, options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationEvidence> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SourceLibraryReconciliationEvidence>(getCaptureSourceLibraryReconciliationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(sourceLibraryReconciliationCaptureRequest)
+  }
+);}
+
+
+
+
+
+export const getCaptureSourceLibraryReconciliationMutationKey = () => ['captureSourceLibraryReconciliation'] as const;
+
+export const getCaptureSourceLibraryReconciliationMutationOptions = <TError = ErrorType<SourceLibraryCaptureError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, TError,CaptureSourceLibraryReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, TError,CaptureSourceLibraryReconciliationMutationVariables, TContext> => {
+
+const mutationKey = getCaptureSourceLibraryReconciliationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, CaptureSourceLibraryReconciliationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  captureSourceLibraryReconciliation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CaptureSourceLibraryReconciliationMutationResult = NonNullable<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>>
+    export type CaptureSourceLibraryReconciliationMutationBody = BodyType<SourceLibraryReconciliationCaptureRequest>
+    export type CaptureSourceLibraryReconciliationMutationError = ErrorType<SourceLibraryCaptureError | void>
+    export type CaptureSourceLibraryReconciliationMutationVariables = {data: BodyType<SourceLibraryReconciliationCaptureRequest>}
+
+    /**
+ * @summary Capture bounded production source-library reconciliation evidence
+ */
+export const useCaptureSourceLibraryReconciliation = <TError = ErrorType<SourceLibraryCaptureError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, TError,CaptureSourceLibraryReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>,
+        TError,
+        CaptureSourceLibraryReconciliationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCaptureSourceLibraryReconciliationMutationOptions(options), queryClient);
+    }
+
+export const getGetPublishedSourceLibraryReconciliationDiagnosticsUrl = () => {
+
+
+
+
+  return `/api/profile-data/source-library-reconciliation/diagnostics`
+}
+
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
+export const getPublishedSourceLibraryReconciliationDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationDiagnostics> => {
+
+  return customFetch<SourceLibraryReconciliationDiagnostics>(getGetPublishedSourceLibraryReconciliationDiagnosticsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublishedSourceLibraryReconciliationDiagnosticsQueryKey = () => {
+    return [
+    `/api/profile-data/source-library-reconciliation/diagnostics`
+    ] as const;
+    }
+
+
+export const getGetPublishedSourceLibraryReconciliationDiagnosticsQueryOptions = <TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublishedSourceLibraryReconciliationDiagnosticsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>> = ({ signal }) => getPublishedSourceLibraryReconciliationDiagnostics({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPublishedSourceLibraryReconciliationDiagnosticsQueryResult = NonNullable<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>>
+export type GetPublishedSourceLibraryReconciliationDiagnosticsQueryError = ErrorType<SourceLibraryCaptureError>
+
+
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
+
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPublishedSourceLibraryReconciliationDiagnosticsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetProfileDataHealthWorkspaceUrl = () => {
 
@@ -14353,6 +16596,171 @@ export function useGetServerJob<TData = Awaited<ReturnType<typeof getServerJob>>
 
 
 
+export const getCreateScheduledJobCleanupPlanUrl = () => {
+
+
+
+
+  return `/api/server-jobs/scheduled-evaluation-cleanup/plans`
+}
+
+/**
+ * Manager-only and live-scope only. Creating a plan does not alter server jobs. The returned digest must be explicitly approved by a manager before any deletion.
+ * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
+ */
+export const createScheduledJobCleanupPlan = async ( options?: Parameters<typeof customFetch>[1]): Promise<ScheduledJobCleanupPlan> => {
+
+  return customFetch<ScheduledJobCleanupPlan>(getCreateScheduledJobCleanupPlanUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateScheduledJobCleanupPlanMutationKey = () => ['createScheduledJobCleanupPlan'] as const;
+
+export const getCreateScheduledJobCleanupPlanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, TError,void, TContext> => {
+
+const mutationKey = getCreateScheduledJobCleanupPlanMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, void> = () => {
+
+
+          return  createScheduledJobCleanupPlan(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateScheduledJobCleanupPlanMutationResult = NonNullable<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>>
+
+    export type CreateScheduledJobCleanupPlanMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
+ */
+export const useCreateScheduledJobCleanupPlan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createScheduledJobCleanupPlan>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateScheduledJobCleanupPlanMutationOptions(options), queryClient);
+    }
+
+export const getApplyScheduledJobCleanupPlanUrl = (planId: string,) => {
+
+
+
+
+  return `/api/server-jobs/scheduled-evaluation-cleanup/plans/${planId}/apply`
+}
+
+/**
+ * Manager-only and live-scope only. The server rechecks every manifest row and lease under serializable transaction locks. Changed plans fail closed.
+ * @summary Approve and apply one exact scheduled-job cleanup manifest
+ */
+export const applyScheduledJobCleanupPlan = async (planId: string,
+    applyScheduledJobCleanupPlanBody: ApplyScheduledJobCleanupPlan, options?: Parameters<typeof customFetch>[1]): Promise<ApplyScheduledJobCleanupResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ApplyScheduledJobCleanupResult>(getApplyScheduledJobCleanupPlanUrl(planId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(applyScheduledJobCleanupPlanBody)
+  }
+);}
+
+
+
+
+
+export const getApplyScheduledJobCleanupPlanMutationKey = () => ['applyScheduledJobCleanupPlan'] as const;
+
+export const getApplyScheduledJobCleanupPlanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, TError,ApplyScheduledJobCleanupPlanMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, TError,ApplyScheduledJobCleanupPlanMutationVariables, TContext> => {
+
+const mutationKey = getApplyScheduledJobCleanupPlanMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, ApplyScheduledJobCleanupPlanMutationVariables> = (props) => {
+          const {planId,data} = props ?? {};
+
+          return  applyScheduledJobCleanupPlan(planId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyScheduledJobCleanupPlanMutationResult = NonNullable<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>>
+    export type ApplyScheduledJobCleanupPlanMutationBody = BodyType<ApplyScheduledJobCleanupPlan>
+    export type ApplyScheduledJobCleanupPlanMutationError = ErrorType<void>
+    export type ApplyScheduledJobCleanupPlanMutationVariables = {planId: string;data: BodyType<ApplyScheduledJobCleanupPlan>}
+
+    /**
+ * @summary Approve and apply one exact scheduled-job cleanup manifest
+ */
+export const useApplyScheduledJobCleanupPlan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>, TError,ApplyScheduledJobCleanupPlanMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof applyScheduledJobCleanupPlan>>,
+        TError,
+        ApplyScheduledJobCleanupPlanMutationVariables,
+        TContext
+      > => {
+      return useMutation(getApplyScheduledJobCleanupPlanMutationOptions(options), queryClient);
+    }
+
 export const getCancelServerJobUrl = (id: string,) => {
 
 
@@ -15396,7 +17804,7 @@ export const getSubmitFieldCheckObservationsUrl = () => {
 }
 
 /**
- * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data.
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence. Version 3 sync-acknowledgment failures require only failureCode (integer 1 login/permission rejection, 2 stale/reset write, 3 exhausted retries); successful sync observations have empty metrics. Version 3 performance observations require only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API network failure). Stale-deployment-recovery accepts no metrics; an incomplete outcome is an attempt without confirmation, and success is emitted only after authenticated startup on a different build. Versions 1 and 2 remain accepted for queued evidence; unsupported diagnostic versions are rejected.
  * @summary Submit passive browser field-check observations
  */
 export const submitFieldCheckObservations = async (fieldCheckObservationBatch: FieldCheckObservationBatch, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {
@@ -15476,21 +17884,28 @@ export const useSubmitFieldCheckObservations = <TError = ErrorType<void>,
       return useMutation(getSubmitFieldCheckObservationsMutationOptions(options), queryClient);
     }
 
-export const getGetFieldChecksUrl = () => {
+export const getGetFieldChecksUrl = (params?: GetFieldChecksParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/field-checks`
+  return stringifiedParams.length > 0 ? `/api/field-checks?${stringifiedParams}` : `/api/field-checks`
 }
 
 /**
- * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
+ * Returns deterministic health rollups separately from evidence coverage for passive browser evidence and explicit unsupported states for hardware-only checks. Receipt delay is an estimate from the browser's observation timestamp to server receipt; missing or future timestamps remain unknown. Optional filters are combined with AND and applied to all observations received within the last 30 days in the authorized facility/sandbox scope, before counts, recovery and recent-row limits are calculated. appBuild is an exact, case-sensitive match; local means an unknown build, not an environment. Filtered recovery requires a success strictly later than the latest non-success in that population. No matches return collecting/unsupported checks and zero counts, not facility-wide issue state. Unfiltered reports preserve lifetime issue counts/status. Advisory only, never release proof.
  * @summary Get manager field-check health
  */
-export const getFieldChecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<FieldChecksReport> => {
+export const getFieldChecks = async (params?: GetFieldChecksParams, options?: Parameters<typeof customFetch>[1]): Promise<FieldChecksReport> => {
 
-  return customFetch<FieldChecksReport>(getGetFieldChecksUrl(),
+  return customFetch<FieldChecksReport>(getGetFieldChecksUrl(params),
   {
     ...options,
     method: 'GET'
@@ -15503,23 +17918,23 @@ export const getFieldChecks = async ( options?: Parameters<typeof customFetch>[1
 
 
 
-export const getGetFieldChecksQueryKey = () => {
+export const getGetFieldChecksQueryKey = (params?: GetFieldChecksParams,) => {
     return [
-    `/api/field-checks`
+    `/api/field-checks`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetFieldChecksQueryOptions = <TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getGetFieldChecksQueryOptions = <TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetFieldChecksQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetFieldChecksQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFieldChecks>>> = ({ signal }) => getFieldChecks({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFieldChecks>>> = ({ signal }) => getFieldChecks(params, { signal, ...requestOptions });
 
 
 
@@ -15533,7 +17948,7 @@ export type GetFieldChecksQueryError = ErrorType<void>
 
 
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
+ params: undefined |  GetFieldChecksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getFieldChecks>>,
           TError,
@@ -15543,7 +17958,7 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
+ params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getFieldChecks>>,
           TError,
@@ -15553,7 +17968,7 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -15561,11 +17976,11 @@ export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChec
  */
 
 export function useGetFieldChecks<TData = Awaited<ReturnType<typeof getFieldChecks>>, TError = ErrorType<void>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ params?: GetFieldChecksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFieldChecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetFieldChecksQueryOptions(options)
+  const queryOptions = getGetFieldChecksQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -15840,7 +18255,7 @@ export const getListIncidentsUrl = () => {
 }
 
 /**
- * Returns recorded incidents (newest first) for a manager to review, including the captured context and the AI diagnosis.
+ * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
  * @summary List incidents (manager only)
  */
 export const listIncidents = async ( options?: Parameters<typeof customFetch>[1]): Promise<Incident[]> => {
@@ -16604,7 +19019,7 @@ export const getGetBackgroundOperationDiagnosticsUrl = () => {
 }
 
 /**
- * @summary List sustained background-operation failures visible to managers
+ * @summary List background failures and automatic-tracking retry status for managers
  */
 export const getBackgroundOperationDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<BackgroundOperationDiagnostics> => {
 
@@ -16675,7 +19090,7 @@ export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List sustained background-operation failures visible to managers
+ * @summary List background failures and automatic-tracking retry status for managers
  */
 
 export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
@@ -19455,6 +21870,114 @@ export const useApplyImportOperation = <TError = ErrorType<void>,
       > => {
       return useMutation(getApplyImportOperationMutationOptions(options), queryClient);
     }
+
+export const getListDistillationApplyEvidenceUrl = (params?: ListDistillationApplyEvidenceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/import-operations/distillation-evidence?${stringifiedParams}` : `/api/import-operations/distillation-evidence`
+}
+
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+export const listDistillationApplyEvidence = async (params?: ListDistillationApplyEvidenceParams, options?: Parameters<typeof customFetch>[1]): Promise<ListDistillationApplyEvidence200> => {
+
+  return customFetch<ListDistillationApplyEvidence200>(getListDistillationApplyEvidenceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDistillationApplyEvidenceQueryKey = (params?: ListDistillationApplyEvidenceParams,) => {
+    return [
+    `/api/import-operations/distillation-evidence`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListDistillationApplyEvidenceQueryOptions = <TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDistillationApplyEvidenceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDistillationApplyEvidence>>> = ({ signal }) => listDistillationApplyEvidence(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListDistillationApplyEvidenceQueryResult = NonNullable<Awaited<ReturnType<typeof listDistillationApplyEvidence>>>
+export type ListDistillationApplyEvidenceQueryError = ErrorType<void>
+
+
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params: undefined |  ListDistillationApplyEvidenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>,
+          TError,
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>,
+          TError,
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListDistillationApplyEvidenceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetImportOperationUrl = (operationId: string,) => {
 

@@ -6,21 +6,50 @@ set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 REPO="$(realpath -e "$REPO")"
+RETAINED_CONTRACT_REPORT="$REPO/docs/evidence/typescript-7-declaration-contracts-current.json"
+
+comparison_source_tar() {
+  local source_root="$1"
+  tar \
+    --sort=name \
+    --mtime='@0' \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    --exclude='./node_modules' \
+    --exclude='*/dist' \
+    --exclude='*/build' \
+    --exclude='*/test-results' \
+    --exclude='*/playwright-report' \
+    --exclude='*/screenshots' \
+    --exclude='*/attached_assets' \
+    -C "$source_root" -cf - \
+    package.json \
+    pnpm-lock.yaml \
+    pnpm-workspace.yaml \
+    tsconfig.json \
+    tsconfig.base.json \
+    lib \
+    artifacts \
+    scripts \
+    docs/evidence/reproduce-typescript-7-comparison.sh \
+    docs/evidence/typescript-7-declaration-approvals.json
+}
+
+comparison_source_sha256() {
+  comparison_source_tar "$1" | sha256sum | awk '{print $1}'
+}
 
 check_documented_declaration_counts() {
   local summary_path="$1"
   node - \
     "$summary_path" \
-    "$REPO/docs/evidence/typescript-7-comparison-2026-09-15.json" \
     "$REPO/docs/typescript-7-migration-research.md" <<'NODE'
 const fs = require("node:fs");
-const path = require("node:path");
 
 const summaryPath = process.argv[2];
-const retainedSummaryPath = process.argv[3];
-const documentPath = process.argv[4];
+const documentPath = process.argv[3];
 const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
-const retainedSummary = JSON.parse(fs.readFileSync(retainedSummaryPath, "utf8"));
 const document = fs.readFileSync(documentPath, "utf8");
 const categoryCount = (paths, segment) =>
   paths.filter((file) => file.includes(`lib/${segment}/`)).length;
@@ -76,35 +105,6 @@ if (categoryTotal !== expected.textuallyChangedFileCount) {
   );
 }
 
-if (path.resolve(summaryPath) !== path.resolve(retainedSummaryPath)) {
-  const retained = retainedSummary.declarations;
-  const retainedExpected = {
-    baselineFileCount: retained?.baselineFileCount,
-    candidateFileCount: retained?.candidateFileCount,
-    textuallyChangedFileCount: retained?.textuallyChangedFileCount,
-    apiClientReact: retained?.changedFilesByPackage?.["api-client-react"],
-    apiZod: retained?.changedFilesByPackage?.["api-zod"],
-    db: retained?.changedFilesByPackage?.db,
-    other: retained?.changedFilesByPackage?.other,
-  };
-  const stale = Object.keys(expected).filter(
-    (name) => expected[name] !== retainedExpected[name],
-  );
-  if (stale.length > 0) {
-    throw new Error(
-      `Retained TypeScript migration summary ${retainedSummaryPath} is stale relative to ` +
-        `${summaryPath}.\nMismatched declaration totals:\n` +
-        stale
-          .map(
-            (name) =>
-              `  ${name}: retained=${JSON.stringify(retainedExpected[name])}, ` +
-              `current=${JSON.stringify(expected[name])}`,
-          )
-          .join("\n"),
-    );
-  }
-}
-
 const requiredLines = [
   `| Declaration file count | ${expected.baselineFileCount} | ${expected.candidateFileCount} |`,
   `| Declaration files with textual differences | baseline | ${expected.textuallyChangedFileCount} |`,
@@ -128,9 +128,166 @@ console.log(`TypeScript migration declaration counts match ${summaryPath}`);
 NODE
 }
 
+check_current_summary() {
+  local summary_path="$1"
+  local contract_report_path="${2:-$RETAINED_CONTRACT_REPORT}"
+  local output_dir
+  output_dir="$(dirname "$summary_path")"
+  "$REPO/scripts/node_modules/.bin/tsx" \
+    "$REPO/scripts/src/typescript-declaration-contract-evidence.mts" \
+    verify "$summary_path" "$contract_report_path"
+  node - \
+    "$summary_path" \
+    "$output_dir" \
+    "$contract_report_path" \
+    "$(git -C "$REPO" rev-parse HEAD)" \
+    "$(comparison_source_sha256 "$REPO")" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const summaryPath = process.argv[2];
+const output = process.argv[3];
+const reportPath = process.argv[4];
+const currentRevision = process.argv[5];
+const currentSourceSha256 = process.argv[6];
+const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
+const readJson = (name) =>
+  JSON.parse(fs.readFileSync(path.join(output, name), "utf8"));
+const readText = (name) => fs.readFileSync(path.join(output, name), "utf8").trim();
+const countFiles = (directory) => {
+  let count = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) count += countFiles(entryPath);
+    else if (entry.isFile()) count += 1;
+  }
+  return count;
+};
+const changedPaths = fs
+  .readFileSync(path.join(output, "declarations.diff"), "utf8")
+  .split(/\r?\n/)
+  .filter((line) => line.startsWith("diff -ruN "))
+  .map((line) => line.split(" ")[2]);
+const categoryCount = (segment) =>
+  changedPaths.filter((file) => file.includes(`/lib/${segment}/`)).length;
+const retained = fs.existsSync(reportPath)
+  ? JSON.parse(fs.readFileSync(reportPath, "utf8"))
+  : null;
+const contractReport = retained?.declarationContract ?? null;
+const unexplainedSemanticChanges = contractReport
+  ? contractReport.classificationTotals.unexplainedSemantic
+  : null;
+const approvedSemanticChanges = contractReport
+  ? contractReport.classificationTotals.approvedSemantic
+  : null;
+const formattingOnlyChanges = contractReport
+  ? contractReport.classificationTotals.formattingOnly
+  : null;
+
+const errors = [];
+if (summary.schemaVersion !== 1) errors.push("unsupported summary schema");
+if (
+  typeof summary.capturedAt !== "string" ||
+  Number.isNaN(Date.parse(summary.capturedAt))
+) {
+  errors.push("missing or invalid capture timestamp");
+}
+if (summary.sourceIdentity?.revision !== currentRevision) {
+  errors.push(
+    `source revision ${JSON.stringify(summary.sourceIdentity?.revision)} does not match current ${currentRevision}`,
+  );
+}
+if (summary.sourceIdentity?.bundleSha256 !== currentSourceSha256) {
+  errors.push("source bundle hash does not match the current comparison inputs");
+}
+if (
+  summary.compilers?.baseline !== "Version 6.0.3" ||
+  summary.compilers?.candidate !== "Version 7.0.2"
+) {
+  errors.push("compiler versions do not match the required TypeScript 6/7 pair");
+}
+
+const declarations = summary.declarations;
+const expected = {
+  baselineFileCount: countFiles(path.join(output, "typescript-6-declarations")),
+  candidateFileCount: countFiles(path.join(output, "typescript-7-declarations")),
+  textuallyChangedFileCount: changedPaths.length,
+  "api-client-react": categoryCount("api-client-react"),
+  "api-zod": categoryCount("api-zod"),
+  db: categoryCount("db"),
+  other:
+    changedPaths.length -
+    categoryCount("api-client-react") -
+    categoryCount("api-zod") -
+    categoryCount("db"),
+};
+for (const [name, value] of Object.entries(expected)) {
+  const actual =
+    name === "api-client-react" || name === "api-zod" || name === "db" || name === "other"
+      ? declarations?.changedFilesByPackage?.[name]
+      : declarations?.[name];
+  if (actual !== value) {
+    errors.push(`declaration ${name}=${JSON.stringify(actual)}; expected ${value}`);
+  }
+}
+if (
+  Object.values(expected).slice(3).reduce((total, count) => total + count, 0) !==
+  expected.textuallyChangedFileCount
+) {
+  errors.push("per-package declaration counts do not sum to the changed-file total");
+}
+
+if (
+  !contractReport ||
+  declarations?.contractComparison?.status !== contractReport.status ||
+  declarations.contractComparison?.approvedSemanticChanges !== approvedSemanticChanges ||
+  declarations.contractComparison?.formattingOnlyChanges !== formattingOnlyChanges ||
+  declarations.contractComparison?.changedFiles !== contractReport.classificationTotals.changedFiles ||
+  declarations.contractComparison?.unexplainedSemanticChanges !==
+    unexplainedSemanticChanges ||
+  contractReport.status !== "pass" ||
+  unexplainedSemanticChanges !== 0 ||
+  Number(readText("declaration-contract-comparison.exit-code")) !== 0
+) {
+  errors.push(
+    `declaration contract is not a clean pass (status=${JSON.stringify(contractReport?.status)}, ` +
+      `unexplainedSemanticChanges=${JSON.stringify(unexplainedSemanticChanges)})`,
+  );
+}
+
+if (errors.length > 0) {
+  throw new Error(
+    `Current TypeScript comparison summary ${summaryPath} failed validation:\n` +
+      errors.map((error) => `  - ${error}`).join("\n"),
+  );
+}
+console.log(
+  `Current TypeScript comparison summary validated against ${currentRevision} ` +
+    `(${currentSourceSha256})`,
+);
+NODE
+}
+
+if [[ "${1:-}" == "--source-bundle-sha256" ]]; then
+  comparison_source_sha256 "$REPO"
+  exit 0
+fi
+
 if [[ "${1:-}" == "--check-retained-summary" ]]; then
   SUMMARY_PATH="${2:-$REPO/docs/evidence/typescript-7-comparison-2026-09-15.json}"
   check_documented_declaration_counts "$(realpath -e "$SUMMARY_PATH")"
+  exit 0
+fi
+if [[ "${1:-}" == "--check-current-summary" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    printf 'Usage: %s --check-current-summary SUMMARY_PATH [CONTRACT_REPORT_PATH]\n' "$0" >&2
+    exit 2
+  fi
+  if [[ -n "${3:-}" ]]; then
+    check_current_summary "$(realpath -e "$2")" "$(realpath -e "$3")"
+  else
+    check_current_summary "$(realpath -e "$2")"
+  fi
   exit 0
 fi
 
@@ -165,26 +322,10 @@ trap cleanup EXIT
 rm -rf "$OUT"
 mkdir -p "$OUT" "$COPY" "$TOOLS"
 
-tar \
-  --exclude='./node_modules' \
-  --exclude='*/dist' \
-  --exclude='*/build' \
-  --exclude='*/test-results' \
-  --exclude='*/playwright-report' \
-  --exclude='*/screenshots' \
-  --exclude='*/attached_assets' \
-  -C "$REPO" -cf - \
-  package.json \
-  pnpm-lock.yaml \
-  pnpm-workspace.yaml \
-  tsconfig.json \
-  tsconfig.base.json \
-  lib \
-  artifacts \
-  scripts |
-  tar -C "$COPY" -xf -
+comparison_source_tar "$REPO" | tar -C "$COPY" -xf -
 
 ln -s "$REPO/node_modules" "$COPY/node_modules"
+comparison_source_sha256 "$COPY" >"$OUT/source-bundle-sha256.txt"
 npm install \
   --prefix "$TOOLS" \
   --ignore-scripts \
@@ -215,6 +356,7 @@ fi
 node --version >"$OUT/node.version"
 pnpm --version >"$OUT/pnpm.version"
 git -C "$REPO" rev-parse HEAD >"$OUT/source-revision.txt"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$OUT/captured-at.txt"
 uname -sm >"$OUT/platform.txt"
 getconf _NPROCESSORS_ONLN >"$OUT/reported-processors.txt"
 awk -F: '/model name/{gsub(/^ +/, "", $2); print $2; exit}' /proc/cpuinfo >"$OUT/cpu.txt"
@@ -389,13 +531,43 @@ const changedPaths = diffLines
 const categoryCount = (segment) =>
   changedPaths.filter((file) => file.includes(`/lib/${segment}/`)).length;
 const elapsed = {};
+const contractPath = path.join(
+  output,
+  "declaration-contract-report",
+  "declaration-contracts.json",
+);
+const contractReport = fs.existsSync(contractPath)
+  ? JSON.parse(fs.readFileSync(contractPath, "utf8"))
+  : null;
+const unexplainedSemanticChanges = contractReport
+  ? contractReport.categories.reduce(
+      (total, category) => total + category.unexplainedSemantic,
+      0,
+    )
+  : null;
+const approvedSemanticChanges = contractReport
+  ? contractReport.files.filter(
+      (file) => file.classification === "approved-semantic",
+    ).length
+  : null;
 
 for (const file of fs.readdirSync(output).filter((name) => name.endsWith(".elapsed-seconds"))) {
   elapsed[file.replace(".elapsed-seconds", "")] = Number(read(file));
 }
 
 const summary = {
-  sourceRevision: read("source-revision.txt"),
+  schemaVersion: 1,
+  capturedAt: read("captured-at.txt"),
+  comparisonCommand: "bash docs/evidence/reproduce-typescript-7-comparison.sh",
+  sourceIdentity: {
+    revision: read("source-revision.txt"),
+    bundleSha256: read("source-bundle-sha256.txt"),
+  },
+  environment: {
+    node: read("node.version"),
+    pnpm: read("pnpm.version"),
+    platform: read("platform.txt"),
+  },
   compilers: {
     baseline: read("typescript-6.version"),
     candidate: read("typescript-7.version"),
@@ -415,16 +587,16 @@ const summary = {
         categoryCount("api-zod") -
         categoryCount("db"),
     },
-    contractComparison: fs.existsSync(
-      path.join(output, "declaration-contract-report", "declaration-contracts.json"),
-    )
-      ? JSON.parse(
-          fs.readFileSync(
-            path.join(output, "declaration-contract-report", "declaration-contracts.json"),
-            "utf8",
-          ),
-        )
-      : null,
+    contractComparison: {
+      status: contractReport?.status ?? "not-generated",
+      changedFiles: contractReport?.files.length ?? null,
+      formattingOnlyChanges: contractReport?.categories.reduce(
+        (total, category) => total + category.formattingOnly,
+        0,
+      ) ?? null,
+      approvedSemanticChanges,
+      unexplainedSemanticChanges,
+    },
   },
   elapsedSeconds: elapsed,
 };
@@ -432,7 +604,19 @@ const summary = {
 fs.writeFileSync(path.join(output, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 NODE
 
-check_documented_declaration_counts "$OUT/summary.json"
+"$REPO/scripts/node_modules/.bin/tsx" \
+  "$REPO/scripts/src/typescript-declaration-contract-evidence.mts" \
+  create "$OUT/summary.json" \
+  "$CONTRACT_REPORT/declaration-contracts.json" \
+  "$OUT/typescript-7-declaration-contracts-current.json"
+
+check_current_summary "$OUT/summary.json" "$OUT/typescript-7-declaration-contracts-current.json"
+
+retained_report_tmp="$(mktemp "${RETAINED_CONTRACT_REPORT}.XXXXXX")"
+cp "$OUT/typescript-7-declaration-contracts-current.json" "$retained_report_tmp"
+mv -f "$retained_report_tmp" "$RETAINED_CONTRACT_REPORT"
+check_current_summary "$OUT/summary.json" "$RETAINED_CONTRACT_REPORT"
 
 printf 'Comparison evidence written to %s\n' "$OUT"
+printf 'Latest successful declaration contract report retained at %s\n' "$RETAINED_CONTRACT_REPORT"
 exit "$contract_comparison_status"

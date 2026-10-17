@@ -69,6 +69,12 @@ const report = (status: "healthy" | "warning" | "failing") => ({
     fullWindowObserved: false,
     expiresAt: "2030-03-10T12:05:00.000Z",
   },
+  syncPeerFrames: {
+    windowMs: 45_000,
+    exactSnapshotSkipped: 3,
+    partialSent: 2,
+    completeSent: 1,
+  },
 });
 
 afterEach(() => {
@@ -89,6 +95,10 @@ describe("DataHealthWorkspace sync health sentinel", () => {
     expect(screen.getByTestId("legacy-sync-readiness").textContent).toContain("zero accepted legacy writes");
     expect(screen.getByTestId("legacy-sync-readiness").textContent).toContain("not cutoff proof");
     expect(screen.getByTestId("legacy-sync-readiness").textContent).toContain("Evidence expires");
+    expect(screen.getByTestId("sync-peer-frames").textContent).toContain("Exact-snapshot updates skipped: 3");
+    expect(screen.getByTestId("sync-peer-frames").textContent).toContain("Partial frames sent: 2");
+    expect(screen.getByTestId("sync-peer-frames").textContent).toContain("Complete frames sent: 1");
+    expect(screen.getByTestId("sync-peer-frames").textContent).toContain("Current telemetry window: 45 seconds");
     await waitFor(() => expect(mocks.fetchSyncHealth).toHaveBeenCalledOnce());
   });
 

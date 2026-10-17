@@ -12,6 +12,9 @@ export interface AuditLogPage {
   logs: AuditLog[];
   /** Number of records in this page */
   count: number;
-  /** Opaque cursor limited to 200 characters */
+  /**
+     * Opaque cursor limited to 200 characters
+     * @nullable
+     */
   nextCursor: string | null;
 }

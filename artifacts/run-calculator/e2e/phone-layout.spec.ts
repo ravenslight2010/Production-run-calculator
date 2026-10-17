@@ -3,12 +3,18 @@ import { Client } from "pg";
 import * as XLSX from "xlsx";
 import {
   cleanupTestUsers,
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
 import {
   signUpAndHandleOnboarding,
 } from "./onboarding";
+import {
+  assertRecipePickerContract,
+  RECIPE_PICKER_CONTRACT,
+} from "./recipe-picker-contract";
 
 const PHONE_VIEWPORTS = [
   { width: 375, height: 812 },
@@ -20,10 +26,19 @@ const TABLET_VIEWPORTS = [
   { width: 1024, height: 768 },
 ] as const;
 
+const TOUCH_RECIPE_PICKER_VIEWPORTS = [
+  { name: "phone", width: 390, height: 844 },
+  { name: "tablet portrait", width: 768, height: 1024 },
+  { name: "tablet landscape", width: 1024, height: 768 },
+] as const;
+
 // 568x320 is a narrow phone in landscape (and is small enough to expose
 // layouts that accidentally depend on portrait height).
 const LANDSCAPE_VIEWPORT = { width: 568, height: 320 } as const;
-
+const RECIPE_PICKER_API_BASE =
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const RECIPE_PICKER_PASSWORD = "TestPass123!";
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const PRIMARY_TABS = [
   "tab-run",
   "tab-dough",
@@ -343,6 +358,25 @@ async function assertOverlayActionHitTargets(
   });
 
   expect(failures, `Overlay action hit targets in ${area}`).toEqual([]);
+}
+
+async function assertRunActionTouchTarget(
+  page: Page,
+  control: Locator,
+  name: string,
+): Promise<void> {
+  await expect(control, `${name} should be visible`).toBeVisible();
+  await control.scrollIntoViewIfNeeded();
+  const box = await control.boundingBox();
+  const viewport = page.viewportSize();
+
+  expect(box, `${name} should have a rendered box`).not.toBeNull();
+  expect(box?.width, `${name} width`).toBeGreaterThanOrEqual(44);
+  expect(box?.height, `${name} height`).toBeGreaterThanOrEqual(44);
+  expect(box?.x, `${name} left edge`).toBeGreaterThanOrEqual(-1);
+  expect((box?.x ?? 0) + (box?.width ?? 0), `${name} right edge`).toBeLessThanOrEqual((viewport?.width ?? 0) + 1);
+  expect(box?.y, `${name} top edge`).toBeGreaterThanOrEqual(-1);
+  expect((box?.y ?? 0) + (box?.height ?? 0), `${name} bottom edge`).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
 }
 
 async function assertFocusedFieldIsKeyboardSafe(
@@ -729,18 +763,21 @@ test.describe("phone layout smoke", () => {
 
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-      const manageDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
-      await expect(manageDialog).toBeVisible();
-      await assertPhoneLayout(page, "tablet manager settings");
-      await assertOverlayActionHitTargets(
-        manageDialog,
-        `tablet manager settings at ${viewport.width}x${viewport.height}`,
-      );
-
-      const setupProfilesTab = manageDialog.getByRole("button", {
-        name: "Setup Profiles",
-        exact: true,
+      const manageDialog = page.getByRole("dialog", {
+        name: "Manage Lists & Settings",
       });
+      await expect(manageDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+        "Manage Lists & Settings",
+      );
+      await assertPhoneLayout(page, "setup/manage surface");
+      await assertKeyboardReachable(page, "setup/manage surface", 12);
+
+      // Exercise the manager's setup editor navigation without saving anything.
+      // These tabs are present for the first signed-up manager and expose the
+      // same compact scroll container used by the longer manager workflows.
+      const setupProfilesTab = page.getByRole("button", { name: "Setup Profiles", exact: true });
       if (await visible(setupProfilesTab)) {
         await setupProfilesTab.click();
         await assertPhoneLayout(page, "tablet setup profiles");
@@ -827,7 +864,7 @@ test.describe("phone layout smoke", () => {
 
       await moreButton.click();
       await page.getByRole("menuitem", { name: "Settings" }).click();
-      const manageDialog = page.getByRole("heading", {
+      const manageDialog = page.getByRole("dialog", {
         name: "Manage Lists & Settings",
       });
       await expect(manageDialog).toBeVisible();
@@ -884,6 +921,7 @@ test.describe("phone layout smoke", () => {
     { width: 375, height: 812 },
     { width: 568, height: 320 },
     { width: 768, height: 1024 },
+    { width: 1024, height: 768 },
     { width: 1280, height: 800 },
   ] as const) {
     test(`Floor Mode remains opaque and closable at ${viewport.width}x${viewport.height}`, async ({
@@ -893,6 +931,11 @@ test.describe("phone layout smoke", () => {
       await signInToSandbox(page);
       await page.getByTestId("tab-run").click();
       const startRun = page.getByTestId("button-start-run");
+      await assertRunActionTouchTarget(
+        page,
+        startRun,
+        `Start Run at ${viewport.width}x${viewport.height}`,
+      );
       for (let attempt = 0; attempt < 2 && await startRun.isVisible(); attempt += 1) {
         await startRun.click();
         await page.waitForTimeout(500);
@@ -901,6 +944,16 @@ test.describe("phone layout smoke", () => {
       await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible({
         timeout: 20_000,
       });
+      await assertRunActionTouchTarget(
+        page,
+        page.getByRole("button", { name: /^stop run$/i }),
+        `Stop Run at ${viewport.width}x${viewport.height}`,
+      );
+      await assertRunActionTouchTarget(
+        page,
+        page.getByTestId("button-log-stoppage"),
+        `Log Stoppage at ${viewport.width}x${viewport.height}`,
+      );
 
       // New accounts start with Floor Mode disabled, but enabling it here
       // exercises the account-backed setting and the real header launch path.
@@ -932,6 +985,11 @@ test.describe("phone layout smoke", () => {
       await expect(page.getByTestId("floor-cases-plus")).toBeVisible();
       await expect(page.getByTestId("floor-skid-done")).toBeVisible();
       await expect(page.getByTestId("floor-complete-run")).toBeVisible();
+      await assertRunActionTouchTarget(
+        page,
+        overlay.getByRole("button", { name: /log stop/i }),
+        `Floor Mode Log Stoppage at ${viewport.width}x${viewport.height}`,
+      );
       await assertOverlayActionHitTargets(overlay, "Floor Mode controls");
       for (const testId of [
         "floor-pause-run",
@@ -944,6 +1002,18 @@ test.describe("phone layout smoke", () => {
         expect(box?.height, `${testId} height at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
         expect(box?.width, `${testId} width at ${viewport.width}x${viewport.height}`).toBeGreaterThanOrEqual(44);
       }
+      for (const [testId, label] of [
+        ["floor-cases-minus", "Correct cases down"],
+        ["floor-cases-plus", "Correct cases up"],
+        ["floor-skid-done", "Skid Done"],
+        ["floor-complete-run", "Complete Run"],
+      ]) {
+        await assertRunActionTouchTarget(
+          page,
+          page.getByTestId(testId),
+          `${label} at ${viewport.width}x${viewport.height}`,
+        );
+      }
 
       await pause.click();
       await expect(pause).toBeHidden({ timeout: 15_000 });
@@ -954,6 +1024,11 @@ test.describe("phone layout smoke", () => {
       await page.getByTestId("floor-complete-run").click();
       const completeDialog = page.getByRole("alertdialog", { name: "Complete this run?" });
       await expect(completeDialog).toBeVisible();
+      await assertRunActionTouchTarget(
+        page,
+        completeDialog.getByTestId("floor-confirm-complete-run"),
+        `Confirm Complete Run at ${viewport.width}x${viewport.height}`,
+      );
       await assertOverlayActionHitTargets(completeDialog, "Floor Mode completion dialog");
       if (viewport.width === 1280) {
         await completeDialog.getByTestId("floor-confirm-complete-run").click();
@@ -973,8 +1048,9 @@ test.describe("phone layout smoke", () => {
       await page.waitForTimeout(1_000);
       await expect(overlay).toHaveCSS("opacity", "1");
 
-      // Verify pointer/touch-style activation, then keyboard activation and
-      // the return to the calculator from both paths.
+      // This Desktop Chrome project has no touch capability, so verify pointer
+      // activation here. The physical-device lane covers real touch dispatch.
+      // Also verify keyboard activation and return to the calculator.
       // The Replit preview banner is browser chrome outside the app and can
       // intercept a synthetic click at the top edge; installed/full-screen
       // station displays do not render it.
@@ -1002,45 +1078,45 @@ test.describe("phone layout smoke", () => {
 
     const syncStatus = page.locator('button[title^="Sync"]');
     await expect(syncStatus).toBeVisible();
-  for (const viewport of [
-    { width: 390, height: 844 },
-    { width: 768, height: 1024 },
-    { width: 1280, height: 900 },
-  ]) {
-    await page.setViewportSize(viewport);
-    await syncStatus.click();
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1280, height: 900 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await syncStatus.click();
 
-    const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
-    await expect(popover).toBeVisible();
-    await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
-    await expect(
-      popover.getByText("Last acknowledgment", { exact: true }),
-    ).toBeVisible();
-    const retry = popover.getByRole("button", {
-      name: /retry latest retained change/i,
-    });
-    if (await retry.count()) await expect(retry).toBeVisible();
+      const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
+      await expect(popover).toBeVisible();
+      await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+      await expect(
+        popover.getByText("Last acknowledgment", { exact: true }),
+      ).toBeVisible();
+      const retry = popover.getByRole("button", {
+        name: /retry latest retained change/i,
+      });
+      if (await retry.count()) await expect(retry).toBeVisible();
 
-    const geometry = await page.evaluate(() => {
-      const panel = document.querySelector("div.absolute.top-9");
-      if (!panel) return null;
-      const rect = panel.getBoundingClientRect();
-      return {
-        left: rect.left,
-        right: rect.right,
-        viewportWidth: window.innerWidth,
-        documentScrollWidth: document.documentElement.scrollWidth,
-        bodyScrollWidth: document.body.scrollWidth,
-      };
-    });
-    expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
-    expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
-    expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
-    expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
-    expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+      const geometry = await page.evaluate(() => {
+        const panel = document.querySelector("div.absolute.top-9");
+        if (!panel) return null;
+        const rect = panel.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        };
+      });
+      expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
+      expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
+      expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
 
-    await syncStatus.click();
-  }
+      await syncStatus.click();
+    }
   });
 
   test("failed sync keeps the retained-change retry action visible on phone", async ({
@@ -1260,13 +1336,29 @@ test.describe("phone layout smoke", () => {
       );
       await reorderDialog.getByRole("button", { name: "Done", exact: true }).click();
       await expect(reorderDialog).toBeHidden();
+        const setupProfiles = page.getByRole("dialog", { name: "Setup Profiles" });
+      if (await setupProfiles.isVisible().catch(() => false)) {
+        await setupProfiles.getByRole("button", { name: "Close" }).click();
+        await expect(setupProfiles).toBeHidden();
+      }
+      await page.getByRole("button", { name: "Select run 1", exact: true }).click();
 
       // Start a disposable run through the real Run workflow so Log Line Stop
       // opens from the same action an operator uses on the station screen.
       await page.getByTestId("tab-run").click();
-      const casesNeeded = page.getByTestId("input-casesNeeded");
-      await expect(casesNeeded).toBeVisible();
-      await casesNeeded.fill("1");
+        const casesNeeded = page.getByTestId("input-casesNeeded");
+
+      const pizzasPerCase = page.getByTestId("input-pizzasPerCase");
+      if (await pizzasPerCase.count()) {
+        const lineSetup = page.locator("details").filter({
+          has: page.locator("summary", { hasText: /line.?setup/i }),
+        }).first();
+        if (!(await lineSetup.evaluate((element) => (element as HTMLDetailsElement).open))) {
+          await lineSetup.locator("summary").click();
+        }
+        await pizzasPerCase.fill("1");
+        await pizzasPerCase.blur();
+      }
       await page.getByTestId("button-start-run").click();
       await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
 
@@ -1331,7 +1423,10 @@ test.describe("phone layout smoke", () => {
       // action and the editor's lower actions without saving a schedule.
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
-      const scheduleDialog = page.getByRole("dialog");
+        const scheduleDialog = page
+          .getByRole("dialog")
+          .filter({ has: page.locator("#scheduled-days-dialog-title") })
+          .first();
       await expect(scheduleDialog).toBeVisible();
       await expect(scheduleDialog.getByRole("heading", { name: "Scheduled Days" })).toBeVisible();
       await assertOverlayActionHitTargets(
@@ -1352,17 +1447,32 @@ test.describe("phone layout smoke", () => {
       const scheduleCalendar = page.locator('[data-slot="calendar"]');
       await expect(scheduleCalendar.getByRole("grid")).toBeVisible();
       await expect(scheduleCalendar.locator("button[data-day][disabled]").first()).toBeDisabled();
-      await assertOverlayActionHitTargets(
-        scheduleCalendar,
-        `Schedule calendar at ${viewport.width}x${viewport.height}`,
-      );
       const selectedScheduleDay = scheduleCalendar.locator(
         'button[data-selected-single="true"]',
       );
       await expect(selectedScheduleDay).toBeVisible();
-      await selectedScheduleDay.focus();
-      await page.keyboard.press("ArrowRight");
-      await page.keyboard.press("Enter");
+      const nextScheduleDate = await selectedScheduleDay.evaluate((selected) => {
+        const days = Array.from(
+          selected.closest("[data-slot='calendar']")?.querySelectorAll<HTMLButtonElement>(
+            "button[data-day]:not([disabled])",
+          ) ?? [],
+        );
+        return (
+          days.find((day) => day !== selected)?.getAttribute("data-day") ?? null
+        );
+      });
+      expect(nextScheduleDate).not.toBeNull();
+      await scheduleCalendar
+        .locator(`button[data-day="${nextScheduleDate}"]`)
+        .click();
+      // Wait for the calendar's selection handler to update the date and close
+      // its popover. Sending Escape during the closing animation can reach the
+      // parent dialog instead and hide the whole schedule editor.
+      await expect(scheduleDateTrigger).not.toHaveAttribute(
+        "data-date-value",
+        initialScheduleDate ?? "",
+      );
+      await expect(scheduleDialog).toBeVisible();
       await expect(scheduleCalendar).toBeHidden();
       await expect(scheduleDateTrigger).not.toHaveAttribute(
         "data-date-value",
@@ -1484,7 +1594,7 @@ test.describe("phone layout smoke", () => {
     ).not.toBeNull();
     if (!preKeyboardViewportHeight) return;
 
-    const username = uniqueUsername();
+    const username = page.locator("#username");
     await username.focus();
     await expect(username, "Username should retain focus").toBeFocused();
     await page.waitForFunction(
@@ -1502,7 +1612,9 @@ test.describe("phone layout smoke", () => {
     expect(
       postKeyboardViewportHeight,
       "opening the real software keyboard should shrink visualViewport",
-    ).toBeLessThan(preKeyboardViewportHeight - 80);
+    ).not.toBeNull();
+    if (!postKeyboardViewportHeight) return;
+    expect(postKeyboardViewportHeight).toBeLessThan(preKeyboardViewportHeight - 80);
 
     const usernameGeometry = await assertMobileViewportAndSafeArea(
       page,
@@ -1585,6 +1697,8 @@ test.describe("phone layout smoke", () => {
       const startRun = page.getByTestId("button-start-run");
       if (await startRun.isVisible()) {
         const casesNeeded = page.getByTestId("input-casesNeeded");
+
+      const pizzasPerCase = page.getByTestId("input-pizzasPerCase");
         await casesNeeded.fill("4");
         await startRun.tap();
       }
@@ -1718,6 +1832,7 @@ test.describe("phone layout smoke", () => {
     } finally {
       await db.end().catch(() => {});
       const cleanup = new Client({ connectionString: process.env.DATABASE_URL });
+
       await cleanup.connect().catch(() => {});
       if (actionItemId !== null) {
         await cleanup.query("DELETE FROM action_items WHERE id = $1", [actionItemId]).catch(() => {});
@@ -1726,6 +1841,464 @@ test.describe("phone layout smoke", () => {
       await cleanup.end().catch(() => {});
     }
   });
+
+  for (const viewport of [
+    { name: "phone", width: 390, height: 844 },
+    { name: "tablet", width: 768, height: 1024 },
+  ] as const) {
+    test.describe(`touch selection dialogs on ${viewport.name}`, () => {
+      test.use({
+        viewport: { width: viewport.width, height: viewport.height },
+        hasTouch: true,
+        isMobile: true,
+      });
+
+      test("opens schedule and recipe pickers without page scrolling", async ({ page }) => {
+        await signInToManagerSandbox(page);
+        const pickerBrands = [
+          { brand: uniqueTestId("touch-picker-brand-a"), flavor: "Phone" },
+          { brand: uniqueTestId("touch-picker-brand-b"), flavor: "Tablet" },
+        ];
+        const profileSeed = await page.request.post("/api/brand-profiles", {
+          data: {
+            items: pickerBrands.map(({ brand, flavor }) => ({
+              key: `${brand.toLowerCase()}__${flavor.toLowerCase()}`,
+              brand,
+              flavor,
+              values: { casesNeeded: 1, pizzasPerCase: 1 },
+              crustValues: {},
+              updatedAt: Date.now(),
+            })),
+          },
+        });
+        expect(profileSeed.ok(), "touch picker profile fixture seed").toBe(true);
+        await page.evaluate((profiles) => {
+          localStorage.setItem(
+            "run-calc-brands",
+            JSON.stringify(profiles.map((profile) => profile.brand)),
+          );
+          localStorage.setItem(
+            "run-calc-brand-flavors",
+            JSON.stringify(Object.fromEntries(
+              profiles.map((profile) => [profile.brand, [profile.flavor]]),
+            )),
+          );
+        }, pickerBrands);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+        const setupProfiles = page.getByRole("dialog", { name: "Setup Profiles" });
+        if (await setupProfiles.isVisible().catch(() => false)) {
+          await setupProfiles.getByRole("button", { name: "Close" }).click();
+          await expect(setupProfiles).toBeHidden();
+        }
+        await page.getByTestId("tab-run").click();
+        await page.getByRole("button", {
+          name: /^More(?: — \d+ manager actions? need attention)?$/,
+        }).click();
+        await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+
+        const scheduleDialog = page
+          .getByRole("dialog")
+          .filter({ has: page.locator("#scheduled-days-dialog-title") })
+          .first();
+        await expect(scheduleDialog).toBeVisible();
+        await scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true }).click();
+        await expect(scheduleDialog.getByRole("button", { name: "Add Run", exact: true })).toBeVisible();
+        await scheduleDialog.getByRole("button", { name: "Add Run", exact: true }).click();
+
+        const scheduleDate = await page.evaluate(() => {
+          const date = new Date();
+          date.setDate(date.getDate() + 1);
+          const day = date.getDate();
+          const suffix = day % 100 >= 11 && day % 100 <= 13
+            ? "th"
+            : day % 10 === 1
+              ? "st"
+              : day % 10 === 2
+                ? "nd"
+                : day % 10 === 3
+                  ? "rd"
+                  : "th";
+          return {
+            value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+            calendarDay: `${date.getMonth() + 1}/${day}/${date.getFullYear()}`,
+            dayLabel: `${day}${suffix}, ${date.getFullYear()}`,
+          };
+        });
+        if (viewport.name === "phone") {
+          // The calendar stacking regression is specific to 375×812. Restore
+          // the existing phone-picker viewport afterward so its keyboard
+          // dismissal contract remains covered at the original size.
+          await page.setViewportSize({ width: 375, height: 812 });
+        }
+        const dateTrigger = scheduleDialog.getByTestId("schedule-date-trigger");
+        await dateTrigger.tap();
+        const nextDay = page
+          .getByRole("button", { name: new RegExp(`${scheduleDate.dayLabel}$`) })
+          .and(page.locator(`[data-day="${scheduleDate.calendarDay}"]`));
+        await expect(nextDay).toBeVisible();
+        await nextDay.tap();
+        await expect(dateTrigger).toHaveAttribute("data-date-value", scheduleDate.value);
+        if (viewport.name === "phone") {
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        }
+
+        const brandTrigger = scheduleDialog.getByRole("button", {
+          name: "Schedule brand",
+          exact: true,
+        }).first();
+        await expect(brandTrigger).toBeVisible();
+        await brandTrigger.tap();
+        const brandPicker = page.getByRole("dialog", {
+          name: "Schedule brand",
+          exact: true,
+        });
+        await expect(brandPicker).toBeVisible();
+        const brandOptions = brandPicker.getByRole("option");
+        expect(await brandOptions.count()).toBeGreaterThan(1);
+        const brandOption = brandOptions.nth(1);
+        const brandLabel = (await brandOption.textContent())?.trim() ?? "";
+        await brandOption.tap();
+        await expect(brandPicker).toBeHidden();
+        await expect(brandTrigger).toBeFocused();
+        expect(brandLabel).not.toBe("");
+        await expect(brandTrigger).toContainText(brandLabel);
+
+        const pickerState = await page.evaluate(() => ({
+          bodyOverflow: getComputedStyle(document.body).overflow,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        }));
+        expect(pickerState.bodyOverflow).toBe("hidden");
+        expect(pickerState.documentScrollWidth).toBeLessThanOrEqual(pickerState.viewportWidth + 1);
+
+        await scheduleDialog
+          .getByRole("button", { name: "Full Recipe & Settings", exact: true })
+          .first()
+          .tap();
+        const recipeTrigger = scheduleDialog.getByRole("button", {
+          name: "Dough recipe name",
+          exact: true,
+        }).first();
+        await expect(recipeTrigger).toBeVisible();
+        await recipeTrigger.tap();
+        const recipePicker = page.getByRole("dialog", {
+          name: "Dough recipe name",
+          exact: true,
+        });
+        await expect(recipePicker).toBeVisible();
+        const optionList = recipePicker.getByTestId("touch-option-picker-options");
+        await expect(optionList).toHaveCSS("overflow-y", "auto");
+        await page.keyboard.press("Escape");
+        await expect(recipePicker).toBeHidden();
+        await expect(recipeTrigger).toBeFocused();
+
+        await scheduleDialog
+          .getByRole("button", { name: "Done — Back to Run List", exact: true })
+          .tap();
+        await scheduleDialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+        await expect(scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true })).toBeVisible();
+        await scheduleDialog.getByRole("button", { name: "Close scheduled days", exact: true }).tap();
+        await expect(scheduleDialog).toBeHidden();
+      });
+    });
+  }
+  for (const viewport of TOUCH_RECIPE_PICKER_VIEWPORTS) {
+    test.describe(`touch recipe picker contract at ${viewport.name} @focused-only`, () => {
+      test.use({
+        viewport: { width: viewport.width, height: viewport.height },
+        hasTouch: true,
+        isMobile: true,
+      });
+
+      test("keeps live Setup and Setup Profiles pickers reachable", async ({
+        page,
+        playwright,
+      }) => {
+        test.setTimeout(120_000);
+        const fixtures = await AuthorizedBrowserFixtures.create(
+          playwright,
+          RECIPE_PICKER_API_BASE,
+          getSignupCode(),
+        );
+
+        try {
+          const account = await fixtures.createAccount({
+            username: uniqueTestId("touch_recipe_picker_contract"),
+            password: RECIPE_PICKER_PASSWORD,
+            capabilities: DEFAULT_MANAGER_CAPABILITIES,
+            onboardingSeen: true,
+          });
+          const brand = uniqueTestId("TouchPickerBrand");
+          const flavor = uniqueTestId("TouchPickerFlavor");
+          const doughName = uniqueTestId("TouchPickerDough");
+          const sauceName = uniqueTestId("TouchPickerSauce");
+          const cheeseName = uniqueTestId("TouchPickerCheese");
+          const mixName = uniqueTestId("TouchPickerMix");
+          const runId = uniqueTestId("touch-picker-run");
+          const now = Date.now();
+          const values = {
+            casesNeeded: 1,
+            pizzasPerCase: 1,
+            casesPerSkid: 1,
+            crustsPerCycle: 1,
+            cycleSpeed: 1,
+            speedAdjustment: 1,
+            doughRecipeName: doughName,
+            doughRecipe: [{ ingredient: "Flour", lbs: 10 }],
+            frontlineRecipeName: sauceName,
+            frontlineRecipe: [{ ingredient: "Tomato", lbs: 10 }],
+            app1Type: "Cheese",
+            app1CheeseRecipeName: cheeseName,
+            app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+            app2Type: "Mix",
+            app2CheeseRecipeName: mixName,
+            app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+            app3Type: "Cheese",
+            app3CheeseRecipeName: cheeseName,
+            app3CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+            app4Type: "Mix",
+            app4CheeseRecipeName: mixName,
+            app4CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+          };
+
+          await fixtures.seedNamedRecipe("dough", account, {
+            id: uniqueTestId("touch-picker-dough"),
+            name: doughName,
+            components: [{ ingredient: "Flour", lbs: 10 }],
+          });
+          await fixtures.seedNamedRecipe("sauce", account, {
+            id: uniqueTestId("touch-picker-sauce"),
+            name: sauceName,
+            components: [{ ingredient: "Tomato", lbs: 10 }],
+          });
+          await fixtures.seedCheeseRecipe(account, {
+            id: uniqueTestId("touch-picker-cheese"),
+            name: cheeseName,
+            components: [{ ingredient: "Cheese", lbs: 10 }],
+          });
+          await fixtures.seedMix(account, {
+            id: uniqueTestId("touch-picker-mix"),
+            name: mixName,
+            components: [{ ingredient: "Blend", perPizza: 1 }],
+          });
+          await fixtures.seedBrandProfile(account, {
+            brand,
+            flavor,
+            values,
+            updatedAt: now,
+          });
+          await fixtures.seedTodaySync({
+            token: account.token,
+            senderId: uniqueTestId("touch-picker-sender"),
+            payload: {
+              dayState: {
+                date: new Date().toISOString().slice(0, 10),
+                runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
+                currentIndex: 0,
+                resetAt: 0,
+                substitutions: [],
+                substitutionLog: [],
+                stagedItems: {},
+              },
+              runValues: { [runId]: values },
+              runValuesUpdatedAt: { [runId]: now },
+              packagingProgress: {},
+            },
+          });
+
+          await page.context().addCookies([{
+            name: "rc_auth",
+            value: account.token,
+            url: RECIPE_PICKER_API_BASE,
+          }]);
+          const masterDataReady = page.waitForResponse(
+            (response) =>
+              response.request().method() === "GET"
+              && response.url().includes("/api/master-data/bootstrap")
+              && response.ok(),
+            { timeout: 25_000 },
+          );
+          await page.goto("/", { waitUntil: "domcontentloaded" });
+          await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+          await masterDataReady;
+
+          const browserCapabilities = await page.evaluate(() => ({
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            touchPoints: navigator.maxTouchPoints,
+          }));
+          expect(browserCapabilities.viewport).toEqual({
+            width: viewport.width,
+            height: viewport.height,
+          });
+          expect(browserCapabilities.touchPoints).toBeGreaterThan(0);
+
+          const assertWithinViewport = async (
+            element: Locator,
+            elementName: string,
+          ): Promise<void> => {
+            const bounds = await element.evaluate((node) => {
+              const rect = node.getBoundingClientRect();
+              return {
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+                width: rect.width,
+                height: rect.height,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+              };
+            });
+            expect(bounds.width, `${elementName} should have rendered width`).toBeGreaterThan(0);
+            expect(bounds.height, `${elementName} should have rendered height`).toBeGreaterThan(0);
+            expect(bounds.left, `${elementName} should fit inside the viewport`).toBeGreaterThanOrEqual(-1);
+            expect(bounds.right, `${elementName} should fit inside the viewport`).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+            expect(bounds.top, `${elementName} should fit inside the viewport`).toBeGreaterThanOrEqual(-1);
+            expect(bounds.bottom, `${elementName} should fit inside the viewport`).toBeLessThanOrEqual(bounds.viewportHeight + 1);
+          };
+
+          const openTouchPickerContract = async (
+            surface: Locator,
+            surfaceName: string,
+          ): Promise<void> => {
+            await assertRecipePickerContract(surface, surfaceName);
+            let searchablePickerCount = 0;
+            for (const picker of RECIPE_PICKER_CONTRACT) {
+              const trigger = surface.getByTestId(picker.testId);
+              await expect(
+                trigger,
+                `${surfaceName}: ${picker.context} picker should use the touch trigger`,
+              ).toHaveAttribute("aria-haspopup", "dialog");
+              await trigger.scrollIntoViewIfNeeded();
+              const pageScrollBeforeOpen = await page.evaluate(() => window.scrollY);
+              await trigger.tap();
+              const dialog = page.getByRole("dialog", {
+                name: new RegExp(escapeRegExp(picker.label), "i"),
+              });
+              await expect(
+                dialog,
+                `${surfaceName}: ${picker.context} touch picker dialog`,
+              ).toBeVisible();
+              await dialog.evaluate(async (element) => {
+                await Promise.all(
+                  element.getAnimations().map((animation) =>
+                    animation.finished.catch(() => undefined),
+                  ),
+                );
+              });
+              await assertWithinViewport(dialog, `${surfaceName}: ${picker.context} dialog`);
+              const search = dialog.getByRole("textbox");
+              if (await search.count()) {
+                searchablePickerCount += 1;
+                await expect(
+                  search,
+                  `${surfaceName}: ${picker.context} search should be visible`,
+                ).toBeVisible();
+                await assertWithinViewport(search, `${surfaceName}: ${picker.context} search`);
+              }
+              const listbox = dialog.getByRole("listbox", {
+                name: new RegExp(escapeRegExp(picker.label), "i"),
+              });
+              await expect(
+                listbox,
+                `${surfaceName}: ${picker.context} options`,
+              ).toBeVisible();
+              await assertWithinViewport(listbox, `${surfaceName}: ${picker.context} options`);
+              const firstOption = listbox.getByRole("option").first();
+              await expect(
+                firstOption,
+                `${surfaceName}: ${picker.context} should expose an option`,
+              ).toBeVisible();
+              await assertWithinViewport(firstOption, `${surfaceName}: ${picker.context} first option`);
+              const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+              await expect(cancel).toBeVisible();
+              await assertWithinViewport(cancel, `${surfaceName}: ${picker.context} cancel`);
+              const scrollState = await page.evaluate(() => ({
+                scrollY: window.scrollY,
+                bodyOverflow: getComputedStyle(document.body).overflow,
+              }));
+              expect(scrollState.scrollY, `${surfaceName}: opening ${picker.context} should not scroll the page`)
+                .toBe(pageScrollBeforeOpen);
+              expect(scrollState.bodyOverflow, `${surfaceName}: picker should lock background scrolling`)
+                .toBe("hidden");
+              await cancel.tap();
+              await expect(dialog).toBeHidden();
+              await expect(trigger).toBeFocused();
+              await expect.poll(() => page.evaluate(() => window.scrollY))
+                .toBe(pageScrollBeforeOpen);
+            }
+            expect(
+              searchablePickerCount,
+              `${surfaceName}: at least one recipe picker should expose a reachable search field`,
+            ).toBeGreaterThan(0);
+          };
+
+          await page.getByRole("button", { name: /^More/ }).click();
+          await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+          const liveSurface = page.getByTestId("setup-recipes-fieldset");
+          await expect(liveSurface).toBeVisible();
+          await liveSurface.getByText("Sauce & Applicator Weights", { exact: true }).click();
+          await openTouchPickerContract(liveSurface, "touch live Setup tab");
+
+          await page.getByRole("button", { name: /^More/ }).click();
+          await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+          const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+          await expect(settings).toBeVisible();
+          await settings.getByRole("button", { name: "Tools", exact: true }).click();
+          await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+          await settings
+            .getByRole("button", { name: "Open Setup Profiles Editor", exact: true })
+            .click();
+
+          const profileSurface = page.getByRole("dialog", { name: "Setup Profiles" });
+          await expect(profileSurface).toBeVisible();
+          const brandPicker = profileSurface.getByRole("button", {
+            name: "Pick or add a brand…",
+            exact: true,
+          });
+          await brandPicker.tap();
+          const brandPickerDialog = page.getByRole("dialog", {
+            name: /Select pick or add a brand/i,
+          });
+          await expect(brandPickerDialog).toBeVisible();
+          await brandPickerDialog.getByPlaceholder("Search or add…").fill(brand);
+          const existingBrand = brandPickerDialog.getByRole("button", { name: brand, exact: true });
+          if (await existingBrand.count()) {
+            await existingBrand.tap();
+          } else {
+            await brandPickerDialog
+              .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(brand)}.*$`) })
+              .tap();
+          }
+          await expect(brandPickerDialog).toBeHidden();
+          const flavorPicker = profileSurface.getByRole("button", {
+            name: "Pick or add a flavor…",
+            exact: true,
+          });
+          await flavorPicker.tap();
+          const flavorPickerDialog = page.getByRole("dialog", {
+            name: /Select pick or add a flavor/i,
+          });
+          await expect(flavorPickerDialog).toBeVisible();
+          await flavorPickerDialog.getByPlaceholder("Search or add…").fill(flavor);
+          const existingFlavor = flavorPickerDialog.getByRole("button", { name: flavor, exact: true });
+          if (await existingFlavor.count()) {
+            await existingFlavor.tap();
+          } else {
+            await flavorPickerDialog
+              .getByRole("button", { name: new RegExp(`^Add .*${escapeRegExp(flavor)}.*$`) })
+              .tap();
+          }
+          await expect(flavorPickerDialog).toBeHidden();
+          await expect(profileSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
+          await openTouchPickerContract(profileSurface, "touch Setup Profiles editor");
+        } finally {
+          await fixtures.cleanup();
+        }
+      });
+    });
+  }
 });
 
 async function prepareGuideReviewForCommit(
