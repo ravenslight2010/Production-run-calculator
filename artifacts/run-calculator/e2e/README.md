@@ -187,6 +187,23 @@ E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
   pnpm --filter @workspace/run-calculator run test:e2e:webkit
 ```
 
+Run the focused Safari-emulated recipe-picker journey across desktop, phone,
+tablet portrait, and tablet landscape:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:recipe-picker:webkit
+```
+
+The command creates a fresh disposable local PostgreSQL database and starts local
+API/web servers through the existing isolated-browser runner. It requires the
+local PostgreSQL runtime; it does not use the configured application database.
+The spec also requires an explicitly disposable database name if invoked directly.
+
+This isolated journey exercises the shared IngredientSelect and TypeDropdown
+through Setup Profiles and live Setup, including selection, add/clear behavior,
+accessible labels, and touch-dialog focus restoration. The four WebKit projects
+are browser emulations; they do not provide physical iOS Safari evidence.
+
 WebKit is intentionally not included by `playwright.config.ts` and does not
 inherit `global-setup.ts`. It is a release signal for the highest-risk
 cross-browser journeys, not a duplicate of every Chromium test. The standard

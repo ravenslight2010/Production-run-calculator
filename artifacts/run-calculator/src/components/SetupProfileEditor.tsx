@@ -757,6 +757,7 @@ export default function SetupProfileEditor({
         <div className="border-t border-border/60" aria-hidden="true" />
         <TypeDropdown
           label={APPLICATOR_LABELS[app]}
+          testId={app === 1 ? "setup-profile-picker-app-1-type" : undefined}
           {...applicatorTypeHandlers(app)}
           options={ingredientTypes}
           onAddOption={onAddIngredientType}

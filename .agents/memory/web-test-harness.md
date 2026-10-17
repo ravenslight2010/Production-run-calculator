@@ -114,6 +114,22 @@ still pending before reload, assert the original `startedAt` immediately after
 reload, and compare post-release state with a snapshot taken before release.
 Pause/resume may adjust `startedAt` to exclude paused time.
 
+## Current-day fixtures after interrupted browser runs
+
+For a journey that assumes one current-day run, delete the disposable live
+day-state row under the fixture lock before seeding it, as well as cleaning it
+up afterward. The sync merge is additive, so a prior interrupted test can leave
+old runs in the same date row even when the new account and profile are unique.
+
+**Why:** A fresh account does not imply a fresh facility day-state row; that row
+is shared across fixture users and can survive when a browser process is
+interrupted before its `finally` cleanup.
+
+**How to apply:** In approved disposable-database browser tests that seed
+`today` and assert the selected run, acquire the shared fixture lock, remove the
+current live date row, then write the fixture snapshot and retain normal
+`finally` cleanup. Never do this against a shared or production database.
+
 ## Same-origin request diagnostics
 
 **Rule:** Determine cross-origin behavior from the request URL and page origin,

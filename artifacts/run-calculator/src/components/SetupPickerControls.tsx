@@ -281,7 +281,7 @@ export function TypeDropdown({
           ref={triggerRef}
           type="button"
           onClick={openDropdown}
-          aria-label={ariaLabel}
+          aria-label={ariaLabel ?? label}
           data-testid={testId}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >

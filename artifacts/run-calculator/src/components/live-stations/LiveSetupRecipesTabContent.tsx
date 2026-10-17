@@ -1049,6 +1049,7 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                       <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label="Applicator 1"
+                        testId="live-setup-picker-app-1-type"
                         value={v.app1Type}
                         onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app1BatchLbs"); } }}
                         options={ingredientTypeOptions}
