@@ -20,3 +20,9 @@ Keep Vite PWA's `registerType: "prompt"` and never let update detection itself r
 **Why:** The old shell can encounter its stale Home failure before the Home effect reports any safety state. Treating that missing report as safe would be unsafe; treating it as permanently unsafe prevents the intended recovery. A narrowly scoped proof from both persisted and authoritative current-day state resolves that gap without making recovery available during active work.
 
 **How to apply:** Keep the pre-Home proof limited to state that can exist before Home mounts, fail closed on uncertainty, and retain the existing Home blockers and idle timing as the normal policy.
+
+**Installed-app update recovery:** The user reported that many refreshes failed to update the PWA and clearing site data finally worked. They approved repairing the complete data-safe update path, not just adding a manual update button.
+
+**Why:** Ordinary refresh is not sufficient evidence that an installed app has entered the new build. Clearing site data can destroy unsynced operational work.
+
+**How to apply:** Verify a genuine old-to-new build handoff and persistence survival. Do not recommend blanket site-data clearing as the standard remedy or infer the precise cache/lifecycle defect from this report alone.
