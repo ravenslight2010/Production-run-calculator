@@ -1,5 +1,6 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { setAppShellCacheHeaders } from "./lib/appShellCache";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -135,10 +136,14 @@ app.use("/api", router);
 if (process.env.NODE_ENV === "production") {
   const WEB_DIST = path.resolve(process.cwd(), "artifacts/run-calculator/dist/public");
   if (existsSync(WEB_DIST)) {
-    app.use(express.static(WEB_DIST, { index: "index.html" }));
+    app.use(express.static(WEB_DIST, {
+      index: "index.html",
+      setHeaders: setAppShellCacheHeaders,
+    }));
     // SPA catch-all: any non-API, non-asset request serves index.html so client-side
     // routing works. Must come AFTER the /api router so API routes are never shadowed.
     app.get("/{*splat}", (req: Request, res: Response) => {
+      res.setHeader("Cache-Control", "no-store");
       res.sendFile(path.join(WEB_DIST, "index.html"));
     });
   }

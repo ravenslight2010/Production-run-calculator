@@ -24,7 +24,7 @@ import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import { SignInPage, SignUpPage, InvitationPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
-import { updateAndReload } from "@/pwaUpdateRecovery";
+import { claimStaleAssetRecoveryAttempt } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { Loader2 } from "lucide-react";
 import { recordPerformance } from "./performanceDiagnostics";
@@ -40,6 +40,8 @@ import {
   subscribeAutomaticUpdateReloadSafety,
 } from "./updateReloadSafety";
 import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
+import { createUpdateCoordinator, type UpdateState } from "./pwaUpdateCoordinator";
+import { AppUpdateControl } from "./components/AppUpdateControl";
 
 const queryClient = new QueryClient();
 registerMasterDataQueryClient(queryClient);
@@ -179,7 +181,7 @@ function AppRoutes() {
 }
 
 type AppUpdateContextValue = {
-  updateAndReload: (canReload?: () => boolean) => Promise<void>;
+  updateAndReload: (canReload?: () => boolean, verifyBeforeReload?: () => Promise<boolean>) => Promise<void>;
   scheduleSafeIdleRecovery: (
     safeAtFailure: boolean,
     recover: (canReload: () => boolean) => void | Promise<void>,
@@ -189,10 +191,22 @@ type AppUpdateContextValue = {
 const AppUpdateContext = createContext<AppUpdateContextValue | null>(null);
 
 function AppUpdatePrompt({ children }: { children: ReactNode }) {
-  const stopUpdateChecksRef = useRef<(() => void) | undefined>(undefined);
   const stopUpdateWatchRef = useRef<(() => void) | undefined>(undefined);
   const registrationRef = useRef<ServiceWorkerRegistration | undefined>(undefined);
   const [activatedUpdateReady, setActivatedUpdateReady] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState>({ phase: "unchecked", running: WEB_BUILD_ID });
+  const coordinatorRef = useRef<ReturnType<typeof createUpdateCoordinator> | null>(null);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = createUpdateCoordinator({
+      registration: () => registrationRef.current,
+      safe: getAutomaticUpdateReloadSafety,
+      reload: () => window.location.reload(),
+      changed: setUpdateState,
+    });
+  }
+  const coordinator = coordinatorRef.current;
+  const updateAvailable = Boolean(updateState.target && updateState.target !== WEB_BUILD_ID
+    && ["ready", "blocked", "updating"].includes(updateState.phase));
   const calculatorSafe = useSyncExternalStore(
     subscribeAutomaticUpdateReloadSafety,
     getAutomaticUpdateReloadSafety,
@@ -202,18 +216,13 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const updateIdleRef = useRef(false);
   const automaticReloadGenerationRef = useRef(0);
   const automaticReloadStartedRef = useRef(false);
-  const workerReloadIntentRef = useRef<(() => boolean) | null>(null);
   const onRegisteredSW = useCallback(
     (
       _serviceWorkerUrl: string,
       registration: ServiceWorkerRegistration | undefined,
     ) => {
-      stopUpdateChecksRef.current?.();
       stopUpdateWatchRef.current?.();
       registrationRef.current = registration;
-      stopUpdateChecksRef.current = registration
-        ? startServiceWorkerUpdateChecks(registration)
-        : undefined;
       if (!registration) return;
 
       let installingWorker: ServiceWorker | null = null;
@@ -232,7 +241,7 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
         onStateChange = () => {
           if (worker.state === "installed" && isUpdate) {
             setActivatedUpdateReady(true);
-            emitFieldCheckSignal("pwa-update-handoff", "success");
+            void coordinator.check();
           }
         };
         worker.addEventListener("statechange", onStateChange);
@@ -247,49 +256,22 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
         }
       };
     },
-    [],
+    [coordinator],
   );
   const {
     needRefresh: [needRefresh],
-    updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW,
-    onNeedReload: () => {
-      const canReload = workerReloadIntentRef.current;
-      workerReloadIntentRef.current = null;
-      // A skipWaiting worker can emit "controlling" during discovery. That is
-      // never permission to navigate: only a manual action or the verified
-      // safe-idle handoff installs an explicit reload intent.
-      if (canReload?.()) window.location.reload();
-    },
+    // Detection is not permission to reload. The coordinator owns navigation.
+    onNeedReload: () => { void coordinator.check(); },
+    onRegisterError: () => { void coordinator.check(); },
   });
   const { toast } = useToast();
   const toastedRef = useRef(false);
-  const activateWaitingWorker = useCallback(
-    async (_reloadPage = true, canReload: () => boolean = () => true) => {
-      workerReloadIntentRef.current = canReload;
-      try {
-        await updateServiceWorker(false);
-      } catch (error) {
-        if (workerReloadIntentRef.current === canReload) {
-          workerReloadIntentRef.current = null;
-        }
-        throw error;
-      }
-    },
-    [updateServiceWorker],
-  );
   const handleUpdateAndReload = useCallback(
-    (canReload: () => boolean = () => true) => {
-      emitFieldCheckSignal("pwa-update-handoff", "success");
-      return updateAndReload(
-        registrationRef.current,
-        activateWaitingWorker,
-        () => window.location.reload(),
-        canReload,
-      );
-    },
-    [activateWaitingWorker],
+    (canReload: () => boolean = getAutomaticUpdateReloadSafety, verifyBeforeReload?: () => Promise<boolean>) =>
+      coordinator.update(canReload, verifyBeforeReload),
+    [coordinator],
   );
   const scheduleSafeIdleRecovery = useCallback(
     (
@@ -307,42 +289,42 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   );
   const handleAutomaticUpdateAndReload = useCallback(
     (generation: number) => {
-      emitFieldCheckSignal("pwa-update-handoff", "success");
       const canReload = () =>
         automaticReloadGenerationRef.current === generation
         && getAutomaticUpdateReloadSafety()
         && updateIdleRef.current;
       if (!canReload()) return Promise.resolve();
-
-      // This path only runs after the app has already observed an installed
-      // update. Do not perform another update() discovery pass here: some
-      // browsers keep that promise pending while the waiting worker is being
-      // activated, which strands safe-idle handoffs. Activate the known
-      // waiting worker directly, or reload when the browser has already
-      // promoted it to active.
-      const registration = registrationRef.current;
-      if (registration?.waiting) {
-        return activateWaitingWorker(false, canReload).catch(() => {
-          if (canReload()) window.location.reload();
-        });
-      }
-      if (canReload()) window.location.reload();
-      return Promise.resolve();
+      // Fail closed if this tab cannot retain its once-only automatic claim.
+      try {
+        if (!claimStaleAssetRecoveryAttempt(`update:${WEB_BUILD_ID}:${coordinator.snapshot().target}`, sessionStorage)) return Promise.resolve();
+        if (!sessionStorage.getItem(`run-calc:stale-asset-recovery:update:${WEB_BUILD_ID}:${coordinator.snapshot().target}`)) return Promise.resolve();
+      } catch { return Promise.resolve(); }
+      return coordinator.update(canReload);
     },
-    [activateWaitingWorker],
+    [coordinator],
   );
 
   useEffect(() => {
+    const initial = coordinator.start();
+    setUpdateState(initial);
+    if (initial.phase === "confirmed") emitFieldCheckSignal("pwa-update-handoff", "success");
+    const check = () => { void coordinator.check(); };
+    const stop = startServiceWorkerUpdateChecks({
+      update: async () => registrationRef.current?.update(),
+    }, undefined, check);
+    window.addEventListener("online", check);
+    return () => { stop(); window.removeEventListener("online", check); };
+  }, [coordinator]);
+
+  useEffect(() => {
     return () => {
-      stopUpdateChecksRef.current?.();
-      stopUpdateChecksRef.current = undefined;
       stopUpdateWatchRef.current?.();
       stopUpdateWatchRef.current = undefined;
     };
   }, []);
 
   useEffect(() => {
-    const updateReady = needRefresh || activatedUpdateReady;
+    const updateReady = updateAvailable;
     updateIdleRef.current = false;
     setUpdateIdle(false);
     automaticReloadGenerationRef.current += 1;
@@ -353,10 +335,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       if (!idle) automaticReloadGenerationRef.current += 1;
       setUpdateIdle(idle);
     });
-  }, [activatedUpdateReady, calculatorSafe, needRefresh]);
+  }, [calculatorSafe, updateAvailable]);
 
   useEffect(() => {
-    const updateReady = needRefresh || activatedUpdateReady;
+    const updateReady = updateState.phase === "ready" || updateState.phase === "blocked";
     if (!updateReady || !updateIdle || !calculatorSafe) return;
     if (automaticReloadStartedRef.current) return;
 
@@ -366,10 +348,9 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       automaticReloadStartedRef.current = false;
     });
   }, [
-    activatedUpdateReady,
+    updateState.phase,
     calculatorSafe,
     handleAutomaticUpdateAndReload,
-    needRefresh,
     updateIdle,
   ]);
 
@@ -384,10 +365,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       persistent: true,
       action: (
         <ToastAction
-          altText="Reload now"
+          altText="Update app when work is saved"
           onClick={() => void handleUpdateAndReload()}
         >
-          Reload now
+          Update app
         </ToastAction>
       ),
     });
@@ -404,6 +385,9 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       scheduleSafeIdleRecovery,
     }}>
       {children}
+      <AppUpdateControl state={updateState}
+        check={() => void coordinator.check()}
+        update={() => void handleUpdateAndReload()} />
     </AppUpdateContext.Provider>
   );
 }

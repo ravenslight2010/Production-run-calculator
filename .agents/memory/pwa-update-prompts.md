@@ -26,3 +26,28 @@ Keep Vite PWA's `registerType: "prompt"` and never let update detection itself r
 **Why:** Ordinary refresh is not sufficient evidence that an installed app has entered the new build. Clearing site data can destroy unsynced operational work.
 
 **How to apply:** Verify a genuine old-to-new build handoff and persistence survival. Do not recommend blanket site-data clearing as the standard remedy or infer the precise cache/lifecycle defect from this report alone.
+
+**Update evidence boundary:** A successful fresh release-identity check is required
+before saying the app is current. Installation, activation, and a reload request
+are intermediate stages; update completion requires the next document to report
+the exact intended build. Keep the confirmation attempt tab-local and bounded.
+
+**Why:** Worker lifecycle promises and controlling events do not prove that a new
+page started. Reporting success early conceals stranded handoffs.
+
+**How to apply:** Preserve the last running/target identities and a bounded,
+payload-free stage history on failure. Keep recovery retryable without clearing
+precache, business stores, settings, sessions, or offline queues. Recheck recovery
+safety after asynchronous activation, not just before starting discovery.
+
+**Fixture safety:** Isolate manual recovery with continued input activity, not a
+fake active authoritative run. Active-to-idle scenarios must provide complete
+canonical snapshots so the real Stop action can pass its foreground fence.
+
+**Why:** An old manual-reload fixture can accidentally encode permission to
+bypass active-work protection, or mistake an unresolved sync fence for a PWA
+handoff failure.
+
+**How to apply:** Keep explicit active-work refusal and once-only confirmed
+navigation assertions. Prefer those observable outcomes to counts of internal
+registration calls when an already-installed worker needs no new discovery.

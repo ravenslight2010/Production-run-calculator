@@ -11,7 +11,10 @@ declare const self: ServiceWorkerGlobalScope & {
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
-self.addEventListener("install", () => { void self.skipWaiting(); });
+self.addEventListener("install", (event) => { event.waitUntil(self.skipWaiting()); });
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") event.waitUntil(self.skipWaiting());
+});
 
 // Retain the runtime font behavior from the previous generated worker.
 registerRoute(
