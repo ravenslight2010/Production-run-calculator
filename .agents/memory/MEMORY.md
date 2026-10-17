@@ -157,3 +157,4 @@
 - [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
+- [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.
