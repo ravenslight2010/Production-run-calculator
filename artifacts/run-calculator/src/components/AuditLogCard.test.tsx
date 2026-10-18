@@ -95,20 +95,30 @@ describe("AuditLogCard PDF export", () => {
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const pdf = new Blob(["%PDF-1.4"], { type: "application/pdf" });
-    const startDate = "2026-08-22";
-    const endDate = "2026-09-21";
     exportAuditLogsPdf.mockResolvedValueOnce(pdf);
+
     renderAuditLogCard();
     await screen.findByText("role_changed");
-    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
-    await waitFor(() => expect(exportAuditLogsPdf).toHaveBeenCalledWith({
-      startDate: `${startDate}T00:00:00.000Z`,
-      endDate: `${endDate}T23:59:59.999Z`,
-      limit: 100,
-    }));
-    expect(createObjectURL).toHaveBeenCalledWith(pdf);
-    expect(click).toHaveBeenCalled();
-    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob: audit"));
+
+    // Read the component's own default (rolling last-30-days) range so the
+    // assertion stays correct regardless of the runner's timezone.
+    const dateInputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    expect(dateInputs).toHaveLength(2);
+    const startDate = dateInputs[0]?.value;
+    const endDate = dateInputs[1]?.value;
+
+    fireEvent.click(screen.getByRole("button", { name: "PDF" }));
+
+    await waitFor(() => {
+      expect(exportAuditLogsPdf).toHaveBeenCalledWith({
+        startDate: `${startDate}T00:00:00.000Z`,
+        endDate: `${endDate}T23:59:59.999Z`,
+        limit: 100,
+      });
+      expect(createObjectURL).toHaveBeenCalledWith(pdf);
+      expect(click).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob: audit");
+    });
     expect(toast).not.toHaveBeenCalled();
   });
 
