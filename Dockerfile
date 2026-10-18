@@ -59,6 +59,7 @@ COPY lib/db/package.json ./lib/db/package.json
 COPY lib/distill-dataset/package.json ./lib/distill-dataset/package.json
 COPY lib/downtime-trends/package.json ./lib/downtime-trends/package.json
 COPY lib/factory-constants/package.json ./lib/factory-constants/package.json
+COPY lib/field-check-contract/package.json ./lib/field-check-contract/package.json
 COPY lib/fill-missing/package.json ./lib/fill-missing/package.json
 COPY lib/formula-guard/package.json ./lib/formula-guard/package.json
 COPY lib/freezer-pull/package.json ./lib/freezer-pull/package.json

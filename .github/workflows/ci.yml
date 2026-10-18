@@ -434,6 +434,10 @@ jobs:
     env:
       # vite.config.ts requires both PORT and BASE_PATH at config-load time;
       # PORT is unused for the static build output but must be present.
+      # CI verifies compilation only; publishing stays on the Replit path, so
+      # build with a development identity like the reduced-motion lane instead
+      # of reusing the committed publish-source record pinned to its own tree.
+      BUILD_IDENTITY_MODE: development
       PORT: 3000
       BASE_PATH: /
     steps:
