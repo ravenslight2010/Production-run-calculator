@@ -50,6 +50,10 @@ jobs:
       VITE_API_PROXY_TARGET: http://127.0.0.1:5000
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-department-${{ github.run_id }}-${{ github.run_attempt }}
+      # CI verifies compilation only; publishing stays on the Replit path, so
+      # build with a development identity instead of the committed publish
+      # record that is pinned to its own source tree.
+      BUILD_IDENTITY_MODE: development
 
     steps:
       - name: Checkout
