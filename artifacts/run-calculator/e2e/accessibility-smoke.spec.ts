@@ -886,9 +886,9 @@ test.describe("accessibility smoke", () => {
     const fieldChecks = page.getByTestId("field-checks-panel");
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
-    await expect(fieldChecks.getByText("Authenticated app startup and home bundle timing.", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText("Recorded when the authenticated field-check observer starts; home-bundle timing is a separate performance observation.", { exact: true })).toBeVisible();
     await expect(fieldChecks.getByText("Guided hardware confirmations", { exact: true })).toBeVisible();
-    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Health Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toBeVisible();
     expect(
       await fieldChecks.getByRole("button", { name: "Pass", exact: true }).count(),
@@ -1234,7 +1234,7 @@ test.describe("accessibility smoke", () => {
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
     await expect(fieldChecks.getByText("Guided hardware confirmations", { exact: true })).toBeVisible();
-    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Health Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toHaveCount(0);
     await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(0);
     await expect(fieldChecks.getByRole("button", { name: "Fail", exact: true })).toHaveCount(0);
