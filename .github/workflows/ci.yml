@@ -81,7 +81,7 @@ jobs:
         run: node scripts/src/test-results.mjs run --lane ci-typescript-codegen-bridge -- pnpm run check:typescript-7-codegen-bridge
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-codegen-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -124,7 +124,7 @@ jobs:
         run: node scripts/src/test-results.mjs run --lane ci-scripts-routine -- pnpm --filter @workspace/scripts run test
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-typecheck-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -160,7 +160,7 @@ jobs:
         run: node scripts/src/test-results.mjs run --lane ci-library-sweep -- pnpm -r --filter "./lib/**" --if-present test
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-unit-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -206,7 +206,7 @@ jobs:
         run: node scripts/src/test-results.mjs run --lane ci-reduced-motion-built-browser -- pnpm --filter @workspace/run-calculator run test:e2e:reduced-motion:built
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-reduced-motion-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -239,7 +239,7 @@ jobs:
         run: node scripts/src/test-results.mjs run --lane ci-release-concurrency-fixtures -- pnpm --filter @workspace/scripts run test:release-concurrency
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-concurrency-fixtures-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -297,7 +297,7 @@ jobs:
         run: node scripts/src/test-results.mjs block --lane ci-api-postgres
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-api-postgres-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -333,7 +333,7 @@ jobs:
           fi
       - name: Retain rollback rehearsal evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: schema-safe-rollback-rehearsal-${{ github.run_id }}
           path: rollback-rehearsal-report.md
@@ -341,7 +341,7 @@ jobs:
           retention-days: 14
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-schema-rollback-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -487,7 +487,7 @@ jobs:
         run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
       - name: Upload merged machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-merged-ci-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/merged-test-results.json

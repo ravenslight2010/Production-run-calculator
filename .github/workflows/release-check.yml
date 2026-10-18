@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload compact TypeScript declaration artifact
         if: ${{ always() && steps.verify-standard-typescript-contract-artifact.outputs.available == 'true' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: typescript-7-declaration-contracts-standard-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/typescript-7-contract-standard-${{ github.run_id }}-${{ github.run_attempt }}
@@ -216,7 +216,7 @@ jobs:
       - name: Upload standard release evidence
         if: always()
         id: upload-standard-release-evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-evidence-standard-${{ github.run_id }}
           path: release-evidence
@@ -225,7 +225,7 @@ jobs:
 
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-release-standard-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -370,7 +370,7 @@ jobs:
 
       - name: Upload compact TypeScript declaration artifact
         if: ${{ always() && steps.verify-full-typescript-contract-artifact.outputs.available == 'true' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: typescript-7-declaration-contracts-full-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/typescript-7-contract-full-${{ github.run_id }}-${{ github.run_attempt }}
@@ -448,7 +448,7 @@ jobs:
       - name: Upload full release evidence
         if: always()
         id: upload-full-release-evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-evidence-full-${{ github.run_id }}
           path: release-evidence-full
@@ -457,7 +457,7 @@ jobs:
 
       - name: Upload machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-release-full-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/test-results.json
@@ -478,7 +478,7 @@ jobs:
 
       - name: Upload sanitized responsive WebKit failure diagnostics
         if: always() && steps.responsive-webkit-debug-artifact.outputs.available == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
@@ -537,7 +537,7 @@ jobs:
         run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
       - name: Upload merged machine-readable test report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/merged-test-results.json
