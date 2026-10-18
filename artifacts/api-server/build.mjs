@@ -15,7 +15,14 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function buildAll() {
   const root = path.resolve(artifactDir, "../..");
-  const sourceRecord = buildSourceRecord(root, process.env.NODE_ENV === "development" ? "development" : "publish");
+  const identityMode = process.env.BUILD_IDENTITY_MODE;
+  if (identityMode !== undefined && identityMode !== "development" && identityMode !== "publish") {
+    throw new Error("Invalid build identity mode.");
+  }
+  const sourceRecord = buildSourceRecord(
+    root,
+    identityMode ?? (process.env.NODE_ENV === "development" ? "development" : "publish"),
+  );
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 

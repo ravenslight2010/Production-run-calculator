@@ -1173,7 +1173,6 @@ test_release_runner_verifies_local_tls_certificates() {
   local ipv6_url
   local ipv6_path_url
   local mismatched_ipv6_url
-  local mismatched_ipv6_path_url
   local ipv6_proxy_url
   local attempt
   local status
@@ -1798,7 +1797,6 @@ EOF
   ipv6_url="https://[::1]:$(cat "$ipv6_port_file")/"
   ipv6_path_url="https://[::1]:$(cat "$ipv6_port_file")/npm/"
   mismatched_ipv6_url="https://[::2]:$(cat "$ipv6_port_file")/"
-  mismatched_ipv6_path_url="https://[::2]:$(cat "$ipv6_port_file")/npm/"
   # npm's bundled https-proxy-agent omits servername for IP-literal targets
   # and drops host when upgrading the CONNECT tunnel, so Node skips hostname
   # verification entirely for https://[::2] through a proxy. The proxied
