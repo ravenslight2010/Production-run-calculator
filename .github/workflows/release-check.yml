@@ -65,6 +65,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # Isolated zip-asset inventory gates inspect the real archives, not
+          # LFS pointer files.
+          lfs: true
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
 
@@ -90,6 +93,14 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24.21.0"
+
+      - name: Install PostgreSQL binaries for isolated browser and sync gates
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql
+          pg_bin="$(dirname "$(find /usr/lib/postgresql -type f -name postgres | sort -V | tail -1)")"
+          echo "$pg_bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile
@@ -288,6 +299,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # Isolated zip-asset inventory gates inspect the real archives, not
+          # LFS pointer files.
+          lfs: true
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
 
@@ -300,6 +314,14 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24.21.0"
+
+      - name: Install PostgreSQL binaries for isolated browser and sync gates
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql
+          pg_bin="$(dirname "$(find /usr/lib/postgresql -type f -name postgres | sort -V | tail -1)")"
+          echo "$pg_bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: bash scripts/src/run-release-node.sh pnpm install --frozen-lockfile
