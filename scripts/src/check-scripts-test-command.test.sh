@@ -10,6 +10,7 @@ PACKAGE_JSON="${SCRIPT_DIR}/../package.json"
 EXPECTED_VALIDATOR='python3 -S ../.agents/skills/skill-creator/scripts/test_quick_validate.py'
 EXPECTED_SKILL_CATALOG_CHECK='pnpm run check:skill-catalog'
 EXPECTED_EVALUATION_REPORT_CHECK='pnpm run test:evaluation-report-retention'
+EXPECTED_NODE_PREFLIGHT='node ./src/check-routine-node-version.mjs'
 
 if [[ ! -f "$PACKAGE_JSON" ]]; then
   printf 'Could not find scripts package manifest: %s\n' "$PACKAGE_JSON" >&2
@@ -34,6 +35,17 @@ if (typeof command !== "string" || command.trim() === "") {
 process.stdout.write(command);
 NODE
 )
+
+if [[ "$TEST_COMMAND" != "$EXPECTED_NODE_PREFLIGHT && "* ]]; then
+  cat >&2 <<EOF
+scripts/package.json#test must run the evidence-bound Node preflight first:
+  ${EXPECTED_NODE_PREFLIGHT}
+
+The standard scripts test command must fail before expensive validation when
+the local Node version differs from the retained evidence runtime.
+EOF
+  exit 1
+fi
 
 if [[ "$TEST_COMMAND" != *"$EXPECTED_VALIDATOR"* ]]; then
   cat >&2 <<EOF
@@ -68,4 +80,4 @@ EOF
   exit 1
 fi
 
-printf 'PASS: scripts test command retains evaluation privacy, live skill catalog, and quick validator checks.\n'
+printf 'PASS: scripts test command starts with the Node preflight and retains evaluation privacy, live skill catalog, and quick validator checks.\n'

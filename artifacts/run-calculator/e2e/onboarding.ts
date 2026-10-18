@@ -1,6 +1,9 @@
 import { expect, type Locator, type Page, type Response } from "@playwright/test";
 
-const ONBOARDING_RESPONSE_TIMEOUT = 15_000;
+// Release browser runs can briefly saturate the disposable database while a
+// fresh account's bootstrap requests are settling. Keep the assertion tied to
+// the real POST, but allow that bounded server-side queue time.
+const ONBOARDING_RESPONSE_TIMEOUT = 30_000;
 const SIGNUP_FORM_TIMEOUT = 20_000;
 const APP_READY_TIMEOUT = 25_000;
 
@@ -62,31 +65,21 @@ export async function completeOnboarding(
   });
   const actionLabel = options.actionLabel ?? "Get started";
 
-  let response: Response | undefined;
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2 && !response; attempt += 1) {
-    // Register the waiter before clicking so a fast response cannot be missed.
-    const seenPromise = page.waitForResponse(
-      (candidate) =>
-        candidate.url().endsWith("/api/me/onboarding-seen") &&
-        candidate.request().method() === "POST",
-      { timeout: ONBOARDING_RESPONSE_TIMEOUT },
-    );
-    try {
-      [response] = await Promise.all([
-        seenPromise,
-        completionButton.click(options.clickOptions),
-      ]);
-    } catch (error) {
-      lastError = error;
-      if (attempt === 0 && await completionButton.isVisible().catch(() => false)) {
-        await page.waitForTimeout(100);
-        continue;
-      }
-    }
-  }
-  if (!response) {
-    const reason = lastError instanceof Error ? lastError.message : String(lastError);
+  // Register the waiter before clicking so a fast response cannot be missed.
+  const seenPromise = page.waitForResponse(
+    (candidate) =>
+      candidate.url().endsWith("/api/me/onboarding-seen") &&
+      candidate.request().method() === "POST",
+    { timeout: ONBOARDING_RESPONSE_TIMEOUT },
+  );
+  let response: Response;
+  try {
+    [response] = await Promise.all([
+      seenPromise,
+      completionButton.click(options.clickOptions),
+    ]);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Timed out waiting up to ${ONBOARDING_RESPONSE_TIMEOUT}ms for POST /api/me/onboarding-seen after clicking ${actionLabel}: ${reason}`,
     );

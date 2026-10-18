@@ -8,7 +8,8 @@
 // a correction learned once is honored everywhere.
 //
 // Best-effort and additive: saving a correction must never break the primary
-// confirmation, so failures are swallowed. Mirrors the mobile glue in
+// confirmation. Failures are reported without exposing mapping values, then
+// swallowed. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/aiCorrections.ts (replit.md parity).
 
 import type {
@@ -17,6 +18,7 @@ import type {
   SafeCorrectionRepair,
 } from "@workspace/ai-memory";
 import { inventoryClientId } from "./inventoryShared";
+import { toast } from "./hooks/use-toast";
 
 export type { AiCorrection };
 
@@ -30,6 +32,61 @@ export interface AiMemoryHealthApplyResult {
   after: AiMemoryHealthReport;
   applied: SafeCorrectionRepair[];
   summary: { deleted: number; retargeted: number };
+}
+
+export type CorrectionWriteStore =
+  | "shared-corrections"
+  | "spec-import-aliases"
+  | "schedule-import-aliases";
+
+export type CorrectionWriteFailure = "http" | "network" | "request";
+
+type CorrectionWriteFailureDetails = {
+  store: CorrectionWriteStore;
+  failure: CorrectionWriteFailure;
+  correctionCount: number;
+  status?: number;
+};
+
+const MAX_CORRECTION_DIAGNOSTIC_COUNT = 1000;
+
+export function logCorrectionWriteFailure({
+  store,
+  failure,
+  correctionCount,
+  status,
+}: CorrectionWriteFailureDetails): void {
+  const details: {
+    store: CorrectionWriteStore;
+    failure: CorrectionWriteFailure;
+    correctionCount: number;
+    status?: number;
+  } = {
+    store,
+    failure,
+    correctionCount: Math.min(
+      MAX_CORRECTION_DIAGNOSTIC_COUNT,
+      Math.max(0, Number.isFinite(correctionCount) ? Math.floor(correctionCount) : 0),
+    ),
+  };
+  if (Number.isInteger(status) && status! >= 100 && status! <= 599) {
+    details.status = status;
+  }
+  // Keep diagnostics to fixed labels and bounded counts; never log correction
+  // names, request bodies, workbook data, or provider output.
+  console.warn("Confirmed correction memory write failed", details);
+}
+
+export function notifyCorrectionWriteFailure(
+  details: CorrectionWriteFailureDetails,
+): void {
+  logCorrectionWriteFailure(details);
+  toast({
+    title: "Confirmed mapping was not fully remembered",
+    description:
+      "The import or match can continue, but a future suggestion may ask about this mapping again. Check your connection or ask a manager to check access.",
+    variant: "destructive",
+  });
 }
 
 export async function fetchAiCorrections(): Promise<AiCorrectionWithId[]> {
@@ -72,7 +129,7 @@ export async function applyAiMemorySafeFixes(): Promise<AiMemoryHealthApplyResul
 export async function saveAiCorrections(corrections: AiCorrection[]): Promise<void> {
   if (corrections.length === 0) return;
   try {
-    await fetch("/api/ai-corrections", {
+    const response = await fetch("/api/ai-corrections", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -80,7 +137,20 @@ export async function saveAiCorrections(corrections: AiCorrection[]): Promise<vo
       },
       body: JSON.stringify({ corrections }),
     });
+    if (!response.ok) {
+      notifyCorrectionWriteFailure({
+        store: "shared-corrections",
+        failure: "http",
+        status: response.status,
+        correctionCount: corrections.length,
+      });
+    }
   } catch {
-    // Advisory memory — never let a save failure break the confirmation.
+    // Advisory memory — report the failure, but never reject the confirmation.
+    notifyCorrectionWriteFailure({
+      store: "shared-corrections",
+      failure: "network",
+      correctionCount: corrections.length,
+    });
   }
 }

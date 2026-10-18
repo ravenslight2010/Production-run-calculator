@@ -170,11 +170,12 @@ test("production, warehouse, QC, and management remain connected after navigatio
   );
   await screenshot(page, testInfo, "02-warehouse-shared-run");
 
-  // QC is manager/capability-gated. Reaching the real history surface proves
-  // this signed-up manager retained permission through navigation.
+  // QC is manager/capability-gated. Reach it through the current QC workflows
+  // menu entry and confirm the run-based surface is available.
   await openMore(page);
-  await page.getByRole("menuitem", { name: "Quality history" }).click();
-  await expect(page.getByTestId("quality-history-surface")).toBeVisible();
+  await page.getByRole("menuitem", { name: "QC workflows & history" }).click();
+  await expect(page.getByTestId("qc-workflow-tab")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Quality checks" })).toBeVisible();
   await screenshot(page, testInfo, "03-qc-history");
 
   // Change an account-level manager setting through the actual management
@@ -191,7 +192,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  await expect(page.getByTestId("quality-history-surface")).toBeVisible();
+  await expect(page.getByTestId("qc-workflow-tab")).toBeVisible();
   await openMore(page);
   await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
   await expect(page.getByTestId("switch-floor-mode")).toBeChecked({ checked: !before });

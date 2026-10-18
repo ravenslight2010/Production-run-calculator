@@ -1,5 +1,5 @@
 import type { OperationalReport } from "@workspace/day-summary";
-import * as XLSX from "xlsx";
+import type { WorkBook } from "xlsx";
 
 function sectionValue<T>(
   section: { availability: string; value: T | null; note?: string },
@@ -159,7 +159,8 @@ export function operationalReportCsv(report: OperationalReport): string {
   return [headers.map(csvCell).join(","), ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(","))].join("\r\n");
 }
 
-export function operationalReportWorkbook(report: OperationalReport): XLSX.WorkBook {
+export async function operationalReportWorkbook(report: OperationalReport): Promise<WorkBook> {
+  const XLSX = await import("xlsx");
   const workbook = XLSX.utils.book_new();
   const rows = operationalReportRows(report);
   for (const section of ["Report", "Production", "Quality", "Incidents", "Inventory", "Actions"]) {
@@ -172,4 +173,12 @@ export function operationalReportWorkbook(report: OperationalReport): XLSX.WorkB
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(safeRows), section);
   }
   return workbook;
+}
+
+export async function downloadOperationalReportWorkbook(
+  report: OperationalReport,
+  filename: string,
+): Promise<void> {
+  const XLSX = await import("xlsx");
+  XLSX.writeFile(await operationalReportWorkbook(report), filename);
 }

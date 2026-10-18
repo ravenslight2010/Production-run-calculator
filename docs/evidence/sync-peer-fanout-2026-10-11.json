@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "kind": "isolated-sync-peer-fanout",
+  "capturedAtUtc": "2026-10-12T01:17:13Z",
+  "environment": "isolated-disposable-test",
+  "source": {
+    "gitHead": "5bce101c0101a79053a816631b8c8e64b5158aba",
+    "releaseTestRevision": "test-sha256:71792cba71439e7243010a0d023db76b7aea82f24e85ed6a17f0b9260a7200c6",
+    "sourceRevision": "source-sha256:72eb4469e3df91b714e6a0a0455156dae1264bb80dea8a71dba7b0cb3ca57181",
+    "verificationFingerprintSha256": "c4cc52ada33d983f88572b353c130a642649c9bbf9b3cbac3c04d393d0758375",
+    "workingTreeDiffSha256": "c4e5abe43d1d3627c13643dcf0971896ecdf805406bf874f3a65f272b40fc393",
+    "workingTreeSourceDigests": [
+      {
+        "path": "artifacts/api-server/src/routes/sync.convergence.integration.test.ts",
+        "sha256": "03e88e5014dc472e00b21d2f84aed9a730d35f2e3b26d955045f7206ac29c169"
+      },
+      {
+        "path": "artifacts/api-server/src/test-fixtures/syncProcessServer.mts",
+        "sha256": "891e943103f3233da24a39de9f291a81e09bba1094116041d3155f034f406b51"
+      }
+    ]
+  },
+  "execution": {
+    "command": "bash scripts/src/run-isolated-sync-convergence.sh src/routes/sync.convergence.integration.test.ts",
+    "result": "passed",
+    "elapsedMs": 40710,
+    "testFilesPassed": 1,
+    "testsPassed": 7,
+    "apiProcesses": 2,
+    "database": "Temporary disposable PostgreSQL database created and removed by the isolated test runner",
+    "listenerIdentity": "Two distinct PostgreSQL LISTEN backend PIDs observed for the independent API processes"
+  },
+  "verified": [
+    "Day-state updates cross from API process A to an SSE peer on process B.",
+    "Delivery is isolated by watched date and live versus sandbox scope.",
+    "Duplicate notifications do not duplicate peer updates.",
+    "A terminated listener reconnects; when the missing event is pruned, the peer receives a canonical gap reconciliation.",
+    "A durable event inserted without NOTIFY is delivered by cursor polling.",
+    "Reset, rollover, and master-data invalidations reach the intended live peers.",
+    "A fresh SSE connection on process B receives the current canonical snapshot.",
+    "Core /api/readyz remains healthy when the optional peer listener is deliberately stopped.",
+    "Graceful API child-process shutdown closes its LISTEN connection; no listener backends remain after both children exit."
+  ],
+  "additionalChecks": [
+    {
+      "command": "pnpm --filter @workspace/api-server run typecheck:routes",
+      "result": "failed",
+      "reason": "TypeScript could not find a declaration for web-push in artifacts/api-server/src/lib/webPush.ts; no changed file was named by the diagnostic."
+    }
+  ],
+  "sanitization": {
+    "rawLogsRetained": false,
+    "requestPayloadsOrDatabaseRowsRetained": false,
+    "credentialsOrPersonalDataRetained": false
+  },
+  "limitations": [
+    "This is isolated fixture evidence, not a test against the published service.",
+    "It does not establish Autoscale serving-process limits or peak database connection capacity."
+  ],
+  "conclusion": {
+    "isolatedCrossProcessFanout": "VERIFIED",
+    "publishedConnectionBudget": "NOT_VERIFIED",
+    "publishedLivePeerSse": "NOT_SUPPORTED"
+  }
+}

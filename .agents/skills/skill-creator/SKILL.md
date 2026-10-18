@@ -19,6 +19,9 @@ For maintenance-mode guidance, read `references/maintenance.md` when improving
 an existing skill. It covers identity preservation, bounded evaluation, safety,
 and completion checks without expanding the core workflow.
 
+When drafting or restructuring a skill, read `references/design-principles.md`
+for progressive-disclosure, validation-integrity, and forward-test rules.
+
 Use `external-skill-import` before incorporating archive or GitHub material;
 finish its inventory, license, ownership, and compatibility review first.
 

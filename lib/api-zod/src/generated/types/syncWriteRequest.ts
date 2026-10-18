@@ -5,11 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { SyncPayload } from './syncPayload';
+import type { SyncWriteRequestPayload } from './syncWriteRequestPayload';
 
 export interface SyncWriteRequest {
   senderId?: string;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId?: string;
-  payload: SyncPayload;
+  payload: SyncWriteRequestPayload;
 }

@@ -3,6 +3,7 @@ import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { aiResultCacheTable, db } from "@workspace/db";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { recordCacheMaintenance } from "./observability";
+import { safeAiErrorMetadata } from "./aiDataBoundary";
 
 export const AI_RESULT_CACHE_NAMESPACE = "ai-results:v1";
 export const AI_RESULT_CACHE_TTL_MS = 15 * 60_000;
@@ -227,7 +228,7 @@ async function executeCache<T>(opts: {
     } catch (err) {
       // The cache is an optimization. A database outage must never change the
       // existing AI route's provider/fallback behavior.
-      opts.log?.error?.({ err, ...fields }, "ai result cache read failed; bypassing");
+      opts.log?.error?.({ ...safeAiErrorMetadata(err), ...fields }, "ai result cache read failed; bypassing");
     }
     return null;
   };
@@ -262,7 +263,7 @@ async function executeCache<T>(opts: {
       }
       serialized = encoded;
     } catch (err) {
-      opts.log?.warn?.({ err, ...fields }, "ai result cache serialization failed; bypassing write");
+      opts.log?.warn?.({ ...safeAiErrorMetadata(err), ...fields }, "ai result cache serialization failed; bypassing write");
       return { result: { value: loaded.value, hit: false } };
     }
     const bytes = Buffer.byteLength(serialized, "utf8");
@@ -276,7 +277,7 @@ async function executeCache<T>(opts: {
       await store.write(scope, opts.key, loaded.value, expiresAt);
       await store.prune(scope, opts.log);
     } catch (err) {
-      opts.log?.error?.({ err, ...fields }, "ai result cache write failed; continuing");
+      opts.log?.error?.({ ...safeAiErrorMetadata(err), ...fields }, "ai result cache write failed; continuing");
     }
     return { result: { value: loaded.value, hit: false } };
   };
@@ -291,7 +292,7 @@ async function executeCache<T>(opts: {
     } catch (err) {
       // Lock acquisition is best-effort, like the rest of the cache. If the
       // database is unavailable, run the provider without cache protection.
-      opts.log?.error?.({ err, ...fields }, "ai result cache lock failed; bypassing");
+      opts.log?.error?.({ ...safeAiErrorMetadata(err), ...fields }, "ai result cache lock failed; bypassing");
       outcome = await resolveMiss(opts.store);
     }
     if ("error" in outcome) throw outcome.error;

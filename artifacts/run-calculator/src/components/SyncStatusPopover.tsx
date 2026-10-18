@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
-import type { SyncDiagnostic } from "../syncDiagnostics";
+import { formatWakeRecoveryDiagnostic, type SyncDiagnostic } from "../syncDiagnostics";
 import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, type AttentionState } from "../attentionStates";
 import {
   discardOperationalIntent,
@@ -231,9 +231,15 @@ export default function SyncStatusPopover(props: Props) {
           <div className="mt-3 border-t border-border pt-2">
             <p className="mb-1 font-semibold">Recent sync activity</p>
             <div className="max-h-36 space-y-1 overflow-auto text-[11px] text-muted-foreground">
-              {props.diagnostics.length === 0 ? <p>No activity recorded yet.</p> : props.diagnostics.slice().reverse().map((event) => (
-                <p key={event.id}><span className="mr-1 text-foreground">{time(event.at)}</span>{event.message}{event.response ? ` [${event.response}]` : ""}{event.runId ? ` · Run ${event.runId.slice(0, 12)}` : ""}</p>
-              ))}
+               {props.diagnostics.length === 0 ? <p>No activity recorded yet.</p> : props.diagnostics.slice().reverse().map((event) => (
+                 <p key={event.id} data-testid={`sync-activity-${event.id}`}>
+                   <span className="mr-1 text-foreground">{time(event.at)}</span>
+                   {event.message}
+                   {event.response ? ` [${event.response}]` : ""}
+                   {event.wakeRecovery ? ` · ${formatWakeRecoveryDiagnostic(event.wakeRecovery)}` : ""}
+                   {event.runId ? ` · Run ${event.runId.slice(0, 12)}` : ""}
+                 </p>
+               ))}
             </div>
           </div>
         </div>

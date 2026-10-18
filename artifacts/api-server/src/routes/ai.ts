@@ -82,6 +82,7 @@ import {
   appendFacilityMemoryBlock,
   groundPromptWithMemory,
 } from "./aiMemoryContext";
+import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "../lib/aiDataBoundary";
 
 const router: IRouter = Router();
 
@@ -148,6 +149,15 @@ class AiResponseError extends Error {
     super(error);
     this.name = "AiResponseError";
   }
+}
+
+function servedByFallback(
+  effectiveModel: string | undefined,
+  requestedModel: string,
+): boolean {
+  return typeof effectiveModel === "string" &&
+    effectiveModel.length > 0 &&
+    effectiveModel !== requestedModel;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -444,6 +454,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-match-import"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.matchImport, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateMatchImportBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -474,6 +489,7 @@ router.post(
         enrichUnresolved: async (unresolved) => {
           const { system, user } = buildMatchImportPrompt(unresolved);
           const userPrompt = await groundPromptWithMemory(req.log, user, {
+            includeFacilityKnowledge: false,
             correctionDomains: ["brand", "flavor"],
           });
           const cached = await cachedAiResponse<MatchImportCacheBody>(req, res, {
@@ -495,6 +511,7 @@ router.post(
           value.pepTypeMatches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          let effectiveModel: string | undefined;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-import",
             log: req.log,
@@ -508,6 +525,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -558,7 +576,10 @@ router.post(
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
-          return { value, cacheable: rawIsValidShape };
+          return {
+            value,
+            cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model),
+          };
         },
           });
           return {
@@ -615,6 +636,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-parse-spec-sheet"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.parseSpecSheet, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateParseSpecSheetBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -623,6 +649,7 @@ router.post(
 
     const { system, user } = buildParseSpecSheetPrompt(validation.data);
     const userPrompt = await groundPromptWithMemory(req.log, user, {
+      includeFacilityKnowledge: false,
       correctionDomains: ["brand", "flavor", "die", "ingredient", "recipe"],
     });
 
@@ -703,6 +730,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-parse-spec-images"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.parseSpecImages, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateParseSpecImagesBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -825,6 +857,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-match-premix"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.matchPremix, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateMatchPremixBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -849,6 +886,7 @@ router.post(
           const aiInput = { ...validation.data, unmatchedNames: unresolvedNames };
           const { system, user } = buildMatchPremixPrompt(aiInput);
           const userPrompt = await groundPromptWithMemory(req.log, user, {
+            includeFacilityKnowledge: false,
             correctionDomains: ["brand", "flavor"],
           });
           const cached = await cachedAiResponse(req, res, {
@@ -862,6 +900,7 @@ router.post(
           value.matches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          let effectiveModel: string | undefined;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-premix",
             log: req.log,
@@ -875,6 +914,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -895,7 +935,10 @@ router.post(
             matches,
             aiStatus: "enriched",
           };
-          return { value, cacheable: rawIsValidShape };
+          return {
+            value,
+            cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model),
+          };
         },
           });
           return {

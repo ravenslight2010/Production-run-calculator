@@ -67,3 +67,84 @@ the same name and fail strict-mode checks without detecting a product defect.
 
 **How to apply:** Select the review card collection by its stable semantic or
 test-ID boundary, then narrow to the named entity and assert within that card.
+
+## Run startup state in browser journeys
+
+For slow-start journeys, verify the selected run's lifecycle state directly and
+reselect that run before asserting its controls. The operational-state badge is
+not a synchronization acknowledgement and may remain provisional while the
+run's controls are usable.
+
+**Why:** Treating the badge as a readiness gate caused false failures in the
+isolated WebKit fixture; the run-specific `startedAt` and selected-run controls
+were the reliable evidence.
+
+**How to apply:** Before releasing held optional panels, wait for the target
+run's start state, select it explicitly, and verify pause/resume plus counters.
+
+## Permission-aware API fixtures
+
+**Rule:** Test API fixtures must derive protected-route responses from the
+active fixture user's capabilities, and cover both an authorized identity and
+a denied one. Do not return a successful manager-only read just to simplify
+operator startup.
+
+**Why:** A permissive fixture can make an application authorization regression
+invisible even when the production route correctly rejects the user.
+
+**How to apply:** When a browser test server stubs a capability-gated route,
+match its real status contract for reads and writes. Verify the app can still
+boot after a denied read separately from verifying the manager's access.
+
+## Reloads with held optional chunks
+
+**Rule:** For deterministic network holds across reloads, block service workers
+only in the relevant Playwright test scope; a precached response can bypass
+Playwright routing. Do not change the app's service worker for this. Keep each
+browser test's date-scoped sync data isolated by cleaning it in the disposable
+database between tests and creating a fresh authorized fixture per test.
+
+**Why:** The service worker can satisfy an optional chunk after reload without
+reaching the route handler, and day-state rows are shared across fixture users
+for the same date. Suite-level cleanup lets sequential tests contaminate one
+another.
+
+**How to apply:** When testing reload with a held chunk, verify the request is
+still pending before reload, assert the original `startedAt` immediately after
+reload, and compare post-release state with a snapshot taken before release.
+Pause/resume may adjust `startedAt` to exclude paused time.
+
+## Current-day fixtures after interrupted browser runs
+
+For a journey that assumes one current-day run, delete the disposable live
+day-state row under the fixture lock before seeding it, as well as cleaning it
+up afterward. The sync merge is additive, so a prior interrupted test can leave
+old runs in the same date row even when the new account and profile are unique.
+
+**Why:** A fresh account does not imply a fresh facility day-state row; that row
+is shared across fixture users and can survive when a browser process is
+interrupted before its `finally` cleanup.
+
+**How to apply:** In approved disposable-database browser tests that seed
+`today` and assert the selected run, acquire the shared fixture lock, remove the
+current live date row, then write the fixture snapshot and retain normal
+`finally` cleanup. Never do this against a shared or production database.
+
+## Same-origin request diagnostics
+
+**Rule:** Determine cross-origin behavior from the request URL and page origin,
+not from the mere presence of an `Origin` header. Same-origin `GET` requests
+often omit it, while same-origin `PUT` requests can include it; neither alone
+proves a CORS failure. Capture the method, URL origin, safe header names,
+response status, and browser failure separately, and redact cookie,
+authorization, and client-ID values.
+
+**Why:** A browser can report a failed request near a fixture API route even
+when the intended same-origin `GET` succeeded. Distinguishing methods and
+responses exposed a fixture's generic `404` on an operator `PUT`, rather than
+a cross-origin or preflight problem.
+
+**How to apply:** For WebKit/PWA fixture errors, first check whether `OPTIONS`
+was actually sent and whether the browser reached the fixture handler. Model
+the endpoint's real authorization status for unsupported fixture writes;
+do not add permissive CORS headers to make the test pass.

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BackgroundOperationDiagnosticsAutomaticTrackingBackoff } from './backgroundOperationDiagnosticsAutomaticTrackingBackoff';
 import type { BackgroundOperationDiagnosticsWarningsItem } from './backgroundOperationDiagnosticsWarningsItem';
 
 export interface BackgroundOperationDiagnostics {
@@ -12,4 +13,5 @@ export interface BackgroundOperationDiagnostics {
   warnings: BackgroundOperationDiagnosticsWarningsItem[];
   /** @minimum 1 */
   windowMs: number;
+  automaticTrackingBackoff: BackgroundOperationDiagnosticsAutomaticTrackingBackoff;
 }

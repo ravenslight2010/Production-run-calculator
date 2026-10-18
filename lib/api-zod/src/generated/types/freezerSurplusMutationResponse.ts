@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FreezerSurplusAdjustment } from './freezerSurplusAdjustment';
 import type { FreezerSurplusAllocation } from './freezerSurplusAllocation';
 import type { FreezerSurplusLot } from './freezerSurplusLot';
 
@@ -12,4 +13,5 @@ export interface FreezerSurplusMutationResponse {
   lots: FreezerSurplusLot[];
   allocations: FreezerSurplusAllocation[];
   createdLot?: FreezerSurplusLot | null;
+  createdAdjustment?: FreezerSurplusAdjustment | null;
 }

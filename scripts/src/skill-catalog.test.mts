@@ -1,15 +1,17 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  checkRequiredMemoryDecisionLinks,
   formatCatalogReport,
   main,
   MAX_EDITABLE_LINES,
+  REQUIRED_MEMORY_DECISION_TOPICS,
   scanSkillCatalog,
   type DuplicateAllowlistEntry,
   type SkillRoot,
@@ -56,7 +58,24 @@ function runDefaultChecker(): Promise<CliResult> {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "skill-catalog-"));
   for (const skillRoot of roots) await mkdir(join(root, skillRoot.relativePath), { recursive: true });
+  await addRequiredMemoryTopics(root);
   return root;
+}
+
+async function addRequiredMemoryTopics(
+  root: string,
+  indexedTopics: readonly string[] = REQUIRED_MEMORY_DECISION_TOPICS,
+) {
+  const memoryDirectory = join(root, ".agents/memory");
+  await mkdir(memoryDirectory, { recursive: true });
+  for (const topicPath of REQUIRED_MEMORY_DECISION_TOPICS) {
+    await writeFile(join(root, topicPath), "Decision fixture.\n");
+  }
+  const indexEntries = indexedTopics.map((topicPath) => {
+    const target = basename(topicPath);
+    return `- [${target.replace(/\.md$/, "")}](${target})`;
+  });
+  await writeFile(join(memoryDirectory, "MEMORY.md"), `${indexEntries.join("\n")}\n`);
 }
 
 async function addSkill(
@@ -70,6 +89,47 @@ async function addSkill(
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "SKILL.md"), `---\n${metadata}\n---\n${body}`);
 }
+
+test("catalog accepts required memory decision topics when targets are indexed", async () => {
+  const root = await fixture();
+  const report = await scanSkillCatalog({ projectRoot: root, roots: [] });
+
+  assert.deepEqual(await checkRequiredMemoryDecisionLinks(root), []);
+  assert.deepEqual(report.memoryDecisionFindings, []);
+  assert.equal(report.failures, 0);
+});
+
+test("catalog fails when a required memory decision target is missing", async () => {
+  const root = await fixture();
+  const missingTopic = REQUIRED_MEMORY_DECISION_TOPICS[0];
+  await unlink(join(root, missingTopic));
+  const report = await scanSkillCatalog({ projectRoot: root, roots: [] });
+
+  assert.deepEqual(report.memoryDecisionFindings, [
+    { topicPath: missingTopic, code: "missing_target" },
+  ]);
+  assert.equal(report.failures, 1);
+  assert.match(formatCatalogReport(report), /required decision topic target is missing/);
+});
+
+test("catalog fails when a required decision topic is omitted from the memory index", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skill-catalog-unindexed-memory-"));
+  const omittedTopic = REQUIRED_MEMORY_DECISION_TOPICS[1];
+  await addRequiredMemoryTopics(
+    root,
+    REQUIRED_MEMORY_DECISION_TOPICS.filter((topicPath) => topicPath !== omittedTopic),
+  );
+  const report = await scanSkillCatalog({ projectRoot: root, roots: [] });
+
+  assert.deepEqual(report.memoryDecisionFindings, [
+    { topicPath: omittedTopic, code: "missing_index_link" },
+  ]);
+  assert.equal(report.failures, 1);
+  assert.match(
+    formatCatalogReport(report),
+    /required decision topic is not linked from \.agents\/memory\/MEMORY\.md/,
+  );
+});
 
 test("accepts valid metadata and reports inventory fields", async () => {
   const root = await fixture();
@@ -333,6 +393,7 @@ test("CLI checks repository skill roots with its default project root", async ()
 
 test("missing roots warn so platform-injected roots remain optional in CI", async () => {
   const root = await mkdtemp(join(tmpdir(), "skill-catalog-missing-"));
+  await addRequiredMemoryTopics(root);
   const report = await scanSkillCatalog({
     projectRoot: root,
     roots,

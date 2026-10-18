@@ -87,16 +87,25 @@ export default function MixesManager({
   // Brand group (lowercased key) whose rename/merge panel is open, if any.
   const [renamingBrand, setRenamingBrand] = useState<string | null>(null);
 
+  const validItems = useMemo(
+    () =>
+      items.flatMap((mix) => {
+        const normalized = normalizeMix(mix);
+        return normalized ? [normalized] : [];
+      }),
+    [items],
+  );
+
   const searching = query.trim().length > 0;
   const groups = useMemo(() => {
-    const filtered = items.filter((m) => mixMatchesQuery(m, query));
+    const filtered = validItems.filter((m) => mixMatchesQuery(m, query));
     return groupMixesByBrand(filtered);
-  }, [items, query]);
+  }, [validItems, query]);
   // All brand names in the FULL pool (ignoring the search filter), so the
   // rename panel can offer every possible merge target.
   const allBrands = useMemo(
-    () => groupMixesByBrand(items).map((g) => g.brand).filter(Boolean),
-    [items],
+    () => groupMixesByBrand(validItems).map((g) => g.brand).filter(Boolean),
+    [validItems],
   );
 
   function toggleBrand(key: string) {
@@ -144,7 +153,7 @@ export default function MixesManager({
   // name matches an existing brand — grouping is case-insensitive). Rewrites
   // only the changed rows through the normal save path.
   function renameBrandGroup(fromBrand: string, toBrand: string) {
-    const changed = renameMixesBrand(items, fromBrand, toBrand);
+    const changed = renameMixesBrand(validItems, fromBrand, toBrand);
     setRenamingBrand(null);
     if (changed.length === 0) return;
     // Learn the rename as a spec-import brand alias (fire-and-forget) so a
@@ -196,7 +205,7 @@ export default function MixesManager({
 
         {isLoading ? (
           <p className="text-xs text-muted-foreground">Loading mixes…</p>
-        ) : items.length === 0 ? (
+        ) : validItems.length === 0 ? (
           <p className="text-xs text-muted-foreground">No mixes yet. Add one below.</p>
         ) : (
           <div className="flex flex-col gap-2">
@@ -340,14 +349,14 @@ export default function MixesManager({
                                     // Per-row brand edit: if no OTHER row still
                                     // carries the old brand, the whole group
                                     // effectively moved — learn the rename.
-                                    const oldBrandLc = mix.brand.trim().toLowerCase();
+                                    const oldBrandLc = mix.brand.toLowerCase();
                                     maybeLearnRowBrandChange(
                                       mix.brand,
                                       next.brand,
-                                      items.some(
+                                      validItems.some(
                                         (m) =>
                                           m.id !== mix.id &&
-                                          m.brand.trim().toLowerCase() === oldBrandLc,
+                                          m.brand.toLowerCase() === oldBrandLc,
                                       ),
                                     );
                                     saveMutation.mutate([next]);

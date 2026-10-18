@@ -13,7 +13,8 @@ deterministic (no AI) in `@workspace/shipping-import`.
 - **Never guess.** A value that doesn't map confidently to one of the app's
   existing packaging options is OMITTED from the patch and surfaced as
   "kept as-is" in the review dialog (e.g. gripsheets "X"/"x+cardboard",
-  multipack counts like "4 - 3PACK"). Only whole-number counts map.
+  whose material is unspecified). Explicit multipack notation such as
+  "4 - 3PACK" maps to 12 pizzas per case; other counts must be whole numbers.
 - **Header tolerance:** header cells are matched letters-only, which absorbs
   the workbook's real "GRIPSHEEETS" typo. N/A detection must not letters-strip
   numeric cells (`12''` is a value, not N/A).
@@ -30,3 +31,9 @@ guard would wrongly block patching sparse profiles.
 **How to apply:** if the guide format changes, adjust mappers in
 `lib/shipping-import` and keep the omit-don't-guess contract; commit writes are
 localStorage-only and ride the existing full-profile sync scan.
+
+**Why:** pack count and pack size are both explicit in "4 - 3PACK", while "X"
+only confirms grip-sheet use and does not identify a supported material.
+
+**How to apply:** preserve the deterministic multiplier and keep unsupported
+grip-sheet values review-only until the guide identifies a specific option.

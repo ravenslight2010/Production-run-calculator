@@ -10,7 +10,7 @@
 //
 // Strategy: seed a real user directly in the DB (bypassing the HTTP sign-up
 // route so no rate-limit budget is consumed before the test loop), mint a valid
-// session token with signToken, then exhaust the limit by sending AUTH_RATE_MAX
+// session token with signLegacyTokenForTests, then exhaust the limit by sending AUTH_RATE_MAX
 // authenticated requests with the wrong current password (all return 401 — the
 // handler rejects the credential fast, before any expensive write). The next
 // request must return 429 regardless of its body. authRateLimit is placed
@@ -92,7 +92,7 @@ beforeAll(async () => {
   // is consumed before the test loop begins.
   const created = await usersMod.createUser(TEST_USERNAME, TEST_PASSWORD);
   if (!created.ok) throw new Error("Failed to create test user");
-  sessionToken = authMod.signToken(created.user.id);
+  sessionToken = authMod.signLegacyTokenForTests(created.user.id);
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));

@@ -966,7 +966,7 @@ const BASE_WAREHOUSE_EXTRAS: Record<string, unknown> = {
   cycleCountSchedules: [],
   dayState: { runs: [], stagedItems: {} },
   freezerPullPlan: [],
-  freezerSurplus: [],
+  freezerSurplus: { lots: [], allocations: [] },
   freezerSurplusBusy: false,
   freezerSurplusError: null,
   freezerSurplusLoaded: true,

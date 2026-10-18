@@ -2,8 +2,14 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { existsSync } from "node:fs";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { VitePWA } from "vite-plugin-pwa";
+import {
+  PROJECT_ROOT,
+  readBoundedJson,
+  validateSourceRecord,
+} from "../../scripts/src/build-source-identity.mjs";
 
 const rawPort = process.env.PORT;
 
@@ -22,11 +28,25 @@ const basePath = process.env.BASE_PATH ?? "/";
 const suppressPreviewReload =
   process.env.REPL_ID !== undefined ||
   process.env.CLEAN_START_REPLIT_PREVIEW === "1";
-const webBuildId =
-  process.env.VITE_APP_VERSION?.trim() ||
-  process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
-  process.env.REPLIT_DEPLOYMENT?.trim() ||
-  "local";
+const webBuildStagePath = path.join(PROJECT_ROOT, ".local/build-identity/web-stage-start.json");
+
+function resolveWebBuildId(command: string): string {
+  const pwaHandoffBuildId = process.env.PWA_HANDOFF_BUILD_ID?.trim();
+  if (command === "build" && /^pwa-(?:old|new)-build$/.test(pwaHandoffBuildId ?? "")) {
+    // The isolated two-version PWA fixture needs genuinely distinct app IDs
+    // even when the workspace has a staged release identity.
+    return pwaHandoffBuildId!;
+  }
+  if (command === "build" && existsSync(webBuildStagePath)) {
+    return validateSourceRecord(readBoundedJson(webBuildStagePath)).appBuildId;
+  }
+  return (
+    process.env.VITE_APP_VERSION?.trim() ||
+    process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
+    process.env.REPLIT_DEPLOYMENT?.trim() ||
+    "local"
+  );
+}
 
 // Dev-only (Replit). The preview runs inside an HTTPS-proxied iframe where
 // Vite's HMR websocket can't stay connected — it drops every so often, and
@@ -105,10 +125,10 @@ function workbookBoundaryManifest(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(async ({ command }) => ({
   base: basePath,
   define: {
-    "import.meta.env.VITE_APP_VERSION": JSON.stringify(webBuildId),
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(resolveWebBuildId(command)),
   },
   plugins: [
     ...(suppressPreviewReload ? [suppressViteClientReload()] : []),
@@ -173,6 +193,10 @@ export default defineConfig({
         // (build hard-fails, not just a warning). Allow up to 4 MiB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // HEIC conversion is optional: inventory photo analysis requires the
+        // online AI endpoint, and inventoryImage.ts already falls back to the
+        // original file if this converter cannot be loaded.
+        globIgnores: ["**/heic2any-*.js"],
       },
       devOptions: {
         enabled: false,
@@ -242,4 +266,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

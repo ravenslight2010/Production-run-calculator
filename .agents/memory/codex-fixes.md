@@ -45,6 +45,45 @@ is pending on this ARM box — its pretypecheck needs a missing `lightningcss`
 aarch64 binary (the CI Typecheck job covers it). Large-spec harness
 re-verification runs via CI/nightly.
 
+## 2026-10-03 — ARM host: add local toolchain memory (extends existing x64-binary note)
+
+**File(s):** `.agents/memory/local-arm64-toolchain.md`, `.agents/memory/MEMORY.md`, `.agents/memory/codex-fixes.md`
+
+**Problem:** The 2026-09-16 merge entries already record that the lockfile ships
+only x64 optional binaries and that ARM hosts must install the arm64 sibling
+packages by hand into `node_modules/.pnpm`. Three host-specific facts were not
+written down anywhere:
+
+- `shellcheck` is a hard prerequisite, not optional lint. Without it
+  `check:generated` aborts before any TypeScript runs, so
+  `CI=true pnpm run typecheck` fails early and looks like a repo break.
+- `/usr/local/bin/node` is the interpreter running the Codex session, and
+  `/usr/local/lib/node_modules` holds Codex itself, `codexui-android`,
+  `openclaw`, and the Android bridge tools. Since the `codex` entry point is
+  `#!/usr/bin/env node`, prepending another Node to `PATH` changes which
+  interpreter runs Codex — so "upgrade Node" is not a safe default here.
+- The two shims are not symmetric: `lightningcss` takes a bare `.node` drop-in,
+  but `@tailwindcss/oxide` needs a real installed package because its loader
+  calls `require('@tailwindcss/oxide-linux-arm64-gnu')`.
+
+**Fix:** Added one memory file covering only the delta, cross-referencing the
+existing lockfile note instead of restating it, plus a `MEMORY.md` index line
+and this log entry. No source, lockfile, or build file touched.
+
+**Why it was needed:** The gaps are invisible in a diff and each one points at
+healthy tracked files — the lockfile especially, which this box must not
+regenerate. The Node-runtime hazard is the sharpest one: an agent following the
+obvious "just install Node 24" path could break the tooling it is running under.
+
+**Verification:** `git diff --numstat` shows pure insertions (53-line new file,
++1 index line, this entry). `CI=true pnpm run typecheck` exits 0 on this host
+once `shellcheck` and both arm64 bindings are present; `check-vite-config-loading`
+passes all three Vite loaders. Documentation-only change, so no test suites apply.
+
+**Still true after this change:** the arm64 shims remain uncommitted and die with
+`node_modules`. `verify-before-commit` step 4 still claims ARM cannot run
+vitest/vite — now demonstrably false here — and correcting that shared skill is
+left for a separate change, since it redirects every agent's verification path.
 ## 2026-09-14 — Add metadata-only ZIP upload inventory
 
 **File(s):** `scripts/zip_asset_inventory.py`, `scripts/test_zip_asset_inventory.py`, `scripts/package.json`
@@ -1353,3 +1392,17 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Verification (2026-09-22 ~23:12 UTC):** `https://runcalc.onrender.com/api/readyz` → HTTP 200 with `process/startup/database/dependencies/backgroundWorkers` all `ok`; `/api/healthz` 200; `/api/livez` 200. Live deploy image ref is the sha tag (digest `caf0787b…` platform manifest; evidence index digest for the same publish is `fff67f56…`).
 
 **Outstanding watch items:** `runcalc-db` (free tier) expires **2026-09-29**; nightly CI still has no `DATABASE_URL` Actions secret.
+## Run action touch-target coverage
+
+**Date**: 2026-10-16
+**Files changed**:
+- `artifacts/run-calculator/e2e/phone-layout.spec.ts`
+- `artifacts/run-calculator/src/pages/home.tsx`
+
+**What was wrong**: Run action journeys did not measure every requested hit area or require the controls to remain fully inside the viewport. The focused responsive check found the Floor Mode Complete Run confirmation was only 38 CSS pixels tall.
+
+**What the fix was**: Added 44×44 CSS-pixel and viewport-bound assertions for Start/Stop, Log Stoppage, case corrections, Skid Done, and both Complete Run controls across phone portrait/landscape, tablet portrait/landscape, and desktop Chromium viewports. Set the undersized confirmation action to a 44-pixel minimum height without changing its behavior.
+
+**Why it was needed**: A rendered hit-area check catches undersized actions that visibility and clickability checks miss, reducing missed production actions on compact screens.
+
+**Verification**: Focused isolated Chromium browser run passed all five viewports; Run Calculator typecheck passed.

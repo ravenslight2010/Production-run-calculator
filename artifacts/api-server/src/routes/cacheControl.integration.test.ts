@@ -26,7 +26,7 @@ import type { Server } from "node:http";
 import type { Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import { CACHE_CONTROL_EXCLUSIONS } from "../lib/cacheControl";
 import { collectGetRoutePathsFromRouter } from "../lib/routeScan";
 
@@ -149,7 +149,7 @@ afterAll(async () => {
 async function get(pathname: string, signal?: AbortSignal): Promise<Response> {
   return fetch(`${baseUrl}${pathname}`, {
     method: "GET",
-    headers: { authorization: `Bearer ${signToken(MANAGER)}` },
+    headers: { authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` },
     signal,
   });
 }
@@ -246,7 +246,7 @@ describe("no-store routes never answer with 304 (conditional revalidation defeat
     const second = await fetch(`${baseUrl}${pathname}`, {
       method: "GET",
       headers: {
-        authorization: `Bearer ${signToken(MANAGER)}`,
+        authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
         "if-none-match": etag as string,
       },
     });

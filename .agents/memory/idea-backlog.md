@@ -1,5 +1,7 @@
 # Idea Backlog
 
+> Historical mirror retained for context. The current catalog is `docs/idea-backlog.md`; sync sequencing is governed by `docs/sync-reliability-unified-plan-2026-09-19.md`, and cross-domain ordering by `research/additional-domain-research-synthesis-2026-09-19.md`. Do not use status lines below as current authority.
+
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
 **Prioritized research synthesis (2026-09-18):** see [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) for ordered phases (stabilize → inventory truth → floor UX → QC/allergen → AI portfolio → reporting), status corrections, and explicit non-priorities. Prefer that document when choosing *what to build next*; keep this file as the catalog of ideas and detailed notes. See also [capability-research-pack-2026-09-18.md](capability-research-pack-2026-09-18.md) (every capability area mapped against industry/MES norms) and [further-research-2026-09-18.md](further-research-2026-09-18.md) (sync architecture, payload measurement, FSMA/allergen scope, station UX decisions).

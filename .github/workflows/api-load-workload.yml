@@ -1,0 +1,89 @@
+name: Bounded API application workload
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: api-load-workload
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  api-load-workload:
+    name: Disposable PostgreSQL API workload
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: api-load-ci
+          POSTGRES_DB: api_load_test_admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d api_load_test_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres:api-load-ci@127.0.0.1:5432/api_load_test_admin
+      NODE_ENV: test
+      API_LOAD_TEST_DISPOSABLE_DB: "1"
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-api-load-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify schema failure removes its child database
+        env:
+          API_LOAD_WORKLOAD_FAILURE_TEST: "1"
+        run: node --test scripts/src/run-api-load-workload.test.mjs
+
+      - name: Run bounded API workload
+        run: node scripts/src/test-results.mjs run --lane api-load-workload -- pnpm --filter @workspace/api-server run test:load:isolated
+
+      - name: Upload sanitized workload summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: api-load-workload-${{ github.run_id }}-${{ github.run_attempt }}
+          path: api-load-workload/api-load-workload-result.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-api-load-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
+          retention-days: 14

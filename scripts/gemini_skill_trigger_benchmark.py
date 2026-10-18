@@ -25,6 +25,11 @@ from typing import Any, Callable, Iterable
 
 
 DECISIONS = {"trigger", "do_not_trigger", "uncertain"}
+FAILURE_CATEGORIES = frozenset({
+    "json_parsing",
+    "response_schema",
+    "field_validation",
+})
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_CONFIDENCE = 0.75
 MINIMUM_ACCURACY = 0.8
@@ -57,6 +62,26 @@ class ProviderFailure(RuntimeError):
     pass
 
 
+class InvalidStructuredOutput(ProviderFailure):
+    """A provider reply failed structured-output parsing or validation."""
+
+    def __init__(self, category: str):
+        if not isinstance(category, str) or category not in FAILURE_CATEGORIES:
+            raise ValueError("unsupported structured-output failure category")
+        super().__init__("Gemini returned invalid structured output")
+        self.category = category
+
+
+class ClassificationValidationFailure(ValueError):
+    """A parsed classification failed response-shape or field validation."""
+
+    def __init__(self, message: str, category: str):
+        if not isinstance(category, str) or category not in FAILURE_CATEGORIES:
+            raise ValueError("unsupported classification failure category")
+        super().__init__(message)
+        self.category = category
+
+
 @dataclass(frozen=True)
 class Classification:
     decision: str
@@ -68,20 +93,37 @@ def validate_classification(value: Any) -> Classification:
     if isinstance(value, Classification):
         return value
     if not isinstance(value, dict):
-        raise ValueError("response must be a JSON object")
+        raise ClassificationValidationFailure(
+            "response must be a JSON object", "response_schema"
+        )
+    if not {"decision", "confidence", "rationale"}.issubset(value):
+        raise ClassificationValidationFailure(
+            "response is missing required fields", "response_schema"
+        )
     decision = value.get("decision")
     confidence = value.get("confidence")
     rationale = value.get("rationale")
-    if decision not in DECISIONS:
-        raise ValueError("decision must be trigger, do_not_trigger, or uncertain")
+    if not isinstance(decision, str) or decision not in DECISIONS:
+        raise ClassificationValidationFailure(
+            "decision must be trigger, do_not_trigger, or uncertain",
+            "field_validation",
+        )
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        raise ValueError("confidence must be numeric")
+        raise ClassificationValidationFailure(
+            "confidence must be numeric", "field_validation"
+        )
     if not 0 <= confidence <= 1:
-        raise ValueError("confidence must be between 0 and 1")
+        raise ClassificationValidationFailure(
+            "confidence must be between 0 and 1", "field_validation"
+        )
     if not isinstance(rationale, str) or not rationale.strip():
-        raise ValueError("rationale must be a non-empty string")
+        raise ClassificationValidationFailure(
+            "rationale must be a non-empty string", "field_validation"
+        )
     if len(rationale) > MAX_RATIONALE_CHARS:
-        raise ValueError("rationale is too long")
+        raise ClassificationValidationFailure(
+            "rationale is too long", "field_validation"
+        )
     return Classification(decision, float(confidence), rationale.strip())
 
 
@@ -147,15 +189,28 @@ class GeminiAdapter:
         url = f"{base}/models/{self.model}:generateContent"
         try:
             raw = self._transport(url, key, body)
-            payload = json.loads(raw)
-            text = payload["candidates"][0]["content"]["parts"][0]["text"]
-            return validate_classification(json.loads(text))
         except ProviderUnavailable:
             raise
-        except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise ProviderFailure("Gemini returned invalid structured output") from exc
         except Exception as exc:
             raise ProviderFailure("Gemini request failed") from exc
+
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            raise InvalidStructuredOutput("json_parsing") from None
+
+        try:
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            raise InvalidStructuredOutput("response_schema") from None
+        if not isinstance(text, str):
+            raise InvalidStructuredOutput("response_schema") from None
+
+        try:
+            classification_value = json.loads(text)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            raise InvalidStructuredOutput("json_parsing") from None
+        return validate_classification(classification_value)
 
     @staticmethod
     def _request(url: str, key: str, body: dict[str, Any]) -> bytes:
@@ -192,6 +247,7 @@ def evaluate(
         for item in skill["evals"]:
             classification = None
             error = None
+            failure_category = None
             attempts = 0
             for attempt in range(retries + 1):
                 attempts = attempt + 1
@@ -201,11 +257,19 @@ def evaluate(
                 except ProviderUnavailable:
                     error = "provider_unavailable"
                     break
+                except InvalidStructuredOutput as exc:
+                    error = "invalid_output"
+                    failure_category = exc.category
+                    break
+                except ClassificationValidationFailure as exc:
+                    error = "invalid_output"
+                    failure_category = exc.category
+                    break
                 except ValueError:
                     error = "invalid_output"
                     break
                 except Exception as exc:
-                    error = "invalid_output" if "structured output" in str(exc).lower() else "provider_failure"
+                    error = "provider_failure"
                     if attempt >= retries or not _is_transient(exc):
                         break
                     sleep(0.2 * (2**attempt))
@@ -230,8 +294,38 @@ def evaluate(
                     record["status"] = "included"
             else:
                 record.update({"status": error or "provider_failure", "error": error})
+                if isinstance(failure_category, str) and failure_category in FAILURE_CATEGORIES:
+                    record["failure_category"] = failure_category
             records.append(record)
     return records
+
+
+def select_skill_corpus(
+    corpus: dict[str, Any],
+    requested_skills: Iterable[str] | None,
+) -> dict[str, Any]:
+    """Return the corpus limited to requested exact skill names, preserving source order."""
+    requested = list(requested_skills or [])
+    if not requested:
+        return corpus
+
+    available = {skill["name"] for skill in corpus["skills"]}
+    unknown = sorted(set(requested) - available)
+    if unknown:
+        raise ValueError(
+            "unknown skill name(s): "
+            + ", ".join(unknown)
+            + ". Available skills: "
+            + ", ".join(sorted(available))
+        )
+
+    selected_names = set(requested)
+    return {
+        **corpus,
+        "skills": [
+            skill for skill in corpus["skills"] if skill["name"] in selected_names
+        ],
+    }
 
 
 def metrics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -254,8 +348,17 @@ def metrics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 
 def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
+    cases = []
+    for r in records:
+        if r["status"] not in {
+            "provider_unavailable",
+            "provider_failure",
+            "invalid_output",
+            "uncertain",
+            "disagreement",
+        }:
+            continue
+        case = {
             "id": r["id"],
             "skill": r["skill"],
             "expected": r["expected"],
@@ -265,13 +368,53 @@ def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "manual_decision": None,
             "manual_reason": None,
         }
-        for r in records
-        if r["status"] in {"provider_unavailable", "provider_failure", "invalid_output", "uncertain", "disagreement"}
-    ]
+        category = r.get("failure_category")
+        if isinstance(category, str) and category in FAILURE_CATEGORIES:
+            case["failure_category"] = category
+        cases.append(case)
+    return cases
 
 
 def write_report(path: Path, result: dict[str, Any]) -> None:
     m = result["metrics"]
+    evaluation_manifest = result.get("evaluationManifest")
+    scope_lines: list[str] = []
+    if isinstance(evaluation_manifest, dict):
+        source = evaluation_manifest.get("corpus")
+        selection = evaluation_manifest.get("selection")
+        if isinstance(source, dict) and isinstance(selection, dict):
+            source_hash = source.get("sha256")
+            source_cases = source.get("cases")
+            source_skills = source.get("skills")
+            selected_hash = selection.get("sha256")
+            selected_cases = selection.get("cases")
+            selected_skills = selection.get("skills")
+            if (
+                isinstance(source_hash, str)
+                and isinstance(source_cases, int)
+                and isinstance(source_skills, int)
+                and isinstance(selected_cases, int)
+                and isinstance(selected_skills, list)
+            ):
+                selected_skill_names = [
+                    skill for skill in selected_skills if isinstance(skill, str)
+                ]
+                if selected_hash == source_hash:
+                    selected_scope = (
+                        f"all source skills ({source_skills} of {source_skills})"
+                    )
+                else:
+                    selected_scope = (
+                        f"{', '.join(selected_skill_names) or 'no skills'} "
+                        f"({len(selected_skill_names)} of {source_skills} source skills)"
+                    )
+                scope_lines = [
+                    "## Evaluation scope",
+                    "",
+                    f"- Source corpus: SHA-256 `{source_hash}`; **{source_skills} skills**, **{source_cases} cases**",
+                    f"- Selected skills: **{selected_scope}**; **{selected_cases} cases**",
+                    "",
+                ]
     lines = [
         "# Gemini skill-trigger benchmark",
         "",
@@ -280,6 +423,7 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         f"- Run at: **{result['run_at']}**",
         "- Scope: Gemini classification only; this is not evidence of Claude behavior or Claude tool selection.",
         "",
+        *scope_lines,
         "## Metrics",
         "",
         f"- Evaluated: **{m['evaluated']}**; excluded: **{m['excluded']}**",
@@ -305,8 +449,16 @@ def retained_results(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         "confidence",
         "status",
         "error",
+        "failure_category",
     )
-    return [{key: record[key] for key in retained_keys if key in record} for record in records]
+    retained = []
+    for record in records:
+        item = {key: record[key] for key in retained_keys if key in record}
+        category = item.get("failure_category")
+        if not isinstance(category, str) or category not in FAILURE_CATEGORIES:
+            item.pop("failure_category", None)
+        retained.append(item)
+    return retained
 
 
 def private_artifact_fields(value: Any, path: str = "$") -> list[str]:
@@ -375,10 +527,20 @@ def evaluation_manifest(
     model: str,
     confidence_threshold: float,
     retries: int,
+    selected_corpus_bytes: bytes | None = None,
+    source_case_count: int | None = None,
+    source_skill_count: int | None = None,
 ) -> dict[str, Any]:
-    corpus_hash = hashlib.sha256(corpus_bytes).hexdigest()
+    source_hash = hashlib.sha256(corpus_bytes).hexdigest()
+    selected_hash = hashlib.sha256(
+        corpus_bytes if selected_corpus_bytes is None else selected_corpus_bytes
+    ).hexdigest()
     result_metrics = metrics(records)
-    total_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
+    selected_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
+    source_cases = selected_cases if source_case_count is None else source_case_count
+    source_skills = (
+        len(corpus["skills"]) if source_skill_count is None else source_skill_count
+    )
     lockfile_hash = hashlib.sha256(
         (Path(__file__).resolve().parents[1] / "pnpm-lock.yaml").read_bytes()
     ).hexdigest()
@@ -391,15 +553,15 @@ def evaluation_manifest(
         reason = "one or more provider calls or structured outputs failed"
     elif (
         result_metrics["evaluated"] < 1
-        or total_cases == 0
-        or result_metrics["evaluated"] / total_cases < MINIMUM_COVERAGE
+        or selected_cases == 0
+        or result_metrics["evaluated"] / selected_cases < MINIMUM_COVERAGE
         or result_metrics["accuracy"] is None
         or result_metrics["accuracy"] < MINIMUM_ACCURACY
     ):
-        state = "failed" if total_cases > 0 else "unavailable"
+        state = "failed" if selected_cases > 0 else "unavailable"
         reason = (
             "quality or coverage thresholds failed"
-            if total_cases > 0
+            if selected_cases > 0
             else "corpus contained no evaluation cases"
         )
     else:
@@ -409,9 +571,15 @@ def evaluation_manifest(
         "manifestVersion": 1,
         "evaluation": {"id": "gemini-skill-trigger", "kind": "provider-backed"},
         "corpus": {
-            "sha256": corpus_hash,
-            "cases": total_cases,
+            "sha256": source_hash,
+            "cases": source_cases,
+            "skills": source_skills,
             "sourceAuthority": "held-out-reviewed-skill-trigger-corpus",
+        },
+        "selection": {
+            "sha256": selected_hash,
+            "cases": selected_cases,
+            "skills": [skill["name"] for skill in corpus["skills"]],
         },
         "thresholds": {
             "minimumConfidence": confidence_threshold,
@@ -450,7 +618,8 @@ def evaluation_manifest(
         },
         "outcome": {"state": state, "reason": reason},
         "provenance": {
-            "sourceSha256": corpus_hash,
+            "sourceSha256": source_hash,
+            "selectedCorpusSha256": selected_hash,
             "evidence": {
                 "state": "hashed",
                 "sha256": hashlib.sha256(
@@ -575,6 +744,13 @@ def main() -> None:
         help="review action (use with the review command)",
     )
     parser.add_argument("--corpus", type=Path, default=Path("skill-trigger-benchmark.json"))
+    parser.add_argument(
+        "--skill",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="evaluate only this exact skill name; repeat to select multiple skills",
+    )
     parser.add_argument("--results", type=Path, default=Path("gemini-skill-trigger-benchmark.json"))
     parser.add_argument("--report", type=Path, default=Path("gemini-skill-trigger-benchmark.md"))
     parser.add_argument("--queue", type=Path, default=Path("gemini-skill-trigger-review-queue.json"))
@@ -623,7 +799,21 @@ def main() -> None:
             "intentional provider-backed check (not CI evidence)"
         )
     corpus_bytes = args.corpus.read_bytes()
-    corpus = json.loads(corpus_bytes)
+    source_corpus = json.loads(corpus_bytes)
+    try:
+        corpus = select_skill_corpus(source_corpus, args.skill)
+    except ValueError as exc:
+        parser.error(str(exc))
+    selected_corpus_bytes = (
+        corpus_bytes
+        if not args.skill
+        else json.dumps(
+            corpus,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
     adapter = GeminiAdapter(model=args.model)
     records = evaluate(corpus, adapter, args.confidence_threshold, args.retries)
     result = {
@@ -642,6 +832,9 @@ def main() -> None:
             args.model,
             args.confidence_threshold,
             args.retries,
+            selected_corpus_bytes,
+            sum(len(skill["evals"]) for skill in source_corpus["skills"]),
+            len(source_corpus["skills"]),
         ),
     }
     write_benchmark_artifacts(args.results, args.queue, args.report, result, records)

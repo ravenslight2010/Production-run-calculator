@@ -6,8 +6,8 @@
 // and auto-apply remembered matches BEFORE falling back to AI/fuzzy matching —
 // no AI call needed, and works for operators too.
 //
-// Best-effort: on any failure (sync disabled, network) the dialog silently
-// proceeds without learned aliases. Mirrors the mobile glue in
+// Best-effort: on any failure (sync disabled, network) the dialog warns the user
+// and proceeds without learned aliases. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/importAliases.ts (replit.md parity).
 
 import { inventoryClientId } from "./inventoryShared";
@@ -29,14 +29,24 @@ export async function fetchImportAliases(): Promise<ImportAlias[]> {
 }
 
 export async function saveImportAliases(aliases: ImportAlias[]): Promise<void> {
-  if (aliases.length === 0) return;
+  const validAliases = aliases.flatMap((alias) => {
+    const externalName = alias.externalName?.trim();
+    const canonicalName = alias.canonicalName?.trim();
+    const brandContext =
+      alias.type === "flavor" ? alias.brandContext?.trim() || null : null;
+    if (!externalName || !canonicalName || (alias.type === "flavor" && !brandContext)) {
+      return [];
+    }
+    return [{ ...alias, externalName, canonicalName, brandContext }];
+  });
+  if (validAliases.length === 0) return;
   const res = await fetch("/api/import-aliases", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ aliases }),
+    body: JSON.stringify({ aliases: validAliases }),
   });
   if (!res.ok) throw new Error(`Save import aliases failed (${res.status})`);
 }

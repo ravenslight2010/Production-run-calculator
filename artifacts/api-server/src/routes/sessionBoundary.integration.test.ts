@@ -26,7 +26,7 @@ import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // NOTE: do NOT statically import anything that pulls in @workspace/db (e.g.
 // ../lib/sessionBoundary) here — the db pool binds to process.env.DATABASE_URL
@@ -199,7 +199,7 @@ function legacyToken(sub: string): string {
 
 // Forge a token with an explicit whole-second `iat`, signed with the live secret.
 // Lets a test pin the exact relationship between the token's second-granularity
-// issue time and a millisecond boundary (impossible with signToken's iat=now).
+// issue time and a millisecond boundary (impossible with signLegacyTokenForTests's iat=now).
 function tokenWithIat(sub: string, iatSec: number): string {
   const secret = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET;
   if (!secret) throw new Error("missing token secret");
@@ -215,21 +215,47 @@ describe("daily-reset session fence", () => {
     // Reset boundary sits in the future relative to the token we are about to
     // mint, i.e. the token was issued before the reset → fenced out.
     await writeReset(todayStr(), Date.now() + 60_000);
-    const res = await meWith(signToken(USER));
+    const res = await meWith(signLegacyTokenForTests(USER));
     expect(res.status).toBe(401);
   });
 
   it("accepts a token issued after today's reset (200)", async () => {
     // Reset already happened in the past; the freshly minted token is newer.
     await writeReset(todayStr(), Date.now() - 60_000);
-    const res = await meWith(signToken(USER));
+    const res = await meWith(signLegacyTokenForTests(USER));
     expect(res.status).toBe(200);
   });
 
   it("accepts every session when today has no reset recorded (200)", async () => {
     // No daily_sync row for today → boundary 0 → nobody is fenced.
-    const res = await meWith(signToken(USER));
+    const res = await meWith(signLegacyTokenForTests(USER));
     expect(res.status).toBe(200);
+  });
+
+  it("rejects a session after its account is disabled", async () => {
+    const token = signLegacyTokenForTests(USER);
+    expect((await meWith(token)).status).toBe(200);
+
+    await db.update(usersTable)
+      .set({ disabled: true, disabledAt: new Date() })
+      .where(eq(usersTable.id, USER));
+    clearUserValidityCache();
+
+    expect((await meWith(token)).status).toBe(401);
+  });
+
+  it("rejects a session after its account's sessions are revoked", async () => {
+    const token = signLegacyTokenForTests(USER);
+    expect((await meWith(token)).status).toBe(200);
+
+    // Keep the marker beyond the token's whole-second issuance window so this
+    // assertion tests the revocation fence rather than its same-second grace.
+    await db.update(usersTable)
+      .set({ sessionRevokedAt: new Date(Date.now() + 1_500) })
+      .where(eq(usersTable.id, USER));
+    clearUserValidityCache();
+
+    expect((await meWith(token)).status).toBe(401);
   });
 
   it("uses today's row only: a future scheduled reset does not invalidate today (200)", async () => {
@@ -237,7 +263,7 @@ describe("daily-reset session fence", () => {
     // boundary read leaked across days, this far-future reset would log everyone
     // out right now. It must be ignored entirely.
     await writeReset(tomorrowStr(), Date.now() + 1_000_000_000);
-    const res = await meWith(signToken(USER));
+    const res = await meWith(signLegacyTokenForTests(USER));
     expect(res.status).toBe(200);
   });
 
@@ -325,7 +351,7 @@ async function readResetAt(date: string): Promise<number | undefined> {
 describe("daily-reset rollover write", () => {
   it("PUT /sync/today persists a sane (recent, > 0) resetAt on today's row", async () => {
     const before = Date.now();
-    const res = await putSync("today", { dayState: { runs: [], resetAt: Date.now() } }, signToken(USER));
+    const res = await putSync("today", { dayState: { runs: [], resetAt: Date.now() } }, signLegacyTokenForTests(USER));
     expect(res.status).toBe(200);
 
     const resetAt = await readResetAt(todayStr());
@@ -340,12 +366,12 @@ describe("daily-reset rollover write", () => {
     // A future production day is scheduled ahead of time, carrying its own data
     // and its own resetAt. The rollover that advances TODAY's boundary writes to
     // today's date key only; it must not bleed into that future row.
-    const token = signToken(USER);
+    const token = signLegacyTokenForTests(USER);
     const futureResetAt = 111_111;
     const futureSetup = await putSync(
       tomorrowStr(),
       { dayState: { runs: [{ id: "r1", brand: "B", flavor: "F" }], resetAt: futureResetAt } },
-      signToken(SCHEDULER),
+      signLegacyTokenForTests(SCHEDULER),
     );
     expect(futureSetup.status).toBe(200);
 
@@ -360,7 +386,7 @@ describe("daily-reset rollover write", () => {
   });
 
   it("fences out a session that was valid before the rollover write (write + read tie-in)", async () => {
-    const token = signToken(USER);
+    const token = signLegacyTokenForTests(USER);
 
     // Before any rollover there is no boundary, so the session is accepted.
     expect((await meWith(token)).status).toBe(200);
@@ -379,6 +405,26 @@ describe("daily-reset rollover write", () => {
     // Same token, now rejected: the read side honours the boundary the write
     // side just persisted.
     expect((await meWith(token)).status).toBe(401);
+  });
+
+  it("does not advance resetBoundaryAt when the same rollover is submitted twice", async () => {
+    // Keep the test session valid for the retry; the idempotence contract is
+    // about the persisted fence, not about fencing this test's caller.
+    const firstBoundary = Date.now() - 60_000;
+    const token = signLegacyTokenForTests(USER);
+    const first = await putSync("today", { dayState: { runs: [], resetAt: firstBoundary } }, token);
+    expect(first.status).toBe(200);
+    const persistedFirst = await readBoundaryAt(todayStr());
+
+    // A delayed/duplicate device can retry with a later local timestamp. The
+    // first genuine rollover remains the only fence for this production date.
+    const second = await putSync(
+      "today",
+      { dayState: { runs: [{ id: "stale-retry" }], resetAt: firstBoundary + 120_000 } },
+      token,
+    );
+    expect(second.status).toBe(200);
+    expect(await readBoundaryAt(todayStr())).toBe(persistedFirst);
   });
 });
 
@@ -415,7 +461,7 @@ async function readBoundaryAt(date: string): Promise<number | undefined> {
 // genuine same-day write, so this override can't fence anyone.
 describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local day)", () => {
   it("does NOT fence when a future scheduled day equals the server's UTC today", async () => {
-    const token = signToken(USER);
+    const token = signLegacyTokenForTests(USER);
     // Server's UTC "today" (what getSessionBoundaryMs reads) is the operator's
     // "tomorrow"; the operator's real local day is one behind UTC.
     const serverToday = todayStr();
@@ -428,7 +474,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [{ id: "r1", brand: "B", flavor: "F" }], resetAt: Date.now() } },
       operatorToday,
-      signToken(SCHEDULER),
+      signLegacyTokenForTests(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     clearSessionBoundaryCache();
@@ -440,7 +486,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
   });
 
   it("DOES fence when the operator's real local day rolls over (date === client today)", async () => {
-    const token = signToken(USER);
+    const token = signLegacyTokenForTests(USER);
     const serverToday = todayStr();
 
     // Genuine rollover: the operator's local day IS the server's day, so the
@@ -449,7 +495,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: Date.now() + 1000 } },
       serverToday,
-      signToken(SCHEDULER),
+      signLegacyTokenForTests(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     clearSessionBoundaryCache();
@@ -461,7 +507,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
   it("strips a client-supplied resetBoundaryAt on a future-day write (server-authoritative)", async () => {
     // The fence is derived server-side; a client must not be able to fence peers
     // by echoing resetBoundaryAt onto a future-day (non-current) row.
-    const token = signToken(USER);
+    const token = signLegacyTokenForTests(USER);
     const serverToday = todayStr();
     const operatorToday = yesterdayStr();
 
@@ -469,7 +515,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: Date.now(), resetBoundaryAt: Date.now() + 1_000_000 } },
       operatorToday,
-      signToken(SCHEDULER),
+      signLegacyTokenForTests(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     clearSessionBoundaryCache();
@@ -482,7 +528,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
     // Once a genuine same-day write recorded the boundary, a subsequent write that
     // treats the same row as a NON-current day (date !== client today) must not
     // erase it — otherwise a stray future-day push could unfence the shift.
-    const token = signToken(USER);
+    const token = signLegacyTokenForTests(USER);
     const serverToday = todayStr();
     const tomorrow = tomorrowStr();
 
@@ -492,7 +538,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: genuineReset } },
       serverToday,
-      signToken(SCHEDULER),
+      signLegacyTokenForTests(SCHEDULER),
     );
     expect(res1.status).toBe(200);
     expect(await readBoundaryAt(serverToday)).toBe(genuineReset);
@@ -503,7 +549,7 @@ describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local 
       serverToday,
       { dayState: { runs: [], resetAt: genuineReset } },
       tomorrow,
-      signToken(SCHEDULER),
+      signLegacyTokenForTests(SCHEDULER),
     );
     expect(res2.status).toBe(200);
     expect(await readBoundaryAt(serverToday)).toBe(genuineReset);

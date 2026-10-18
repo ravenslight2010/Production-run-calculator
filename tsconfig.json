@@ -22,10 +22,19 @@
       "path": "./lib/fill-missing"
     },
     {
+      "path": "./lib/factory-constants"
+    },
+    {
       "path": "./lib/inventory-math"
     },
     {
+      "path": "./lib/live-calc"
+    },
+    {
       "path": "./lib/cheese-recipes"
+    },
+    {
+      "path": "./lib/cheese-reconcile"
     },
     {
       "path": "./lib/named-recipes"
@@ -53,6 +62,9 @@
     },
     {
       "path": "./lib/freezer-pull"
+    },
+    {
+      "path": "./lib/formula-guard"
     },
     {
       "path": "./lib/mixes"
@@ -85,6 +97,9 @@
       "path": "./lib/day-summary"
     },
     {
+      "path": "./lib/field-check-contract"
+    },
+    {
       "path": "./lib/incident-cluster"
     },
     {
@@ -103,10 +118,25 @@
       "path": "./lib/ai-evaluation"
     },
     {
+      "path": "./lib/distill-dataset"
+    },
+    {
       "path": "./lib/recipe-apply"
     },
     {
+      "path": "./lib/recipe-guide-import"
+    },
+    {
+      "path": "./lib/setup-math-check"
+    },
+    {
+      "path": "./lib/sync-contract"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
+    },
+    {
+      "path": "./lib/ingredient-catalog"
     }
   ]
 }

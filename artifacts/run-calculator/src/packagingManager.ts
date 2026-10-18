@@ -5,6 +5,11 @@ import { computeCasesInFreezer } from "@workspace/inventory-math";
 import { computeEffectiveLineSpeed } from "./lineSpeed";
 
 export type PackagingProgressSource = "manual" | "auto";
+export function runUnlockedManualSectionAction(isLocked: () => boolean, action: () => void): boolean {
+  if (isLocked()) return false;
+  action();
+  return true;
+}
 
 export type PackagingControlAdapter = {
   apply(
@@ -29,9 +34,19 @@ type PackagingControlAdapterDependencies = {
   skidsCompleted: number;
   casesOnCurrentSkid: number;
   casesPerSkid: number;
-  applyProgress(skidsCompleted: number, casesOnCurrentSkid: number): void;
+  getProgress?(): {
+    skidsCompleted: number;
+    casesOnCurrentSkid: number;
+  };
+  applyProgress(
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+    previousSkidsCompleted: number,
+    previousCasesOnCurrentSkid: number,
+  ): void;
   reportCorrection(deltaCases: number): void;
   vibrate?(durationMs: number): void;
+  isLocked?(): boolean;
 };
 
 /**
@@ -49,14 +64,23 @@ export function createPackagingControlAdapter(
     casesPerSkid > 0
       ? skidsCompleted * casesPerSkid + casesOnCurrentSkid
       : skidsCompleted;
+  const refreshCurrent = () => {
+    const latest = deps.getProgress?.();
+    if (latest) {
+      currentSkids = Math.max(0, Number(latest.skidsCompleted) || 0);
+      currentCases = Math.max(0, Number(latest.casesOnCurrentSkid) || 0);
+    }
+  };
 
   const apply: PackagingControlAdapter["apply"] = (
     skidsCompleted,
     casesOnCurrentSkid,
     options = {},
   ) => {
+    if (deps.isLocked?.()) return;
+    refreshCurrent();
     options.vibrationMs && deps.vibrate?.(options.vibrationMs);
-    deps.applyProgress(skidsCompleted, casesOnCurrentSkid);
+    deps.applyProgress(skidsCompleted, casesOnCurrentSkid, currentSkids, currentCases);
     if (options.reportCorrection !== false) {
       deps.reportCorrection(
         totalCases(skidsCompleted, casesOnCurrentSkid) -
@@ -77,17 +101,28 @@ export function createPackagingControlAdapter(
         Math.round(total % casesPerSkid),
       );
     },
-    decrementSkids: () => apply(Math.max(0, currentSkids - 1), currentCases, { vibrationMs: 8 }),
+    decrementSkids: () => {
+      refreshCurrent();
+      apply(Math.max(0, currentSkids - 1), currentCases, { vibrationMs: 8 });
+    },
     incrementSkids: (maxSkids) => {
+      refreshCurrent();
       if (maxSkids !== undefined && currentSkids >= maxSkids) return;
       apply(currentSkids + 1, currentCases, { vibrationMs: 8 });
     },
-    decrementCases: () => apply(currentSkids, Math.max(0, currentCases - 1), { vibrationMs: 8 }),
+    decrementCases: () => {
+      refreshCurrent();
+      apply(currentSkids, Math.max(0, currentCases - 1), { vibrationMs: 8 });
+    },
     incrementCases: () => {
+      refreshCurrent();
       if (casesPerSkid > 0 && currentCases >= casesPerSkid) return;
       apply(currentSkids, currentCases + 1, { vibrationMs: 8 });
     },
-    completeSkid: () => apply(currentSkids + 1, 0, { vibrationMs: 15 }),
+    completeSkid: () => {
+      refreshCurrent();
+      apply(currentSkids + 1, 0, { vibrationMs: 15 });
+    },
   };
 }
 
@@ -97,8 +132,13 @@ export interface PackagingManager {
     skidsCompleted: number,
     casesOnCurrentSkid: number,
     manualOverrideUntil?: number,
+    beforeOverride?: Record<string, number>,
   ): void;
-  persistAutomaticProgress(skidsCompleted: number, casesOnCurrentSkid: number): boolean;
+  persistAutomaticProgress(
+    runId: string,
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+  ): boolean;
   updateDrainingRun(
     runId: string,
     partial: Partial<FormValues>,
@@ -106,7 +146,11 @@ export interface PackagingManager {
   ): void;
   selectDrainingRun(runs: RunMeta[], currentRunId: string, nowMs: number): DrainingPackagingRun | null;
   casesInDrainingFreezer(entry: DrainingPackagingRun, nowMs: number): number;
-  advanceDrainingRun(entry: DrainingPackagingRun, exitedCases: number): void;
+  advanceDrainingRun(
+    runId: string,
+    values: FormValues,
+    exitedCases: number,
+  ): void;
 }
 
 type PackagingManagerDependencies = {
@@ -119,7 +163,7 @@ type PackagingManagerDependencies = {
   markRunValuesUpdated(runId: string, now: number): void;
   markLocalEdit(now: number): void;
   schedulePush(dayState: DayState, delayMs: number): void;
-  queueManualCorrection(runId: string, values: Record<string, number>): void;
+  queueManualCorrection(runId: string, values: Record<string, number>, baseline?: Record<string, number>): void;
   recordManualProgress(input: {
     runId: string;
     skidsCompleted: number;
@@ -148,8 +192,11 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
     skidsCompleted,
     casesOnCurrentSkid,
     manualOverrideUntil = Date.now() + deps.autoSuppressMs,
+    beforeOverride,
   ) => {
     const now = Date.now();
+    const before = beforeOverride
+      ?? deps.loadRunValues(runId) as unknown as Record<string, number>;
     deps.recordManualProgress({
       runId,
       skidsCompleted,
@@ -162,6 +209,9 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
     deps.queueManualCorrection(runId, {
       skidsCompleted: Math.max(0, skidsCompleted),
       casesOnCurrentSkid: Math.max(0, casesOnCurrentSkid),
+    }, {
+      skidsCompleted: Number(before?.skidsCompleted) || 0,
+      casesOnCurrentSkid: Number(before?.casesOnCurrentSkid) || 0,
     });
     if (runId === deps.currentRunIdRef.current) {
       deps.autoSuppressUntilRef.current = Math.max(
@@ -172,13 +222,21 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
   };
 
   const persistAutomaticProgress: PackagingManager["persistAutomaticProgress"] = (
+    runId,
     skidsCompleted,
     casesOnCurrentSkid,
-  ) => deps.recordAutomaticProgress({
-    runId: deps.currentRunIdRef.current,
-    skidsCompleted,
-    casesOnCurrentSkid,
-  }) !== null;
+  ) => {
+    const accepted = deps.recordAutomaticProgress({
+      runId,
+      skidsCompleted,
+      casesOnCurrentSkid,
+    }) !== null;
+    // The hook shares one form across runs. A drain tick may finish after a
+    // foreground adoption or manual switch has selected another run: keep the
+    // old run's independent progress, but never apply that old snapshot to the
+    // newly selected form.
+    return accepted && runId === deps.currentRunIdRef.current;
+  };
 
   const updateDrainingRun: PackagingManager["updateDrainingRun"] = (
     runId,
@@ -258,7 +316,8 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
   };
 
   const advanceDrainingRun: PackagingManager["advanceDrainingRun"] = (
-    { run, values },
+    runId,
+    values,
     exitedCases,
   ) => {
     if (exitedCases <= 0) return;
@@ -272,7 +331,7 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
     const nextTotal =
       casesNeeded > 0 ? Math.min(target, Math.max(currentTotal, casesNeeded)) : target;
     if (nextTotal === currentTotal) return;
-    updateDrainingRun(run.id, {
+    updateDrainingRun(runId, {
       skidsCompleted: Math.floor(nextTotal / casesPerSkid),
       casesOnCurrentSkid: Math.round(nextTotal % casesPerSkid),
     }, "auto");

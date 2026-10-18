@@ -1,4 +1,6 @@
 import type { FormValues } from "./types";
+import type { GetFieldChecksParams, FieldChecksReportPopulation } from "@workspace/api-client-react";
+export type { GetFieldChecksParams } from "@workspace/api-client-react";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
@@ -10,6 +12,7 @@ import {
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
+  computeRunDemandImpact as computeRunDemandImpactShared,
   deriveCandidateItems as deriveCandidateItemsShared,
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
@@ -116,6 +119,21 @@ export const computeRunLines = (vals: FormValues) =>
 
 export const computeRunConsumptionLines = (vals: FormValues) =>
   computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
+
+/** Compare two run forms through the same canonical math and substitution overlay as inventory consumption. */
+export const computeRunDemandImpact = (
+  before: FormValues,
+  after: FormValues,
+  items: readonly Pick<InventoryItem, "key" | "onHand">[] | null,
+) =>
+  computeRunDemandImpactShared(
+    {
+      before: toRunLinesInput(before),
+      after: toRunLinesInput(after),
+      inventory: items?.map(({ key, onHand }) => ({ key, onHand })) ?? null,
+    },
+    DEFAULT_PEP_TYPES,
+  );
 
 export type WarehouseCoverageStatus = "covered" | "short" | "conversion" | "missing";
 export type WarehouseTransferSource = {
@@ -411,18 +429,30 @@ export class InventoryApiError extends Error {
   status: number;
   retryAfterSec: number | null;
   serverMessage: string | null;
+  /** Safe, bounded reason supplied by the auth/session middleware. */
+  authSessionReason: AuthSessionReason | null;
   constructor(
     status: number,
     message: string,
     retryAfterSec: number | null,
     serverMessage: string | null,
+    authSessionReason: AuthSessionReason | null = null,
   ) {
     super(message);
     this.name = "InventoryApiError";
     this.status = status;
     this.retryAfterSec = retryAfterSec;
     this.serverMessage = serverMessage;
+    this.authSessionReason = authSessionReason;
   }
+}
+
+// Never surface arbitrary server strings as session diagnostics. The server may
+// add context to the response, but the client only accepts these UI-safe values.
+export type AuthSessionReason = "daily_reset" | "session_expired";
+
+function parseAuthSessionReason(value: unknown): AuthSessionReason | null {
+  return value === "daily_reset" || value === "session_expired" ? value : null;
 }
 
 // ── SSE response reader (for opt-in streaming AI chat) ──────────────────────
@@ -460,18 +490,26 @@ export async function postEventStream<T>(
     body: JSON.stringify(body),
   });
   if (!res.ok || !res.body) {
-    if (res.status === 401) onUnauthorized?.(requestEpoch);
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
     let serverMessage: string | null = null;
+    let authSessionReason: AuthSessionReason | null = null;
     try {
-      const errBody = (await res.json()) as { error?: unknown };
+      const errBody = (await res.json()) as { error?: unknown; reason?: unknown };
       if (errBody && typeof errBody.error === "string") serverMessage = errBody.error;
+      authSessionReason = parseAuthSessionReason(errBody?.reason);
     } catch {
       // non-JSON / unreadable error body; ignore
     }
-    throw new InventoryApiError(res.status, failMessage, retryAfterSec, serverMessage);
+    if (res.status === 401) onUnauthorized?.(requestEpoch, authSessionReason);
+    throw new InventoryApiError(
+      res.status,
+      failMessage,
+      retryAfterSec,
+      serverMessage,
+      authSessionReason,
+    );
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -524,7 +562,9 @@ export async function postEventStream<T>(
 // AuthContext registers a handler here so any such 401 routes the user back to
 // the login screen. Sign-in/up failures and the signed-out /me probe are not
 // session expiries, so those paths are excluded by the caller below.
-let onUnauthorized: ((requestEpoch: number) => void) | null = null;
+let onUnauthorized: (
+  (requestEpoch: number, reason?: AuthSessionReason | null) => void
+) | null = null;
 let authRequestEpoch = 0;
 
 // AuthProvider advances this whenever ownership of the browser session changes.
@@ -535,7 +575,10 @@ export function setAuthRequestEpoch(epoch: number): void {
 }
 
 export function setUnauthorizedHandler(
-  fn: ((requestEpoch: number) => void) | null,
+  fn: ((
+    requestEpoch: number,
+    reason?: AuthSessionReason | null,
+  ) => void) | null,
 ): void {
   onUnauthorized = fn;
 }
@@ -586,26 +629,29 @@ async function parseApiResponse<T>(
         },
       }));
     }
-    if (res.status === 401 && !isSessionProbePath(path)) {
-      onUnauthorized?.(requestEpoch);
-    }
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))
         ? Number(retryAfterRaw)
         : null;
     let serverMessage: string | null = null;
+    let authSessionReason: AuthSessionReason | null = null;
     try {
-      const body = (await res.json()) as { error?: unknown };
+      const body = (await res.json()) as { error?: unknown; reason?: unknown };
       if (body && typeof body.error === "string") serverMessage = body.error;
+      authSessionReason = parseAuthSessionReason(body?.reason);
     } catch {
       // non-JSON error body; ignore and fall back to the generic message
+    }
+    if (res.status === 401 && !isSessionProbePath(path)) {
+      onUnauthorized?.(requestEpoch, authSessionReason);
     }
     throw new InventoryApiError(
       res.status,
       `Inventory request failed (${res.status}): ${path}`,
       retryAfterSec,
       serverMessage,
+      authSessionReason,
     );
   }
   if (res.status === 204) return null as T;
@@ -1003,23 +1049,29 @@ export type Role = string;
 export const CAPABILITIES = [
   "manage-staff",
   "manage-inventory",
+  "manage-allergens",
   "manage-factory-settings",
   "edit-production-rules",
   "approve-password-resets",
   "review-incidents",
   "use-ai-tools",
   "manage-profiles",
+  "record-qc",
+  "manage-qc",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   "manage-staff": "Manage staff & roles",
   "manage-inventory": "Manage inventory",
+  "manage-allergens": "Manage ingredient allergens",
   "manage-factory-settings": "Manage factory settings",
   "edit-production-rules": "Edit production rules",
   "approve-password-resets": "Approve password resets",
   "review-incidents": "Review incidents",
   "use-ai-tools": "Use AI tools",
   "manage-profiles": "Manage setup profiles",
+  "record-qc": "Record and view QC workflows",
+  "manage-qc": "Manage QC settings, sign-offs, and exports",
 };
 export type RoleDefinition = {
   name: string;
@@ -1053,6 +1105,7 @@ export type StaffMember = {
   // server owns the staleness cutoff; the client reacts by running the same
   // reset-and-reload flow as the manual "Reset sandbox" button.
   sandboxStale: boolean;
+  disabled: boolean;
 };
 export const fetchMe = (signal?: AbortSignal) =>
   api<StaffMember>("/me", signal ? { signal } : undefined);
@@ -1133,6 +1186,28 @@ export const resetStaffPassword = (userId: string, newPassword: string) =>
   });
 export const deleteStaffMember = (userId: string) =>
   api<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+export const setStaffAccountStatus = (userId: string, disabled: boolean) =>
+  api<{ disabled: boolean }>(`/users/${encodeURIComponent(userId)}/status`, {
+    method: "PATCH", body: JSON.stringify({ disabled }),
+  });
+export const revokeStaffSessions = (userId: string) =>
+  api<null>(`/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: "POST" });
+export const createStaffInvitation = (role: string) =>
+  api<{ id: string; role: string; secret: string; expiresAt: string }>("/staff-invitations", {
+    method: "POST", body: JSON.stringify({ role }),
+  });
+export type StaffInvitation = { id: string; role: string; createdAt: string; expiresAt: string; consumedAt: string | null; revokedAt: string | null };
+export const listStaffInvitations = () => api<StaffInvitation[]>("/staff-invitations");
+export const revokeStaffInvitation = (id: string) =>
+  api<null>(`/staff-invitations/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const fetchSignupCodeStatus = () => api<{ enabled: boolean; successfulUses: number; failedUses: number; rotatedAt: string | null }>("/signup-code/status");
+export const setSignupCodeEnabledRequest = (enabled: boolean) =>
+  api<{ enabled: boolean; successfulUses: number; failedUses: number; rotatedAt: string | null }>("/signup-code/status", { method: "PATCH", body: JSON.stringify({ enabled }) });
+export const rotateSignupCodeRequest = () => api<{ secret: string }>("/signup-code/rotate", { method: "POST" });
+export const acceptStaffInvitation = (invitation: string, username: string, password: string) =>
+  api<AuthResult>("/auth/accept-invitation", {
+    method: "POST", body: JSON.stringify({ invitation, username, password }),
+  });
 
 // Role catalog management (manage-staff). Managers list/create/edit/delete the
 // roles that can be assigned to staff.
@@ -1211,7 +1286,8 @@ export const declinePasswordReset = (id: string) =>
     { method: "POST" },
   );
 
-export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+export const fetchInventory = (signal?: AbortSignal) =>
+  api<InventoryItem[]>("/inventory", signal ? { signal } : undefined);
 
 // Server-authority warehouse advisory snapshot. The server pre-computes the
 // reorder list, use-first list, and transfer warnings from canonical sync data
@@ -1490,7 +1566,17 @@ export const submitFieldCheckObservations = async (
     }
     throw error;
   }
-  return (await res.json()) as { accepted: number; duplicate: number };
+  const result: unknown = await res.json();
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("Field-check delivery confirmation unavailable");
+  }
+  const counts = result as { accepted?: unknown; duplicate?: unknown };
+  if (!Number.isSafeInteger(counts.accepted) || (counts.accepted as number) < 0 ||
+      !Number.isSafeInteger(counts.duplicate) || (counts.duplicate as number) < 0 ||
+      (counts.accepted as number) + (counts.duplicate as number) !== observations.length) {
+    throw new Error("Field-check delivery confirmation unavailable");
+  }
+  return { accepted: counts.accepted as number, duplicate: counts.duplicate as number };
 };
 
 export type FieldCheckFailure = {
@@ -1504,11 +1590,14 @@ export type FieldCheckSummary = {
   name: string;
   label: string;
   status: "healthy" | "collecting" | "needs-review" | "unsupported";
+  coverage: "never-observed" | "current" | "stale" | "no-success";
   observedBy: "browser" | "hardware";
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
+  lastSuccessfulMetrics: Record<string, number> | null;
   lastObservedAt: string | null;
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -1522,11 +1611,17 @@ export type FieldChecksReport = {
   checks: FieldCheckSummary[];
   overallStatus: "healthy" | "collecting" | "needs-review" | "unsupported";
   actionableCount: number;
+  population: FieldChecksReportPopulation;
 };
 
 // Incident and field-check review endpoints.
 export const fetchIncidents = () => api<Incident[]>("/incidents");
-export const fetchFieldChecks = () => api<FieldChecksReport>("/field-checks");
+export const fetchFieldChecks = (filters: GetFieldChecksParams = {}) => {
+  const query = new URLSearchParams();
+  if (filters.appBuild !== undefined) query.set("appBuild", filters.appBuild);
+  if (filters.deviceCategory !== undefined) query.set("deviceCategory", filters.deviceCategory);
+  return api<FieldChecksReport>(`/field-checks${query.size ? `?${query}` : ""}`);
+};
 export const confirmHardwareFieldCheck = (body: {
   checkName: "touch-accuracy" | "keyboard-clearance" | "orientation-layout" |
     "safe-area-clearance" | "camera-file-selection" | "update-handoff" |

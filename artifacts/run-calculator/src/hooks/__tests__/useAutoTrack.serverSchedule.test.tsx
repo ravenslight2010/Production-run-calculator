@@ -71,6 +71,10 @@ describe("useAutoTrack server schedule freshness", () => {
         sauceBarrelsMade: 0,
         sauceBarrelAnchorNetSec: 0,
         sauceBarrelCorrectionGeneration: 0,
+        sauceStockBarrels: 0,
+        sauceStockAnchorNetSec: 0,
+        sauceStockCorrectionGeneration: 0,
+        sauceStockInitialized: true,
         app1Type: "", app1OzPerPizza: 0, app1BatchLbs: 0, app1CheeseRecipe: [],
         app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
         app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
@@ -83,7 +87,7 @@ describe("useAutoTrack server schedule freshness", () => {
       form,
       machine: { spinSec: 1, hopperSec: 1 },
       autoTrackBlocked: blocked,
-      autoTrackRebaseAfterBlock: false,
+      autoTrackWakeRebaseReason: null,
       claimAutoTrackEvent: claim,
     });
 
@@ -136,6 +140,8 @@ describe("useAutoTrack server schedule freshness", () => {
         casesPerSkid: 10, pizzasPerCase: 10, casesNeeded: 100, freezerTime: 0,
         traysOnLine: 0, batchesReady: 0, sauceBarrelsMade: 0,
         sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+        sauceStockBarrels: 0, sauceStockAnchorNetSec: 0,
+        sauceStockCorrectionGeneration: 0, sauceStockInitialized: true,
         app1Type: "", app1OzPerPizza: 0, app1BatchLbs: 0, app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
         app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [], app2BatchesMade: 0, app2BatchAnchorNetSec: 0, app2BatchCorrectionGeneration: 0,
         app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [], app3BatchesMade: 0, app3BatchAnchorNetSec: 0, app3BatchCorrectionGeneration: 0,
@@ -143,7 +149,7 @@ describe("useAutoTrack server schedule freshness", () => {
       },
       form,
       claimAutoTrackEvent: claim,
-      autoTrackRebaseAfterBlock: false,
+      autoTrackWakeRebaseReason: null,
     };
     const hook = renderHook((p: Parameters<typeof useAutoTrack>[0]) => useAutoTrack(p), {
       initialProps: { ...base, nowTime: new Date(T0), autoTrackBlocked: true },
@@ -183,6 +189,8 @@ describe("useAutoTrack server schedule freshness", () => {
         casesPerSkid: 10, pizzasPerCase: 10, casesNeeded: 100, freezerTime: 0,
         traysOnLine: 5, batchesReady: 2, sauceBarrelsMade: 0,
         sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+        sauceStockBarrels: 0, sauceStockAnchorNetSec: 0,
+        sauceStockCorrectionGeneration: 0, sauceStockInitialized: true,
         app1Type: "", app1OzPerPizza: 0, app1BatchLbs: 0, app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
         app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [], app2BatchesMade: 0, app2BatchAnchorNetSec: 0, app2BatchCorrectionGeneration: 0,
         app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [], app3BatchesMade: 0, app3BatchAnchorNetSec: 0, app3BatchCorrectionGeneration: 0,
@@ -191,7 +199,7 @@ describe("useAutoTrack server schedule freshness", () => {
       form,
       claimAutoTrackEvent: claim,
       authoritativeServerAutoTrack: true,
-      autoTrackRebaseAfterBlock: false,
+      autoTrackWakeRebaseReason: null,
     };
     const hook = renderHook((p: Props) => useAutoTrack(p), {
       initialProps: { ...base, autoTrackBlocked: true },

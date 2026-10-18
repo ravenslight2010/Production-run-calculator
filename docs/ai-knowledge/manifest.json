@@ -1,0 +1,36 @@
+{
+  "format": "app-knowledge-source-manifest",
+  "knowledgeFileSha256": "df4469f035fad129d552716b2cecb89adac7f4711cc92c2b57fa0d767c1d3c9c",
+  "knowledgeVersion": "2026-10-16.1",
+  "sourceManifestVersion": 1,
+  "sources": [
+    {
+      "path": "artifacts/api-server/src/routes/ai.ts",
+      "sha256": "e2e6183973a57379d37cffde8679557b37ea5e6c47e2d0906d987af6cd41740a"
+    },
+    {
+      "path": "docs/ai-feature-value-audit-2026-09-05.md",
+      "sha256": "6a69e01a84b726044307092faf4e9998ff8c58cd8f56f8d63456cbf67a25b34d"
+    },
+    {
+      "path": "docs/evidence/provider-comparison-gate-review-2026-10-08.md",
+      "sha256": "51cb2322f6f430f59372555015d82383d7ac24e65cadbd60fc229d338b075125"
+    },
+    {
+      "path": "docs/retained-ai-service-contracts.md",
+      "sha256": "a6071ae5c511f4fd0f918a008e8dbbaa21d053c392b7b6e0f0bad093ac4bd280"
+    },
+    {
+      "path": "docs/spec-import-gold-review.md",
+      "sha256": "e31cdad19cbf928a39e08c85e84259bd2a4c992cf831f27ec2ea85d49ec0f27d"
+    },
+    {
+      "path": "lib/spec-import/src/index.ts",
+      "sha256": "0f18fc6139d56499f2595817652c214341c1d2717bd6c5fc9a95a7269e11ce7d"
+    },
+    {
+      "path": "lib/spec-import/src/workbookSource.ts",
+      "sha256": "48397f53f20a2d5d9906d3722c815f514601df6f0f0c2158b089c200f9d05da7"
+    }
+  ]
+}

@@ -32,6 +32,74 @@ async function trimGeneratedTrailingBlankLines(
   }
 }
 
+async function hoistZodValidatorConstants(filePath: string): Promise<void> {
+  const source = await readFile(filePath, "utf8");
+  if (!source.includes("zod.")) return;
+
+  const lines = source.split("\n");
+  const constants: string[] = [];
+  const declarations = new Map<string, string>();
+  const remainingLines: string[] = [];
+
+  for (const line of lines) {
+    // Orval can emit scalar constraint constants after the schema that uses
+    // them. Keep generated output runtime-safe by placing all lower-camel
+    // scalar exports before the first validator. Composed oneOf schemas can
+    // emit the same scalar declaration more than once; coalesce only identical
+    // declarations and fail if the generated constraints disagree.
+    const scalarDeclaration = line.match(
+      /^export const ([a-z][A-Za-z0-9]*) = (.+);$/,
+    );
+    if (scalarDeclaration && !line.includes("= zod.")) {
+      const [, name, value] = scalarDeclaration;
+      const previousValue = declarations.get(name);
+      if (previousValue !== undefined) {
+        if (previousValue !== value) {
+          throw new Error(
+            `Conflicting generated scalar constraint declarations for ${name} in ${filePath}`,
+          );
+        }
+        continue;
+      }
+      declarations.set(name, value);
+      constants.push(line);
+    } else {
+      remainingLines.push(line);
+    }
+  }
+
+  if (constants.length === 0) return;
+
+  const importIndex = remainingLines.findIndex((line) =>
+    line.startsWith("import * as zod from"),
+  );
+  if (importIndex === -1) {
+    throw new Error(`Could not find the zod import in ${filePath}`);
+  }
+
+  remainingLines.splice(
+    importIndex + 1,
+    0,
+    "",
+    ...constants,
+    "",
+  );
+  await writeFile(filePath, remainingLines.join("\n"));
+}
+
+async function hoistZodValidatorConstantsInDirectory(
+  directory: string,
+): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      await hoistZodValidatorConstantsInDirectory(entryPath);
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      await hoistZodValidatorConstants(entryPath);
+    }
+  }
+}
+
 // Our exports make assumptions about the title of the API being "Api" (i.e. generated output is `api.ts`).
 const titleTransformer: InputTransformerFn = (config) => {
   config.info ??= {};
@@ -116,6 +184,9 @@ export default defineConfig({
           ),
           trimGeneratedTrailingBlankLines(path.resolve(apiZodSrc, "generated")),
         ]);
+        await hoistZodValidatorConstantsInDirectory(
+          path.resolve(apiZodSrc, "generated"),
+        );
       },
     },
   },

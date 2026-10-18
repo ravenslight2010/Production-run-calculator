@@ -16,8 +16,11 @@ export interface ShiftHandoffItem {
   status: ShiftHandoffItemStatus;
   title: string;
   detail: string;
+  /** @nullable */
   affectedRun: string | null;
+  /** @nullable */
   affectedProduct: string | null;
+  /** @nullable */
   occurredAt: Date | null;
   sourcePath: string;
   historical: boolean;

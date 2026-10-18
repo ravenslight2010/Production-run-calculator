@@ -10,6 +10,7 @@ import {
   forgotPasswordRequest,
   resetPasswordRequest,
   InventoryApiError,
+  type AuthSessionReason,
 } from "@/inventoryShared";
 
 /** @internal – exported only for the regression test suite. */
@@ -98,6 +99,15 @@ function UsernameHint({ status }: { status: UsernameStatus }) {
 }
 
 type Mode = "sign-in" | "sign-up";
+
+/** @internal – exported only for the regression test suite. */
+export function sessionEndingMessage(reason: AuthSessionReason | null | undefined): string | null {
+  if (!reason) return null;
+  if (reason === "daily_reset") {
+    return "Your staff session ended at the daily production rollover. Sign in again to continue.";
+  }
+  return "Your staff session expired. Check your connection and sign in again.";
+}
 
 function messageForError(err: unknown, mode: Mode): string {
   if (err instanceof InventoryApiError) {
@@ -205,7 +215,7 @@ function ConfirmPasswordHint({
 
 function AuthForm({ mode }: { mode: Mode }) {
   const [, setLocation] = useLocation();
-  const { signIn, signUp, signInAsTest } = useAuth();
+  const { signIn, signUp, signInAsTest, sessionEndedReason } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -216,6 +226,7 @@ function AuthForm({ mode }: { mode: Mode }) {
   const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
   const isSignUp = mode === "sign-up";
   const usernameStatus = useUsernameAvailability(username, isSignUp);
+  const endingMessage = sessionEndingMessage(sessionEndedReason);
 
   async function handleTestLogin() {
     setError(null);
@@ -379,6 +390,14 @@ function AuthForm({ mode }: { mode: Mode }) {
             )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {endingMessage && (
+              <p
+                role="status"
+                className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground"
+              >
+                {endingMessage}
+              </p>
+            )}
 
             <Button
               type="submit"
@@ -455,6 +474,55 @@ export function SignInPage() {
 
 export function SignUpPage() {
   return <AuthForm mode="sign-up" />;
+}
+
+export function InvitationPage() {
+  const [, setLocation] = useLocation();
+  const { acceptInvitation } = useAuth();
+  const [invitation, setInvitation] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (password.length < MIN_PASSWORD_LENGTH || password !== confirm) {
+      setError("Use a password of at least 6 characters and confirm it exactly.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await acceptInvitation(invitation.trim(), username.trim(), password);
+      setLocation("/");
+    } catch (err) {
+      setError(err instanceof InventoryApiError && err.serverMessage
+        ? err.serverMessage
+        : "This invitation is invalid or unavailable. Ask your manager for a new invitation.");
+      setSubmitting(false);
+    }
+  }
+  return (
+    <main className="dark flex min-h-[100dvh] items-center justify-center bg-background px-4 text-foreground">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-border/50 bg-card/50 p-6 shadow-md">
+        <h1 className="text-xl font-bold">Accept staff invitation</h1>
+        <p className="text-sm text-muted-foreground">Use the one-time invitation your manager gave you.</p>
+        <Label htmlFor="invitation">Invitation</Label>
+        <Input id="invitation" value={invitation} onChange={(e) => setInvitation(e.target.value)} required />
+        <Label htmlFor="invitation-username">Username</Label>
+        <Input id="invitation-username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        <Label htmlFor="invitation-password">Password</Label>
+        <PasswordInput id="invitation-password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Label htmlFor="invitation-confirm">Confirm password</Label>
+        <PasswordInput id="invitation-confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button className="w-full" disabled={submitting || invitation.length < 20 || username.trim().length < MIN_USERNAME_LENGTH}>
+          {submitting ? "Creating account…" : "Create account"}
+        </Button>
+      </form>
+    </main>
+  );
 }
 
 type ResetStep = "request" | "verify" | "done";

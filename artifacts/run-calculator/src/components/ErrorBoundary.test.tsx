@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,9 +7,16 @@ import ErrorBoundary, {
   isStaleDeploymentAssetError,
 } from "./ErrorBoundary";
 import { reportIncident } from "../inventoryShared";
+import { updateAndReload } from "../pwaUpdateRecovery";
+import { reportAutomaticUpdateReloadSafety } from "../updateReloadSafety";
+import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
+import { STALE_ASSET_RELOAD_FALLBACK_MS } from "../pwaUpdateRecovery";
 
 vi.mock("../inventoryShared", () => ({
   reportIncident: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../pwaStartupSafety", () => ({
+  checkPreHomeReloadSafety: vi.fn().mockResolvedValue(true),
 }));
 
 function ThrowError({ error }: { error: Error }): never {
@@ -19,6 +26,8 @@ function ThrowError({ error }: { error: Error }): never {
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  reportAutomaticUpdateReloadSafety(false);
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -118,11 +127,271 @@ describe("ErrorBoundary recovery actions", () => {
 
     expect(updateAndReload).toHaveBeenCalledOnce();
     expect(reload).toHaveBeenCalledOnce();
+    const attempt = JSON.parse(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1") ?? "null");
+    expect(attempt).toMatchObject({
+      fromBuild: expect.stringMatching(/^[a-f0-9]{1,8}$/),
+      attemptedAt: expect.any(Number),
+    });
+    expect(JSON.stringify(attempt)).not.toMatch(/https|stack|user|device/i);
     expect(vi.mocked(reportIncident)).toHaveBeenCalledWith(expect.objectContaining({
       appVersion: expect.any(String),
       errorMessage: expect.stringContaining("[stale_deployment_asset]"),
       errorStack: expect.stringMatching(/^x{4000}$/),
     }));
+  });
+
+  it("gives manual recovery the full combined worker budget before its emergency reload", async () => {
+    vi.useFakeTimers();
+    try {
+      let finishRecovery: (() => void) | undefined;
+      const updateAndReload = vi.fn(() => new Promise<void>((resolve) => {
+        finishRecovery = resolve;
+      }));
+      const reload = vi.fn();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(true);
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, reload },
+      });
+
+      render(
+        <ErrorBoundary onUpdateAndReload={updateAndReload}>
+          <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+        </ErrorBoundary>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Update and reload" }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(updateAndReload).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(STALE_ASSET_RELOAD_FALLBACK_MS - 1);
+      expect(reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reload).toHaveBeenCalledOnce();
+      finishRecovery?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the automatic emergency reload when healthy recovery finishes within the combined budget", async () => {
+    vi.useFakeTimers();
+    try {
+      let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;
+      let finishRecovery: (() => void) | undefined;
+      const updateAndReload = vi.fn(() => new Promise<void>((resolve) => {
+        finishRecovery = resolve;
+      }));
+      const scheduleSafeIdleRecovery = vi.fn((_safeAtFailure, recover) => {
+        recoverWhenSafe = recover;
+        return vi.fn();
+      });
+      const reload = vi.fn();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(true);
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, reload },
+      });
+      reportAutomaticUpdateReloadSafety(true);
+
+      render(
+        <ErrorBoundary
+          onUpdateAndReload={updateAndReload}
+          scheduleSafeIdleRecovery={scheduleSafeIdleRecovery}
+        >
+          <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+        </ErrorBoundary>,
+      );
+
+      const recovery = recoverWhenSafe?.(() => true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(updateAndReload).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(STALE_ASSET_RELOAD_FALLBACK_MS - 1);
+      expect(reload).not.toHaveBeenCalled();
+      finishRecovery?.();
+      await recovery;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reload).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps automatic recovery bounded when the worker update never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;
+      const updateAndReload = vi.fn(() => new Promise<void>(() => undefined));
+      const scheduleSafeIdleRecovery = vi.fn((_safeAtFailure, recover) => {
+        recoverWhenSafe = recover;
+        return vi.fn();
+      });
+      const reload = vi.fn();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, reload },
+      });
+      reportAutomaticUpdateReloadSafety(true);
+
+      render(
+        <ErrorBoundary
+          onUpdateAndReload={updateAndReload}
+          scheduleSafeIdleRecovery={scheduleSafeIdleRecovery}
+        >
+          <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+        </ErrorBoundary>,
+      );
+
+      void recoverWhenSafe?.(() => true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(updateAndReload).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(STALE_ASSET_RELOAD_FALLBACK_MS - 1);
+      expect(reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reload).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["cache-key reads", "cache deletion"] as const)(
+    "continues the worker-update reload fallback when %s fail",
+    async (failingOperation) => {
+      const user = userEvent.setup();
+      const keys = vi.fn().mockImplementation(async () => {
+        if (failingOperation === "cache-key reads") throw new Error("cache keys unavailable");
+        return ["workbox-precache-v2-http://app.test/", "google-fonts-cache"];
+      });
+      const remove = vi.fn().mockImplementation(async () => {
+        if (failingOperation === "cache deletion") throw new Error("cache deletion unavailable");
+        return true;
+      });
+      vi.stubGlobal("caches", { keys, delete: remove });
+      const reload = vi.fn();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, reload },
+      });
+      const registration = {
+        waiting: undefined as ServiceWorker | undefined,
+        update: vi.fn().mockRejectedValue(new Error("worker unavailable")),
+      };
+      const onUpdateAndReload = (canReload?: () => boolean) =>
+        updateAndReload(registration, undefined, reload, canReload);
+
+      render(
+        <ErrorBoundary onUpdateAndReload={onUpdateAndReload}>
+          <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+        </ErrorBoundary>,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Update and reload" }));
+      await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+
+      expect(keys).toHaveBeenCalledOnce();
+      if (failingOperation === "cache-key reads") {
+        expect(remove).not.toHaveBeenCalled();
+      } else {
+        expect(remove).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
+        expect(remove).not.toHaveBeenCalledWith("google-fonts-cache");
+      }
+      expect(registration.update).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("continues worker-update recovery and reload when CacheStorage is unavailable", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("caches", undefined);
+    const reload = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    const registration = {
+      waiting: undefined as ServiceWorker | undefined,
+      update: vi.fn().mockRejectedValue(new Error("worker unavailable")),
+    };
+    const onUpdateAndReload = (canReload?: () => boolean) =>
+      updateAndReload(registration, undefined, reload, canReload);
+
+    render(
+      <ErrorBoundary onUpdateAndReload={onUpdateAndReload}>
+        <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+      </ErrorBoundary>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Update and reload" }));
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+
+    expect(registration.update).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("schedules one stale-chunk recovery only when the captured app state is safe", async () => {
+    const updateAndReload = vi.fn().mockResolvedValue(undefined);
+    let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;
+    const scheduleSafeIdleRecovery = vi.fn((safeAtFailure, recover) => {
+      expect(safeAtFailure).toBe(true);
+      recoverWhenSafe = recover;
+      return vi.fn();
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    reportAutomaticUpdateReloadSafety(true);
+
+    render(
+      <ErrorBoundary
+        onUpdateAndReload={updateAndReload}
+        scheduleSafeIdleRecovery={scheduleSafeIdleRecovery}
+      >
+        <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+      </ErrorBoundary>,
+    );
+
+    expect(scheduleSafeIdleRecovery).toHaveBeenCalledOnce();
+    expect(updateAndReload).not.toHaveBeenCalled();
+    vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(true);
+    await recoverWhenSafe?.(() => false);
+    expect(updateAndReload).not.toHaveBeenCalled();
+    await recoverWhenSafe?.(() => true);
+    expect(updateAndReload).toHaveBeenCalledOnce();
+    expect(updateAndReload).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("blocks stale-chunk recovery when the fresh pre-Home safety check is unsafe", async () => {
+    const updateAndReload = vi.fn().mockResolvedValue(undefined);
+    let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;
+    const scheduleSafeIdleRecovery = vi.fn((_safeAtFailure, recover) => {
+      recoverWhenSafe = recover;
+      return vi.fn();
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(checkPreHomeReloadSafety).mockResolvedValue(false);
+    reportAutomaticUpdateReloadSafety(true);
+
+    render(
+      <ErrorBoundary
+        onUpdateAndReload={updateAndReload}
+        scheduleSafeIdleRecovery={scheduleSafeIdleRecovery}
+      >
+        <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+      </ErrorBoundary>,
+    );
+
+    await recoverWhenSafe?.(() => true);
+    expect(updateAndReload).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("run-calc:stale-asset-recovery-pending:v1")).toBeNull();
+    expect(await screen.findByText(
+      /automatic recovery is paused because the app could not confirm that reloading was safe/i,
+    )).not.toBeNull();
   });
 
   it("keeps the ordinary reload experience for unrelated errors", () => {

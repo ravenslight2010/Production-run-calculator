@@ -13,9 +13,6 @@ export interface RecordMixSurplusInput {
      */
   mixId: string;
   productionDate: Date;
-  /**
-     * @minimum 0.1
-     * @exclusiveMinimum
-     */
+  /** @exclusiveMinimum 0.1 */
   amountMade: number;
 }

@@ -58,6 +58,38 @@ describe("deriveFrontlineNeedRows", () => {
     expect(rows.some((row) => row.station === "pep2")).toBe(false);
   });
 
+  it("shows configured Pep slots with zero demand and hides blank slots", () => {
+    const v = {
+      ...DEFAULT_VALUES,
+      pep1Combined: false,
+      pep1Type: "  Pep A  ",
+      pep1TypeB: "   ",
+      pep2Type: "\tPep C",
+      pep2TypeB: "Pep D",
+    };
+    const zeroQuantities: FrontlineQuantitySource = {
+      sauceLbs: 0, sauceBatches: 0,
+      app1Lbs: 0, app1Batches: 0,
+      app2Lbs: 0, app2Batches: 0,
+      app3Lbs: 0, app3Batches: 0,
+      app4Lbs: 0, app4Batches: 0,
+      pep1Lbs: 0, pep1Batches: 0,
+      pep2Lbs: 0, pep2Batches: 0,
+      pep1LbsB: 0, pep1BatchesB: 0,
+      pep2LbsB: 0, pep2BatchesB: 0,
+    };
+
+    const rows = deriveFrontlineNeedRows(v, zeroQuantities);
+
+    expect(rows.map((row) => row.key)).toEqual(["pep1", "pep2", "pep2b"]);
+    expect(rows.map((row) => row.label)).toEqual([
+      "Pep 1 — Pep A",
+      "Pep 2 — Pep C",
+      "Pep 2 — Pep D",
+    ]);
+    expect(rows.every((row) => row.amount === 0 && row.unit === "lbs" && row.totalLbs === 0)).toBe(true);
+  });
+
   it("shows no plausible rows when shared case-based quantities are unavailable", () => {
     const rows = deriveFrontlineNeedRows(
       { ...DEFAULT_VALUES, casesNeeded: 240, pizzasPerCase: 0, app1Type: "Cheese", app1OzPerPizza: 2.9 },

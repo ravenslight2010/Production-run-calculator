@@ -14,7 +14,7 @@
 // recipe in the review dialog. Web-only (mobile parity paused per replit.md).
 
 import {
-  parseCheeseWorkbook,
+  parseCheeseWorkbookWithSources,
   cheeseImportId,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
@@ -30,6 +30,8 @@ import {
   type CheeseLinkTarget,
   type CheesePrepItem,
   type ParsedCheeseSheet,
+  type CheeseCellReference,
+  type CheeseRecipeSourceEvidence,
 } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import {
@@ -46,8 +48,9 @@ import {
   fetchSpecImportAliases,
   saveSpecImportAliases,
 } from "./specImportAliases";
-import { saveAiCorrections } from "./aiCorrections";
+import { logCorrectionWriteFailure, saveAiCorrections } from "./aiCorrections";
 import { saveCheeseSheet, buildCheeseSheetLabel, deriveSourceKey } from "./savedCheeseSheets";
+import { applyImportOperation } from "./importOperations";
 import {
   auditedCheeseApprovalFor,
   isAuditedCheeseWorkbook,
@@ -84,6 +87,12 @@ export type CheeseImportPrepared = {
   absentRecipes: (CheeseLinkTarget & { brand: string })[];
   /** Uploaded filename(s) for this import. */
   sourceNames?: string[];
+  /** Review-only workbook coordinates keyed by the original imported recipe id. */
+  sourceByRecipeId?: Record<string, CheeseRecipeSourceEvidence>;
+  sourceByPrepItem?: Record<string, {
+    sources: { ingredient: CheeseCellReference; lbs: CheeseCellReference }[];
+    ambiguous: boolean;
+  }>;
   /**
    * Present only for the byte-identical workbook covered by the retained
    * reconciliation. Its exact allowlist is enforced again at commit time.
@@ -150,6 +159,13 @@ export async function prepareCheeseImport(
   }
 
   const byId = new Map<string, CheeseRecipe>();
+  const sourceByRecipeId: Record<string, CheeseRecipeSourceEvidence> = {};
+  const prepSourceRows: {
+    blend: string;
+    ingredient: string;
+    lbs: number;
+    source?: { ingredient: CheeseCellReference; lbs: CheeseCellReference };
+  }[] = [];
   const sheets: ParsedCheeseSheet[] = [];
   const errors: string[] = [];
   const failedNames: string[] = [];
@@ -159,11 +175,11 @@ export async function prepareCheeseImport(
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
-      const grids = await readWorkbookGrids(buffers[i]);
+      const grids = await readWorkbookGrids(buffers[i], label);
       // Cheap junk-file guard (a renamed PDF/image "reads" as one junk sheet).
       const sanity = gridSanityIssue(grids);
       if (sanity) throw new Error(sanity);
-      const parsedWb = parseCheeseWorkbook(grids);
+      const parsedWb = parseCheeseWorkbookWithSources(grids);
       // Snap merged/renamed-away customer names to their canonical brand BEFORE
       // dedupe/existing-id matching, so a re-import of an old workbook updates
       // the renamed pool instead of resurrecting the old brand. Sheet recipes
@@ -179,7 +195,27 @@ export async function prepareCheeseImport(
         errors.push(`${label}: no recognizable cheese recipes.`);
       } else {
         // De-dup across files by deterministic id (last-seen wins).
-        for (const r of recipes) byId.set(r.id, r);
+        for (let recipeIndex = 0; recipeIndex < parsedWb.recipes.length; recipeIndex++) {
+          const original = parsedWb.recipes[recipeIndex]!;
+          const recipe = recipes[recipeIndex]!;
+          byId.set(recipe.id, recipe);
+          const evidence = parsedWb.sourceByRecipeId[original.id];
+          if (evidence) {
+            sourceByRecipeId[recipe.id] = evidence;
+            for (const component of recipe.components) {
+              if (!/\b(fresh|spinach|mushroom)\b/i.test(component.ingredient)) continue;
+              const source = evidence.components.find(
+                (candidate) => candidate.ingredientName.trim().toLowerCase() === component.ingredient.trim().toLowerCase(),
+              );
+              prepSourceRows.push({
+                blend: recipe.name,
+                ingredient: component.ingredient,
+                lbs: component.lbs,
+                ...(source ? { source: { ingredient: source.ingredient, lbs: source.lbs } } : {}),
+              });
+            }
+          }
+        }
         // Keep the per-tab parse so sub-mix / prep detection stays tab-scoped.
         sheets.push(...parsedSheets);
       }
@@ -253,6 +289,21 @@ export async function prepareCheeseImport(
     detectCheeseSubMixes(sheets),
   );
   const prepItems = collectCheesePrepItems(sheets);
+  const sourceByPrepItem: NonNullable<CheeseImportPrepared["sourceByPrepItem"]> = {};
+  for (const item of prepItems) {
+    const matchingRows = prepSourceRows.filter((row) =>
+      row.blend.trim().toLowerCase() === item.blend.trim().toLowerCase() &&
+      row.ingredient.trim().toLowerCase() === item.ingredient.trim().toLowerCase(),
+    );
+    const sources = matchingRows.flatMap((row) => row.source ? [row.source] : []);
+    const pounds = new Set(matchingRows.map((row) => row.lbs));
+    if (sources.length) {
+      sourceByPrepItem[`${item.blend.trim().toLowerCase()}::${item.ingredient.trim().toLowerCase()}`] = {
+        sources,
+        ambiguous: pounds.size > 1,
+      };
+    }
+  }
 
   const noteParts: string[] = [];
   if (errors.length) {
@@ -273,6 +324,8 @@ export async function prepareCheeseImport(
       .map((r) => ({ id: r.id, name: r.name, brand: r.brand }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     absentRecipes,
+    sourceByRecipeId,
+    sourceByPrepItem,
     ...(auditApproval ? { auditApproval } : {}),
     ...(auditBlockedReason ? { auditBlockedReason } : {}),
     ...(note ? { note } : {}),
@@ -286,6 +339,7 @@ export type CheeseCommitResult = {
   saved: CheeseRecipe[];
   snapshotId?: number;
   warning?: string;
+  resultHash?: string;
 };
 
 /**
@@ -300,6 +354,7 @@ export async function commitCheeseImport(
   recipesToApply: ReadonlyArray<CheeseRecipe>,
   newAliases: ReadonlyArray<SpecImportAlias> = [],
   recipesToRemove: ReadonlyArray<string> = [],
+  operationId?: string,
 ): Promise<CheeseCommitResult> {
   // Commit is a second trust boundary: never write a name-only/empty recipe
   // that could replace a populated server recipe during a re-import.
@@ -319,16 +374,47 @@ export async function commitCheeseImport(
     }
   }
   let saved: CheeseRecipe[] = [];
+  let atomicApplied = false;
+  let resultHash: string | undefined;
   if (recipesToApply.length > 0 || recipesToRemove.length > 0) {
     const existing = await fetchCheeseRecipes();
-  const removeSet = new Set(recipesToRemove);
-  const afterRemoval = recipesToRemove.length > 0
-    ? existing.filter((r) => !removeSet.has(r.id))
-    : existing;
-  const merged = recipesWithComponents.length > 0
-    ? mergeCheeseRecipes(afterRemoval, recipesWithComponents)
-    : afterRemoval;
-    saved = await saveCheeseRecipes(merged);
+    const removeSet = new Set(recipesToRemove);
+    const afterRemoval = recipesToRemove.length > 0
+      ? existing.filter((r) => !removeSet.has(r.id))
+      : existing;
+    const merged = recipesWithComponents.length > 0
+      ? mergeCheeseRecipes(afterRemoval, recipesWithComponents)
+      : afterRemoval;
+    const importedIds = new Set(recipesWithComponents.map((recipe) => recipe.id));
+    const atomicRecipeUpserts = merged.filter((recipe) => importedIds.has(recipe.id));
+    if (operationId) {
+      const committed = await applyImportOperation(operationId, {
+        importType: "cheese",
+        sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+        sourceLabel: buildCheeseSheetLabel(prepared.recipes, prepared.sourceNames),
+        changes: {
+          cheeseRecipes: { upsert: atomicRecipeUpserts, delete: recipesToRemove },
+          ...(newAliases.length ? { specImportAliases: { upsert: newAliases } } : {}),
+        },
+      });
+      atomicApplied = true;
+      resultHash = committed.resultHash;
+      saved = merged;
+    } else {
+      saved = await saveCheeseRecipes(merged);
+    }
+  }
+  if (operationId && !atomicApplied) {
+    const committed = await applyImportOperation(operationId, {
+      importType: "cheese",
+      sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+      sourceLabel: buildCheeseSheetLabel(prepared.recipes, prepared.sourceNames),
+      changes: {
+        ...(newAliases.length ? { specImportAliases: { upsert: newAliases } } : {}),
+      },
+    });
+    atomicApplied = true;
+    resultHash = committed.resultHash;
   }
   let snapshotId: number | undefined;
   let warning: string | undefined;
@@ -346,7 +432,7 @@ export async function commitCheeseImport(
   // Remember the review's manual "use existing recipe" picks as blend-name
   // aliases so the next import of the same sheet pre-suggests the same links.
   // Best-effort: the recipes already saved; learning is a bonus.
-  if (newAliases.length) {
+  if (newAliases.length && !atomicApplied) {
     let priorAliases: SpecImportAlias[] = [];
     try {
       priorAliases = await fetchSpecImportAliases();
@@ -406,7 +492,17 @@ export async function commitCheeseImport(
     try {
       await saveSpecImportAliases(aliasesToSave);
     } catch {
-      // ignore — learning is non-critical
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: aliasesToSave.length,
+      });
+      warning = [
+        warning,
+        "Cheese recipes were imported, but the reviewed name mappings were not saved. A later import may ask you to confirm them again.",
+      ]
+        .filter(Boolean)
+        .join(" ");
     }
     const mirrorable = aliasesToSave.filter(
       (a) => a.kind === "brand" || a.kind === "flavor" || a.kind === "appType",
@@ -429,6 +525,7 @@ export async function commitCheeseImport(
   return {
     count: recipesWithComponents.length,
     saved,
+    ...(resultHash ? { resultHash } : {}),
     ...(snapshotId != null ? { snapshotId } : {}),
     ...(warning ? { warning } : {}),
   };

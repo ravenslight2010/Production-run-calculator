@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDiagnostics: vi.fn(),
+  getSharedAutoTrackDeferredDiagnostic: vi.fn(),
 }));
 
 vi.mock("../middlewares/requireCapability", () => ({
@@ -12,6 +13,7 @@ vi.mock("../middlewares/requireCapability", () => ({
 }));
 
 vi.mock("../lib/backgroundOperations", () => ({
+  getSharedAutoTrackDeferredDiagnostic: mocks.getSharedAutoTrackDeferredDiagnostic,
   getBackgroundOperationDiagnostics: mocks.getDiagnostics,
 }));
 
@@ -65,6 +67,11 @@ describe("GET /background-operations/diagnostics", () => {
         windowMs: 300_000,
       },
     });
+    mocks.getSharedAutoTrackDeferredDiagnostic.mockResolvedValue({
+      deferredDateCount: 2,
+      deferredDateCountCapped: false,
+      nextEligibleRetryAt: "2026-09-15T12:31:00.000Z",
+    });
 
     const response = await fetch(`${baseUrl}/background-operations/diagnostics`);
     const body = await response.json();
@@ -75,6 +82,11 @@ describe("GET /background-operations/diagnostics", () => {
         operation: "daily-rollover",
         lastFailureAt: "2026-09-15T12:30:00.000Z",
       }],
+      automaticTrackingBackoff: {
+        deferredDateCount: 2,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: "2026-09-15T12:31:00.000Z",
+      },
       windowMs: 300_000,
     });
     expect(JSON.stringify(body)).not.toContain("PRIVATE_INTERNAL_CODE");

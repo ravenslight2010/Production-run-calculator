@@ -159,7 +159,7 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
     apiRequests: apiEvidence,
     consoleErrors,
     expectedHttpErrorConsoleMessages: consoleErrors.filter((message) =>
-      /failed to load resource: the server responded with a status of (?:401 \(Unauthorized\)|403 \(Forbidden\))$/i.test(
+      /failed to load resource: the server responded with a status of (?:401(?: \([^)]*\))?|403(?: \([^)]*\))?)$/i.test(
         message,
       ),
     ),
@@ -181,7 +181,7 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
   expect(pageErrors, "the authenticated tablet journey must have no page errors").toEqual([]);
   const unexpectedConsoleErrors = consoleErrors.filter(
     (message) =>
-      !/failed to load resource: the server responded with a status of (?:401 \(Unauthorized\)|403 \(Forbidden\))$/i.test(
+      !/failed to load resource: the server responded with a status of (?:401(?: \([^)]*\))?|403(?: \([^)]*\))?)$/i.test(
         message,
       ),
   );
@@ -189,4 +189,99 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
     unexpectedConsoleErrors,
     "the authenticated tablet journey must have no unexpected console errors",
   ).toEqual([]);
+});
+
+test("resumes the cookie session after an Android-style PWA close and reopen", async ({
+  page,
+}, testInfo) => {
+  requireIsolatedTestDatabase("PWA Android session resume");
+  if (!SIGNUP_CODE) {
+    throw new Error("STAFF_SIGNUP_CODE must be configured for PWA Android session resume.");
+  }
+
+  const username = uniqueTestId("e2e_pwa_android_resume");
+  testUsernames.add(username);
+  await page.setViewportSize({ width: 412, height: 915 });
+  await signUp(page, username);
+  await page.getByTestId("tab-run").waitFor({ state: "visible", timeout: 30_000 });
+
+  const before = await page.evaluate(() => {
+    const now = new Date();
+    const date = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+    const state = {
+      date,
+      runs: [{
+        id: "android-resume-run",
+        brand: "Android",
+        flavor: "Resume",
+        startedAt: 1_700_000_000_000,
+        casesCompleted: 17,
+      }],
+      currentIndex: 0,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+    };
+    const serialized = JSON.stringify(state);
+    localStorage.setItem("run-calc-day", serialized);
+    return serialized;
+  });
+
+  // Closing the document and creating a new page in the same browser context
+  // models an installed standalone PWA relaunch while retaining httpOnly
+  // cookies and local production state.
+  await page.close();
+  const reopened = await page.context().newPage();
+  await reopened.setViewportSize({ width: 412, height: 915 });
+  await reopened.goto("/", { waitUntil: "domcontentloaded" });
+  await reopened.getByTestId("tab-run").waitFor({ state: "visible", timeout: 30_000 });
+
+  const after = await reopened.evaluate(() => localStorage.getItem("run-calc-day"));
+  const stableDayState = (serialized: string | null) => {
+    if (!serialized) return null;
+    const state = JSON.parse(serialized) as {
+      date?: string;
+      currentIndex?: number;
+      runs?: Array<{
+        id?: string;
+        brand?: string;
+        flavor?: string;
+        casesCompleted?: number;
+      }>;
+    };
+    return {
+      date: state.date,
+      currentIndex: state.currentIndex,
+      runs: state.runs?.map(({ id, brand, flavor, casesCompleted }) => ({
+        id,
+        brand,
+        flavor,
+        casesCompleted,
+      })),
+    };
+  };
+  const evidence = {
+    viewport: { width: 412, height: 915 },
+    standaloneCloseReopen: true,
+    authenticatedHome: await reopened.getByTestId("tab-run").isVisible(),
+    stateUnchanged:
+      JSON.stringify(stableDayState(after)) === JSON.stringify(stableDayState(before)),
+    signInRequests: await reopened.evaluate(() =>
+      performance.getEntriesByType("resource")
+        .filter((entry) => entry.name.includes("/api/auth/sign-in")).length,
+    ),
+  };
+  await testInfo.attach("pwa-android-session-resume-evidence.json", {
+    body: JSON.stringify(evidence, null, 2),
+    contentType: "application/json",
+  });
+
+  expect(evidence.authenticatedHome).toBe(true);
+  expect(evidence.stateUnchanged).toBe(true);
+  expect(evidence.signInRequests).toBe(0);
+  await reopened.close();
 });

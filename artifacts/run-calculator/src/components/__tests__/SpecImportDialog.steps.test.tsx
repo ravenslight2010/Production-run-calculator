@@ -67,6 +67,7 @@ function makePrepared(
 function renderDialog(
   prepared: SpecImportPrepared,
   onConfirm: (p: ParsedSpecImport, learnedRenames: SpecImportAlias[]) => void = () => {},
+  ai: { allowed?: boolean; retryAvailable?: boolean; onRetry?: () => void } = {},
 ) {
   return render(
     <SpecImportDialog
@@ -76,6 +77,9 @@ function renderDialog(
       error={null}
       prepared={prepared}
       applying={false}
+      canUseAiTools={ai.allowed ?? false}
+      aiRetryAvailable={ai.retryAvailable ?? false}
+      onUseAiFallback={ai.onRetry ?? (() => {})}
       existingRecipeNamesByKind={{ dough: [], sauce: [], cheese: [], mix: [] }}
       onConfirm={onConfirm}
     />,
@@ -83,6 +87,54 @@ function renderDialog(
 }
 
 describe("SpecImportDialog two-step wizard", () => {
+  it("shows unresolved guidance without offering AI to users who lack permission", () => {
+    const prepared = makePrepared([]);
+    prepared.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;
+    prepared.note = "Automatic AI interpretation did not complete.";
+    renderDialog(prepared);
+
+    expect(screen.getByText("Automatic AI interpretation did not complete.")).toBeTruthy();
+    expect(screen.getByTestId("spec-import-unresolved").textContent)
+      .toContain("Ask an authorized manager for use-ai-tools access");
+    expect(screen.getByTestId("spec-import-empty-review").textContent)
+      .toContain("incomplete review");
+    expect(screen.queryByText("Retry AI interpretation")).toBeNull();
+    expect((screen.getByText("Next").closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("offers only the bounded retry action when AI permission is present", () => {
+    const prepared = makePrepared([]);
+    prepared.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;
+    const retry = vi.fn();
+    renderDialog(prepared, () => {}, { allowed: true, retryAvailable: true, onRetry: retry });
+
+    fireEvent.click(screen.getByText("Retry AI interpretation"));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Use AI for/)).toBeNull();
+  });
+
+  it("does not offer retries for unsupported workbooks or authorization rejection", () => {
+    const unsupported = makePrepared([]);
+    unsupported.unresolved = [{ source: "Shipping", values: ["PIZZA/BOX"] }] as never;
+    unsupported.aiFallbackUnsupported = true;
+    const { unmount } = renderDialog(unsupported, () => {}, {
+      allowed: true,
+      retryAvailable: true,
+    });
+    expect(screen.getByTestId("spec-import-unresolved").textContent)
+      .toContain("dedicated importer");
+    expect(screen.queryByText("Retry AI interpretation")).toBeNull();
+
+    unmount();
+    const denied = makePrepared([]);
+    denied.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;
+    denied.aiRetryBlocked = true;
+    renderDialog(denied, () => {}, { allowed: true, retryAvailable: true });
+    expect(screen.getByTestId("spec-import-unresolved").textContent)
+      .toContain("authorization");
+    expect(screen.queryByText("Retry AI interpretation")).toBeNull();
+  });
+
   it("requires explicit acknowledgement for a single destructive formula removal", () => {
     const prepared = makePrepared([{ brand: "A", flavor: "X" }]);
     prepared.importReview = {
@@ -350,5 +402,215 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(next.disabled).toBe(false);
     fireEvent.click(next);
     expect(screen.getByTestId("spec-recipe-name-rk0")).toBeTruthy();
+  });
+
+  it("shows verified workbook cells during review and strips locations before Apply", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      dieType: "12 inch",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+        flavor: [{ file: "spec.xlsx", sheet: "Profiles", cell: "B2" }],
+        dieType: [{ file: "spec.xlsx", sheet: "Profiles", cell: "C2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "House Dough",
+      sourceLocations: {
+        name: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "A1" }],
+        doughballOz: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "B2" }],
+        rowsUnit: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "B3" }],
+      },
+      doughballOz: 8.25,
+      rowsUnit: "lb",
+      rows: [{
+        ingredient: "Flour",
+        lbs: 40,
+        sourceLocations: [
+          { file: "spec.xlsx", sheet: "Dough Recipes", cell: "A3" },
+          { file: "spec.xlsx", sheet: "Dough Recipes", cell: "B3" },
+        ],
+      }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared([profile], [recipe]), onConfirm);
+
+    expect(screen.getByTestId("spec-profile-source-pk0").textContent)
+      .toContain("spec.xlsx · Profiles!A2");
+    expect(screen.getByTestId("spec-profile-source-pk0").textContent)
+      .toContain("spec.xlsx · Profiles!B2");
+    expect(screen.getByText(/Die 12 inch .*spec\.xlsx · Profiles!C2/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Next"));
+    expect(screen.getByTestId("spec-recipe-source-name-rk0").textContent)
+      .toContain("spec.xlsx · Dough Recipes!A1");
+    expect(screen.getByTestId("spec-recipe-source-metadata-rk0").textContent)
+      .toContain("Doughball 8.25 oz (spec.xlsx · Dough Recipes!B2)");
+    expect(screen.getByTestId("spec-recipe-rows-unit-rk0").textContent)
+      .toContain("spec.xlsx · Dough Recipes!B3");
+    expect(screen.getByText(/Flour 40 lb .*Dough Recipes!A3.*Dough Recipes!B3/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const applied = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(applied.profiles[0]).not.toHaveProperty("sourceLocations");
+    expect(applied.recipes[0]).not.toHaveProperty("sourceLocations");
+    expect(applied.recipes[0].rows[0]).not.toHaveProperty("sourceLocations");
+  });
+
+  it("labels AI-only locations as unverified", () => {
+    const profile: ParsedProfile = {
+      brand: "AI Brand",
+      flavor: "AI Flavor",
+      applicators: [],
+      pepperonis: [],
+    };
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "AI Dough",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    renderDialog(makePrepared([profile], [recipe]));
+
+    expect(screen.getByTestId("spec-profile-source-pk0").textContent)
+      .toContain("location unverified");
+    fireEvent.click(screen.getByText("Next"));
+    expect(screen.getByTestId("spec-recipe-source-name-rk0").textContent)
+      .toContain("location unverified");
+    expect(screen.getByText(/Flour 40 lb \(location unverified\)/)).toBeTruthy();
+  });
+
+  it("opens cited cells, navigates across workbook sheets, and clears the preview when review ends", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "House Dough",
+      sourceLocations: {
+        name: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "B2" }],
+      },
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const prepared = makePrepared([profile], [recipe]);
+    prepared.sourcePreviewCells = [
+      { file: "spec.xlsx", sheet: "Profiles", cell: "A2", value: "Aldo Foods" },
+      { file: "spec.xlsx", sheet: "Dough Recipes", cell: "B2", value: "House Dough" },
+    ];
+    const props = {
+      onClose: () => {},
+      loading: false,
+      error: null,
+      prepared,
+      applying: false,
+      existingRecipeNamesByKind: { dough: [], sauce: [], cheese: [], mix: [] },
+      onConfirm: () => {},
+    };
+    const view = render(<SpecImportDialog open={true} {...props} />);
+
+    fireEvent.click(screen.getByText("View cited cells"));
+    fireEvent.click(screen.getByRole("button", { name: "Open spec.xlsx · Profiles!A2" }));
+    expect(screen.getByTestId("spec-source-preview").textContent)
+      .toContain("spec.xlsx · Profiles!A2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent).toBe("Aldo Foods");
+
+    fireEvent.change(screen.getByLabelText("Navigate to another cited workbook cell"), {
+      target: { value: JSON.stringify(["spec.xlsx", "Dough Recipes", "B2"]) },
+    });
+    expect(screen.getByTestId("spec-source-preview").textContent)
+      .toContain("spec.xlsx · Dough Recipes!B2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent).toBe("House Dough");
+
+    view.rerender(<SpecImportDialog open={false} {...props} prepared={null} />);
+    expect(screen.queryByTestId("spec-source-preview")).toBeNull();
+    view.rerender(<SpecImportDialog open={true} {...props} />);
+    expect(screen.queryByTestId("spec-source-preview")).toBeNull();
+  });
+
+  it("shows a formula separately from its saved result", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const prepared = makePrepared([profile]);
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "A2",
+      value: "0.5",
+      formula: "1/2",
+      hasSavedResult: true,
+      savedResult: "0.5",
+    }];
+    renderDialog(prepared);
+
+    fireEvent.click(screen.getByText("View cited cells"));
+    fireEvent.click(screen.getByRole("button", { name: "Open spec.xlsx · Profiles!A2" }));
+
+    expect(screen.getByTestId("spec-source-preview-formula").textContent).toBe("=1/2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent).toBe("0.5");
+  });
+
+  it("states when a formula has no saved result instead of showing a calculated value", () => {
+    const missingResultProfile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "D2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const missingResultPrepared = makePrepared([missingResultProfile]);
+    missingResultPrepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    }];
+    renderDialog(missingResultPrepared);
+
+    fireEvent.click(screen.getByText("View cited cells"));
+    fireEvent.click(screen.getByRole("button", { name: "Open spec.xlsx · Profiles!D2" }));
+
+    expect(screen.getByTestId("spec-source-preview-formula").textContent).toBe("=1/2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent)
+      .toBe("No saved result in workbook");
+  });
+
+  it("does not preview a cited location that is absent from the source workbook", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "Z99" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const prepared = makePrepared([profile]);
+    prepared.sourcePreviewCells = [
+      { file: "spec.xlsx", sheet: "Profiles", cell: "A2", value: "Aldo Foods" },
+    ];
+    renderDialog(prepared);
+
+    expect(screen.queryByRole("button", { name: /Profiles!Z99/ })).toBeNull();
+    expect(screen.queryByTestId("spec-source-preview")).toBeNull();
   });
 });

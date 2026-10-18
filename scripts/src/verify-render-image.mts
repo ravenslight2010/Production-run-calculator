@@ -261,7 +261,7 @@ async function main(): Promise<void> {
       "sh",
       imageTag,
       "-c",
-      "cd /app/migration && ./node_modules/.bin/drizzle-kit push --force --config ./drizzle.config.ts",
+      "cd /app/migration && ./node_modules/.bin/drizzle-kit push --force --config ./drizzle.config.ts && node ./migrations/apply-audit-log-protection.mjs",
     ],
     "inherit",
   );

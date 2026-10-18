@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { profileNameLinkCleanupSummary } from "./auditLogs";
+import { profileNameLinkCleanupSummary, redactAuditChanges } from "./auditLogs";
 
 describe("profileNameLinkCleanupSummary", () => {
   it("keeps a completed cleanup result manager-readable", () => {
@@ -27,5 +27,37 @@ describe("profileNameLinkCleanupSummary", () => {
       skippedStarted: 0,
       removedStubs: { dough: 0, sauce: 3, cheese: 0, mix: 0 },
     });
+  });
+});
+
+describe("operational audit privacy boundary", () => {
+  it("keeps only allowlisted bounded evidence and drops network/payload fields", () => {
+    expect(redactAuditChanges({
+      count: 12,
+      outcome: "success",
+      password: "secret",
+      ipAddress: "192.0.2.1",
+      requestBody: { recipe: "private" },
+    })).toEqual({ count: 12, outcome: "success" });
+  });
+
+  it("bounds string values", () => {
+    expect(redactAuditChanges({ reasonCode: "x".repeat(201) })).toEqual({});
+  });
+
+  it("retains only bounded recipe field names and a bounded correlation ID", () => {
+    expect(redactAuditChanges({
+      fieldNames: ["name", "components"],
+      correlationId: "server-generated-correlation-id",
+      recipe: { name: "private recipe value" },
+      requestBody: { notes: "private recipe note" },
+    })).toEqual({
+      fieldNames: ["name", "components"],
+      correlationId: "server-generated-correlation-id",
+    });
+    expect(redactAuditChanges({
+      fieldNames: ["name", "private-value"],
+      correlationId: "x".repeat(129),
+    })).toEqual({});
   });
 });

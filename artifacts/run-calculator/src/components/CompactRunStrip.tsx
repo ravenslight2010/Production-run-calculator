@@ -57,12 +57,12 @@ const CompactRunStrip = memo(function CompactRunStrip() {
   return (
     <div className="print:hidden sticky top-2 z-40">
       <div
-        className="relative rounded-lg border border-border/60 bg-card/95 backdrop-blur shadow-lg overflow-hidden cursor-pointer"
+        className="relative min-w-0 rounded-lg border border-border/60 bg-card/95 backdrop-blur shadow-lg overflow-hidden cursor-pointer"
         onClick={() => setActiveTab("run")}
         data-testid="compact-run-strip"
       >
         <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
-        <div className="px-3 py-2.5 pt-3 flex items-center justify-between gap-2 sm:gap-3">
+        <div className="responsive-row px-3 py-2.5 pt-3 flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex flex-col flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               {runStatus === "running" ? (
@@ -71,34 +71,34 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider truncate">
+                  <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider truncate">
                     Running{currentRun?.startedAt ? <> · <ElapsedTimeBadge data-testid="strip-elapsed" nowMs={nowTime.getTime()} startedAt={currentRun.startedAt} pausedAt={currentRun.pausedAt ?? null} /></> : ""}
                   </span>
                 </>
               ) : runStatus === "paused" ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
-                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Paused</span>
+                  <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Paused</span>
                 </>
               ) : runStatus === "ended" ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Ended</span>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Ended</span>
                 </>
               ) : (
                 <>
                   <span className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0" />
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Not started</span>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Not started</span>
                 </>
               )}
             </div>
             <div className="flex items-baseline gap-2 min-w-0">
-              <span className="text-sm font-bold text-foreground truncate">
+              <span className="text-base font-bold text-foreground truncate">
                 {(currentRun?.brand || currentRun?.flavor)
                   ? <>{currentRun?.brand}{currentRun?.brand && currentRun?.flavor ? <span className="text-primary mx-1">—</span> : null}{currentRun?.flavor}</>
                   : "Unnamed Run"}
               </span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase shrink-0 inline-flex items-center">
+              <span className="text-xs font-bold text-muted-foreground uppercase shrink-0 inline-flex items-center">
                 Run {dayState.currentIndex + 1}/{dayState.runs.length}
                 <ChevronRight className="w-3 h-3 ml-0.5" />
               </span>
@@ -117,9 +117,9 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                 )}
               </div>
             )}
-            <div className="flex items-center gap-2">
+              <div className="responsive-row flex items-center gap-2">
               {calc.paceStatus !== null && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border tabular-nums ${
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded border tabular-nums ${
                   calc.paceStatus === "behind"
                     ? "text-red-400 bg-red-400/10 border-red-400/20"
                     : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
@@ -129,7 +129,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                 </span>
               )}
               {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (
-                <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
+                  <span className="text-xs font-medium text-muted-foreground tabular-nums">
                   Est {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}
                 </span>
               )}
@@ -144,7 +144,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                   aria-label="Pause active run"
                   data-testid="strip-pause"
                   onClick={(e: any) => { e.stopPropagation(); pauseRun(); }}
-                  className="min-h-11 min-w-11 bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
+                   className="responsive-icon-button bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
                 >
                   <Pause className="w-4 h-4 fill-current" />
                 </button>
@@ -155,7 +155,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                   aria-label="Open Run tab to resume active run"
                   data-testid="strip-resume"
                   onClick={(e: any) => { e.stopPropagation(); setActiveTab("run"); }}
-                  className="min-h-11 min-w-11 bg-emerald-600/20 text-emerald-500 hover:bg-emerald-500 hover:text-black p-2.5 rounded-lg transition-colors border border-emerald-500/30"
+                   className="responsive-icon-button bg-emerald-600/20 text-emerald-500 hover:bg-emerald-500 hover:text-black p-2.5 rounded-lg transition-colors border border-emerald-500/30"
                 >
                   <Play className="w-4 h-4 fill-current" />
                 </button>

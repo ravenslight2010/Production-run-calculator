@@ -13,6 +13,7 @@ import {
 } from "@workspace/ai-memory";
 import { INCIDENT_MEMORY_DOMAIN } from "./incidentsAi";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
+import { safeAiErrorMetadata } from "../lib/aiDataBoundary";
 
 // Shared AI-memory context builder — the single seam every AI prompt uses to get
 // grounded by what the facility (and, in a conversation, the user) has learned.
@@ -42,7 +43,7 @@ export async function loadFacilityKnowledge(log: ContextLogger): Promise<Facilit
       rows.map((r) => ({ domain: r.domain, key: r.key, fact: r.fact })),
     );
   } catch (err) {
-    log.error({ err }, "failed to load facility knowledge for prompt");
+    log.error(safeAiErrorMetadata(err), "failed to load facility knowledge for prompt");
     return [];
   }
 }
@@ -138,7 +139,7 @@ export async function loadConversationTurns(
       { window: limit },
     );
   } catch (err) {
-    log.error({ err }, "failed to load conversation turns for prompt");
+    log.error(safeAiErrorMetadata(err), "failed to load conversation turns for prompt");
     return [];
   }
 }
@@ -171,6 +172,7 @@ export async function groundPromptWithMemory(
   userPrompt: string,
   opts: {
     facilityDomains?: string[];
+    includeFacilityKnowledge?: boolean;
     userId?: string;
     conversationLimit?: number;
     allowPrivilegedFacilityDomains?: boolean;
@@ -181,13 +183,16 @@ export async function groundPromptWithMemory(
     correctionDomains?: string[] | false;
   } = {},
 ): Promise<string> {
-  const knowledge = await loadFacilityKnowledge(log);
-  let grounded = appendFacilityMemoryBlock(
-    userPrompt,
-    knowledge,
-    opts.facilityDomains,
-    opts.allowPrivilegedFacilityDomains ?? true,
-  );
+  let grounded = userPrompt;
+  if (opts.includeFacilityKnowledge !== false) {
+    const knowledge = await loadFacilityKnowledge(log);
+    grounded = appendFacilityMemoryBlock(
+      userPrompt,
+      knowledge,
+      opts.facilityDomains,
+      opts.allowPrivilegedFacilityDomains ?? true,
+    );
+  }
   if (opts.correctionDomains !== false) {
     const corrections = await loadCorrections(log);
     grounded = appendCorrectionsBlock(grounded, corrections, opts.correctionDomains);

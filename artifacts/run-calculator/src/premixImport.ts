@@ -16,7 +16,7 @@
 // (replit.md parity).
 
 import {
-  parsePremixWorkbook,
+  parsePremixWorkbookWithSources,
   groundPremix,
   premixMatchName,
   collectPremixAliases,
@@ -38,10 +38,11 @@ import {
   type PremixFreezerPull,
   type PremixPrepItem,
   type SpecImportAlias,
+  type PremixSourceEvidence,
 } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
 import { buildFreezerPullUpserts } from "@workspace/freezer-pull";
-import { gridSanityIssue } from "@workspace/spec-import";
+import { gridSanityIssue, type WorkbookCellReference } from "@workspace/spec-import";
 import { fetchFreezerPullItems, saveFreezerPullItems } from "./freezerPull";
 import { loadSpecImportKnown } from "./storage";
 import { readWorkbookGrids } from "./specImport";
@@ -53,8 +54,9 @@ import {
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes } from "./cheeseRecipes";
 import { requestMatchPremix } from "./premixMatch";
-import { saveAiCorrections } from "./aiCorrections";
+import { logCorrectionWriteFailure, saveAiCorrections } from "./aiCorrections";
 import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./savedPremixSheets";
+import { applyImportOperation } from "./importOperations";
 
 export type PremixImportPrepared = {
   /** Ready-to-apply mixes (grounded, AI-matched, deterministic ids). */
@@ -107,6 +109,9 @@ export type PremixImportPrepared = {
   absentMixes: { id: string; name: string; brand: string; flavor: string }[];
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
+  /** Review-only workbook coordinates keyed by the original imported mix id. */
+  sourceByMixId?: Record<string, PremixSourceEvidence>;
+  sourceByPrepItem?: Record<string, { ingredient: WorkbookCellReference; perBatch: WorkbookCellReference }>;
   note?: string;
 };
 
@@ -168,7 +173,7 @@ export async function preparePremixImport(
     try {
       await new Promise((resolve) => setTimeout(resolve, 0));
       if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
-      const grids = await readWorkbookGrids(buffers[i]);
+      const grids = await readWorkbookGrids(buffers[i], label);
       // Cheap junk-file guard: the xlsx reader does NOT throw on garbage bytes
       // (a renamed PDF/image "reads" as one junk sheet), so reject empty or
       // binary-junk grids BEFORE the deterministic parse / AI matcher. In the
@@ -178,7 +183,7 @@ export async function preparePremixImport(
       if (sanity) {
         throw new Error(sanity);
       }
-      const blocks = parsePremixWorkbook(grids);
+      const blocks = parsePremixWorkbookWithSources(grids);
       if (blocks.length === 0) {
         failedNames.push(label);
         errors.push(`${label}: no recognizable premix blocks.`);
@@ -199,7 +204,18 @@ export async function preparePremixImport(
   }
 
   // Deterministic grounding first (alias → exact → fuzzy → new).
-  const grounded: GroundedPremix[] = parsed.map((p) => groundPremix(p, known, aliases));
+  const grounded: GroundedPremix[] = parsed.map((p) => {
+    const item = groundPremix(p, known, aliases);
+    if (item.mix.sourceEvidence) {
+      item.mix.sourceEvidence = {
+        ...item.mix.sourceEvidence,
+        productMatchVerified: item.productResolved,
+        resolvedBrand: item.mix.brand,
+        resolvedFlavor: item.mix.flavor,
+      };
+    }
+    return item;
+  });
 
   // Ask the AI matcher ONLY for blocks whose product didn't resolve. Names only;
   // quantities are already final. Best-effort — proceed without it on failure.
@@ -234,10 +250,13 @@ export async function preparePremixImport(
   // block entirely when EVERY row is prep — it isn't a mix at all.
   const seen = new Set<string>();
   const mixes: Mix[] = [];
-  for (const pm of groundedMixes) {
+  const sourceByMixId: Record<string, PremixSourceEvidence> = {};
+  for (let i = 0; i < groundedMixes.length; i++) {
+    const pm = groundedMixes[i]!;
     if (isPrepOnlyPremix(pm)) continue;
     const mix = premixToMix(pm, { perPizzaOnly: true });
     if (!mix) continue;
+    if (pm.sourceEvidence) sourceByMixId[mix.id] = pm.sourceEvidence;
     // De-dup within the import by deterministic id (re-importing the same block
     // across sheets/files collapses to one).
     if (seen.has(mix.id)) {
@@ -271,6 +290,23 @@ export async function preparePremixImport(
   const freezerPulls = collectPremixFreezerPulls(groundedMixes);
   // The per-batch-only rows split out of the mixes, for a read-only review note.
   const prepItems = collectPremixPrepItems(groundedMixes);
+  const sourceByPrepItem: NonNullable<PremixImportPrepared["sourceByPrepItem"]> = {};
+  for (const item of prepItems) {
+    const parsedMix = groundedMixes.find((candidate) =>
+      candidate.name.trim() === item.mixName.trim() &&
+      candidate.components.some((component) => component.ingredient.trim() === item.ingredient.trim()),
+    );
+    const componentIndex = parsedMix?.components.findIndex(
+      (component) => component.ingredient.trim() === item.ingredient.trim(),
+    ) ?? -1;
+    const sources = componentIndex >= 0 ? parsedMix?.sourceEvidence?.components[componentIndex] : undefined;
+    if (sources) {
+      sourceByPrepItem[`${item.mixName.trim().toLowerCase()}::${item.ingredient.trim().toLowerCase()}`] = {
+        ingredient: sources.ingredient,
+        perBatch: sources.perBatch,
+      };
+    }
+  }
 
   const noteParts: string[] = [];
   if (errors.length) {
@@ -301,6 +337,8 @@ export async function preparePremixImport(
     freezerPulls,
     prepItems,
     absentMixes,
+    sourceByMixId,
+    sourceByPrepItem,
     ...(note ? { note } : {}),
   };
 }
@@ -311,6 +349,7 @@ export type PremixCommitResult = {
   /** Non-fatal problem worth surfacing (the mixes themselves applied fine). */
   warning?: string;
   snapshotId?: number;
+  resultHash?: string;
 };
 
 /**
@@ -328,6 +367,7 @@ export async function commitPremixImport(
   freezerPulls: ReadonlyArray<PremixFreezerPull> = [],
   extraAliases: ReadonlyArray<SpecImportAlias> = [],
   mixesToRemove: ReadonlyArray<string> = [],
+  operationId?: string,
 ): Promise<PremixCommitResult> {
   // The review may be assembled by an older client or by a caller other than
   // the current dialog. Re-apply the boundary guard here so an empty normalized
@@ -345,7 +385,40 @@ export async function commitPremixImport(
   // A premix sheet can be entirely prep/pull-early rows (no per-pizza mixes).
   // In that case there are no mixes to save, but its pull-note reminders below
   // must still persist — so only the mix write is gated on having mixes.
-  if (mixesToApply.length > 0 || mixesToRemove.length > 0) {
+  let atomicApplied = false;
+  let resultHash: string | undefined;
+  let atomicPullUpserts: ReturnType<typeof buildFreezerPullUpserts> = [];
+  let existingForAtomic: Mix[] = [];
+  if (operationId) {
+    existingForAtomic = await fetchMixes();
+    const removeSet = new Set(mixesToRemove);
+    const afterRemoval = mixesToRemove.length > 0
+      ? existingForAtomic.filter((m) => !removeSet.has(m.id))
+      : existingForAtomic;
+    const merged = mixesToApply.length > 0
+      ? mergePremixIntoMixes(afterRemoval, mixesToApply)
+      : afterRemoval;
+    const importedIds = new Set(mixesToApply.map((mix) => mix.id));
+    const atomicMixUpserts = merged.filter((mix) => importedIds.has(mix.id));
+    const existingItems = await fetchFreezerPullItems();
+    atomicPullUpserts = freezerPulls.length > 0
+      ? buildFreezerPullUpserts(existingItems, [...freezerPulls])
+      : [];
+    const aliases = [...prepared.newAliases, ...extraAliases];
+    const committed = await applyImportOperation(operationId, {
+      importType: "premix",
+      sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+      sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Premix sheet",
+      changes: {
+        mixes: { upsert: atomicMixUpserts, delete: mixesToRemove },
+        ...(atomicPullUpserts.length ? { freezerPullItems: { upsert: atomicPullUpserts } } : {}),
+        ...(aliases.length ? { specImportAliases: { upsert: aliases } } : {}),
+      },
+    });
+    atomicApplied = true;
+    resultHash = committed.resultHash;
+  }
+  if (!atomicApplied && (mixesToApply.length > 0 || mixesToRemove.length > 0)) {
     // Re-read current mixes right before writing so we merge onto the freshest
     // list (another manager may have edited mixes since prepare).
     const existing = await fetchMixes();
@@ -366,6 +439,11 @@ export async function commitPremixImport(
   let freezerPullCount = 0;
   let warning: string | undefined;
   let snapshotId: number | undefined;
+  if (atomicApplied) {
+    freezerPullCount = new Set(
+      freezerPulls.map((p) => p.ingredient.trim().toLowerCase()).filter(Boolean),
+    ).size;
+  }
   // Retain the complete parsed source, not the manager's last selection. A
   // source remains useful for a later repair even when individual rows were
   // skipped during the original reviewed commit.
@@ -383,7 +461,7 @@ export async function commitPremixImport(
   } catch {
     warning = "The import was applied, but its retained repair source could not be saved.";
   }
-  if (freezerPulls.length > 0) {
+  if (!atomicApplied && freezerPulls.length > 0) {
     try {
       const existingItems = await fetchFreezerPullItems();
       const upserts = buildFreezerPullUpserts(existingItems, [...freezerPulls]);
@@ -400,7 +478,7 @@ export async function commitPremixImport(
   // Persist learned name mappings: the grounding pass's brand/flavor aliases
   // plus any "use existing mix" picks the review dialog collected (blend-name
   // "appType" aliases). Best-effort: the import already applied.
-  let aliasesToSave = [...prepared.newAliases, ...extraAliases];
+  let aliasesToSave = atomicApplied ? [] : [...prepared.newAliases, ...extraAliases];
   if (aliasesToSave.length) {
     // A reviewed redirect can correct an older redirect for the same workbook
     // label. Compare against the server aliases before upserting so the stale
@@ -467,7 +545,17 @@ export async function commitPremixImport(
     try {
       await saveSpecImportAliases(aliasesToSave);
     } catch {
-      // Best-effort: the import already applied; learning is a bonus.
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: aliasesToSave.length,
+      });
+      warning = [
+        warning,
+        "The mixes were imported, but the reviewed name mappings were not saved. A later import may ask you to confirm them again.",
+      ]
+        .filter(Boolean)
+        .join(" ");
     }
     // Mirror each learned BRAND/FLAVOR mapping into the factory-wide corrections
     // pool so every other name-resolving AI helper honors it too. Other kinds
@@ -492,7 +580,7 @@ export async function commitPremixImport(
     }
   }
 
-  return { freezerPullCount, ...(warning ? { warning } : {}), ...(snapshotId != null ? { snapshotId } : {}) };
+  return { freezerPullCount, ...(resultHash ? { resultHash } : {}), ...(warning ? { warning } : {}), ...(snapshotId != null ? { snapshotId } : {}) };
 }
 
 export { premixId };

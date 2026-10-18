@@ -113,7 +113,7 @@ describe("foreground wake sync barrier", () => {
     } as unknown as SyncPayload;
     const responseFor = async (payload: SyncPayload) => {
       const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
-      return new Response(JSON.stringify(payload), {
+      return new Response(JSON.stringify({ ...payload, resetEpoch: 0, rollover: false }), {
         status: 200,
         headers: {
           "X-Sync-Response": "complete",
@@ -138,6 +138,7 @@ describe("foreground wake sync barrier", () => {
           requestedSnapshotId: "snapshot-a",
           isCurrent: () => true,
           adoptUnchanged: vi.fn(),
+          adoptReset: vi.fn(() => false),
           adoptCanonical: (payload) => {
             coordinateForegroundAdoption({
               payload,
@@ -250,6 +251,200 @@ describe("foreground wake sync barrier", () => {
     expect(pullClientDateRow).toHaveBeenCalledTimes(2);
   });
 
+  it("retries every five seconds while visible and stops after canonical recovery", async () => {
+    vi.useFakeTimers();
+    let hidden = false;
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => hidden,
+    });
+    const recover = vi.fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover);
+    try {
+      scheduler.start();
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(recover).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(recover).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(recover).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(recover).toHaveBeenCalledTimes(3);
+
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(recover).toHaveBeenCalledTimes(3);
+    } finally {
+      registration.dispose();
+      scheduler.stop();
+      unmount();
+      hidden = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans up the visible retry timer when recovery registration is disposed", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => false,
+    });
+    const recover = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover);
+    scheduler.start();
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledTimes(1);
+    registration.dispose();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(recover).toHaveBeenCalledTimes(1);
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records successful wake recovery with its trigger and duration", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const recover = vi.fn(async () => {
+      vi.setSystemTime(1_250);
+      return true;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+    scheduler.start();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(diagnostics).toHaveBeenCalledWith({
+      attempts: 1,
+      durationMs: 250,
+      trigger: "online",
+      outcome: "success",
+    });
+    registration.dispose();
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records connectivity retries as one recovery episode", async () => {
+    vi.useFakeTimers();
+    const recover = vi.fn(async ({ classify }) => {
+      if (recover.mock.calls.length === 1) {
+        classify("connectivity-retry");
+        return false;
+      }
+      return true;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+    scheduler.start();
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 2,
+      trigger: "foreground",
+      outcome: "success",
+    }));
+    registration.dispose();
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records cancellation without treating it as a connectivity retry", async () => {
+    const recover = vi.fn(async ({ classify }) => {
+      classify("cancelled");
+      return false;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+
+    await registration.reconcile();
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "manual",
+      outcome: "cancelled",
+    }));
+    registration.dispose();
+    unmount();
+  });
+
+  it("records a non-retryable HTTP outcome without entering the retry cadence", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => false,
+    });
+    const recover = vi.fn(async ({ classify }) => {
+      classify("non-retryable-http");
+      return false;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+    scheduler.start();
+
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "online",
+      outcome: "non-retryable-http",
+    }));
+    registration.dispose();
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records a background stop for an unfinished connectivity recovery", async () => {
+    const recover = vi.fn(async ({ classify }) => {
+      classify("connectivity-retry");
+      return false;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+
+    await registration.reconcile();
+    registration.dispose();
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "manual",
+      outcome: "background-stop",
+    }));
+    unmount();
+  });
+
   it("retries once when online arrives while a client-date pull is failing", async () => {
     let rejectFirst!: (reason?: unknown) => void;
     let resolveSecond!: (result: boolean) => void;
@@ -343,6 +538,44 @@ describe("foreground wake sync barrier", () => {
     expect(replay).toHaveBeenCalledTimes(1);
   });
 
+  it("adopts canonical breaks before replaying a queued stale snapshot", () => {
+    const canonicalBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 30 },
+      { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
+      { slot: 3, enabled: true, mode: "after-run", runId: "run-2", durationMin: 30 },
+    ];
+    const staleBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "06:00", durationMin: 5 },
+      { slot: 2, enabled: true, mode: "after-run", runId: "run-1", durationMin: 90 },
+    ];
+    let localBreaks = staleBreaks;
+    let queued = true;
+    const order: string[] = [];
+    const replay = vi.fn(() => {
+      order.push("replay");
+      expect(localBreaks).toEqual(canonicalBreaks);
+    });
+
+    releaseForegroundRecovery({
+      releaseFence: () => {
+        order.push("adopt-canonical");
+        localBreaks = canonicalBreaks;
+      },
+      acknowledgeRelease: () => order.push("acknowledge"),
+      takeQueuedWrite: () => {
+        const pending = queued;
+        queued = false;
+        return pending;
+      },
+      replayQueuedWrite: replay,
+    });
+
+    expect(order).toEqual(["adopt-canonical", "acknowledge", "replay"]);
+    expect(replay).toHaveBeenCalledTimes(1);
+    expect(localBreaks).toHaveLength(3);
+    expect(localBreaks.every((breakSlot) => breakSlot.durationMin === 30)).toBe(true);
+  });
+
   it("releases a cancelled completed recovery without replaying its queued write", () => {
     let fenced = true;
     let queued = true;
@@ -379,7 +612,7 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain("tracking is paused");
 
     const catchBlock = homeSource.match(
-      /catch \{\s*\/\/ Failed pulls are not successful reconciliation[\s\S]*?return false;\s*\}/,
+      /catch(?:\s*\([^)]*\))? \{\s*classify\([\s\S]*?\/\/ Failed pulls are not successful reconciliation[\s\S]*?return false;\s*\}/,
     )?.[0] ?? "";
     expect(catchBlock).toContain("return false");
     expect(catchBlock).not.toContain("reconciled = true");
@@ -401,7 +634,7 @@ describe("foreground wake sync barrier", () => {
     expect(hookSource).toContain("autoTrackBlockedRef?.current");
     expect(homeSource).toContain("setAutoTrackBlocked(true)");
     expect(homeSource).toContain("autoTrackBlockedRef={foregroundSyncBarrierRef}");
-    expect(homeSource).toContain("setAutoTrackRebaseAfterBlock(true)");
+    expect(homeSource).toContain('setAutoTrackWakeRebaseReason("lifecycle-replacement")');
     expect(hookSource).toContain("rebaseAfterForegroundSync");
     expect(hookSource).toContain("lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1");
     expect(hookSource).toContain("autoTrackBlockedRef?.current");

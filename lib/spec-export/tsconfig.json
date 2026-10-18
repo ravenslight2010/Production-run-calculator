@@ -8,5 +8,10 @@
     "rootDir": "src",
     "lib": ["es2022"]
   },
+  "references": [
+    { "path": "../mixes" },
+    { "path": "../premix-import" },
+    { "path": "../spec-import" }
+  ],
   "include": ["src"]
 }

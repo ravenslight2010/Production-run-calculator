@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { ClipboardList } from "lucide-react";
-import InventoryTab from "./InventoryTab";
+import { DeferredInventoryTab } from "../departments/DeferredDepartmentSurface";
 import { useInventoryTabCtx } from "../contexts/InventoryTabCtx";
 
 // Memo'd wrapper that feeds InventoryTab from the narrow InventoryTabCtx
@@ -32,7 +32,7 @@ export default memo(function InventoryTabContent() {
           Review stock, lots, alerts, transfers, and substitutions.
         </p>
       </div>
-      <InventoryTab
+      <DeferredInventoryTab
         candidates={candidates}
         runValsList={runValsList}
         coverageRunSources={coverageRunSources}

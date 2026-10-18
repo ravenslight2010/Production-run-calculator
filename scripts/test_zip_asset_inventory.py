@@ -627,9 +627,9 @@ class ZipAssetInventoryTests(unittest.TestCase):
                 archive.writestr("safe.txt", "review metadata only")
 
             # A UTF-8 flag with invalid UTF-8 bytes makes zipfile fail while
-            # decoding the central-directory filename. Keep the malformed
-            # marker out of all expected report fields so any accidental echo
-            # is immediately visible.
+            # decoding the central-directory filename. Use an ASCII canary
+            # outside the hexadecimal alphabet so a checksum cannot trigger
+            # the redaction assertion by coincidence.
             data = bytearray(archive_path.read_bytes())
             central_signature = b"PK\x01\x02"
             central_offset = data.find(central_signature)
@@ -637,7 +637,7 @@ class ZipAssetInventoryTests(unittest.TestCase):
             filename_length = int.from_bytes(
                 data[central_offset + 28 : central_offset + 30], "little"
             )
-            malformed_name = b"bad\xffname"
+            malformed_name = b"leak\xfftag"
             self.assertEqual(len(malformed_name), filename_length)
             data[central_offset + 8 : central_offset + 10] = (
                 int.from_bytes(data[central_offset + 8 : central_offset + 10], "little")
@@ -670,7 +670,7 @@ class ZipAssetInventoryTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(process.returncode, 1)
-                self.assertNotIn("bad", process.stdout)
+                self.assertNotIn("leak", process.stdout)
                 self.assertNotIn("UnicodeDecodeError", process.stdout)
                 self.assertNotIn("invalid start byte", process.stdout)
                 if output_format == "json":

@@ -15,6 +15,7 @@ export interface ImportHistorySummary {
   unresolved?: string[];
   skipped?: string[];
   followUp?: string[];
+  /** @nullable */
   snapshotId?: number | null;
   [key: string]: unknown;
  }

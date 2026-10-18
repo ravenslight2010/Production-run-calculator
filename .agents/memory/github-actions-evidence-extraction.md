@@ -16,3 +16,14 @@ failures.
 **How to apply:** Use fixed run/artifact identifiers or branch-bound source revisions,
 least-privilege `contents: write`, strict report validation, and evidence-only commit paths
 that do not change the measured source revision. Do not merge the temporary workflow.
+
+Evidence-generating task handoffs must retain the exact report in the shared, merged
+evidence location; task completion text or stale project-level reports cannot substitute.
+
+**Why:** Downstream verification can only inspect the shared workspace, and omitted
+isolated-run logs make timings and failures impossible to attribute.
+
+**How to apply:** Record the full source revision, mode, run identity/time, environment,
+and report path beside the sanitized report. Verify referenced artifacts are present after
+merge. For failed captures, preserve the failure status and state the evidence gap rather
+than silently inheriting a stale report.

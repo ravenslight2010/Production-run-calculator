@@ -1,5 +1,7 @@
 # Importer Redesign — Plan
 
+> Historical mirror retained for context. `docs/importer-redesign-plan.md` is the current authority; `docs/import-system-plan.md` owns transactional safety and recovery sequencing.
+
 ## Goals
 1. **More accurate** — fewer AI hallucinations, silent misparses, near-duplicate recipes
 2. **More automatic** — less manual review clicking, auto-apply when confident

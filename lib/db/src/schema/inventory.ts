@@ -114,6 +114,7 @@ export const inventoryConsumedRunsTable = pgTable(
   {
     runId: text("run_id").notNull(),
     scope: text("scope").notNull().default("live"),
+    baselineLines: jsonb("baseline_lines").$type<Array<{ itemId: number; qty: number }> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("inventory_consumed_runs_run_scope_idx").on(t.runId, t.scope)],

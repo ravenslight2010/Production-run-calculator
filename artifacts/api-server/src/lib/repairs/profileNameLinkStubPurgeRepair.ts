@@ -198,7 +198,10 @@ export const profileNameLinkStubPurgeRepair: RepairDefinition<RepairTransaction>
       components.every((c) => {
         if (!c || typeof c !== "object") return true;
         const row = c as Record<string, unknown>;
-        return num(row.lbs) <= 0 && num(row.ozPerPizza) <= 0 && num(row.perPizza) <= 0;
+        return num(row.lbs) <= 0 &&
+          num(row.ozPerPizza) <= 0 &&
+          num(row.perPizza) <= 0 &&
+          num(row.amount) <= 0;
       });
 
     let removedDough = 0;

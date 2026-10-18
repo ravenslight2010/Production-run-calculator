@@ -12,7 +12,13 @@
 // supported via `image_url` data-URI parts. Everything else in the app (routes,
 // prompts, parsing) stays byte-for-byte unchanged.
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import type { Content, Part, GenerateContentConfig } from "@google/genai";
+import type {
+  Content,
+  GenerateContentConfig,
+  GenerateContentResponse,
+  Part,
+} from "@google/genai";
+import { modelChain } from "./models";
 
 type TextPart = { type: "text"; text: string };
 type ImagePart = { type: "image_url"; image_url: { url: string } };
@@ -38,12 +44,130 @@ interface CreateParamsStream extends CreateParamsBase {
 
 interface ChatResponse {
   choices: Array<{ message: { content: string | null } }>;
+  /** Present only when a fallback model served the request. */
+  model?: string;
 }
 interface ChatChunk {
   choices: Array<{ delta: { content: string | null } }>;
 }
 
+interface ChainAttempt extends ChatResponse {
+  blocked: boolean;
+}
+
 let _client: GoogleGenAI | null = null;
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 120_000;
+const MAX_RETRIES = 1;
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_COOLDOWN_MS = 30_000;
+const MAX_RETRY_DELAY_MS = 10_000;
+const MAX_TOKEN_METRIC = 10_000_000;
+
+export type GeminiRequestOutcome =
+  | "success"
+  | "cancelled"
+  | "timeout"
+  | "circuit_open"
+  | "provider_error";
+
+export type GeminiFallbackTrigger =
+  | "rate_limited"
+  | "service_unavailable"
+  | "retired_model"
+  | "empty_response";
+
+export type GeminiRequestResult =
+  | "primary_success"
+  | "fallback_success"
+  | "fallback_triggered"
+  | "fallback_exhausted"
+  | "attempt_failed";
+
+export interface GeminiRequestMetrics {
+  durationMs: number;
+  outcome: GeminiRequestOutcome;
+  /** Zero is the selected model; positive values are bounded fallback rungs. */
+  modelRung: number;
+  requestResult: GeminiRequestResult;
+  /** Why this fallback rung was selected; null for the primary model. */
+  fallbackTrigger: GeminiFallbackTrigger | null;
+  retryCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costMicrousd: number;
+}
+
+type GeminiMetricsObserver = (metrics: GeminiRequestMetrics) => void;
+
+let metricsObserver: GeminiMetricsObserver = () => {};
+let consecutiveTransientFailures = 0;
+let circuitOpenedAt = 0;
+let halfOpenProbeActive = false;
+
+export function setGeminiMetricsObserver(observer?: GeminiMetricsObserver): void {
+  metricsObserver = observer ?? (() => {});
+}
+
+export class GeminiProviderUnavailableError extends Error {
+  constructor(message = "AI extraction is temporarily unavailable", options?: ErrorOptions) {
+    super(message, options);
+    this.name = "GeminiProviderUnavailableError";
+  }
+}
+
+class GeminiRequestTimeoutError extends GeminiProviderUnavailableError {
+  constructor() {
+    super("AI provider request timed out");
+    this.name = "GeminiRequestTimeoutError";
+  }
+}
+
+class GeminiRequestCancelledError extends Error {
+  constructor() {
+    super("AI provider request was cancelled");
+    this.name = "GeminiRequestCancelledError";
+  }
+}
+
+export interface GeminiProviderEnvironment {
+  AI_INTEGRATIONS_GEMINI_API_KEY?: string;
+  GOOGLE_API_KEY?: string;
+}
+
+/**
+ * Reports whether the Gemini adapter has a credential it can use.
+ *
+ * Keep readiness and other configuration checks on this helper so they cannot
+ * drift from the credential selection performed by client().
+ */
+export function isGeminiProviderConfigured(
+  env: GeminiProviderEnvironment = process.env,
+): boolean {
+  return Boolean(
+    env.AI_INTEGRATIONS_GEMINI_API_KEY || env.GOOGLE_API_KEY,
+  );
+}
+
+/**
+ * Makes a bounded, synthetic request to confirm that one configured model is
+ * currently accepted by the provider. The response is intentionally discarded.
+ */
+export async function probeGeminiModel(model: string): Promise<void> {
+  if (!model.trim()) throw new Error("A Gemini model ID is required");
+  await client().models.generateContent({
+    model,
+    contents: "Reply with OK.",
+    config: {
+      maxOutputTokens: 1,
+      temperature: 0,
+      abortSignal: AbortSignal.timeout(15_000),
+    },
+  });
+}
+
 // Lazily construct the client so merely importing this module (e.g. in a
 // non-AI context or a mocked test) never throws on a missing env var.
 //
@@ -57,14 +181,14 @@ function client(): GoogleGenAI {
   const replitKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
   const replitBase = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
   const directKey = process.env.GOOGLE_API_KEY;
-  const apiKey = replitKey || directKey;
-  if (!apiKey) {
+  if (!isGeminiProviderConfigured(process.env)) {
     throw new Error(
       "No Gemini API key found. Set GOOGLE_API_KEY for the direct Gemini API " +
         "(get one at https://aistudio.google.com/apikey), or set " +
         "AI_INTEGRATIONS_GEMINI_API_KEY for the Replit proxy.",
     );
   }
+  const apiKey = replitKey || directKey!;
   _client = new GoogleGenAI({
     apiKey,
     ...(replitKey && replitBase
@@ -155,18 +279,477 @@ function buildConfig(
 
 type CreateRequestOptions = { signal?: AbortSignal; timeoutMs?: number };
 
-function abortable<T>(promise: Promise<T>, options?: CreateRequestOptions): Promise<T> {
-  if (!options?.signal && !options?.timeoutMs) return promise;
-  return new Promise<T>((resolve, reject) => {
-    const timer = options.timeoutMs ? setTimeout(() => reject(new Error("AI provider request timed out")), options.timeoutMs) : undefined;
-    const abort = () => reject(new Error("AI provider request was cancelled"));
-    if (options.signal?.aborted) { abort(); return; }
-    options.signal?.addEventListener("abort", abort, { once: true });
-    promise.then(resolve, reject).finally(() => {
-      if (timer) clearTimeout(timer);
-      options.signal?.removeEventListener("abort", abort);
-    });
+function boundedInteger(value: unknown, maximum: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(0, Math.round(value)))
+    : 0;
+}
+
+function statusOf(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === "number") return status;
+  const responseStatus = (error as { response?: { status?: unknown } }).response?.status;
+  return typeof responseStatus === "number" ? responseStatus : undefined;
+}
+
+function fallbackTriggerFor(error: unknown): GeminiFallbackTrigger | null {
+  const cause = error instanceof Error && error.cause !== undefined
+    ? error.cause
+    : error;
+  const status = statusOf(cause);
+  if (status === 429) return "rate_limited";
+  if (status === 503 || status === 504) return "service_unavailable";
+  if (isRetiredModelError(cause)) return "retired_model";
+  return null;
+}
+
+function isTransientProviderError(error: unknown): boolean {
+  if (error instanceof GeminiRequestTimeoutError) return true;
+  const status = statusOf(error);
+  if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && [
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "EPIPE",
+    "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+  ].includes(code);
+}
+
+function isRetiredModelError(error: unknown): boolean {
+  if (statusOf(error) !== 404 || !error || typeof error !== "object") return false;
+  const providerError = error as {
+    message?: unknown;
+    response?: { data?: { message?: unknown; error?: { message?: unknown } } | string };
+  };
+  const data = providerError.response?.data;
+  const messages = [
+    providerError.message,
+    typeof data === "string" ? data : data?.message,
+    typeof data === "object" ? data.error?.message : undefined,
+  ];
+  const message = messages
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  return message.includes("model") && [
+    "not found",
+    "not available",
+    "no longer",
+    "retired",
+    "decommissioned",
+    "not supported",
+    "does not exist",
+  ].some((marker) => message.includes(marker));
+}
+
+function isChainAdvanceError(error: unknown): boolean {
+  if (error instanceof GeminiRequestCancelledError || error instanceof GeminiRequestTimeoutError) {
+    return false;
+  }
+  // Provider errors are wrapped by this adapter. Inspect their cause so that
+  // timeouts remain ineligible even though they are same-model retryable.
+  const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+  if (cause instanceof GeminiRequestCancelledError || cause instanceof GeminiRequestTimeoutError) {
+    return false;
+  }
+  const status = statusOf(cause);
+  // A remote gateway deadline is an availability failure, not our local
+  // request timeout. Healthy backups can recover a stalled upstream model.
+  // Keep client cancellation/timeouts and other gateway errors ineligible.
+  return status === 429 || status === 503 || status === 504 || isRetiredModelError(cause);
+}
+
+function isSafetyBlockedResponse(response: GenerateContentResponse): boolean {
+  return Boolean(response.promptFeedback?.blockReason) ||
+    (response.candidates ?? []).some((candidate) => candidate?.finishReason === "SAFETY");
+}
+
+function retryAfterMs(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const headers = (error as {
+    response?: { headers?: { get?: (name: string) => string | null } | Record<string, unknown> };
+  }).response?.headers;
+  const raw = typeof headers?.get === "function"
+    ? headers.get("retry-after")
+    : headers && typeof headers === "object"
+      ? (headers as Record<string, unknown>)["retry-after"]
+      : undefined;
+  if (typeof raw !== "string") return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(MAX_RETRY_DELAY_MS, Math.round(seconds * 1_000));
+  }
+  const dateMs = Date.parse(raw);
+  if (!Number.isFinite(dateMs)) return undefined;
+  return Math.min(MAX_RETRY_DELAY_MS, Math.max(0, dateMs - Date.now()));
+}
+
+function acquireCircuit(now = Date.now()): "closed" | "half_open" {
+  if (consecutiveTransientFailures < CIRCUIT_FAILURE_THRESHOLD) return "closed";
+  if (now - circuitOpenedAt < CIRCUIT_COOLDOWN_MS || halfOpenProbeActive) {
+    throw new GeminiProviderUnavailableError();
+  }
+  halfOpenProbeActive = true;
+  return "half_open";
+}
+
+function releaseCircuit(
+  mode: "closed" | "half_open",
+  result: "success" | "transient_failure" | "other_failure",
+): void {
+  if (mode === "half_open") halfOpenProbeActive = false;
+  if (result === "success" || result === "other_failure") {
+    consecutiveTransientFailures = 0;
+    circuitOpenedAt = 0;
+    return;
+  }
+  consecutiveTransientFailures += 1;
+  if (
+    mode === "half_open" ||
+    consecutiveTransientFailures >= CIRCUIT_FAILURE_THRESHOLD
+  ) {
+    consecutiveTransientFailures = CIRCUIT_FAILURE_THRESHOLD;
+    circuitOpenedAt = Date.now();
+  }
+}
+
+function releaseIntermediateCircuit(mode: "closed" | "half_open"): void {
+  // Model rungs belong to one logical request. Do not count each failed model
+  // as a separate circuit failure or the breaker can block the remaining
+  // fallbacks in the same request.
+  if (mode === "half_open") halfOpenProbeActive = false;
+}
+
+function requestSignal(
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; dispose: () => void; timedOut: () => boolean } {
+  const controller = new AbortController();
+  let didTimeOut = false;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = setTimeout(() => {
+    didTimeOut = true;
+    controller.abort(new GeminiRequestTimeoutError());
+  }, timeoutMs);
+  timer.unref?.();
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeOut,
+    dispose: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", abortFromCaller);
+    },
+  };
+}
+
+async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new GeminiRequestCancelledError());
+    };
+    if (signal?.aborted) return abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    timer.unref?.();
   });
+}
+
+function usageMetrics(response?: GenerateContentResponse): Pick<
+  GeminiRequestMetrics,
+  "promptTokens" | "completionTokens" | "totalTokens" | "costMicrousd"
+> {
+  return {
+    promptTokens: boundedInteger(response?.usageMetadata?.promptTokenCount, MAX_TOKEN_METRIC),
+    completionTokens: boundedInteger(response?.usageMetadata?.candidatesTokenCount, MAX_TOKEN_METRIC),
+    totalTokens: boundedInteger(response?.usageMetadata?.totalTokenCount, MAX_TOKEN_METRIC),
+    // The Gemini response has no authoritative price. Keep the numeric cost
+    // total bounded at zero rather than estimating from request content.
+    costMicrousd: 0,
+  };
+}
+
+function observeMetrics(metrics: GeminiRequestMetrics): void {
+  try {
+    metricsObserver(Object.freeze({ ...metrics }));
+  } catch {
+    // Telemetry must never change provider behavior.
+  }
+}
+
+async function createForModel(
+  params: CreateParamsBase & { stream?: boolean },
+  options: CreateRequestOptions | undefined,
+  chainIndex: number,
+  finalModel: boolean,
+  fallbackTrigger: GeminiFallbackTrigger | null = null,
+): Promise<ChainAttempt | AsyncIterable<ChatChunk>> {
+  const startedAt = performance.now();
+  let retryCount = 0;
+  let responseForMetrics: GenerateContentResponse | undefined;
+  let outcome: GeminiRequestOutcome = "provider_error";
+  let requestResult: GeminiRequestResult = "attempt_failed";
+  let deferStreamCleanup = false;
+  let circuitMode: "closed" | "half_open";
+  try {
+    circuitMode = acquireCircuit();
+  } catch (error) {
+    observeMetrics({
+      durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS),
+      outcome: "circuit_open",
+      modelRung: boundedInteger(chainIndex, 2),
+      requestResult: chainIndex > 0 && finalModel ? "fallback_exhausted" : "attempt_failed",
+      fallbackTrigger,
+      retryCount: 0,
+      ...usageMetrics(),
+    });
+    throw error;
+  }
+
+  const { systemInstruction, contents } = toGemini(params.messages);
+  const config = buildConfig(params, systemInstruction);
+
+  try {
+    const ai = client();
+    for (let attempt = 0; ; attempt += 1) {
+      const timeoutMs = Math.min(
+        MAX_TIMEOUT_MS,
+        Math.max(1, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      );
+      const request = requestSignal(options?.signal, timeoutMs);
+      try {
+        const requestConfig = {
+          model: params.model,
+          contents,
+          config: {
+            ...config,
+            httpOptions: { ...config.httpOptions, timeout: timeoutMs },
+            abortSignal: request.signal,
+          },
+        };
+        if (params.stream) {
+          const stream = await ai.models.generateContentStream(requestConfig);
+          // Stream creation only confirms that response headers arrived. Keep
+          // the timeout/cancellation signal and defer success metrics until the
+          // iterator has been consumed without an error.
+          deferStreamCleanup = true;
+          let streamSettled = false;
+          let onStreamAbort = () => {};
+          const finishStream = (
+            streamOutcome: GeminiRequestOutcome,
+            circuitResult: "success" | "transient_failure" | "other_failure",
+          ) => {
+            if (streamSettled) return;
+            streamSettled = true;
+            request.signal.removeEventListener("abort", onStreamAbort);
+            request.dispose();
+            outcome = streamOutcome;
+            releaseCircuit(circuitMode, circuitResult);
+            observeMetrics({
+              durationMs: boundedInteger(
+                performance.now() - startedAt,
+                MAX_TIMEOUT_MS * 2,
+              ),
+              outcome,
+              modelRung: boundedInteger(chainIndex, 2),
+              requestResult,
+              fallbackTrigger,
+              retryCount,
+              ...usageMetrics(responseForMetrics),
+            });
+          };
+          onStreamAbort = () => {
+            const timedOut = request.timedOut();
+            finishStream(
+              timedOut ? "timeout" : "cancelled",
+              timedOut ? "transient_failure" : "other_failure",
+            );
+          };
+          request.signal.addEventListener("abort", onStreamAbort, { once: true });
+          if (request.signal.aborted) onStreamAbort();
+          return (async function* () {
+            let emittedChunk = false;
+            try {
+              for await (const chunk of stream) {
+                emittedChunk = true;
+                yield { choices: [{ delta: { content: chunk.text ?? null } }] };
+              }
+              if (request.timedOut()) throw new GeminiRequestTimeoutError();
+              if (options?.signal?.aborted) {
+                throw new GeminiRequestCancelledError();
+              }
+              requestResult = chainIndex === 0 ? "primary_success" : "fallback_success";
+              finishStream("success", "success");
+            } catch (error) {
+              const normalized = request.timedOut()
+                ? new GeminiRequestTimeoutError()
+                : options?.signal?.aborted
+                  ? new GeminiRequestCancelledError()
+                  : error;
+              const transient = isTransientProviderError(normalized);
+              outcome = normalized instanceof GeminiRequestCancelledError
+                ? "cancelled"
+                : normalized instanceof GeminiRequestTimeoutError
+                  ? "timeout"
+                  : "provider_error";
+              requestResult = finalModel && chainIndex > 0 && !emittedChunk &&
+                  !(normalized instanceof GeminiRequestCancelledError)
+                ? "fallback_exhausted"
+                : !finalModel && !emittedChunk && isChainAdvanceError(normalized)
+                  ? "fallback_triggered"
+                  : "attempt_failed";
+              finishStream(
+                outcome,
+                transient ? "transient_failure" : "other_failure",
+              );
+              if (normalized instanceof GeminiRequestCancelledError) {
+                throw normalized;
+              }
+              throw new GeminiProviderUnavailableError(undefined, {
+                cause: normalized,
+              });
+            } finally {
+              if (!streamSettled) {
+                // A consumer can stop reading an otherwise healthy stream.
+                // Treat that as incomplete, not as provider success.
+                finishStream("cancelled", "other_failure");
+              }
+            }
+          })();
+        }
+
+        const response = await ai.models.generateContent(requestConfig);
+        responseForMetrics = response;
+        outcome = "success";
+        releaseCircuit(circuitMode, "success");
+        const blocked = isSafetyBlockedResponse(response);
+        const content = blocked ? null : response.text ?? null;
+        const hasUsableContent = blocked ||
+          (typeof content === "string" && content.trim().length > 0);
+        requestResult = hasUsableContent
+          ? chainIndex === 0 ? "primary_success" : "fallback_success"
+          : finalModel ? "fallback_exhausted" : "fallback_triggered";
+        return {
+          choices: [{ message: { content } }],
+          blocked,
+          ...(chainIndex > 0 ? { model: params.model } : {}),
+        };
+      } catch (error) {
+        const normalized = request.timedOut()
+          ? new GeminiRequestTimeoutError()
+          : options?.signal?.aborted
+            ? new GeminiRequestCancelledError()
+            : error;
+        const transient = isTransientProviderError(normalized);
+        if (transient && attempt < MAX_RETRIES && circuitMode !== "half_open") {
+          retryCount += 1;
+          request.dispose();
+          await waitForRetry(retryAfterMs(error) ?? 250, options?.signal);
+          continue;
+        }
+        outcome = normalized instanceof GeminiRequestCancelledError
+          ? "cancelled"
+          : normalized instanceof GeminiRequestTimeoutError
+            ? "timeout"
+            : "provider_error";
+        requestResult = finalModel && chainIndex > 0 &&
+            !(normalized instanceof GeminiRequestCancelledError)
+          ? "fallback_exhausted"
+          : !finalModel && isChainAdvanceError(normalized)
+            ? "fallback_triggered"
+            : "attempt_failed";
+        if (isChainAdvanceError(normalized) && !finalModel) {
+          releaseIntermediateCircuit(circuitMode);
+        } else {
+          releaseCircuit(
+            circuitMode,
+            transient ? "transient_failure" : "other_failure",
+          );
+        }
+        if (normalized instanceof GeminiRequestCancelledError) throw normalized;
+        throw new GeminiProviderUnavailableError(undefined, { cause: normalized });
+      } finally {
+        if (!deferStreamCleanup) request.dispose();
+      }
+    }
+  } finally {
+    if (!deferStreamCleanup) {
+      observeMetrics({
+        durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
+        outcome,
+        modelRung: boundedInteger(chainIndex, 2),
+        requestResult,
+        fallbackTrigger,
+        retryCount,
+        ...usageMetrics(responseForMetrics),
+      });
+    }
+  }
+}
+
+function streamWithModelFallback(
+  initial: AsyncIterable<ChatChunk>,
+  params: CreateParamsBase & { stream?: boolean },
+  options: CreateRequestOptions | undefined,
+  models: readonly string[],
+  startIndex: number,
+): AsyncIterable<ChatChunk> {
+  return (async function* () {
+    let stream = initial;
+    let lastError: unknown;
+    let fallbackTrigger: GeminiFallbackTrigger | null = null;
+
+    for (let index = startIndex; index < models.length; index += 1) {
+      const finalModel = index === models.length - 1;
+      if (index > startIndex) {
+        try {
+          const attempt = await createForModel(
+            { ...params, model: models[index]!, stream: true },
+            options,
+            index,
+            finalModel,
+            fallbackTrigger,
+          );
+          stream = attempt as AsyncIterable<ChatChunk>;
+        } catch (error) {
+          lastError = error;
+          if (finalModel || !isChainAdvanceError(error)) throw error;
+          fallbackTrigger = fallbackTriggerFor(error);
+          continue;
+        }
+      }
+
+      let emittedChunk = false;
+      try {
+        for await (const chunk of stream) {
+          emittedChunk = true;
+          yield chunk;
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (emittedChunk || finalModel || !isChainAdvanceError(error)) throw error;
+        fallbackTrigger = fallbackTriggerFor(error);
+      }
+    }
+
+    throw lastError ?? new GeminiProviderUnavailableError();
+  })();
 }
 
 async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
@@ -175,29 +758,62 @@ async function create(
   params: CreateParamsBase & { stream?: boolean },
   options?: CreateRequestOptions,
 ): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
-  const { systemInstruction, contents } = toGemini(params.messages);
-  const config = buildConfig(params, systemInstruction);
-  const ai = client();
+  const models = modelChain(params.model);
+  let lastError: unknown;
+  let fallbackTrigger: GeminiFallbackTrigger | null = null;
 
-  if (params.stream) {
-    const stream = await abortable(ai.models.generateContentStream({
-      model: params.model,
-      contents,
-      config,
-    }), options);
-    return (async function* () {
-      for await (const chunk of stream) {
-        yield { choices: [{ delta: { content: chunk.text ?? null } }] };
-      }
-    })();
+  for (const [index, model] of models.entries()) {
+    const finalModel = index === models.length - 1;
+    let attempt: ChainAttempt | AsyncIterable<ChatChunk>;
+    try {
+      attempt = await createForModel(
+        { ...params, model },
+        options,
+        index,
+        finalModel,
+        fallbackTrigger,
+      );
+    } catch (error) {
+      if (finalModel || !isChainAdvanceError(error)) throw error;
+      lastError = error;
+      fallbackTrigger = fallbackTriggerFor(error);
+      continue;
+    }
+
+    // A stream may switch models until its first chunk is yielded. Once output
+    // reaches the caller, the remainder must stay on that model.
+    if (params.stream) {
+      return streamWithModelFallback(
+        attempt as AsyncIterable<ChatChunk>,
+        params,
+        options,
+        models,
+        index,
+      );
+    }
+
+    const { blocked, ...response } = attempt as ChainAttempt;
+    if (blocked) return response;
+    const content = response.choices[0]?.message.content;
+    if (typeof content === "string" && content.trim().length > 0) return response;
+
+    // A successful HTTP response with no text is still unusable for an import.
+    fallbackTrigger = "empty_response";
+    lastError = new GeminiProviderUnavailableError(
+      `AI provider returned empty content from ${model}`,
+    );
+    if (finalModel) throw lastError;
   }
 
-  const response = await abortable(ai.models.generateContent({
-    model: params.model,
-    contents,
-    config,
-  }), options);
-  return { choices: [{ message: { content: response.text ?? null } }] };
+  throw lastError ?? new GeminiProviderUnavailableError();
+}
+
+export function resetGeminiResilienceForTests(): void {
+  _client = null;
+  metricsObserver = () => {};
+  consecutiveTransientFailures = 0;
+  circuitOpenedAt = 0;
+  halfOpenProbeActive = false;
 }
 
 // OpenAI-compatible surface consumed across the server.

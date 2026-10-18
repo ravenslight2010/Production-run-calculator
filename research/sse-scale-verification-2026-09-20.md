@@ -58,3 +58,80 @@ If Autoscale remains able to serve this application from more than one process, 
 The alternatives are an explicit, verified single-serving-process constraint or an always-on single-server topology such as Reserved VM. Replit documents Reserved VM as dedicated and always running, but a target change would still require the same sanitized stream probe; “always on” alone is not an SSE correctness guarantee.
 
 No heartbeat, proxy-header, or deployment-target change is justified by this probe. The observed heartbeat and frame delivery were prompt, and `X-Accel-Buffering` should not be added without evidence that buffering is occurring.
+
+## 2026-10-11 production capacity recheck
+
+The current deployment metadata reports an active Autoscale deployment with a
+successful build. The owner confirmed the configured maximum is three machines;
+the deployment metadata and logs do not expose actual current/peak serving
+process counts. The configured run command starts one Node API process per
+machine, and the live pool maximum is 10.
+
+A sanitized allowlist-only review of 101 samples from 2026-10-10T20:35:03Z
+through 2026-10-11T04:58:48Z found 35 primary observations and 66 unavailable
+capacity results. Successful primary samples reported `max_connections=450`,
+four known reserved slots, 6–13 client backends, and a per-process pool maximum
+of 10. Across the samples, pool waiters reached 16, with waiters present in 12
+samples. A read-only production-replica snapshot at 2026-10-11T13:57:46Z
+reported the same 450 connection limit, four superuser-reserved slots, zero
+role-reserved slots, and three client backends; it is not a primary or peak
+measurement. The configured ceiling implies at most 30 API pool connections
+against 446 ordinary PostgreSQL slots, leaving 416 for other clients before
+provider limits. Peak non-API client counts and any tighter provider limit
+remain unknown, so the observed remainder does not prove safe peak capacity.
+
+The observation is retained in
+[`../docs/evidence/sse-capacity-observation-2026-10-11.json`](../docs/evidence/sse-capacity-observation-2026-10-11.json).
+The current isolated cross-process test also verifies explicit listener stop,
+core `/api/readyz` behavior, graceful process shutdown cleanup, reconnect
+recovery, retention-gap reconciliation, and notification-loss polling; its sanitized report is retained in
+[`../docs/evidence/sync-peer-fanout-2026-10-11.json`](../docs/evidence/sync-peer-fanout-2026-10-11.json).
+These disposable-database tests do not replace deployment-bound capacity
+evidence. Keep live peer SSE **NOT SUPPORTED** until the remaining database
+client/provider constraints are measured over representative peak demand.
+
+The offline capacity-report command can summarize sanitized
+`database_capacity_sample` JSONL logs and a separate Replit-metrics file:
+
+```bash
+pnpm --filter @workspace/scripts run sse-capacity-report -- \
+  --samples /path/to/sanitized-capacity-samples.jsonl \
+  --platform /path/to/sse-capacity-platform-metrics.json
+```
+
+Use
+[`../docs/evidence/sse-capacity-platform-metrics.template.json`](../docs/evidence/sse-capacity-platform-metrics.template.json)
+for the input shape. The database-client peak is computed from complete primary
+samples. The verified deployment fingerprint, process count per machine, peak
+active-machine count, provider limit/reservations, and representative-window
+confirmation remain Replit evidence until a supported metrics source is
+available. Missing evidence stays `UNKNOWN`; this tool does not change
+deployment settings or enable peer SSE.
+
+## 2026-10-12 platform metrics source recheck
+
+The current Replit documentation does not describe a supported feed that an
+application can use to read Autoscale peak machine/process counts or provider
+connection limits and reservations:
+
+- The [Admin API](https://docs.replit.com/teams/admin-api) documents account
+  usage, workspace, member, project, budget, approval, and compliance scopes;
+  it does not document runtime Autoscale instance metrics.
+- [Deployment Monitoring](https://docs.replit.com/features/publishing/monitoring-a-deployment)
+  documents uptime, requests, HTTP statuses, request durations, CPU and memory
+  charts, and logs. It does not document a metrics export/API for machine counts.
+- [Database connection details](https://docs.replit.com/features/data-and-storage/connection-details)
+  describes the managed connection string, storage usage, and advanced
+  connection details, not an API for provider connection limits or reservations.
+- [Development and production databases](https://docs.replit.com/features/data-and-storage/development-and-production)
+  identifies current production databases as Replit-managed (Helium) and
+  distinguishes legacy Neon development databases. No separate provider
+  metrics credential or supported production-provider metrics feed is configured
+  for this application.
+
+Therefore no automatic adapter is justified yet. Keep platform and provider
+values in the separate manual evidence file, leave unavailable values unknown,
+and retain the report's existing revision/sample checks. This documentation
+review does not change deployment settings or enable live peer SSE. Recheck
+these sources before adding an adapter if Replit or the configured provider
+documents a supported metrics export.

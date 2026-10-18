@@ -1,8 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 import { execFileSync } from "node:child_process";
+import {
+  releaseBrowserBaseUrl,
+  releaseBrowserWebServers,
+} from "./playwright.release-servers";
 
-const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const baseURL = releaseBrowserBaseUrl(
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
 const realMobileBrowserWsEndpoint =
   process.env.PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT;
 const chromiumExecutablePath =
@@ -11,6 +16,7 @@ const chromiumExecutablePath =
   execFileSync("which", ["chromium"], { encoding: "utf8" }).trim();
 
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "sync-convergence.spec.ts",
   timeout: 60_000,

@@ -1,0 +1,91 @@
+# Readiness recovery evidence
+
+Run the bounded, read-only capture against the published `/api/readyz` endpoint:
+
+```sh
+pnpm --filter @workspace/scripts run check:readiness-recovery -- \
+  --url https://published-host.example/api/readyz \
+  --environment release \
+  --deployment-handoff ./release-evidence/published-deployment-handoff.json \
+  --mode normal
+```
+
+The deployment step must provide the explicit handoff before capture starts.
+It is a provider-neutral JSON object with only bounded identity and validity
+fields:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "published-deployment-handoff",
+  "deploymentId": "<published-deployment-id>",
+  "deployedRevision": "<deployed-40-character-git-sha>",
+  "issuedAt": "2026-09-21T12:00:00.000Z",
+  "expiresAt": "2026-09-21T13:00:00.000Z"
+}
+```
+
+The handoff must be current when capture begins and its validity window may
+not exceed 24 hours. Missing, malformed, expired, future-dated, or conflicting
+metadata fails before the first live probe and before the evidence output is
+written. `--deployment-id` and `--revision` may be supplied as transitional
+cross-checks, but the handoff is the source of truth.
+
+Use `--mode recovery` during a real sustained worker incident. That mode only
+passes after it observes a worker-diagnostic `503` and a later healthy `200`;
+it cannot manufacture either state. The output contains only allowlisted
+statuses, bounded counts, operation names, and timestamps. It never retains the
+URL, response body, request data, recipe data, credentials, or provider errors.
+
+The output is capped at 60 samples and expires seven days after capture. Treat
+the deployment ID and full deployed revision in the handoff as required
+provenance, not values to infer from the verifier's checkout. The retained
+readiness record copies only those two identity values; it does not copy the
+handoff path or any provider metadata.
+
+
+## Verification
+
+Only the JSON record passes as current proof after a consumer validates it. The
+validator rejects malformed records, prose snapshots, expired records, records
+over the 60-sample bound, and records from another published deployment or
+revision. Release evidence verification requires both values explicitly:
+
+```sh
+pnpm --filter @workspace/scripts run check:release-evidence -- \
+  --readiness-deployment-id <published-deployment-id> \
+  --deployed-revision <deployed-40-character-git-sha>
+```
+
+`--deployed-revision` is the revision running in the published deployment; it
+is not the verifier checkout revision. A useful uptime brief or manually
+written observation can guide investigation, but it is not authoritative
+readiness evidence unless it is represented by the bounded JSON contract.
+
+Standard and full published-release verification require this JSON path and
+validate it against both supplied identities before a GO report is accepted.
+The verifier never infers either identity from its checkout. Development and
+disposable CI fixture tests use an explicit
+`requireReadinessEvidence: false` verifier option; that fixture contract is not
+available to the published standard/full release command.
+
+## Deterministic local recovery proof
+
+The CLI is also covered by a local HTTP fixture that serves two normal `200`
+responses, two `503` responses with a hard startup-not-ready condition and
+worker diagnostics, then two recovery `200` responses:
+
+```sh
+pnpm --filter @workspace/scripts run test:readiness-recovery
+```
+
+The test verifies the complete `normal_200` → `worker_incident_503` →
+`recovery_200` sequence, including the worker warning in the incident response.
+The fixture's `503` is anchored to `checks.startup = "error"` so optional
+background-worker degradation is not treated as a permanent hard-failure
+policy. The retained JSON is checked for the absence of request, recipe, URL,
+and private diagnostic fields.
+
+`attached_assets/replit-uptime-brief-for-agent-2026-09-20_1789934089785.md` is
+a dated healthy probe reference only. It is not recovery evidence and must not
+be copied into the retained evidence file.

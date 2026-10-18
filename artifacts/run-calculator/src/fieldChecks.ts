@@ -1,19 +1,50 @@
 import { useEffect } from "react";
+import {
+  FIELD_CHECK_MAX_CLOCK_SKEW_MS,
+  isFieldCheckTimestampOutsideClockWindow,
+} from "@workspace/field-check-contract";
 import { submitFieldCheckObservations } from "./inventoryShared";
 import { useAuth } from "./useAuth";
+import { AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS, PERFORMANCE_BUDGETS } from "./performanceDiagnostics";
+import { PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
+import { consumeStaleAssetRecoveryAttempt } from "./pwaUpdateRecovery";
+export { fieldCheckDiagnosticLabel, PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
 
-export const FIELD_CHECK_VERSION = "1";
+export const FIELD_CHECK_VERSION = "3";
 export const FIELD_CHECK_SIGNAL_EVENT = "calculator-field-check-signal";
+export const FIELD_CHECK_QUEUE_EVENT = "calculator-field-check-queue";
+export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
+
+export const PRODUCTION_RUN_SAVE_FAILURE_CODES = {
+  authenticationRejected: 1,
+  staleOrResetWrite: 2,
+  unrecoverableConflict: 3,
+  retriesExhausted: 4,
+} as const;
+
+const productionRunSaveFailureLabels: Record<number, string> = {
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.authenticationRejected]: "Login or permission rejected",
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite]: "Server rejected a stale/reset save",
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.unrecoverableConflict]: "Unrecoverable sync conflict",
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.retriesExhausted]: "Sync retries exhausted",
+};
+
+export function productionRunSaveFailureLabel(failureCode: number | undefined): string | null {
+  return Number.isInteger(failureCode) ? productionRunSaveFailureLabels[failureCode!] ?? null : null;
+}
 
 export const FIELD_CHECK_CATALOG = [
   { name: "startup", label: "Startup", observedBy: "browser" as const },
   { name: "foreground-recovery", label: "Background / foreground recovery", observedBy: "browser" as const },
   { name: "sync-acknowledgment", label: "Sync acknowledgment", observedBy: "browser" as const },
+  { name: "production-run-save-sync", label: "Production-run save and sync", observedBy: "browser" as const },
+  { name: "spec-import-review-commit", label: "Spec import parse, review, and commit", observedBy: "browser" as const },
   { name: "cross-device-convergence", label: "Cross-device convergence", observedBy: "browser" as const },
-  { name: "reload-persistence", label: "Reload persistence", observedBy: "browser" as const },
+  { name: "reload-persistence", label: "Reload startup", observedBy: "browser" as const },
   { name: "offline-recovery", label: "Offline recovery", observedBy: "browser" as const },
   { name: "offline-queue-replay", label: "Offline queue replay", observedBy: "browser" as const },
   { name: "pwa-update-handoff", label: "PWA update handoff", observedBy: "browser" as const },
+  { name: "stale-deployment-recovery", label: "Stale-deployment recovery", observedBy: "browser" as const },
   { name: "performance", label: "Performance", observedBy: "browser" as const },
   { name: "touch-accuracy", label: "Touch accuracy", observedBy: "hardware" as const },
   { name: "keyboard-clearance", label: "Keyboard clearance", observedBy: "hardware" as const },
@@ -33,11 +64,19 @@ type Signal = {
 };
 
 const queueKey = "run-calc-field-check-queue";
+const queueDisplacementKey = "run-calc-field-check-queue-displacements-v1";
 const clientKey = "run-calc-field-check-client";
+const dedupKey = "run-calc-field-check-dedup-v3";
 const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
 const defaultRetryMs = 30_000;
+// Expired rows stay local and visible, but are never resent.
+export const FIELD_CHECK_QUEUE_MAX_AGE_MS = FIELD_CHECK_MAX_CLOCK_SKEW_MS;
+const workflowChecks = new Set<CheckName>([
+  "production-run-save-sync",
+  "spec-import-review-commit",
+]);
 
 function randomId(): string {
   try {
@@ -58,6 +97,17 @@ function localClientId(): string {
   }
 }
 
+function hashScope(scope: string): string {
+  let first = 2166136261;
+  let second = 0x811c9dc5;
+  for (let index = 0; index < scope.length; index += 1) {
+    const code = scope.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ (code + index), 16777619);
+  }
+  return `${(first >>> 0).toString(16)}${(second >>> 0).toString(16)}`;
+}
+
 function deviceCategory(): "desktop-chrome" | "desktop-safari" | "desktop-firefox" | "mobile-chrome" | "mobile-safari" | "tablet-browser" | "other-browser" {
   if (typeof navigator === "undefined") return "other-browser";
   const ua = navigator.userAgent.toLowerCase();
@@ -72,8 +122,43 @@ function deviceCategory(): "desktop-chrome" | "desktop-safari" | "desktop-firefo
   return "other-browser";
 }
 
-function safeMetrics(metrics: Record<string, number> | undefined): Record<string, number> {
+function safeMetrics(
+  checkName: CheckName,
+  outcome: Outcome,
+  metrics: Record<string, number> | undefined,
+): Record<string, number> {
   if (!metrics) return {};
+  if (checkName === "sync-acknowledgment") {
+    return outcome === "failure" && Number.isInteger(metrics.failureCode) &&
+      Object.values(SYNC_ACK_FAILURE_CODES).includes(metrics.failureCode as 1 | 2 | 3)
+      ? { failureCode: metrics.failureCode! } : {};
+  }
+  if (checkName === "performance") {
+    if (!Number.isFinite(metrics.durationMs) || metrics.durationMs! < 0 ||
+      !Number.isInteger(metrics.sourceCode) || !Object.values(PERFORMANCE_SOURCE_CODES).includes(metrics.sourceCode as 1 | 2 | 3 | 4)) return {};
+    // Preserve very slow failures as a saturated measurement, not a missing sample.
+    return { durationMs: Math.round(Math.min(metrics.durationMs!, 10_000_000) * 100) / 100, sourceCode: metrics.sourceCode! };
+  }
+  if (checkName === "stale-deployment-recovery") return {};
+  if (workflowChecks.has(checkName)) {
+    const durationMs = metrics.durationMs;
+    if (!Number.isFinite(durationMs) || durationMs! < 0 || durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS) {
+      return {};
+    }
+    const safe: Record<string, number> = { durationMs: Math.round(durationMs! * 100) / 100 };
+    const failureCode = metrics.failureCode;
+    if (
+      checkName === "production-run-save-sync" &&
+      outcome === "failure" &&
+      Number.isInteger(failureCode) &&
+      Object.values(PRODUCTION_RUN_SAVE_FAILURE_CODES).includes(
+        failureCode as (typeof PRODUCTION_RUN_SAVE_FAILURE_CODES)[keyof typeof PRODUCTION_RUN_SAVE_FAILURE_CODES],
+      )
+    ) {
+      safe.failureCode = failureCode!;
+    }
+    return safe;
+  }
   return Object.fromEntries(
     Object.entries(metrics)
       .filter(([key, value]) => /^[a-z][a-zA-Z0-9]{0,31}$/.test(key) && Number.isFinite(value) && value >= 0 && value <= 10_000_000)
@@ -84,6 +169,7 @@ function safeMetrics(metrics: Record<string, number> | undefined): Record<string
 
 function loadQueue(): Array<{
   observationId: string;
+  originScope?: string | null;
   checkName: CheckName;
   checkVersion: string;
   outcome: Outcome;
@@ -102,9 +188,44 @@ function loadQueue(): Array<{
       (item.outcome === "success" || item.outcome === "failure" || item.outcome === "incomplete") &&
       typeof item.observedAt === "string" && typeof item.appBuild === "string" &&
       typeof item.deviceCategory === "string" && item.metrics && typeof item.metrics === "object",
-    ).slice(-maxQueue);
+    ).slice(-maxQueue).map((item) => ({
+      ...item,
+      // Older queue entries have no trustworthy account origin. Keep them
+      // visible locally, but never attribute them to a later sign-in.
+      originScope: typeof item.originScope === "string" && item.originScope.length <= 120
+        ? item.originScope
+        : null,
+    }));
   } catch {
     return [];
+  }
+}
+
+function isFieldCheckObservationExpired(
+  observation: { observedAt: string },
+  now: number,
+): boolean {
+  const observedAt = Date.parse(observation.observedAt);
+  return !Number.isFinite(observedAt) || isFieldCheckTimestampOutsideClockWindow(observedAt, now);
+}
+
+function getQueueDisplacementCount(): number {
+  try {
+    const count = Number(localStorage.getItem(queueDisplacementKey));
+    return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function recordQueueDisplacement(): void {
+  try {
+    localStorage.setItem(
+      queueDisplacementKey,
+      String(Math.min(Number.MAX_SAFE_INTEGER, getQueueDisplacementCount() + 1)),
+    );
+  } catch {
+    // Queue accounting is best-effort telemetry and must never affect operations.
   }
 }
 
@@ -114,34 +235,112 @@ function saveQueue(queue: ReturnType<typeof loadQueue>): void {
   } catch {
     // Collection must never affect production persistence.
   }
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(FIELD_CHECK_QUEUE_EVENT));
+}
+
+export type FieldCheckQueueStatus = {
+  available: boolean;
+  /** All retained entries, including expired entries that remain unconfirmed. */
+  count: number;
+  retryableCount: number;
+  expiredCount: number;
+  /** Cumulative entries displaced by the local queue cap; delivery is unconfirmed. */
+  displacedCount: number;
+  oldestAgeMs: number | null;
+};
+
+export function getFieldCheckQueueStatus(now = Date.now()): FieldCheckQueueStatus {
+  try {
+    // Probe storage separately so a denied localStorage read is not mistaken
+    // for a confirmed empty queue.
+    localStorage.getItem(queueKey);
+    const queue = loadQueue();
+    const retryableCount = queue.filter((item) => !isFieldCheckObservationExpired(item, now)).length;
+    const oldest = queue
+      .map((item) => Date.parse(item.observedAt))
+      .filter(Number.isFinite)
+      .reduce<number | null>((value, timestamp) => value === null ? timestamp : Math.min(value, timestamp), null);
+    return {
+      available: true,
+      count: queue.length,
+      retryableCount,
+      expiredCount: queue.length - retryableCount,
+      displacedCount: getQueueDisplacementCount(),
+      oldestAgeMs: oldest === null ? null : Math.min(30 * 24 * 60 * 60 * 1000, Math.max(0, now - oldest)),
+    };
+  } catch {
+    return {
+      available: false,
+      count: 0,
+      retryableCount: 0,
+      expiredCount: 0,
+      displacedCount: 0,
+      oldestAgeMs: null,
+    };
+  }
 }
 
 export function emitFieldCheckSignal(checkName: CheckName, outcome: Outcome, metrics?: Record<string, number>): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<Signal>(FIELD_CHECK_SIGNAL_EVENT, {
-    detail: { checkName, outcome, metrics: safeMetrics(metrics) },
+    detail: { checkName, outcome, metrics: safeMetrics(checkName, outcome, metrics) },
   }));
 }
 
-function queueSignal(signal: Signal, appBuild: string): void {
+function queueSignal(signal: Signal, appBuild: string, originScope: string): void {
+  const metrics = safeMetrics(signal.checkName, signal.outcome, signal.metrics);
+  if (workflowChecks.has(signal.checkName) && metrics.durationMs === undefined) return;
+  if (signal.checkName === "performance" && metrics.sourceCode === undefined) return;
+  if (signal.checkName === "sync-acknowledgment" && signal.outcome === "failure" && metrics.failureCode === undefined) return;
   const now = Date.now();
-  const id = `${localClientId()}:${signal.checkName}:${Math.floor(now / bucketMs)}:${signal.outcome}`;
+  // Separate builds and bounded causes/sources without retaining event names or URLs.
+  let buildHash = 2166136261;
+  for (const char of appBuild) buildHash = Math.imul(buildHash ^ char.charCodeAt(0), 16777619);
+  const category = metrics.sourceCode ?? metrics.failureCode ?? 0;
+  const bucket = `${originScope}:${(buildHash >>> 0).toString(16)}:${signal.checkName}:${Math.floor(now / bucketMs)}:${metrics.sourceCode ?? 0}`;
+  const state = `${signal.outcome}:${category}`;
+  // Keep repeated samples deduplicated even after delivery, but do not hide a
+  // new failure following recovery in the same bucket. This is telemetry state,
+  // wholly separate from sync persistence and retry state.
+  let dedup: Array<{ bucket: string; state: string; sequence: number }> = [];
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(dedupKey) ?? "[]");
+    if (Array.isArray(parsed)) dedup = parsed.filter((item) =>
+      item && typeof item.bucket === "string" && item.bucket.length <= 220 &&
+      /^(success|failure|incomplete):[0-4]$/.test(item.state) &&
+      Number.isSafeInteger(item.sequence) && item.sequence >= 0,
+    ).slice(-maxQueue);
+  } catch {}
+  const previous = dedup.find((item) => item.bucket === bucket);
+  if (previous?.state === state) return;
+  const sequence = (previous?.sequence ?? -1) + 1;
+  const id = `${localClientId()}:${hashScope(originScope)}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${(buildHash >>> 0).toString(16)}:${Math.floor(now / bucketMs)}:${signal.outcome}:${category}:${sequence}`;
   const queue = loadQueue();
   if (queue.some((item) => item.observationId === id)) return;
+  if (queue.length >= maxQueue) recordQueueDisplacement();
   queue.push({
     observationId: id,
+    originScope,
     checkName: signal.checkName,
     checkVersion: FIELD_CHECK_VERSION,
     outcome: signal.outcome,
     observedAt: new Date(now).toISOString(),
     appBuild: appBuild.slice(0, 100) || "local",
     deviceCategory: deviceCategory(),
-    metrics: safeMetrics(signal.metrics),
+    metrics,
   });
   saveQueue(queue);
+  try {
+    localStorage.setItem(dedupKey, JSON.stringify([
+      ...dedup.filter((item) => item.bucket !== bucket),
+      { bucket, state, sequence },
+    ].slice(-maxQueue)));
+  } catch {
+    // A storage failure may duplicate diagnostics, never affect operational writes.
+  }
 }
 
-export function createFieldCheckObserver(appBuild: string): () => void {
+export function createFieldCheckObserver(appBuild: string, originScope: string): () => void {
   if (typeof window === "undefined" || typeof document === "undefined") return () => {};
   let stopped = false;
   let wasHidden = document.visibilityState === "hidden";
@@ -151,10 +350,18 @@ export function createFieldCheckObserver(appBuild: string): () => void {
 
   const flush = async () => {
     if (stopped || flushInFlight || retryTimer !== null || !navigator.onLine) return;
-    const queued = loadQueue();
+    const now = Date.now();
+    const queued = loadQueue().filter((item) =>
+      item.originScope === originScope && !isFieldCheckObservationExpired(item, now),
+    );
     if (queued.length === 0) return;
     const batch = queued.slice(0, 20);
-    flushInFlight = submitFieldCheckObservations(batch)
+    const payload = batch.map((item) => {
+      const observation = { ...item };
+      delete observation.originScope;
+      return observation;
+    });
+    flushInFlight = submitFieldCheckObservations(payload)
       .then(() => {
         const sent = new Set(batch.map((item) => item.observationId));
         saveQueue(loadQueue().filter((item) => !sent.has(item.observationId)));
@@ -165,10 +372,14 @@ export function createFieldCheckObserver(appBuild: string): () => void {
           ? Math.min(120_000, Math.max(1_000, requestedDelay))
           : defaultRetryMs;
         if (!stopped && retryTimer === null) {
+          const nextExpiration = queued
+            .map((item) => Date.parse(item.observedAt) + FIELD_CHECK_QUEUE_MAX_AGE_MS)
+            .reduce((earliest, expiration) => Math.min(earliest, expiration), Number.POSITIVE_INFINITY);
+          const boundedDelay = Math.min(delay, Math.max(0, nextExpiration - Date.now()));
           retryTimer = window.setTimeout(() => {
             retryTimer = null;
             void flush();
-          }, delay);
+          }, boundedDelay);
         }
       })
       .finally(() => {
@@ -180,7 +391,8 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   const onSignal = (event: Event) => {
     const signal = (event as CustomEvent<Signal>).detail;
     if (!signal || !FIELD_CHECK_CATALOG.some((check) => check.name === signal.checkName && check.observedBy === "browser")) return;
-    queueSignal(signal, appBuild);
+    if (!["success", "failure", "incomplete"].includes(signal.outcome)) return;
+    queueSignal(signal, appBuild, originScope);
     void flush();
   };
   const onVisibility = () => {
@@ -199,10 +411,17 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   const onOffline = () => { wasOffline = true; };
   const onPerformance = (event: Event) => {
     const entry = (event as CustomEvent<{ name?: string; durationMs?: number }>).detail;
-    if (!entry?.name || !Number.isFinite(entry.durationMs)) return;
-    if (entry.name === "startup:home-chunk-load" || entry.name === "browser:navigation-to-load" || entry.name.startsWith("api-failure:")) {
-      emitFieldCheckSignal("performance", entry.durationMs! > 1500 ? "failure" : "success", { durationMs: entry.durationMs! });
-    }
+    if (typeof entry?.name !== "string" || !Number.isFinite(entry.durationMs) || entry.durationMs! < 0) return;
+    const sourceCode = entry.name === "startup:home-chunk-load" ? PERFORMANCE_SOURCE_CODES.homeChunkLoad
+      : entry.name === "browser:navigation-to-load" ? PERFORMANCE_SOURCE_CODES.navigationLoad
+        : entry.name.startsWith("api-failure:") && entry.name.endsWith(":timeout") ? PERFORMANCE_SOURCE_CODES.apiTimeout
+          : entry.name.startsWith("api-failure:") && entry.name.endsWith(":network") ? PERFORMANCE_SOURCE_CODES.apiNetwork
+            : undefined;
+    if (sourceCode === undefined) return;
+    const budget = sourceCode === PERFORMANCE_SOURCE_CODES.homeChunkLoad
+      ? AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs : PERFORMANCE_BUDGETS.initialLoadMs;
+    emitFieldCheckSignal("performance", entry.durationMs! > budget ? "failure" : "success",
+      { durationMs: entry.durationMs!, sourceCode });
   };
 
   window.addEventListener(FIELD_CHECK_SIGNAL_EVENT, onSignal);
@@ -210,9 +429,12 @@ export function createFieldCheckObserver(appBuild: string): () => void {
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("calculator-performance", onPerformance);
-  queueSignal({ checkName: "startup", outcome: "success" }, appBuild);
+  queueSignal({ checkName: "startup", outcome: "success" }, appBuild, originScope);
+  if (consumeStaleAssetRecoveryAttempt(appBuild)) {
+    queueSignal({ checkName: "stale-deployment-recovery", outcome: "success" }, appBuild, originScope);
+  }
   const navigation = performance.getEntriesByType("navigation").at(-1) as PerformanceNavigationTiming | undefined;
-  if (navigation?.type === "reload") queueSignal({ checkName: "reload-persistence", outcome: "success" }, appBuild);
+  if (navigation?.type === "reload") queueSignal({ checkName: "reload-persistence", outcome: "success" }, appBuild, originScope);
   const interval = window.setInterval(() => void flush(), 120_000);
   void flush();
 
@@ -229,10 +451,11 @@ export function createFieldCheckObserver(appBuild: string): () => void {
 }
 
 export function FieldVerificationObserver({ appBuild }: { appBuild: string }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, me } = useAuth();
   useEffect(() => {
-    if (isLoading || !isAuthenticated) return;
-    return createFieldCheckObserver(appBuild);
-  }, [appBuild, isAuthenticated, isLoading]);
+    if (isLoading || !isAuthenticated || !me) return;
+    const originScope = `${me.sandbox ? "sandbox" : "live"}:${me.userId}`;
+    return createFieldCheckObserver(appBuild, originScope);
+  }, [appBuild, isAuthenticated, isLoading, me]);
   return null;
 }

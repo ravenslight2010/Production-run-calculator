@@ -42,6 +42,7 @@ registerServerJob("workbook-parse", {
     await context.reportProgress(5, "Grounding workbook parse");
     const { system, user } = buildParseSpecSheetPrompt(validation.data);
     const userPrompt = await groundPromptWithMemory(logger, user, {
+      includeFacilityKnowledge: false,
       correctionDomains: ["brand", "flavor", "die", "ingredient", "recipe"],
     });
     if (await context.isCancellationRequested()) throw new Error("Cancelled");

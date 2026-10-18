@@ -83,6 +83,20 @@ describe("buildDemandByKey", () => {
     // Pepperoni isn't in the web DEFAULT_PEP_TYPES list, so it tracks by lbs.
     expect(demand["ingredient:Pepperoni Stick:lbs"]).toBeGreaterThan(0);
   });
+
+  it("keeps loading a partial persisted run snapshot with missing optional fields", () => {
+    const demand = buildDemandByKey([
+      {
+        casesNeeded: 10,
+        pizzasPerCase: 6,
+        cartoned: "yes",
+        circles: "12in",
+        cartonsPerCase: 6,
+      },
+    ]);
+
+    expect(demand["packaging:circles:12in"]).toBe(60);
+  });
 });
 
 describe("computeWarehouseSnapshot", () => {

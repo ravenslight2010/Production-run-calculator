@@ -194,8 +194,9 @@ describe("web multi-file import — junk files are skipped BEFORE the AI call", 
     expect(prepared.parsed.profiles.map((p) => `${p.brand}/${p.flavor}`)).toContain(
       "Acme/Classic",
     );
-    // Exactly one AI parse call — for the good file only. Junk never burns one.
-    expect(parseSpy).toHaveBeenCalledTimes(1);
+    // The tiny export is completely deterministic, so neither it nor junk files
+    // should consume an AI request.
+    expect(parseSpy).not.toHaveBeenCalled();
   });
 
   it("throws (no review) when EVERY picked file is junk, with zero AI calls", async () => {
@@ -214,6 +215,23 @@ describe("web single-file import — junk throws a plain-language error pre-AI",
     await expect(prepareSpecImport(randomBinaryBuffer())).rejects.toThrow(
       /doesn't look like a spreadsheet/,
     );
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a renamed pizza-to-dough guide out of spec AI fallback", async () => {
+    const guide = workbookBuffer([
+      ["Pizza to Dough Recipes"],
+      ["Pizza recipe", "Dough recipe"],
+      ["Classic", "House dough"],
+    ]);
+    const prepared = await prepareSpecImport(
+      guide,
+      "renamed-workbook.xlsx",
+      undefined,
+      { allowAi: true },
+    );
+
+    expect(prepared.aiFallbackUnsupported).toBe(true);
     expect(parseSpy).not.toHaveBeenCalled();
   });
 });

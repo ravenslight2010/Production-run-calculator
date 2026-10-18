@@ -1,5 +1,9 @@
 # Stoppage & Downtime Analytics — Plan
 
+**Status:** Logging, trend aggregation, stall detection, and manager trends built; real-time alerts, deterministic classification, cost/correlation analysis, and standalone reporting remain planned
+**Updated:** 2026-09-19
+**Ordering:** this is an adjacent analytics track, not a prerequisite for the [reliability program](sync-reliability-unified-plan-2026-09-19.md). Prefer deterministic reason codes and configured categories before adding AI classification.
+
 ## Current State
 
 | Feature | File | What It Does |

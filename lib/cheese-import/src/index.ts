@@ -37,6 +37,38 @@ import { brandPrefixedName, buildNearDupNameMatcher } from "@workspace/name-matc
 export interface CheeseSheetGrid {
   name: string;
   rows: string[][];
+  sourceFile?: string;
+}
+
+export type CheeseCellReference = { file?: string; sheet: string; cell: string };
+
+export type CheeseRecipeSourceEvidence = {
+  recipeName: CheeseCellReference;
+  recipeNameText: string;
+  sheetBrand: string;
+  shredderSetting?: CheeseCellReference;
+  assignmentCells: CheeseCellReference[];
+  components: { ingredientName: string; lbsValue: number; ingredient: CheeseCellReference; lbs: CheeseCellReference }[];
+  cellulosePercent?: CheeseCellReference;
+};
+
+function cellAddress(rowIndex: number, columnIndex: number): string {
+  let column = columnIndex + 1;
+  let letters = "";
+  while (column > 0) {
+    const remainder = (column - 1) % 26;
+    letters = String.fromCharCode(65 + remainder) + letters;
+    column = Math.floor((column - 1) / 26);
+  }
+  return `${letters}${rowIndex + 1}`;
+}
+
+function sourceCell(grid: CheeseSheetGrid, row: number, column: number): CheeseCellReference {
+  return {
+    ...(grid.sourceFile?.trim() ? { file: grid.sourceFile.trim() } : {}),
+    sheet: grid.name,
+    cell: cellAddress(row, column),
+  };
 }
 
 export interface CheeseAssignment {
@@ -213,6 +245,9 @@ interface RawBlock {
   /** Row index (inclusive) where scanning may resume after this block. */
   endRow: number;
   firstRow: number;
+  nameCol: number;
+  componentRows: number[];
+  cellulosePercentRow?: number;
 }
 
 /**
@@ -253,7 +288,9 @@ function scanColumnBlocks(rows: string[][], nameCol: number): RawBlock[] {
     // Collect components after the LBS marker until Total / Percent / a blank
     // name / a new header.
     const components: CheeseComponent[] = [];
+    const componentRows: number[] = [];
     let cellulosePercent = "";
+    let cellulosePercentRow: number | undefined;
     let k = lbsRow + 1;
     for (; k < rows.length; k++) {
       const kname = cell(rows, k, nameCol);
@@ -268,7 +305,8 @@ function scanColumnBlocks(rows: string[][], nameCol: number): RawBlock[] {
       if (!kname) break; // start of the "", LBS summary row
       const num = parseNum(kamt);
       if (num == null) continue; // e.g. "For 1st Cheese Applicator" sub-label
-      components.push({ ingredient: kname, lbs: Math.max(0, num) });
+       components.push({ ingredient: kname, lbs: Math.max(0, num) });
+       componentRows.push(k);
     }
 
     // Skip past the trailing "Cellulose / Percent" summary block so its rows are
@@ -279,6 +317,7 @@ function scanColumnBlocks(rows: string[][], nameCol: number): RawBlock[] {
       const klower = kname.toLowerCase();
       if (klower === "percent") {
         cellulosePercent = kamt;
+        cellulosePercentRow ??= k;
         k++;
         continue;
       }
@@ -290,18 +329,77 @@ function scanColumnBlocks(rows: string[][], nameCol: number): RawBlock[] {
     }
 
     if (components.length > 0) {
-      blocks.push({ name, components, cellulosePercent, endRow: k, firstRow: r });
+      blocks.push({
+        name,
+        components,
+        cellulosePercent,
+        endRow: k,
+        firstRow: r,
+        nameCol,
+        componentRows,
+        ...(cellulosePercentRow !== undefined ? { cellulosePercentRow } : {}),
+      });
     }
     r = Math.max(k, r + 1);
   }
   return blocks;
 }
 
-/** Parse a single customer sheet into its shredder setting, assignments, recipes. */
-export function parseCheeseSheet(grid: CheeseSheetGrid): ParsedCheeseSheet {
+function findShredderSettingCell(
+  grid: CheeseSheetGrid,
+): { value: string; source?: CheeseCellReference } {
+  const rows = grid.rows ?? [];
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+    for (let c = 0; c < row.length; c++) {
+      const value = cell(rows, r, c);
+      if (!value.toLowerCase().includes("shredder setting")) continue;
+      const after = value.split(":").slice(1).join(":").trim();
+      if (after) return { value: after, source: sourceCell(grid, r, c) };
+      for (let k = c + 1; k < row.length; k++) {
+        if (cell(rows, r, k)) return { value: cell(rows, r, k), source: sourceCell(grid, r, k) };
+      }
+      return { value: "" };
+    }
+  }
+  return { value: "" };
+}
+
+function findAssignmentSourceCells(
+  grid: CheeseSheetGrid,
+  firstBlockRow: number,
+  recipeName: string,
+): CheeseCellReference[] {
+  const rows = grid.rows ?? [];
+  const limit = firstBlockRow >= 0 ? firstBlockRow : rows.length;
+  const refs: CheeseCellReference[] = [];
+  for (let r = 0; r < limit; r++) {
+    const row = rows[r] ?? [];
+    for (let c = 0; c < row.length; c++) {
+      const value = cell(rows, r, c);
+      if (!value || !value.includes(":")) continue;
+      const lower = value.toLowerCase();
+      if (value.startsWith("**") || lower.includes("note") || lower.includes("shredder setting")) continue;
+      const idx = value.indexOf(":");
+      const flavor = value.slice(0, idx).trim();
+      const mixName = value.slice(idx + 1).trim();
+      if (flavor && mixName && /[a-z]/i.test(mixName) && matchKey(mixName) === matchKey(recipeName)) {
+        refs.push(sourceCell(grid, r, c));
+      }
+    }
+  }
+  return refs;
+}
+
+/** Parse a single customer sheet and keep its review-only source locations. */
+function parseCheeseSheetWithSources(grid: CheeseSheetGrid): {
+  sheet: ParsedCheeseSheet;
+  sourceByRecipeId: Record<string, CheeseRecipeSourceEvidence>;
+} {
   const rows = grid.rows ?? [];
   const brand = collapseWs(grid.name ?? "");
-  const shredderSetting = findShredderSetting(rows);
+  const shredder = findShredderSettingCell(grid);
+  const shredderSetting = shredder.value;
 
   // Find recipe blocks across every column pair.
   const amtCols = amountColumns(rows);
@@ -325,6 +423,7 @@ export function parseCheeseSheet(grid: CheeseSheetGrid): ParsedCheeseSheet {
   }
 
   const recipes: CheeseRecipe[] = [];
+  const sourceByRecipeId: Record<string, CheeseRecipeSourceEvidence> = {};
   for (const b of deduped) {
     // Flavors assigned to this recipe = assignment lines whose mix name matches.
     const flavors = assignments
@@ -341,32 +440,70 @@ export function parseCheeseSheet(grid: CheeseSheetGrid): ParsedCheeseSheet {
       components: b.components,
       enabled: true,
     });
-    if (recipe) recipes.push(recipe);
+    if (recipe) {
+      recipes.push(recipe);
+      sourceByRecipeId[recipe.id] = {
+        recipeName: sourceCell(grid, b.firstRow, b.nameCol),
+        recipeNameText: b.name,
+        sheetBrand: brand,
+        ...(shredder.source ? { shredderSetting: shredder.source } : {}),
+        assignmentCells: findAssignmentSourceCells(grid, firstBlockRow, b.name),
+        components: b.componentRows.map((row, index) => ({
+          ingredientName: b.components[index]?.ingredient ?? "",
+          lbsValue: b.components[index]?.lbs ?? 0,
+          ingredient: sourceCell(grid, row, b.nameCol),
+          lbs: sourceCell(grid, row, b.nameCol + 1),
+        })),
+        ...(b.cellulosePercentRow !== undefined
+          ? { cellulosePercent: sourceCell(grid, b.cellulosePercentRow, b.nameCol + 1) }
+          : {}),
+      };
+    }
   }
 
-  return { brand, shredderSetting, assignments, recipes };
+  return { sheet: { brand, shredderSetting, assignments, recipes }, sourceByRecipeId };
+}
+
+/** Parse a single customer sheet into its shredder setting, assignments, recipes. */
+export function parseCheeseSheet(grid: CheeseSheetGrid): ParsedCheeseSheet {
+  return parseCheeseSheetWithSources(grid).sheet;
 }
 
 /** Parse a whole workbook (many customer tabs) into a flat CheeseRecipe[]. */
-export function parseCheeseWorkbook(grids: ReadonlyArray<CheeseSheetGrid>): {
+export function parseCheeseWorkbookWithSources(grids: ReadonlyArray<CheeseSheetGrid>): {
   recipes: CheeseRecipe[];
   brands: string[];
   sheets: ParsedCheeseSheet[];
+  sourceByRecipeId: Record<string, CheeseRecipeSourceEvidence>;
 } {
   const sheets: ParsedCheeseSheet[] = [];
   const byId = new Map<string, CheeseRecipe>();
+  const sourceByRecipeId: Record<string, CheeseRecipeSourceEvidence> = {};
   const brands = new Set<string>();
   for (const grid of grids) {
-    const sheet = parseCheeseSheet(grid);
+    const { sheet, sourceByRecipeId: sheetSources } = parseCheeseSheetWithSources(grid);
     sheets.push(sheet);
     if (sheet.brand) brands.add(sheet.brand);
-    for (const r of sheet.recipes) byId.set(r.id, r);
+    for (const r of sheet.recipes) {
+      byId.set(r.id, r);
+      sourceByRecipeId[r.id] = sheetSources[r.id]!;
+    }
   }
   return {
     recipes: [...byId.values()],
     brands: [...brands],
     sheets,
+    sourceByRecipeId,
   };
+}
+
+export function parseCheeseWorkbook(grids: ReadonlyArray<CheeseSheetGrid>): {
+  recipes: CheeseRecipe[];
+  brands: string[];
+  sheets: ParsedCheeseSheet[];
+} {
+  const { recipes, brands, sheets } = parseCheeseWorkbookWithSources(grids);
+  return { recipes, brands, sheets };
 }
 
 // ---------------------------------------------------------------------------

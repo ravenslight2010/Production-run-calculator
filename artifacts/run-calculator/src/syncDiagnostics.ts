@@ -15,6 +15,11 @@ export type SyncDiagnosticKind =
   | "stale"
   | "failure"
   | "reset";
+export type SyncDiagnosticFieldCheck = {
+  checkName: "sync-acknowledgment";
+  outcome: "success" | "failure";
+  metrics?: { failureCode: number };
+};
 export type SyncDiagnostic = {
   id: string;
   kind: SyncDiagnosticKind;
@@ -23,11 +28,44 @@ export type SyncDiagnostic = {
   message: string;
   runId?: string;
   response?: string;
+  fieldCheck?: SyncDiagnosticFieldCheck;
+  wakeRecovery?: WakeRecoveryDiagnostic;
 };
+
+export type WakeRecoveryTrigger = "foreground" | "online" | "sse-reconnect" | "manual" | "retry";
+export type WakeRecoveryOutcome =
+  | "success"
+  | "connectivity-retry"
+  | "non-retryable-http"
+  | "cancelled"
+  | "background-stop";
+
+export type WakeRecoveryDiagnostic = {
+  attempts: number;
+  durationMs: number;
+  trigger: WakeRecoveryTrigger;
+  outcome: WakeRecoveryOutcome;
+};
+
+function readableWakeRecoveryLabel(value: WakeRecoveryTrigger | WakeRecoveryOutcome): string {
+  return value.replaceAll("-", " ");
+}
+
+function readableWakeRecoveryDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs}ms`;
+  const seconds = durationMs / 1_000;
+  return `${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, "") : Math.round(seconds)}s`;
+}
+
+export function formatWakeRecoveryDiagnostic(diagnostic: WakeRecoveryDiagnostic): string {
+  const attemptLabel = diagnostic.attempts === 1 ? "attempt" : "attempts";
+  return `${diagnostic.attempts} ${attemptLabel} · ${readableWakeRecoveryDuration(diagnostic.durationMs)} · ${readableWakeRecoveryLabel(diagnostic.trigger)} · ${readableWakeRecoveryLabel(diagnostic.outcome)}`;
+}
 
 export type SyncMeasurementPath = "complete" | "partial";
 export type SyncMeasurementDirection = "push" | "peer";
 export type SyncMeasurementTrigger = "edit" | "auto-track" | "recovery" | "periodic";
+export type SyncFallbackOutcome = "none" | "authoritative-recovery";
 
 export type SyncDiagnosticMeasurement = {
   path: SyncMeasurementPath;
@@ -45,6 +83,7 @@ export type SyncDiagnosticMeasurement = {
   peerApplyMs?: number;
   retries: number;
   converged: boolean;
+  fallbackOutcome?: SyncFallbackOutcome;
 };
 
 export type SyncMeasurementSummary = {
@@ -61,6 +100,7 @@ export type SyncMeasurementSummary = {
   averagePeerApplyMs?: number;
   retries: number;
   convergedSamples: number;
+  fallbackSamples: number;
 };
 
 export type SyncDiagnosticReport = {
@@ -107,11 +147,31 @@ export type SyncHealthReport = {
     historyRowsScanned: number;
     historyRowsTruncated: boolean;
   };
+  legacySyncReadiness: {
+    compatibilityMode: "accept" | "reject";
+    status: "ready" | "not-ready" | "rejection-enabled";
+    acceptedLegacyWrites: number;
+    rejectedLegacyWrites: number;
+    requiredAcceptedLegacyWrites: 0;
+    windowMs: number;
+    observedFrom: string;
+    observedUntil: string;
+    fullWindowObserved: boolean;
+    expiresAt: string;
+  };
+  syncPeerFrames: {
+    windowMs: number;
+    exactSnapshotSkipped: number;
+    partialSent: number;
+    completeSent: number;
+  };
   correlationId?: string;
 };
 
 const MAX_EVENTS = 20;
 const MAX_MEASUREMENTS = 50;
+const MAX_WAKE_RECOVERY_ATTEMPTS = 99;
+const MAX_WAKE_RECOVERY_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 function key(date: string): string {
   return `run-calc-sync-diagnostics:${date}`;
@@ -126,7 +186,10 @@ export function loadSyncDiagnostics(date: string): SyncDiagnostic[] {
     decode: (parsed) => Array.isArray(parsed) ? parsed.filter((item): item is SyncDiagnostic =>
       item && typeof item === "object" && typeof item.id === "string" &&
       typeof item.kind === "string" && typeof item.at === "number" &&
-      typeof item.date === "string" && typeof item.message === "string",
+      typeof item.date === "string" && typeof item.message === "string" &&
+      (item.fieldCheck === undefined ||
+        (item.fieldCheck && item.fieldCheck.checkName === "sync-acknowledgment" &&
+          (item.fieldCheck.outcome === "success" || item.fieldCheck.outcome === "failure"))),
     ).slice(-MAX_EVENTS) : null,
   }).read();
 }
@@ -139,16 +202,37 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
   } catch {
     // Diagnostics must never interfere with production persistence.
   }
-  if (event.kind === "ack") {
-    emitFieldCheckSignal("sync-acknowledgment", "success");
-  } else if (event.kind === "failure" || event.kind === "stale") {
-    emitFieldCheckSignal("sync-acknowledgment", "failure");
+  if (event.fieldCheck) {
+    emitFieldCheckSignal(event.fieldCheck.checkName, event.fieldCheck.outcome, event.fieldCheck.metrics);
   } else if (event.kind === "peer" || event.kind === "merge") {
     emitFieldCheckSignal("cross-device-convergence", "success");
   }
   return next;
 }
 
+export function recordWakeRecoveryDiagnostic(input: {
+  date: string;
+  at?: number;
+  attempts: number;
+  durationMs: number;
+  trigger: WakeRecoveryTrigger;
+  outcome: WakeRecoveryOutcome;
+}): SyncDiagnostic {
+  const wakeRecovery: WakeRecoveryDiagnostic = {
+    attempts: Math.min(MAX_WAKE_RECOVERY_ATTEMPTS, Math.max(1, Math.trunc(input.attempts))),
+    durationMs: Math.min(MAX_WAKE_RECOVERY_DURATION_MS, Math.max(0, Math.trunc(input.durationMs))),
+    trigger: input.trigger,
+    outcome: input.outcome,
+  };
+  return recordSyncDiagnostic({
+    kind: wakeRecovery.outcome === "success" ? "ack" : "failure",
+    at: input.at ?? Date.now(),
+    date: input.date,
+    message: "Foreground wake recovery completed",
+    response: `wake-recovery:${wakeRecovery.outcome}`,
+    wakeRecovery,
+  });
+}
 export function clearSyncDiagnostics(date: string): void {
   try {
     browserRecordStore.record(key(date), () => [], { decode: () => null }).remove();
@@ -175,7 +259,9 @@ export function loadSyncMeasurements(date: string): SyncDiagnosticMeasurement[] 
       (item.serverQueueAgeMs === undefined || (Number.isFinite(item.serverQueueAgeMs) && item.serverQueueAgeMs >= 0)) &&
       (item.peerApplyMs === undefined || (Number.isFinite(item.peerApplyMs) && item.peerApplyMs >= 0)) &&
       Number.isInteger(item.retries) && item.retries >= 0 &&
-      typeof item.converged === "boolean",
+      typeof item.converged === "boolean" &&
+      (item.fallbackOutcome === undefined || item.fallbackOutcome === "none" ||
+        item.fallbackOutcome === "authoritative-recovery"),
     ).slice(-MAX_MEASUREMENTS) : null,
   }).read();
 }
@@ -224,6 +310,7 @@ function summarizeMeasurements(
       averagePeerApplyMs: average("peerApplyMs"),
       retries: samples.reduce((total, sample) => total + sample.retries, 0),
       convergedSamples: samples.filter((sample) => sample.converged).length,
+      fallbackSamples: samples.filter((sample) => sample.fallbackOutcome === "authoritative-recovery").length,
     }];
   });
 }

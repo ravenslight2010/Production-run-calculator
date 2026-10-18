@@ -26,7 +26,7 @@
 // @workspace/db binds its pool to process.env.DATABASE_URL at import time, so we
 // create the throwaway DB and repoint DATABASE_URL BEFORE importing anything
 // that pulls in @workspace/db (see .agents/memory/integration-test-db-binding.md).
-// Only the db-free helper (lib/auth's signToken) is a safe static import.
+// Only the db-free helper (lib/auth's signLegacyTokenForTests) is a safe static import.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -36,7 +36,7 @@ import { and, eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import { facilityDate } from "../lib/facilityTime";
 
 type DbModule = typeof import("@workspace/db");
@@ -232,7 +232,7 @@ async function req(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (userId) headers["authorization"] = `Bearer ${signToken(userId)}`;
+  if (userId) headers["authorization"] = `Bearer ${signLegacyTokenForTests(userId)}`;
   return fetch(`${baseUrl}${pathname}`, {
     method,
     headers,

@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "The response routes the stale lazy Home failure to .agents/memory/pwa-update-prompts.md or explicitly identifies the PWA update policy as the source of its recovery rules.",
+      "passed": true,
+      "evidence": "PWA policy source is cited or named."
+    },
+    {
+      "text": "The response requires both an authenticated complete current-client-day snapshot and a matching current-day local snapshot showing no active run; unknown, malformed, unavailable, or mismatched state stays unsafe.",
+      "passed": true,
+      "evidence": "Response names authenticated complete server and matching-day local snapshots, plus no active run."
+    },
+    {
+      "text": "The response retains the one-minute uninterrupted safe-idle interval and rechecks safety before worker recovery.",
+      "passed": true,
+      "evidence": "Response retains the one-minute idle interval and recheck before worker recovery."
+    },
+    {
+      "text": "The response rejects a blind or generic automatic reload while safety is unknown or production work may be active.",
+      "passed": true,
+      "evidence": "Response refuses blind reload while safety is unknown."
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4,
+    "pass_rate": 1.0
+  }
+}

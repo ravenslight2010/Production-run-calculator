@@ -15,10 +15,10 @@ import { getUserById } from "./users";
 // TTL to lapse.
 
 const CACHE_TTL_MS = 15_000;
-type Entry = { exists: boolean; passwordChangedAtMs: number; at: number };
+type Entry = { exists: boolean; disabled?: boolean; passwordChangedAtMs: number; sessionRevokedAtMs: number; at: number };
 const cache = new Map<string, Entry>();
 
-export type UserSecurityState = { exists: boolean; passwordChangedAtMs: number };
+export type UserSecurityState = { exists: boolean; disabled?: boolean; passwordChangedAtMs: number; sessionRevokedAtMs: number };
 
 export async function getUserSecurityState(userId: string): Promise<UserSecurityState> {
   const now = Date.now();
@@ -26,21 +26,25 @@ export async function getUserSecurityState(userId: string): Promise<UserSecurity
   if (cached && now - cached.at < CACHE_TTL_MS) return cached;
 
   let exists: boolean;
+  let disabled: boolean;
   let passwordChangedAtMs: number;
+  let sessionRevokedAtMs: number;
   try {
     const user = await getUserById(userId);
     exists = user !== undefined;
+    disabled = user?.disabled ?? false;
     passwordChangedAtMs = user?.passwordChangedAt
       ? new Date(user.passwordChangedAt).getTime()
       : 0;
+    sessionRevokedAtMs = user?.sessionRevokedAt ? new Date(user.sessionRevokedAt).getTime() : 0;
   } catch {
     // On a transient DB error fall back to the last known value if we have one,
     // else fail open so a database blip never logs out a legitimate user. A
     // freshly revoked user already has a cached `false` entry, so they stay out.
     if (cached) return cached;
-    return { exists: true, passwordChangedAtMs: 0 };
+    return { exists: true, passwordChangedAtMs: 0, sessionRevokedAtMs: 0 };
   }
-  const entry: Entry = { exists, passwordChangedAtMs, at: now };
+  const entry: Entry = { exists, disabled, passwordChangedAtMs, sessionRevokedAtMs, at: now };
   cache.set(userId, entry);
   return entry;
 }
@@ -52,7 +56,7 @@ export async function userExists(userId: string): Promise<boolean> {
 // Called the moment a user is removed so any in-flight session is revoked on its
 // very next request, independent of the cache TTL.
 export function revokeUser(userId: string): void {
-  cache.set(userId, { exists: false, passwordChangedAtMs: Date.now(), at: Date.now() });
+  cache.set(userId, { exists: false, disabled: true, passwordChangedAtMs: Date.now(), sessionRevokedAtMs: Date.now(), at: Date.now() });
 }
 
 // Called the moment a user's password is changed (self-service, manager reset,
@@ -62,7 +66,7 @@ export function revokeUser(userId: string): void {
 export function invalidateUserSessions(userId: string): void {
   const now = Date.now();
   const cached = cache.get(userId);
-  cache.set(userId, { exists: cached?.exists ?? true, passwordChangedAtMs: now, at: now });
+  cache.set(userId, { exists: cached?.exists ?? true, disabled: cached?.disabled ?? false, passwordChangedAtMs: now, sessionRevokedAtMs: cached?.sessionRevokedAtMs ?? 0, at: now });
 }
 
 // Drops every cached existence result. Intended for tests, which reuse fixed

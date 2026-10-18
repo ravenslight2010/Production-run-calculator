@@ -15,3 +15,7 @@ Other gotchas baked into the harness:
 - Schedule workbook is exempt from the dropped-rows gate (imports via its own day-block path, not the spec prompt chunker).
 - Single-component "premixes" (prep steps like drained pineapple) and nameless blocks can't route by the ≥2-component rule — exempt.
 - Snapshot builders must `JSON.parse(JSON.stringify(actual))` before `toEqual` (undefined-vs-missing) and use `c.ingredient` (components have no `name` field).
+
+**Snapshot toolchain provenance:** regenerate snapshots through `scripts/src/run-release-node.sh`, not the host's ambient Node binary.
+**Why:** snapshots retain the Node version, and the supported release runtime is pinned by `.nvmrc` and CI; using a different host Node rewrites evidence metadata and makes the version contract fail.
+**How to apply:** when regenerating snapshots, run the package's `snapshots` script through the release-node wrapper, then review the full diff for intentional data and dependency-hash changes.

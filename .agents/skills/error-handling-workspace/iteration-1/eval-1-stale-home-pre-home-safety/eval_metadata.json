@@ -1,0 +1,11 @@
+{
+  "eval_id": 1,
+  "eval_name": "stale-home-pre-home-safety",
+  "prompt": "A tablet still has an older production tab open. It fails while loading the lazy Home JavaScript chunk, before the Home screen appears. The staff member may have an active run or unsaved setup, and support cannot confirm that today's local or server snapshot is available. Should support tell them to refresh? Give safe recovery guidance.",
+  "assertions": [
+    "The response routes the stale lazy Home failure to .agents/memory/pwa-update-prompts.md or explicitly identifies the PWA update policy as the source of its recovery rules.",
+    "The response requires both an authenticated complete current-client-day snapshot and a matching current-day local snapshot showing no active run; unknown, malformed, unavailable, or mismatched state stays unsafe.",
+    "The response retains the one-minute uninterrupted safe-idle interval and rechecks safety before worker recovery.",
+    "The response rejects a blind or generic automatic reload while safety is unknown or production work may be active."
+  ]
+}

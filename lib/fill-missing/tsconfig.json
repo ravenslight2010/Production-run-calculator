@@ -8,5 +8,6 @@
     "rootDir": "src",
     "lib": ["es2022"]
   },
+  "references": [{ "path": "../factory-constants" }],
   "include": ["src"]
 }

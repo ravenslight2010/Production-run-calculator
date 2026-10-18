@@ -13,4 +13,41 @@ describe("Home sync manager boundary", () => {
     expect(home).not.toContain("createSync" + "BaselineGate");
     expect(home).not.toMatch(/fetch\(`\/api\/sync\/today[^`]*`,\s*\{\s*method:\s*"PUT"/);
   });
+
+  it("keeps every terminal local-write diagnostic classified for the manager alert", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const terminalWriteSections = [
+      home.slice(
+        home.indexOf("if (res.status === 401 || res.status === 403)"),
+        home.indexOf("// Any other non-success response must follow the retry path below."),
+      ),
+      home.slice(
+        home.indexOf("if (stale) {"),
+        home.indexOf("const latencyMs ="),
+      ),
+      home.slice(
+        home.indexOf('recordSyncEvent(\n        "ack"'),
+        home.indexOf("// Record the synced signature ONLY after a successful PUT"),
+      ),
+      home.slice(
+        home.indexOf("// All retries exhausted"),
+        home.indexOf("syncPushQueueRef.current.finish({ drainQueued: false });", home.indexOf("// All retries exhausted")),
+      ),
+    ];
+
+    expect(terminalWriteSections.every((section) => section.includes("syncWriteFieldCheck"))).toBe(true);
+    expect(home.match(/syncWriteFieldCheck/g)).toHaveLength(5);
+  });
+
+  it("keeps scheduled profile propagation on the causally fenced write contract", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const start = home.indexOf("async function propagateProfileToPendingRunsNow");
+    const end = home.indexOf("// Recipe-manager acknowledgements", start);
+    const propagation = home.slice(start, end);
+
+    expect(propagation).toContain("!payloadResult.snapshotId");
+    expect(propagation).toContain('completeness: "complete"');
+    expect(propagation).toContain("baseSnapshotId: payloadResult.snapshotId");
+    expect(propagation).toContain("fallback?.partialFallback");
+  });
 });

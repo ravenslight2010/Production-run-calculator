@@ -39,6 +39,8 @@ let runWebPushAlerts: typeof import("./webPush")["runWebPushAlerts"];
 let enqueueScheduledWebPushAlerts: typeof import("./webPush")["enqueueScheduledWebPushAlerts"];
 let ServerJobWorker: typeof import("./serverJobs")["ServerJobWorker"];
 let enqueueServerJob: typeof import("./serverJobs")["enqueueServerJob"];
+
+let readScheduledEvaluationQueueSnapshot: typeof import("./serverJobs")["readScheduledEvaluationQueueSnapshot"];
 let registerServerJob: typeof import("./serverJobs")["registerServerJob"];
 let requestServerJobCancellation: typeof import("./serverJobs")["requestServerJobCancellation"];
 
@@ -49,6 +51,7 @@ const NEXT_DATE = "2030-03-12";
 const ROLLOVER_NOW = Date.parse("2030-03-12T06:00:00.000Z");
 const ROLLOVER_RUN = "failover-rollover-run";
 const ALERT_DATE = "2030-04-01";
+const ALERT_SANDBOX_SCOPE = "sandbox" as const;
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -111,6 +114,7 @@ beforeAll(async () => {
   enqueueScheduledWebPushAlerts = webPushMod.enqueueScheduledWebPushAlerts;
   ServerJobWorker = jobsMod.ServerJobWorker;
   enqueueServerJob = jobsMod.enqueueServerJob;
+  readScheduledEvaluationQueueSnapshot = jobsMod.readScheduledEvaluationQueueSnapshot;
   registerServerJob = jobsMod.registerServerJob;
   requestServerJobCancellation = jobsMod.requestServerJobCancellation;
 
@@ -131,6 +135,17 @@ beforeAll(async () => {
     RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF OLD.status = 'queued' AND NEW.status = 'running' THEN
+        PERFORM pg_sleep(10);
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+  `);
+  await killer.query(`
+    CREATE OR REPLACE FUNCTION background_ops_sleep_job_finalization()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.status = 'running' AND NEW.status = 'succeeded' THEN
         PERFORM pg_sleep(10);
       END IF;
       RETURN NEW;
@@ -161,7 +176,7 @@ beforeAll(async () => {
     END;
     $$;
   `);
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   if (clearBackgroundOperationDiagnosticsForTests) {
@@ -198,8 +213,12 @@ beforeEach(async () => {
   `);
   await killer.query("DROP TRIGGER IF EXISTS background_ops_data_reset_sleep ON data_reset");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_claim_sleep ON server_jobs");
+  await killer.query("DROP TRIGGER IF EXISTS background_ops_job_finalization_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_cancellation_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_lease_terminalization_sleep ON server_jobs");
+  await killer.query("DROP TRIGGER IF EXISTS background_ops_scheduled_alert_failure ON scheduled_alert_records");
+  await killer.query("DROP FUNCTION IF EXISTS background_ops_fail_scheduled_alert_once()");
+  await killer.query("DROP SEQUENCE IF EXISTS background_ops_scheduled_alert_failure_seq");
 });
 
 async function terminateSleepingBackend(
@@ -380,7 +399,7 @@ describe("background operation PostgreSQL reconnection", () => {
         timeZone: "America/Chicago",
       })), { delay: async () => { retryPid = await freshBackendPid(); } });
     const terminatedPid = await terminateSleepingBackend(
-      "data_reset",
+      "daily rollover",
       "background_ops_data_reset_sleep",
       "data_reset",
     );
@@ -429,42 +448,157 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
 
-  it("recovers server-job scheduled web-push evaluation on a fresh backend with one attempt and one record", async () => {
+  it("counts duplicate scheduled scope/time buckets across scheduler actors without exposing identifiers", async () => {
+    const now = Date.now();
+    const bucketStart = Date.parse("2030-04-01T12:00:00.000Z");
+
+    const idempotencyKey = `scheduled-evaluation:${SCOPE}:${bucketStart}`;
+    const expiresAt = new Date(now + 60 * 60_000);
+
+    const rows = Array.from({ length: 101 }, (_, index) => {
+      const bucketStart = Date.parse("2030-04-01T12:00:00.000Z") + index * 60_000;
+      return ["a", "b"].map((suffix) => ({
+        scope: SCOPE,
+        type: "scheduled-evaluation",
+        actorId: `bounded-${index}-${suffix}`,
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: bucketStart },
+        expiresAt,
+      }));
+    }).flat();
+    await db.insert(serverJobsTable).values([
+      {
+        scope: SCOPE,
+        type: "scheduled-evaluation",
+        actorId: "first-scheduler",
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: now },
+        expiresAt,
+      },
+      {
+        scope: SCOPE,
+        type: "scheduled-evaluation",
+        actorId: "second-scheduler",
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: now },
+        expiresAt,
+      },
+      {
+        scope: ALERT_SANDBOX_SCOPE,
+        type: "scheduled-evaluation",
+        actorId: "sandbox-scheduler",
+        idempotencyKey: `scheduled-evaluation:${ALERT_SANDBOX_SCOPE}:${bucketStart}`,
+        input: { scheduledFor: now },
+        expiresAt,
+      },
+    ]);
+
+    const snapshot = await readScheduledEvaluationQueueSnapshot(now);
+
+    expect(snapshot).toMatchObject({
+      queued: 3,
+      duplicateTimeBucketGroups: 1,
+      duplicateGroupsTruncated: false,
+    });
+    expect(JSON.stringify(snapshot)).not.toMatch(/first-scheduler|second-scheduler|sandbox-scheduler|idempotencyKey/i);
+  });
+
+  it("caps duplicate-bucket diagnostics and reports when the count is truncated", async () => {
     const now = Date.now();
     const endedAt = now - 120_000;
     const dueAt = endedAt + 60_000;
-    await db.insert(dailySyncTable).values({
-      date: ALERT_DATE,
-      scope: SCOPE,
-      data: {
-        dayState: {
-          date: ALERT_DATE,
-          runs: [{ id: "scheduled-alert-run", startedAt: now - 300_000, endedAt }],
+    const dates = Array.from({ length: 3 }, (_, index) =>
+      new Date(Date.parse(`${ALERT_DATE}T00:00:00.000Z`) + index * 24 * 60 * 60 * 1_000)
+        .toISOString()
+        .slice(0, 10));
+    await db.insert(dailySyncTable).values(
+      [SCOPE, ALERT_SANDBOX_SCOPE].flatMap((scope) => dates.map((date) => ({
+        date,
+        scope,
+        data: {
+          dayState: {
+            date,
+            runs: scope === SCOPE && date === ALERT_DATE
+              ? [{ id: "scheduled-alert-run", startedAt: now - 300_000, endedAt }]
+              : [],
+          },
+          runValues: scope === SCOPE && date === ALERT_DATE
+            ? { "scheduled-alert-run": { freezerTime: 1 } }
+            : {},
         },
-        runValues: { "scheduled-alert-run": { freezerTime: 1 } },
-      },
-    });
+      }))),
+    );
 
     // Arm the freezer milestone before it is due. The production scheduled
     // handler will then claim the logical record after the milestone passes.
     await runWebPushAlerts(dueAt - 1, { scope: SCOPE, date: ALERT_DATE });
-    const queued = await enqueueScheduledWebPushAlerts(now);
-    expect(queued).toEqual({ examined: 1, enqueued: 1 });
-    expect(await enqueueScheduledWebPushAlerts(now)).toEqual({ examined: 1, enqueued: 0 });
-
-    const worker = new ServerJobWorker("failover-test-worker");
+    const bucketMs = 60_000;
+    const scheduledAt = Date.parse("2030-04-01T12:00:10.000Z");
+    const bucketStart = Date.parse("2030-04-01T12:00:00.000Z");
+    const idempotencyKey = `scheduled-evaluation:${SCOPE}:${bucketStart}`;
     await killer.query(`
-      CREATE TRIGGER background_ops_job_claim_sleep
-      BEFORE UPDATE ON server_jobs
-      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_claim()
+      CREATE OR REPLACE FUNCTION background_ops_sleep_scheduled_enqueue()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.type = 'scheduled-evaluation' THEN
+          PERFORM pg_sleep(0.2);
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER background_ops_scheduled_enqueue_sleep
+      BEFORE INSERT ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_scheduled_enqueue();
     `);
+    let concurrentResults: Awaited<ReturnType<typeof enqueueScheduledWebPushAlerts>>[];
+    try {
+      concurrentResults = await Promise.all([
+        enqueueScheduledWebPushAlerts(scheduledAt, bucketMs),
+        enqueueScheduledWebPushAlerts(scheduledAt + 30_000, bucketMs),
+      ]);
+    } finally {
+      await killer.query("DROP TRIGGER IF EXISTS background_ops_scheduled_enqueue_sleep ON server_jobs");
+      await killer.query("DROP FUNCTION IF EXISTS background_ops_sleep_scheduled_enqueue()");
+    }
+    expect(concurrentResults).toHaveLength(2);
+    expect(concurrentResults.every((result) => result.examined === 2)).toBe(true);
+    expect(concurrentResults.reduce((sum, result) => sum + result.enqueued, 0)).toBe(2);
+    const queuedJobs = await db.select().from(serverJobsTable);
+    expect(queuedJobs.filter((job) => job.type === "scheduled-evaluation")).toHaveLength(2);
+    expect(queuedJobs.map((job) => job.scope).sort()).toEqual([SCOPE, ALERT_SANDBOX_SCOPE].sort());
+    expect(queuedJobs.map((job) => ({
+      scope: job.scope,
+      idempotencyKey: job.idempotencyKey,
+    }))).toEqual(expect.arrayContaining([
+      {
+        scope: SCOPE,
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+      },
+      {
+        scope: ALERT_SANDBOX_SCOPE,
+        idempotencyKey: `scheduled-evaluation:${ALERT_SANDBOX_SCOPE}:${bucketStart}`,
+      },
+    ]));
+    for (const job of queuedJobs) {
+      const scheduledFor = (job.input as { scheduledFor: number }).scheduledFor;
+      expect([scheduledAt, scheduledAt + 30_000]).toContain(scheduledFor);
+      expect(Math.floor(scheduledFor / bucketMs) * bucketMs).toBe(bucketStart);
+    }
+
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
+    await killer.query(`
+      CREATE TRIGGER background_ops_job_finalization_sleep
+      BEFORE UPDATE ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_finalization()
+    `);
+
     let retryPid: number | undefined;
     const workerOperation = runBackgroundOperation("server-job-run", () => preserveTransientDatabaseCause(() => worker.runOnce()), {
       delay: async () => { retryPid = await freshBackendPid(); },
     });
     const terminatedPid = await terminateSleepingBackend(
-      "server_jobs",
-      "background_ops_job_claim_sleep",
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
       "server_jobs",
     );
     const ran = await workerOperation;
@@ -476,19 +610,43 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(retryPid).not.toBe(terminatedPid);
     expect(recoveredPid).not.toBe(terminatedPid);
 
-    const [job] = await db.select().from(serverJobsTable);
-    expect(job).toMatchObject({
-      scope: SCOPE,
+    const jobsAfterRetry = await db.select().from(serverJobsTable);
+    expect(jobsAfterRetry.map((job) => job.status).sort()).toEqual(["running", "succeeded"]);
+    const recoveredJob = jobsAfterRetry.find((job) => job.status === "succeeded");
+    expect(recoveredJob).toMatchObject({
       type: "scheduled-evaluation",
-      status: "succeeded",
       attempt: 1,
     });
-    expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
-    const [jobAttempt] = await db.select().from(serverJobAttemptsTable);
+    const leasedJob = jobsAfterRetry.find((job) => job.status === "running");
+    expect(leasedJob).toBeDefined();
+    if (!leasedJob) throw new Error("Expected one scheduled job to remain leased after recovery");
+    await db.update(serverJobsTable).set({
+      leaseExpiresAt: new Date(Date.now() - 1),
+    }).where(eq(serverJobsTable.id, leasedJob.id));
+    expect(await worker.runOnce()).toBe(true);
+
+    const evaluatedJobs = await db.select().from(serverJobsTable);
+    expect(evaluatedJobs).toHaveLength(2);
+    expect(evaluatedJobs.map((job) => ({
+      scope: job.scope,
+      status: job.status,
+      result: job.result,
+    }))).toEqual(expect.arrayContaining([
+      { scope: SCOPE, status: "succeeded", result: { examined: dates.length, candidates: 1 } },
+      { scope: ALERT_SANDBOX_SCOPE, status: "succeeded", result: { examined: dates.length, candidates: 0 } },
+    ]));
+    const attempts = await db.select().from(serverJobAttemptsTable);
+    expect(attempts).toHaveLength(3);
+    expect(attempts
+      .filter((attempt) => attempt.jobId === leasedJob.id)
+      .map((attempt) => attempt.attempt)
+      .sort()).toEqual([1, 2]);
+    const jobAttempt = attempts
+      .find((attempt) => attempt.jobId === recoveredJob?.id);
     expect(jobAttempt).toMatchObject({
-      jobId: job.id,
+      jobId: recoveredJob?.id,
       attempt: 1,
-      workerId: "failover-test-worker",
+      workerId: "ambiguous-commit-worker",
       outcome: "succeeded",
     });
 
@@ -502,8 +660,265 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
   });
 
+  it("recovers a job after its success transaction loses the database connection", async () => {
+    let handlerRuns = 0;
+    registerServerJob("finalization-recovery-test", {
+      capability: "review-incidents",
+      handler: async () => ({ handlerRun: ++handlerRuns }),
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "protected-lease-renewal-actor",
+      type: "finalization-recovery-test",
+      idempotencyKey: "finalization-recovery",
+      input: {},
+    });
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
+    await killer.query(`
+      CREATE TRIGGER background_ops_job_finalization_sleep
+      BEFORE UPDATE ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_finalization()
+    `);
+
+    let retryPid: number | undefined;
+    const workerPass = runBackgroundOperation(
+      "server-job-run",
+      () => preserveTransientDatabaseCause(() => worker.runOnce()),
+      { delay: async () => { retryPid = await freshBackendPid(); } },
+    );
+    const terminatedPid = await terminateSleepingBackend(
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
+      "server_jobs",
+    );
+
+    // The immediate recovery poll must not relabel this job as a handler
+    // failure or requeue work whose handler already ran.
+    await expect(workerPass).resolves.toBe(false);
+    expect(retryPid).toBeTypeOf("number");
+    expect(retryPid).not.toBe(terminatedPid);
+    const [leasedJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(leasedJob).toMatchObject({ status: "running", attempt: 1 });
+    expect(handlerRuns).toBe(1);
+
+    await db.update(serverJobsTable).set({
+      leaseExpiresAt: new Date(Date.now() - 1),
+    }).where(eq(serverJobsTable.id, job.id));
+    await expect(worker.runOnce()).resolves.toBe(true);
+
+    const [completedJob] = await db.select().from(serverJobsTable);
+    expect(completedJob).toMatchObject({ status: "succeeded", attempt: 2, result: { handlerRun: 2 } });
+    expect(await db.select().from(serverJobAttemptsTable).where(eq(serverJobAttemptsTable.jobId, job.id)))
+      .toMatchObject([
+        { attempt: 1, outcome: "retrying", errorCode: "lease_expired" },
+        { attempt: 2, outcome: "succeeded" },
+      ]);
+  });
+
+  it("leaves job finalization leased and retryable after a pool-acquisition timeout", async () => {
+    let handlerRuns = 0;
+    let saturatedFinalization = false;
+    const heldClients: Array<{ release(): void }> = [];
+    registerServerJob("finalization-timeout-recovery-test", {
+      capability: "review-incidents",
+      handler: async () => ({ handlerRun: ++handlerRuns }),
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "protected-lease-renewal-actor",
+      type: "finalization-timeout-recovery-test",
+      idempotencyKey: "protected-lease-renewal",
+      input: {},
+    });
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
+    const internalWorker = worker as unknown as {
+      finish: (...args: unknown[]) => Promise<void>;
+    };
+    const originalFinish = internalWorker.finish.bind(worker);
+    internalWorker.finish = async (...args) => {
+      if (args[2] === "succeeded" && !saturatedFinalization) {
+        saturatedFinalization = true;
+        heldClients.push(await pool.connect(), await pool.connect());
+      }
+      return originalFinish(...args);
+    };
+
+    try {
+      await expect(runBackgroundOperation("server-job-run", () => worker.runOnce(), {
+        delay: async () => {
+          heldClients.splice(0).forEach((client) => client.release());
+        },
+      })).resolves.toBe(false);
+    } finally {
+      heldClients.splice(0).forEach((client) => client.release());
+    }
+
+    const [leasedJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(leasedJob).toMatchObject({ status: "running", attempt: 1 });
+    expect(handlerRuns).toBe(1);
+
+    await db.update(serverJobsTable).set({
+      leaseExpiresAt: new Date(Date.now() - 1),
+    }).where(eq(serverJobsTable.id, job.id));
+    await expect(worker.runOnce()).resolves.toBe(true);
+
+    const [completedJob] = await db.select().from(serverJobsTable);
+    expect(completedJob).toMatchObject({ status: "succeeded", attempt: 2, result: { handlerRun: 2 } });
+    expect(await db.select().from(serverJobAttemptsTable).where(eq(serverJobAttemptsTable.jobId, job.id)))
+      .toMatchObject([
+        { attempt: 1, outcome: "retrying", errorCode: "lease_expired" },
+        { attempt: 2, outcome: "succeeded" },
+      ]);
+  });
+
+  it("recovers scheduled work and job claims after bounded pool-acquisition timeouts", async () => {
+    const scheduledHolds = [await pool.connect(), await pool.connect()];
+    let scheduledAttempts = 0;
+    try {
+      await expect(runBackgroundOperation("daily-rollover", async () => {
+        scheduledAttempts += 1;
+        await db.execute(sql`SELECT 1`);
+        return "scheduled-recovered";
+      }, {
+        delay: async () => { scheduledHolds.pop()?.release(); },
+      })).resolves.toBe("scheduled-recovered");
+    } finally {
+      scheduledHolds.forEach((client) => client.release());
+    }
+    expect(scheduledAttempts).toBe(2);
+
+    registerServerJob("pool-claim-timeout-test", {
+      capability: "review-incidents",
+      handler: async () => ({ recovered: true }),
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "protected-lease-renewal-actor",
+      type: "pool-claim-timeout-test",
+      idempotencyKey: "protected-lease-renewal",
+      input: {},
+    });
+    const claimHolds = [await pool.connect(), await pool.connect()];
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
+    try {
+      await expect(runBackgroundOperation("server-job-run", () => worker.runOnce(), {
+        delay: async () => { claimHolds.pop()?.release(); },
+      })).resolves.toBe(true);
+    } finally {
+      claimHolds.forEach((client) => client.release());
+    }
+    const [recovered] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(recovered).toMatchObject({ status: "succeeded", attempt: 1, result: { recovered: true } });
+    expect((await getBackgroundOperationDiagnostics())["server-job-run"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+    });
+  });
+
+  it("retries a failed date without losing later alerts or duplicating completed dates", async () => {
+    const now = Date.now();
+    const endedAt = now - 120_000;
+    const dueAt = endedAt + 60_000;
+    const dates = Array.from({ length: 3 }, (_, index) =>
+      new Date(Date.parse(`${ALERT_DATE}T00:00:00.000Z`) + index * 24 * 60 * 60 * 1_000)
+        .toISOString()
+        .slice(0, 10));
+    const runs = dates.map((date, index) => ({
+      date,
+      scope: SCOPE,
+      data: {
+        dayState: {
+          date,
+          runs: [{ id: `scheduled-alert-retry-run-${index}`, startedAt: now - 300_000, endedAt }],
+        },
+        runValues: { [`scheduled-alert-retry-run-${index}`]: { freezerTime: 1 } },
+      },
+    }));
+    await db.insert(dailySyncTable).values(runs);
+
+    for (const date of dates) {
+      await runWebPushAlerts(dueAt - 1, { scope: SCOPE, date });
+    }
+
+    await expect(enqueueScheduledWebPushAlerts(now)).resolves.toEqual({ examined: 1, enqueued: 1 });
+    await killer.query("CREATE SEQUENCE background_ops_scheduled_alert_failure_seq");
+    await killer.query(`
+      CREATE FUNCTION background_ops_fail_scheduled_alert_once()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.date = '${dates[1]}' THEN
+          IF nextval('background_ops_scheduled_alert_failure_seq') = 1 THEN
+            RAISE EXCEPTION 'controlled scheduled alert date failure'
+              USING ERRCODE = '40001';
+          END IF;
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await killer.query(`
+      CREATE TRIGGER background_ops_scheduled_alert_failure
+      BEFORE INSERT ON scheduled_alert_records
+      FOR EACH ROW EXECUTE FUNCTION background_ops_fail_scheduled_alert_once()
+    `);
+
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
+    expect(await worker.runOnce()).toBe(true);
+
+    const [failedJob] = await db.select().from(serverJobsTable);
+    expect(failedJob).toMatchObject({
+      type: "scheduled-evaluation",
+      status: "queued",
+      attempt: 1,
+      errorCode: "handler_failed",
+    });
+    const firstAttemptSequence = await killer.query<{ last_value: string; is_called: boolean }>(
+      "SELECT last_value::text, is_called FROM background_ops_scheduled_alert_failure_seq",
+    );
+    expect(firstAttemptSequence.rows[0]).toEqual({ last_value: "1", is_called: true });
+    const recordsAfterFailure = await db.select().from(scheduledAlertRecordsTable);
+    expect(recordsAfterFailure).toHaveLength(1);
+    expect(recordsAfterFailure).toMatchObject([
+      { scope: SCOPE, date: dates[0], alertKind: "freezerEmpty", status: "no-subscriptions" },
+    ]);
+
+    expect(await worker.runOnce()).toBe(true);
+
+    const [retriedJob] = await db.select().from(serverJobsTable);
+    expect(retriedJob).toMatchObject({
+      type: "scheduled-evaluation",
+      status: "succeeded",
+      attempt: 2,
+      result: { examined: dates.length, candidates: dates.length },
+    });
+    const records = await db.select().from(scheduledAlertRecordsTable);
+    expect(records).toHaveLength(dates.length);
+    expect(records
+      .map(({ scope, date, alertKind, status }) => ({ scope, date, alertKind, status }))
+      .sort((a, b) => a.date.localeCompare(b.date)))
+      .toEqual(dates.map((date) => ({
+        scope: SCOPE,
+        date,
+        alertKind: "freezerEmpty",
+        status: "no-subscriptions",
+      })));
+    expect(new Set(records.map((record) => record.alertId)).size).toBe(dates.length);
+    const retrySequence = await killer.query<{ last_value: string; is_called: boolean }>(
+      "SELECT last_value::text, is_called FROM background_ops_scheduled_alert_failure_seq",
+    );
+    expect(retrySequence.rows[0]).toEqual({ last_value: "2", is_called: true });
+
+    const attempts = await db.select().from(serverJobAttemptsTable);
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map(({ attempt, outcome }) => ({ attempt, outcome }))).toEqual([
+      { attempt: 1, outcome: "retrying" },
+      { attempt: 2, outcome: "succeeded" },
+    ]);
+  });
+
   it("keeps one queued scheduled job when enqueue confirmation is lost", async () => {
-    const now = Date.parse("2030-04-01T12:00:00.000Z");
+    const now = Date.now();
+    const bucketStart = Math.floor(now / 60_000) * 60_000;
     await db.insert(dailySyncTable).values({
       date: ALERT_DATE,
       scope: SCOPE,
@@ -531,7 +946,7 @@ describe("background operation PostgreSQL reconnection", () => {
       scope: SCOPE,
       actorId: "system:scheduled-alert-scheduler",
       type: "scheduled-evaluation",
-      idempotencyKey: `scheduled-evaluation:${ALERT_DATE}:${now}`,
+      idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
       status: "queued",
       attempt: 0,
     });
@@ -539,9 +954,9 @@ describe("background operation PostgreSQL reconnection", () => {
   });
 
   it("keeps rollover and scheduled-job effects single after committed replies are lost", async () => {
-    const now = ROLLOVER_NOW;
+    const now = Date.now();
     const alertNow = Date.now();
-    const endedAt = alertNow - 120_000;
+    const endedAt = now - 120_000;
     const dueAt = endedAt + 60_000;
     await db.insert(dailySyncTable).values({
       date: ALERT_DATE,
@@ -626,7 +1041,7 @@ describe("background operation PostgreSQL reconnection", () => {
     const rollover = await runBackgroundOperation("daily-rollover", async () => {
       rolloverAttempts += 1;
       const result = await runDailyRollover(SCOPE, {
-        nowMs: now,
+        nowMs: ROLLOVER_NOW,
         timeZone: "America/Chicago",
       });
       if (rolloverAttempts === 1) await loseCommittedReply();
@@ -638,7 +1053,7 @@ describe("background operation PostgreSQL reconnection", () => {
     const worker = new ServerJobWorker("ambiguous-commit-worker");
     let workerAttempts = 0;
     let workerRetryPid: number | undefined;
-    const ran = await runBackgroundOperation("server-job-run", async () => {
+    const recoveryOperation = runBackgroundOperation("server-job-run", async () => {
       workerAttempts += 1;
       const result = await worker.runOnce();
       if (workerAttempts === 1) await loseCommittedReply();
@@ -646,6 +1061,7 @@ describe("background operation PostgreSQL reconnection", () => {
     }, {
       delay: async () => { workerRetryPid = await freshBackendPid(); },
     });
+    const ran = await recoveryOperation;
 
     expect(rolloverAttempts).toBe(2);
     expect(rolloverRetryPid).toBeTypeOf("number");
@@ -658,8 +1074,8 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
-    const [job] = await db.select().from(serverJobsTable);
-    expect(job).toMatchObject({ status: "succeeded", attempt: 1 });
+    const [completedJob] = await db.select().from(serverJobsTable);
+    expect(completedJob).toMatchObject({ type: "scheduled-evaluation", status: "succeeded", attempt: 1 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
   });
@@ -695,8 +1111,8 @@ describe("background operation PostgreSQL reconnection", () => {
       { delay: async () => { retryPid = await freshBackendPid(); } },
     );
     const terminatedPid = await terminateSleepingBackend(
-      "server job cancellation",
-      "background_ops_job_cancellation_sleep",
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
       "server_jobs",
     );
     const cancelled = await cancellationOperation;
@@ -712,8 +1128,6 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(recoveredPid).not.toBe(terminatedPid);
 
     expect(await new ServerJobWorker("cancelled-job-worker").runOnce()).toBe(false);
-    const [job] = await db.select().from(serverJobsTable);
-    expect(job).toMatchObject({ status: "cancelled", attempt: 0 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(0);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(0);
   });
@@ -759,15 +1173,16 @@ describe("background operation PostgreSQL reconnection", () => {
     // The lifecycle prevents a late handler result from becoming a successful
     // durable outcome, but cooperative checks are the side-effect boundary.
     expect(alreadyEnteredSideEffects).toBe(1);
-    const [job] = await db.select().from(serverJobsTable);
-    expect(job).toMatchObject({
+    const [finalJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, queuedJob.id));
+    expect(finalJob).toMatchObject({
       id: queuedJob.id,
       status: "cancelled",
       cancelRequested: true,
       attempt: 1,
       result: null,
     });
-    const attempts = await db.select().from(serverJobAttemptsTable);
+    const attempts = await db.select().from(serverJobAttemptsTable)
+      .where(eq(serverJobAttemptsTable.jobId, queuedJob.id));
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({
       jobId: queuedJob.id,
@@ -784,26 +1199,26 @@ describe("background operation PostgreSQL reconnection", () => {
     const handlerReady = new Promise<void>((resolve) => { markHandlerReady = resolve; });
     const handlerRelease = new Promise<void>((resolve) => { releaseHandler = resolve; });
     let protectedEffects = 0;
-    registerServerJob("protected-commit-cancel-test", {
+    registerServerJob("protected-lease-renewal-test", {
       capability: "review-incidents",
       handler: async (context) => {
         markHandlerReady();
         await handlerRelease;
         await context.commit(async () => {
           protectedEffects += 1;
-          return undefined;
+          return { receipt: "protected-effect-1" };
         });
         return { protectedEffects };
       },
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "protected-commit-cancel-actor",
-      type: "protected-commit-cancel-test",
-      idempotencyKey: "protected-commit-cancel",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
-    const workerRun = new ServerJobWorker("protected-commit-cancel-worker").runOnce();
+    const workerRun = new ServerJobWorker("protected-commit-race-worker").runOnce();
     await handlerReady;
     expect(await requestServerJobCancellation(job.id, SCOPE, job.actorId)).toMatchObject({
       id: job.id,
@@ -826,23 +1241,23 @@ describe("background operation PostgreSQL reconnection", () => {
     const commitEntered = new Promise<void>((resolve) => { markCommitEntered = resolve; });
     const commitRelease = new Promise<void>((resolve) => { releaseCommit = resolve; });
     let protectedEffects = 0;
-    registerServerJob("protected-commit-race-test", {
+    registerServerJob("protected-lease-renewal-test", {
       capability: "review-incidents",
       handler: async (context) => {
         await context.commit(async () => {
           markCommitEntered();
           await commitRelease;
           protectedEffects += 1;
-          return undefined;
+          return { receipt: "protected-effect-1" };
         });
         return { protectedEffects };
       },
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "protected-commit-race-actor",
-      type: "protected-commit-race-test",
-      idempotencyKey: "protected-commit-race",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
     const workerRun = new ServerJobWorker("protected-commit-race-worker").runOnce();
@@ -1023,6 +1438,71 @@ describe("background operation PostgreSQL reconnection", () => {
     expect((await getBackgroundOperationDiagnostics())["daily-rollover"]).toMatchObject({
       status: "warning",
       recentFailureCount: BACKGROUND_OPERATION_FAILURE_MAX_EVENTS,
+    });
+  });
+
+  it("fences retained shared failures after a successful replacement-process pass", async () => {
+    const { getBackgroundOperationProcessEpochForTests } = await import("./backgroundOperations");
+    const epoch = getBackgroundOperationProcessEpochForTests();
+    // Straddle the actual module epoch rather than assuming test startup is
+    // less than one minute old.
+    const failedAt = epoch - 1;
+    const recoveredAt = epoch + 1;
+    await db.insert(backgroundOperationEventsTable).values(Array.from(
+      { length: BACKGROUND_OPERATION_FAILURE_THRESHOLD },
+      () => ({
+        operation: "server-job-run",
+        sourceInstance: "prior-process",
+        errorCode: "ETIMEDOUT",
+        occurredAt: new Date(failedAt),
+      }),
+    ));
+
+    await clearBackgroundOperationDiagnosticsForTests({ preserveShared: true });
+    expect((await getBackgroundOperationDiagnostics(failedAt))["server-job-run"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+    });
+
+    await runBackgroundOperation(
+      "server-job-run",
+      async () => false,
+      { now: () => recoveredAt },
+    );
+
+    expect((await getBackgroundOperationDiagnostics(recoveredAt))["server-job-run"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+      lastSuccessAt: new Date(recoveredAt).toISOString(),
+    });
+    expect(await db.select().from(backgroundOperationEventsTable))
+      .toHaveLength(BACKGROUND_OPERATION_FAILURE_THRESHOLD);
+  });
+
+  it("does not let idle successes mask a concurrently failing peer", async () => {
+    const peerFailureAt = Date.now() + 1_000;
+    await db.insert(backgroundOperationEventsTable).values(Array.from(
+      { length: BACKGROUND_OPERATION_FAILURE_THRESHOLD },
+      () => ({
+        operation: "server-job-run",
+        sourceInstance: "concurrently-failing-peer",
+        errorCode: "ETIMEDOUT",
+        occurredAt: new Date(peerFailureAt),
+      }),
+    ));
+
+    await runBackgroundOperation(
+      "server-job-run",
+      async () => false,
+      { now: () => peerFailureAt + 1_000 },
+    );
+
+    expect((await getBackgroundOperationDiagnostics(
+      peerFailureAt + 1_000,
+    ))["server-job-run"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+      errorCode: "ETIMEDOUT",
     });
   });
 
