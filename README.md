@@ -6,6 +6,11 @@ Pizza production planning, scheduling, and inventory for floor staff — availab
 
 The system plans a day's pizza production line (runs, dough, sauce, cheese, ingredients), tracks inventory consumption, schedules staff-facing work, and pairs the operational data with AI-assisted issue diagnosis and manager alerts.
 
+The Replit deployment is the only authorized publisher of the active production
+app. GitHub is used for source backup and CI/testing: GitHub pushes, releases,
+workflow runs, test artifacts, and container builds do not publish the app or
+prove what is live.
+
 ## Stack
 
 - pnpm workspaces · Node.js 24 · TypeScript 5.9
@@ -29,7 +34,10 @@ The system plans a day's pizza production line (runs, dough, sauce, cheese, ingr
 | `attached_assets/source-library` | Customer's complete source workbooks (specs, dough/sauce procedures, cheese/premix/shipping/schedule) + audit reports. |
 | `.agents/memory` | Institutional knowledge: sharp edges, sync semantics, auth boundaries, schema rules, etc. Read before touching an unfamiliar area. |
 
-## Quick start (Docker)
+## Local Docker smoke/development setup
+
+This Compose setup is a local development and test reference. It is not an
+authorized route for publishing the active production app.
 
 ```bash
 cp .env.docker.example .env   # fill in secrets (DB password, sign-up code, AI key)
@@ -42,23 +50,31 @@ docker compose up --build
   service uses the full `api-migrate` target and must complete before `api`
   starts.
 
-### Container deployment and rollback
+### Legacy container deployment and rollback reference
 
-CI publishes two API images:
+> **Legacy and unsupported for current production publication.** The material
+> below records the former GHCR/Render/manual-Docker deployment procedure for
+> historical reference only. GitHub Actions no longer publishes these images
+> or prepares an image handoff. Use the Replit deployment as the only authorized
+> production publisher. This repository change does not alter or remove any
+> external Render account, service, or deployment setting.
+
+The former CI image publisher produced these API images:
 
 - `runcalc-api:<sha>` — slim production runtime serving `/` and `/api/*`.
 - `runcalc-api-migrate:<sha>` — full workspace image for one-shot
   `@workspace/db` `push-force` operations.
 
-Render deploys `runcalc-api` and runs the bundled Drizzle Kit command as its
-pre-deploy migration. For a manual migration or a self-hosted deployment, run
+The retained `render.yaml` describes a former Render configuration for
+`runcalc-api` and its bundled Drizzle Kit pre-deploy migration. For historical
+manual-migration or self-hosted deployment context, it described running
 the `api-migrate` target (or the matching `runcalc-api-migrate:<sha>` image)
 against the deployment database before starting the runtime image. Do not
 point the long-lived API service at the migration image.
 
-Use immutable GHCR tags, never `latest`, for a deployment or rollback. For
-example, first apply the migration image that exactly matches the release being
-introduced, then start its matching runtime:
+The former procedure used immutable GHCR tags, never `latest`, for a deployment
+or rollback. For example, it applied the migration image matching a release
+before starting its matching runtime:
 
 ```bash
 docker run --rm --env DATABASE_URL="$DATABASE_URL" \
@@ -66,15 +82,16 @@ docker run --rm --env DATABASE_URL="$DATABASE_URL" \
 docker run ... ghcr.io/ravenslight2010/runcalc-api:<new-sha>
 ```
 
-Verify both deployed checks: `/` must return the compiled calculator and
-`/api/healthz` must report healthy. To roll application code back, replace only
-the runtime with the earlier immutable tag:
+The former procedure verified that `/` returned the compiled calculator and
+`/api/healthz` reported healthy. It rolled application code back by replacing
+only the runtime with the earlier immutable tag:
 
 ```bash
 docker run ... ghcr.io/ravenslight2010/runcalc-api:<previous-sha>
 ```
 
-Do **not** run the previous migration image or attempt a down migration.
+The historical procedure warned not to run the previous migration image or
+attempt a down migration.
 Database application is forward-only, so the earlier runtime must operate
 against the schema already applied by
 `runcalc-api-migrate:<new-sha>`. If either `/` or `/api/healthz` is
@@ -88,7 +105,49 @@ image identities, and an unchanged normalized schema fingerprint.
 
 ## Local development
 
-Prerequisites: Node.js 24, pnpm, a PostgreSQL 16 database.
+Prerequisites: Node.js 24.21.0, pnpm 12.8.1, a PostgreSQL 16 database.
+
+The exact local Node patch is declared in `.nvmrc` and must stay aligned with
+the explicit CI pin and retained validation evidence. Activate it before
+installing dependencies or running validation:
+
+```bash
+nvm install
+nvm use
+```
+
+Compatible version managers such as `fnm` can also read `.nvmrc` (for example,
+`fnm use --install`). Selecting the declared runtime does not regenerate or
+modify retained evidence.
+
+In a new Replit interactive terminal, the project startup hook selects the
+exact `.nvmrc` version for that shell and its child commands. Confirm it with:
+
+```bash
+node --version
+node -p process.execPath
+```
+
+The startup hook finds the matching versioned Node package in the Replit Nix
+store without depending on its machine-specific store path. If it is missing,
+the shell exits with instructions instead of continuing with the older
+`nodejs-24` module version. Restore the exact runtime to the Replit environment
+and open a new shell.
+
+Run ad hoc validation through the same fail-closed launcher used by Replit
+validation workflows and post-merge setup:
+
+```bash
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test
+bash scripts/src/run-release-node.sh pnpm run typecheck
+```
+
+The launcher independently checks the exact evidence-bound version and puts
+its executable first on `PATH` for pnpm and its child scripts. It uses the
+local runtime when it matches, otherwise obtains `node@24.21.0` through npx;
+if unavailable, the command fails rather than running with the wrong version.
+Interactive shell selection does not change the release runner or production
+runtime.
 
 ```bash
 pnpm install
@@ -113,7 +172,7 @@ shared databases, applies the canonical Drizzle schema, and only then starts
 the development API. Leave it running and execute `test:e2e:department` from a
 second shell; no separate schema command is required.
 
-Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (gates public sign-up, fails closed), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed).
+Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (transitional sign-up code until a manager rotates or disables it), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed), `SESSION_TTL_SEC` (absolute session lifetime, default 30 days), and `SESSION_IDLE_TIMEOUT_SEC` (idle lifetime, default 12 hours). Managers can issue one-time invitations, rotate or disable the transitional code, disable accounts, and revoke sessions.
 
 ## Verification
 
@@ -160,7 +219,7 @@ The approved floor-layout reference is available as a
 - `replit.md` — operational runbook (Replit workflows, reset flow, corpus harness, gotchas).
 - `threat_model.md` — security threat model and trust boundaries.
 - `.agents/memory/` — deep institutional knowledge (215+ notes on sync semantics, auth, imports, schema rules).
-- `docker-compose.yml` / `Dockerfile` — containerized deployment.
+- `docker-compose.yml` / `Dockerfile` — local/test container setup and legacy deployment reference; not an authorized production route.
 
 ## User preferences (current)
 

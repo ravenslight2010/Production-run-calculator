@@ -23,6 +23,7 @@ const testUsernames = new Set<string>();
 
 type Fixture = {
   username: string;
+  brand: string;
   runId: string;
   futureRunId: string;
   lotId?: string;
@@ -79,7 +80,7 @@ async function signIn(page: Page, username: string): Promise<void> {
 async function seedRuns(page: Page, fixture: Fixture): Promise<void> {
   const date = localDate();
   await page.evaluate(
-    ({ date, runId, futureRunId }) => {
+    ({ date, brand, runId, futureRunId }) => {
       const endedAt = Date.now() - 15 * 60_000;
       const finishedValues = {
         casesNeeded: 500,
@@ -105,7 +106,7 @@ async function seedRuns(page: Page, fixture: Fixture): Promise<void> {
           runs: [
             {
               id: runId,
-              brand: "Freezer E2E",
+              brand,
               flavor: "Pepperoni",
               casesNeeded: 500,
               startedAt: endedAt - 30 * 60_000,
@@ -113,7 +114,7 @@ async function seedRuns(page: Page, fixture: Fixture): Promise<void> {
             },
             {
               id: futureRunId,
-              brand: "Freezer E2E",
+              brand,
               flavor: "Pepperoni",
               casesNeeded: 500,
             },
@@ -127,16 +128,26 @@ async function seedRuns(page: Page, fixture: Fixture): Promise<void> {
         }),
       );
     },
-    { date, runId: fixture.runId, futureRunId: fixture.futureRunId },
+    { date, brand: fixture.brand, runId: fixture.runId, futureRunId: fixture.futureRunId },
   );
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 }
 
-async function removeSurplusFixture(db: Client, lotId?: string): Promise<void> {
+async function removeSurplusFixture(db: Client, lotId: string | undefined, brand: string): Promise<void> {
   if (!lotId) return;
+  await db.query("DELETE FROM freezer_surplus_adjustments WHERE lot_id = $1", [lotId]);
   await db.query("DELETE FROM freezer_surplus_allocations WHERE lot_id = $1", [lotId]);
   await db.query("DELETE FROM freezer_surplus_lots WHERE id = $1", [lotId]);
+  const item = await db.query<{ id: number }>(
+    "SELECT id FROM inventory_items WHERE scope = 'live' AND key = $1",
+    [`finished:${brand.trim().toLowerCase()}:pepperoni`],
+  );
+  if (item.rows[0]) {
+    await db.query("DELETE FROM inventory_lots WHERE item_id = $1", [item.rows[0].id]);
+    await db.query("DELETE FROM inventory_ledger WHERE item_id = $1", [item.rows[0].id]);
+    await db.query("DELETE FROM inventory_items WHERE id = $1", [item.rows[0].id]);
+  }
 }
 
 async function removeRunFixture(db: Client, fixture: Fixture): Promise<void> {
@@ -174,6 +185,9 @@ test.afterAll(async () => {
   try {
     await db.connect();
     await cleanupTestUsers(db, testUsernames);
+      await db.query(
+        "DELETE FROM inventory_locations WHERE scope = 'live' AND name = 'Freezer Surplus Browser Test'",
+      );
   } finally {
     await db.end().catch(() => {});
   }
@@ -190,15 +204,17 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const fixture: Fixture = {
       username: uniqueTestId(`surplus_${viewport.name}`),
+      brand: uniqueTestId(`FreezerE2E${viewport.name}`).replace(/[^A-Za-z0-9 ]/g, ""),
       runId: uniqueTestId("surplus_finished_run"),
       futureRunId: uniqueTestId("surplus_future_run"),
     };
     testUsernames.add(fixture.username);
 
     const browserErrors: string[] = [];
+    const simulatedLostResponseUrls = new Set<string>();
     page.on("pageerror", (error) => browserErrors.push(error.message));
     page.on("response", (response) => {
-      if (response.status() >= 500) {
+      if (response.status() >= 500 && !simulatedLostResponseUrls.has(response.url())) {
         browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
       }
     });
@@ -207,6 +223,11 @@ for (const viewport of [
     try {
       await db.connect();
       await createManager(request, db, fixture.username);
+      await db.query(
+        `INSERT INTO inventory_locations (scope, name, is_onsite)
+         VALUES ('live', 'Freezer Surplus Browser Test', false)
+         ON CONFLICT (name, scope) DO NOTHING`,
+      );
       await signIn(page, fixture.username);
       // daily_sync is factory-wide rather than user-scoped. A preceding
       // browser journey can leave a newer day snapshot that wins during the
@@ -258,7 +279,8 @@ for (const viewport of [
       await expect(confirmPanel).toBeHidden();
 
       const lots = await db.query<{ id: string }>(
-        "SELECT id FROM freezer_surplus_lots WHERE brand = 'Freezer E2E' ORDER BY created_at DESC",
+        "SELECT id FROM freezer_surplus_lots WHERE brand = $1 ORDER BY created_at DESC",
+        [fixture.brand],
       );
       expect(lots.rows).toHaveLength(1);
       fixture.lotId = lots.rows[0].id;
@@ -266,6 +288,52 @@ for (const viewport of [
       await page.getByTestId("tab-warehouse").click();
       const warehousePanel = page.getByTestId("freezer-surplus-warehouse");
       await expect(warehousePanel).toBeVisible();
+      const adjustmentPanel = page.getByTestId("finished-case-adjustments");
+      await expect(adjustmentPanel).toBeVisible();
+      await adjustmentPanel.getByLabel("Finished-case adjustment lot").selectOption(fixture.lotId);
+      await adjustmentPanel.getByLabel("Finished-case adjustment cases").fill("2");
+      await adjustmentPanel.getByLabel("Finished-case adjustment reason").fill("Two cases damaged in storage");
+
+      let adjustmentCommittedButResponseLost = false;
+      await page.route("**/api/freezer-surplus/lots/**/adjustments", async (route) => {
+        if (route.request().method() === "POST" && !adjustmentCommittedButResponseLost) {
+          adjustmentCommittedButResponseLost = true;
+          simulatedLostResponseUrls.add(route.request().url());
+          const committed = await route.fetch();
+          expect(committed.status()).toBe(201);
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Adjustment response lost after commit." }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+      await adjustmentPanel.getByRole("button", { name: "Record adjustment" }).click();
+      await expect(adjustmentPanel.getByRole("alert")).toContainText("Adjustment response lost after commit.");
+      await page.unroute("**/api/freezer-surplus/lots/**/adjustments");
+      await adjustmentPanel.getByRole("button", { name: "Record adjustment" }).click();
+      await expect(adjustmentPanel).toContainText("damage · 2 cases");
+      await expect(adjustmentPanel).toContainText("Two cases damaged in storage");
+      const manager = await db.query<{ id: string }>(
+        "SELECT id FROM users WHERE username = $1",
+        [fixture.username],
+      );
+      const adjustmentRows = await db.query<{
+        cases: number;
+        reason: string;
+        actor_id: string;
+      }>(
+        "SELECT cases, reason, actor_id FROM freezer_surplus_adjustments WHERE lot_id = $1",
+        [fixture.lotId],
+      );
+      expect(adjustmentRows.rows).toEqual([{
+        cases: 2,
+        reason: "Two cases damaged in storage",
+        actor_id: manager.rows[0].id,
+      }]);
+
       const futureRun = warehousePanel.getByTestId(`freezer-surplus-run-${fixture.futureRunId}`);
       await expect(futureRun).toContainText("Original target 500");
       await expect(futureRun).toContainText("Carried in 0");
@@ -316,7 +384,7 @@ for (const viewport of [
          WHERE l.id = $1 AND a.run_id = $2`,
         [fixture.lotId, fixture.futureRunId],
       );
-      expect(stored.rows).toEqual([{ remaining_cases: 8, cases: 12 }]);
+      expect(stored.rows).toEqual([{ remaining_cases: 6, cases: 12 }]);
 
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
@@ -337,7 +405,7 @@ for (const viewport of [
         fullPage: true,
       });
     } finally {
-      await removeSurplusFixture(db, fixture.lotId);
+      await removeSurplusFixture(db, fixture.lotId, fixture.brand);
       await removeRunFixture(db, fixture);
       await db.end().catch(() => {});
     }

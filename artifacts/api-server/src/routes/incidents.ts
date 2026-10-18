@@ -215,7 +215,9 @@ router.post(
   },
 );
 
-// GET /incidents — manager-only review list (newest first).
+// GET /incidents — manager-only review list (newest first). Resolved incidents
+// older than 14 days are omitted from the list but remain stored and addressable
+// through GET /incidents/:id.
 router.get("/incidents", requireCapability("review-incidents"), async (_req, res): Promise<void> => {
   res.json(await listIncidents());
 });

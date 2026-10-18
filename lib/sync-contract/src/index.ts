@@ -1,0 +1,146 @@
+export const SYNC_SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
+
+export const SYNC_DELTA_MAP_SECTIONS = [
+  "runValues",
+  "runValuesUpdatedAt",
+  "packagingProgress",
+] as const;
+
+/** Operational fields that must be edited as one atomic peer-visible section. */
+export const MANUAL_SECTION_FIELDS = {
+  packaging: ["skidsCompleted", "casesOnCurrentSkid"],
+  dough: ["traysOnLine", "batchesReady"],
+  sauce: ["sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration"],
+  "sauce-stock": ["sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration"],
+  app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration", "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration"],
+  app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration", "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration"],
+  app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration", "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration"],
+  app4: ["app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration", "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration"],
+  pep1: ["pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration", "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration"],
+  pep2: ["pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration", "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration"],
+} as const;
+export type ManualSection = keyof typeof MANUAL_SECTION_FIELDS;
+export type ManualSectionField = (typeof MANUAL_SECTION_FIELDS)[ManualSection][number];
+const MANUAL_SECTION_SET = new Set<string>(Object.keys(MANUAL_SECTION_FIELDS));
+const MANUAL_SECTION_FIELD_SET = new Set<string>(
+  Object.values(MANUAL_SECTION_FIELDS).flat(),
+);
+
+export function manualSectionForField(field: string): ManualSection | undefined {
+  for (const [section, fields] of Object.entries(MANUAL_SECTION_FIELDS)) {
+    if ((fields as readonly string[]).includes(field)) return section as ManualSection;
+  }
+  return undefined;
+}
+
+export function isManualSection(value: unknown): value is ManualSection {
+  return typeof value === "string" && MANUAL_SECTION_SET.has(value);
+}
+
+export function isManualSectionField(value: unknown): value is ManualSectionField {
+  return typeof value === "string" && MANUAL_SECTION_FIELD_SET.has(value);
+}
+
+export function manualSectionKey(runId: string, section: ManualSection): string {
+  return `${runId}:${section}`;
+}
+
+const SYNC_DELTA_METADATA_KEYS = new Set([
+  "syncVersion",
+  "completeness",
+  "baseSnapshotId",
+  "resultingSnapshotId",
+]);
+const SYNC_DELTA_MAP_SECTION_SET = new Set<string>(SYNC_DELTA_MAP_SECTIONS);
+
+export function isSyncRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function canonicalSyncValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalSyncValue);
+  if (isSyncRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        // Object-key ordering is part of the wire hash.  Do not use
+        // localeCompare: browser/server locales may produce different orders.
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([key, child]) => [key, canonicalSyncValue(child)]),
+    );
+  }
+  return value;
+}
+
+export function canonicalSyncJson(value: unknown): string {
+  return JSON.stringify(canonicalSyncValue(value));
+}
+
+export function isValidSyncSnapshotId(value: unknown): value is string {
+  return typeof value === "string" && SYNC_SNAPSHOT_ID_RE.test(value);
+}
+
+export function buildSyncDeltaData(
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const delta: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+  for (const key of keys) {
+    if (SYNC_DELTA_METADATA_KEYS.has(key)) continue;
+    const before = previous[key];
+    const after = next[key];
+    if (canonicalSyncJson(before) === canonicalSyncJson(after)) continue;
+    if (SYNC_DELTA_MAP_SECTION_SET.has(key) && isSyncRecord(before) && isSyncRecord(after)) {
+      const sparse: Record<string, unknown> = {};
+      const childKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+      for (const child of childKeys) {
+        if (canonicalSyncJson(before[child]) !== canonicalSyncJson(after[child])) {
+          sparse[child] = child in after ? after[child] : null;
+        }
+      }
+      delta[key] = sparse;
+    } else {
+      delta[key] = key in next ? after : null;
+    }
+  }
+  return delta;
+}
+
+export function applySyncDeltaData(
+  base: Record<string, unknown>,
+  delta: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(delta)) {
+    if (SYNC_DELTA_MAP_SECTION_SET.has(key)) {
+      if (value === null) {
+        delete merged[key];
+        continue;
+      }
+      if (!isSyncRecord(value)) return null;
+      const baseSection = base[key];
+      const section = { ...(isSyncRecord(baseSection) ? baseSection : {}) };
+      for (const [child, childValue] of Object.entries(value)) {
+        if (childValue === null) delete section[child];
+        else section[child] = childValue;
+      }
+      merged[key] = section;
+    } else if (key === "dayState" && isSyncRecord(value)) {
+      merged.dayState = value;
+    } else if (key !== "deletions") {
+      if (value === null) delete merged[key];
+      else merged[key] = value;
+    }
+  }
+
+  if (isSyncRecord(delta.deletions)) {
+    for (const [sectionName, ids] of Object.entries(delta.deletions)) {
+      const target = merged[sectionName];
+      if (!isSyncRecord(target) || !Array.isArray(ids)) continue;
+      const copy = { ...target };
+      for (const id of ids) if (typeof id === "string") delete copy[id];
+      merged[sectionName] = copy;
+    }
+  }
+  return merged;
+}

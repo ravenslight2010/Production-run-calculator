@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+workspace_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 "$workspace_root/scripts/local_model_eval_setup.py" "$@"

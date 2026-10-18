@@ -8,79 +8,105 @@ import {
 } from "@workspace/db";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import {
+  FIELD_CHECK_MAX_CLOCK_SKEW_MS,
+  isFieldCheckTimestampOutsideClockWindow,
+} from "@workspace/field-check-contract";
 import { currentScope } from "./requestScope";
 
-export const FIELD_CHECK_VERSION = "1";
+export const FIELD_CHECK_VERSION = "3";
 export const HARDWARE_CHECK_VERSION = "2026-09";
 export const FIELD_CHECK_RETENTION_DAYS = 30;
 export const FIELD_CHECK_MAX_BATCH = 20;
 export const FIELD_CHECK_MAX_METRICS = 8;
 export const FIELD_CHECK_MAX_OBSERVATION_BYTES = 24_000;
 export const FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD = 3;
-export const FIELD_CHECK_MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+export { FIELD_CHECK_MAX_CLOCK_SKEW_MS };
+export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
 
 export const FIELD_CHECK_CATALOG = [
   {
     name: "startup",
     label: "Startup",
     observedBy: "browser",
-    evidence: "Authenticated app startup and home bundle timing.",
+    evidence: "Recorded when the authenticated field-check observer starts; home-bundle timing is a separate performance observation.",
     expiresHours: 24,
   },
   {
     name: "foreground-recovery",
     label: "Background / foreground recovery",
     observedBy: "browser",
-    evidence: "A visible session returned after the page was hidden.",
+    evidence: "Recorded when this page becomes visible after the browser reported it hidden.",
     expiresHours: 72,
   },
   {
     name: "sync-acknowledgment",
     label: "Sync acknowledgment",
     observedBy: "browser",
-    evidence: "The server acknowledged a naturally occurring sync write.",
+    evidence: "Recorded when a naturally occurring sync write receives its server acknowledgment.",
     expiresHours: 72,
+  },
+  {
+    name: "production-run-save-sync",
+    label: "Production-run save and sync",
+    observedBy: "browser",
+    evidence: "Recorded after a production-run save; success requires server acknowledgment, interruption is incomplete, and only bounded duration/cause codes are retained.",
+    expiresHours: 72,
+  },
+  {
+    name: "spec-import-review-commit",
+    label: "Spec import parse, review, and commit",
+    observedBy: "browser",
+    evidence: "Recorded after the spec-import review/commit flow; cancellation is incomplete, success requires persisted changes, and only bounded duration is retained.",
+    expiresHours: 168,
   },
   {
     name: "cross-device-convergence",
     label: "Cross-device convergence",
     observedBy: "browser",
-    evidence: "This browser applied a naturally occurring peer update.",
+    evidence: "Recorded when this browser applies a naturally occurring peer or merged update.",
     expiresHours: 168,
   },
   {
     name: "reload-persistence",
-    label: "Reload persistence",
+    label: "Reload startup",
     observedBy: "browser",
-    evidence: "The browser reported a normal reload and the app booted again.",
+    evidence: "Recorded after a full-page reload followed by authenticated observer startup; saved-data persistence is not checked.",
     expiresHours: 168,
   },
   {
     name: "offline-recovery",
     label: "Offline recovery",
     observedBy: "browser",
-    evidence: "The browser returned online after an offline interval.",
+    evidence: "Recorded when the browser reports returning online after an offline interval.",
     expiresHours: 168,
   },
   {
     name: "offline-queue-replay",
     label: "Offline queue replay",
     observedBy: "browser",
-    evidence: "A queued offline operation received a server acknowledgment after connectivity returned.",
+    evidence: "Recorded when a queued offline operation receives server acknowledgment after connectivity returns.",
     expiresHours: 168,
   },
   {
     name: "pwa-update-handoff",
     label: "PWA update handoff",
     observedBy: "browser",
-    evidence: "A service worker update became ready for an explicit staff handoff.",
+    evidence: "Recorded when a service-worker update is ready or an update handoff is initiated; this does not confirm recovery.",
+    expiresHours: 720,
+  },
+  {
+    name: "stale-deployment-recovery",
+    label: "Stale-deployment recovery",
+    observedBy: "browser",
+    evidence: "An update attempt is incomplete until an authenticated startup on a different build; same-build or interrupted attempts remain unconfirmed.",
     expiresHours: 720,
   },
   {
     name: "performance",
     label: "Performance",
     observedBy: "browser",
-    evidence: "Browser timing samples stayed within the reviewed budget.",
+    evidence: "Records home-bundle load, page-navigation load, and API timeout/network timings against their reviewed budgets.",
     expiresHours: 72,
   },
   {
@@ -137,10 +163,16 @@ export const FIELD_CHECK_CATALOG = [
 export type FieldCheckName = (typeof FIELD_CHECK_CATALOG)[number]["name"];
 export type FieldCheckOutcome = "success" | "failure" | "incomplete";
 export type FieldCheckStatus = "healthy" | "collecting" | "needs-review" | "unsupported";
+export type FieldCheckCoverage = "never-observed" | "current" | "stale" | "no-success";
 export type FieldCheckObservedBy = "browser" | "hardware";
 export type FieldCheckMetrics = Record<string, number>;
 
 const catalogByName = new Map(FIELD_CHECK_CATALOG.map((check) => [check.name, check]));
+const workflowCheckNames = new Set<FieldCheckName>([
+  "production-run-save-sync",
+  "spec-import-review-commit",
+]);
+const productionRunSaveFailureCodes = new Set([1, 2, 3, 4]);
 const metricKey = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const observationId = /^[a-zA-Z0-9:_-]{8,160}$/;
 
@@ -169,12 +201,54 @@ const observationSchema = z.object({
   if (!catalogByName.has(value.checkName as FieldCheckName)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkName"], message: "Unsupported field check" });
   }
+  if (["sync-acknowledgment", "performance"].includes(value.checkName) && !["1", "2", "3"].includes(value.checkVersion)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkVersion"], message: "Unsupported diagnostic observation version" });
+  }
   if (value.metrics && Object.keys(value.metrics).length > FIELD_CHECK_MAX_METRICS) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Too many metrics" });
   }
   for (const key of Object.keys(value.metrics ?? {})) {
     if (!metricKey.test(key)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics", key], message: "Invalid metric name" });
+    }
+  }
+  if (value.checkVersion === "3" && value.checkName === "sync-acknowledgment") {
+    const keys = Object.keys(value.metrics);
+    const valid = value.outcome === "failure"
+      ? keys.length === 1 && Number.isInteger(value.metrics.failureCode) && [1, 2, 3].includes(value.metrics.failureCode!)
+      : keys.length === 0;
+    if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected an approved sync failure category only" });
+  }
+  if (value.checkVersion === "3" && value.checkName === "performance") {
+    const valid = Object.keys(value.metrics).length === 2 &&
+      Object.hasOwn(value.metrics, "durationMs") &&
+      Number.isInteger(value.metrics.sourceCode) && [1, 2, 3, 4].includes(value.metrics.sourceCode!);
+    if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected bounded durationMs and an approved performance source only" });
+  }
+  if (value.checkName === "stale-deployment-recovery" && Object.keys(value.metrics).length !== 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Recovery evidence does not accept metrics" });
+  }
+  if (workflowCheckNames.has(value.checkName as FieldCheckName)) {
+    const metrics = value.metrics ?? {};
+    const metricNames = Object.keys(metrics);
+    const hasFailureCode = Object.prototype.hasOwnProperty.call(metrics, "failureCode");
+    const failureCodeAllowed =
+      value.checkName === "production-run-save-sync" &&
+      value.outcome === "failure" &&
+      Number.isInteger(metrics.failureCode) &&
+      productionRunSaveFailureCodes.has(metrics.failureCode!);
+    if (
+      !Object.prototype.hasOwnProperty.call(metrics, "durationMs") ||
+      metricNames.some((name) => name !== "durationMs" && name !== "failureCode") ||
+      metricNames.length > (hasFailureCode ? 2 : 1) ||
+      (hasFailureCode && !failureCodeAllowed) ||
+      metrics.durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["metrics"],
+        message: "Workflow evidence accepts only bounded durationMs and an approved save failureCode",
+      });
     }
   }
 });
@@ -207,7 +281,7 @@ export function validateHardwareConfirmation(body: unknown): {
   const parsed = hardwareConfirmationSchema.safeParse(body);
   if (!parsed.success) return { ok: false, error: "Invalid hardware-check confirmation" };
   const observedAt = Date.parse(parsed.data.observedAt);
-  if (Math.abs(Date.now() - observedAt) > FIELD_CHECK_MAX_CLOCK_SKEW_MS) {
+  if (isFieldCheckTimestampOutsideClockWindow(observedAt, Date.now())) {
     return { ok: false, error: "Observation timestamp is outside the accepted clock window" };
   }
   return { ok: true, data: parsed.data };
@@ -254,7 +328,7 @@ export function validateFieldCheckBatch(body: unknown): {
   const now = Date.now();
   if (parsed.data.some((observation) => {
     const observedAt = Date.parse(observation.observedAt);
-    return Math.abs(now - observedAt) > FIELD_CHECK_MAX_CLOCK_SKEW_MS;
+    return isFieldCheckTimestampOutsideClockWindow(observedAt, now);
   })) {
     return { ok: false, error: "Observation timestamp is outside the accepted clock window" };
   }
@@ -277,11 +351,14 @@ export type FieldCheckSummary = {
   name: FieldCheckName;
   label: string;
   status: FieldCheckStatus;
+  coverage: FieldCheckCoverage;
   observedBy: FieldCheckObservedBy;
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
+  lastSuccessfulMetrics: FieldCheckMetrics | null;
   lastObservedAt: string | null;
+  lastReceiptDelayMs: number | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
   incompleteCount: number;
@@ -296,7 +373,21 @@ export type FieldChecksReport = {
   checks: FieldCheckSummary[];
   overallStatus: FieldCheckStatus;
   actionableCount: number;
+  population: {
+    appBuild: string | null;
+    deviceCategory: string | null;
+    countBasis: "lifetime-issues" | "retained-observations";
+    retentionDays: 30;
+  };
 };
+
+// Strict scalar filters: never accept arrays/objects, wildcard searches or
+// caller-controlled scopes. Reuse the ingestion enums without widening them.
+export const fieldCheckFiltersSchema = z.object({
+  appBuild: z.string().min(1).max(100).refine((value) => value === value.trim()).optional(),
+  deviceCategory: observationSchema.shape.deviceCategory.optional(),
+}).strict();
+export type FieldCheckFilters = z.infer<typeof fieldCheckFiltersSchema>;
 
 export function deriveFieldCheckStatus(input: {
   observedBy: FieldCheckObservedBy;
@@ -316,6 +407,19 @@ export function deriveFieldCheckStatus(input: {
   return input.lastSuccessfulAt && isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())
     ? "healthy"
     : "collecting";
+}
+
+export function deriveFieldCheckCoverage(input: {
+  expiresHours: number | null;
+  lastSuccessfulAt: Date | null;
+  hasObservation: boolean;
+  now?: number;
+}): FieldCheckCoverage {
+  if (!input.hasObservation) return "never-observed";
+  if (!input.lastSuccessfulAt) return "no-success";
+  return input.expiresHours === null ||
+    isFresh(input.lastSuccessfulAt, input.expiresHours, input.now ?? Date.now())
+    ? "current" : "stale";
 }
 
 function iso(date: Date | null | undefined): string | null {
@@ -440,16 +544,19 @@ export async function recordFieldCheckBatch(
   return { accepted, duplicate };
 }
 
-export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChecksReport> {
+export async function buildFieldChecksReport(now = Date.now(), filters: FieldCheckFilters = {}): Promise<FieldChecksReport> {
   const scope = currentScope();
+  const filtered = filters.appBuild !== undefined || filters.deviceCategory !== undefined;
   const [observations, issues] = await Promise.all([
     db.select().from(fieldCheckObservationsTable)
       .where(and(
         eq(fieldCheckObservationsTable.scope, scope),
         gt(fieldCheckObservationsTable.receivedAt, new Date(now - FIELD_CHECK_RETENTION_DAYS * 24 * 60 * 60 * 1000)),
+        filters.appBuild === undefined ? undefined : eq(fieldCheckObservationsTable.appBuild, filters.appBuild),
+        filters.deviceCategory === undefined ? undefined : eq(fieldCheckObservationsTable.deviceCategory, filters.deviceCategory),
       ))
       .orderBy(desc(fieldCheckObservationsTable.observedAt)),
-    db.select().from(fieldCheckIssuesTable)
+    filtered ? Promise.resolve([]) : db.select().from(fieldCheckIssuesTable)
       .where(eq(fieldCheckIssuesTable.scope, scope)),
   ]);
   const issueByName = new Map(issues.map((issue) => [issue.checkName, issue]));
@@ -458,12 +565,22 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
     const issue = issueByName.get(check.name);
     const last = rows[0];
     const lastSuccess = rows.find((row) => row.outcome === "success");
+    const lastNonSuccess = rows.find((row) => row.outcome !== "success");
+    const filteredRecovered = Boolean(
+      lastNonSuccess && lastSuccess &&
+      lastSuccess.observedAt.getTime() > lastNonSuccess.observedAt.getTime(),
+    );
+    const issueRecovered = filtered ? filteredRecovered : issue?.status === "recovered";
     const recentFailures = rows.filter((row) => row.outcome !== "success").slice(0, 5).map(failureDto);
     const incompleteCount = issue?.incompleteCount ?? rows.filter((row) => row.outcome === "incomplete").length;
     const failureCount = issue?.failureCount ?? rows.filter((row) => row.outcome === "failure").length;
     const actionable = (
       failureCount > 0 || incompleteCount >= FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD
-    ) && issue?.status !== "recovered";
+    ) && !issueRecovered;
+    const issueStatus: "open" | "recovered" | null = filtered
+      ? !lastNonSuccess ? null : filteredRecovered ? "recovered" : actionable ? "open" : null
+      : issue?.status === "recovered" ? "recovered"
+        : issue?.status === "open" && actionable ? "open" : null;
     const status = deriveFieldCheckStatus({
       observedBy: check.observedBy,
       expiresHours: check.expiresHours,
@@ -475,18 +592,28 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
       name: check.name,
       label: check.label,
       status,
+      coverage: deriveFieldCheckCoverage({
+        expiresHours: check.expiresHours,
+        lastSuccessfulAt: lastSuccess?.observedAt ?? null,
+        hasObservation: rows.length > 0,
+        now,
+      }),
       observedBy: check.observedBy,
       evidence: check.evidence,
       expiresHours: check.expiresHours,
       lastSuccessfulAt: iso(lastSuccess?.observedAt),
+      lastSuccessfulMetrics: workflowCheckNames.has(check.name)
+        ? ((lastSuccess?.metrics ?? null) as FieldCheckMetrics | null)
+        : null,
       lastObservedAt: iso(last?.observedAt),
+      lastReceiptDelayMs: last && last.receivedAt.getTime() >= last.observedAt.getTime()
+        ? Math.min(2 * FIELD_CHECK_MAX_CLOCK_SKEW_MS, last.receivedAt.getTime() - last.observedAt.getTime())
+        : null,
       recentFailures,
       failureCount,
       incompleteCount,
       actionable,
-      issueStatus: issue?.status === "open" || issue?.status === "recovered"
-        ? (issue.status as "open" | "recovered")
-        : null,
+      issueStatus,
     };
   });
   const actionableCount = summaries.filter((summary) => summary.actionable).length;
@@ -503,6 +630,12 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
     checks: summaries,
     overallStatus,
     actionableCount,
+    population: {
+      appBuild: filters.appBuild ?? null,
+      deviceCategory: filters.deviceCategory ?? null,
+      countBasis: filtered ? "retained-observations" : "lifetime-issues",
+      retentionDays: 30,
+    },
   };
 }
 

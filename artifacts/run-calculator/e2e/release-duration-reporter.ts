@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { relative, resolve } from "node:path";
@@ -10,8 +10,12 @@ import type {
   TestCase,
   TestResult,
 } from "@playwright/test/reporter";
+import {
+  FULL_BROWSER_EXPECTED_CASES,
+  assertFullBrowserCaseContract,
+} from "../../../scripts/src/full-browser-case-contract.mjs";
 
-export const EXPECTED_CASES = 159;
+export { FULL_BROWSER_EXPECTED_CASES as EXPECTED_CASES };
 const repositoryRoot = fileURLToPath(
   new URL("../../../", import.meta.url),
 );
@@ -72,14 +76,7 @@ function currentRevision(): string {
   const configured = process.env.RELEASE_REVISION?.trim();
   if (configured) return configured;
 
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return "unknown";
-  }
+  return captureReleaseIdentity(repositoryRoot).revision;
 }
 
 function relativeFilePath(file: string): string {
@@ -255,9 +252,9 @@ export function parseCompleteFullBrowserBaseline(
     revision === "unknown" ||
     result !== "PASS" ||
     coverage !== "COMPLETE" ||
-    expectedCases !== EXPECTED_CASES ||
-    enumeratedCases !== EXPECTED_CASES ||
-    completedCases !== EXPECTED_CASES ||
+    expectedCases !== FULL_BROWSER_EXPECTED_CASES ||
+    enumeratedCases !== FULL_BROWSER_EXPECTED_CASES ||
+    completedCases !== FULL_BROWSER_EXPECTED_CASES ||
     !Number.isInteger(passedCases) ||
     !Number.isInteger(skippedCases) ||
     !Number.isInteger(failedCases) ||
@@ -323,7 +320,7 @@ export function canRetainFullBrowserReport(
   return (
     fullResult !== "timedout" &&
     fullResult !== "interrupted" &&
-    allCases.length === EXPECTED_CASES &&
+    allCases.length === FULL_BROWSER_EXPECTED_CASES &&
     allCases.every((testCase) => testCase.completed)
   );
 }
@@ -440,7 +437,8 @@ export function formatFullBrowserReport(
     0,
   );
   const coverage =
-    enumeratedCases === EXPECTED_CASES && completedCases === EXPECTED_CASES
+    enumeratedCases === FULL_BROWSER_EXPECTED_CASES &&
+    completedCases === FULL_BROWSER_EXPECTED_CASES
       ? "COMPLETE"
       : "INCOMPLETE";
 
@@ -450,7 +448,7 @@ export function formatFullBrowserReport(
     `Generated: ${new Date().toISOString()}`,
     `Revision: ${revision}`,
     `Result: ${resultLabel(fullResult)}`,
-    `Expected cases: ${EXPECTED_CASES}`,
+    `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
     `Enumerated cases: ${enumeratedCases}`,
     `Completed cases: ${completedCases}`,
     `Passed cases: ${passedCases}`,
@@ -483,6 +481,58 @@ export function formatFullBrowserReport(
   ].join("\n");
 }
 
+export function formatFullBrowserCountSummary(
+  cases: Iterable<CaseRecord>,
+  fullResult: FullResult["status"],
+  revision: string,
+  runId: string,
+  generatedAt: string,
+): string {
+  const summaries = summarizeCases(cases);
+  const counts = {
+    total: summaries.reduce((total, summary) => total + summary.cases, 0),
+    completed: summaries.reduce((total, summary) => total + summary.completed, 0),
+    passed: summaries.reduce((total, summary) => total + summary.passed, 0),
+    failed: summaries.reduce((total, summary) => total + summary.failed, 0),
+    skipped: summaries.reduce((total, summary) => total + summary.skipped, 0),
+    notRun: summaries.reduce((total, summary) => total + summary.notRun, 0),
+  };
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    browser: "chromium",
+    runId,
+    revision,
+    result: fullResult,
+    generatedAt,
+    counts,
+  })}\n`;
+}
+
+async function writeFullBrowserCountSummary(
+  cases: Iterable<CaseRecord>,
+  fullResult: FullResult["status"],
+  revision: string,
+): Promise<void> {
+  const configuredPath =
+    process.env.PLAYWRIGHT_RELEASE_COUNT_SUMMARY_PATH?.trim();
+  const runId = process.env.TEST_RESULTS_REPORT_ID?.trim();
+  if (!configuredPath || !runId) return;
+
+  const path = resolve(repositoryRoot, configuredPath);
+  await mkdir(resolve(path, ".."), { recursive: true });
+  await writeFile(
+    path,
+    formatFullBrowserCountSummary(
+      cases,
+      fullResult,
+      revision,
+      runId,
+      new Date().toISOString(),
+    ),
+    "utf8",
+  );
+}
+
 export default class ReleaseDurationReporter implements Reporter {
   private readonly cases = new Map<string, CaseRecord>();
   private startedAt = Date.now();
@@ -490,11 +540,7 @@ export default class ReleaseDurationReporter implements Reporter {
   onBegin(_config: FullConfig, suite: Suite): void {
     this.startedAt = Date.now();
     const allTests = suite.allTests();
-    if (allTests.length !== EXPECTED_CASES) {
-      throw new Error(
-        `Full browser release lane discovered ${allTests.length} cases; expected exactly ${EXPECTED_CASES}. Update the release filter or contract before running evidence.`,
-      );
-    }
+    assertFullBrowserCaseContract(allTests.length);
     for (const testCase of allTests) {
       this.cases.set(testCase.id, {
         file: testCase.location.file,
@@ -524,9 +570,15 @@ export default class ReleaseDurationReporter implements Reporter {
     if (process.argv.includes("--list")) {
       return;
     }
+    const revision = currentRevision();
+    await writeFullBrowserCountSummary(
+      this.cases.values(),
+      result.status,
+      revision,
+    );
     if (!canRetainFullBrowserReport(this.cases.values(), result.status)) {
       console.log(
-        `Retained full browser duration report unchanged: run was not a complete passing ${EXPECTED_CASES}-case suite.`,
+        `Retained full browser duration report unchanged: run was not a complete passing ${FULL_BROWSER_EXPECTED_CASES}-case suite.`,
       );
       return;
     }
@@ -544,7 +596,7 @@ export default class ReleaseDurationReporter implements Reporter {
         this.cases.values(),
         result.status,
         Date.now() - this.startedAt,
-        currentRevision(),
+        revision,
         baseline,
       ),
       "utf8",

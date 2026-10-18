@@ -16,7 +16,7 @@ import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import type { ProfileDataHealthService } from "./profileDataHealth";
 
 // The router imports AI routes at load time; mock the provider so no real
@@ -181,7 +181,7 @@ async function post(userId: string, corrections: unknown[]): Promise<Response> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${signToken(userId)}`,
+      authorization: `Bearer ${signLegacyTokenForTests(userId)}`,
     },
     body: JSON.stringify({ corrections }),
   });
@@ -190,13 +190,13 @@ async function post(userId: string, corrections: unknown[]): Promise<Response> {
 async function del(userId: string, id: number): Promise<Response> {
   return fetch(`${baseUrl}/api/ai-corrections/${id}`, {
     method: "DELETE",
-    headers: { authorization: `Bearer ${signToken(userId)}` },
+    headers: { authorization: `Bearer ${signLegacyTokenForTests(userId)}` },
   });
 }
 
 async function listCorrections(userId: string): Promise<Array<{ id: number; domain: string; fromText: string; toText: string }>> {
   const res = await fetch(`${baseUrl}/api/ai-corrections`, {
-    headers: { authorization: `Bearer ${signToken(userId)}` },
+    headers: { authorization: `Bearer ${signLegacyTokenForTests(userId)}` },
   });
   const body = await res.json() as { corrections: Array<{ id: number; domain: string; fromText: string; toText: string }> };
   return body.corrections;
@@ -247,7 +247,7 @@ describe("retired AI data retention", () => {
     });
 
     const dryRun = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(dryRun.status).toBe(200);
     const workspace = (await dryRun.json()) as { workspace: { aiRetention: { candidates: { total: number; conversationTurns: number }; canApply: boolean } } };
@@ -257,12 +257,12 @@ describe("retired AI data retention", () => {
 
     const apply = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(apply.status).toBe(200);
     const second = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(second.status).toBe(200);
 
@@ -292,7 +292,7 @@ describe("retired AI data retention", () => {
     });
     const laterApply = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(laterApply.status).toBe(200);
     const qualityAfterLaterRun = await db.select().from(qualityChecksTable);
@@ -313,7 +313,7 @@ describe("retired AI data retention", () => {
 
     const apply = await fetch(`${baseUrl}/api/profile-data/ai-retention/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(apply.status).toBe(409);
     expect(await db.select().from(facilityKnowledgeTable)).toHaveLength(501);
@@ -326,7 +326,7 @@ describe("GET, POST, and DELETE /ai-corrections — capability gating", () => {
     const operator = await freshOperator();
 
     const res = await fetch(`${baseUrl}/api/ai-corrections`, {
-      headers: { authorization: `Bearer ${signToken(operator)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(operator)}` },
     });
 
     expect(res.status).toBe(403);
@@ -337,7 +337,7 @@ describe("GET, POST, and DELETE /ai-corrections — capability gating", () => {
     const manager = await freshManager();
 
     const res = await fetch(`${baseUrl}/api/ai-corrections`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
 
     expect(res.status).toBe(200);
@@ -575,7 +575,7 @@ describe("AI memory health check", () => {
     });
 
     const denied = await fetch(`${baseUrl}/api/ai-memory/health-check`, {
-      headers: { authorization: `Bearer ${signToken(operator)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(operator)}` },
     });
     expect(denied.status).toBe(403);
 
@@ -583,7 +583,7 @@ describe("AI memory health check", () => {
     const beforeKnowledge = await db.select().from(facilityKnowledgeTable);
     const beforeTurns = await db.select().from(aiConversationTurnsTable);
     const res = await fetch(`${baseUrl}/api/ai-memory/health-check`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(res.status).toBe(200);
     const body = await res.json() as {
@@ -634,13 +634,13 @@ describe("AI memory health check", () => {
 
     const denied = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(operator)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(operator)}` },
     });
     expect(denied.status).toBe(403);
 
     const res = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
       method: "POST",
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(res.status).toBe(200);
     const body = await res.json() as {
@@ -748,11 +748,11 @@ describe("profile data health check", () => {
     });
 
     const denied = await fetch(`${baseUrl}/api/profile-data/health-check`, {
-      headers: { authorization: `Bearer ${signToken(operator)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(operator)}` },
     });
     expect(denied.status).toBe(403);
     const before = await fetch(`${baseUrl}/api/profile-data/health-check`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(before.status).toBe(200);
     const report = await before.json() as { report: { safeRepairs: Array<{ id: string; recipeKind: string }>; findings: Array<{ status: string }> } };
@@ -762,7 +762,7 @@ describe("profile data health check", () => {
     const [beforeProfile] = await db.select().from(brandProfilesTable);
     expect((beforeProfile.values as Record<string, unknown>).frontlineRecipeName).toBe("Mystic Pizza Sauce");
     const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     const workspace = await workspaceResponse.json() as {
       workspace: {
@@ -799,7 +799,7 @@ describe("profile data health check", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${signToken(manager)}`,
+        authorization: `Bearer ${signLegacyTokenForTests(manager)}`,
       },
       body: JSON.stringify({ findingIds: [report.report.safeRepairs[0]?.id] }),
     });
@@ -845,7 +845,7 @@ describe("profile data health check", () => {
 
     const undo = await fetch(
       `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(body.batchId)}/undo`,
-      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+      { method: "POST", headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` } },
     );
     expect(undo.status).toBe(200);
     expect(await undo.json()).toMatchObject({
@@ -861,7 +861,7 @@ describe("profile data health check", () => {
      expect(restoredData.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
     const repeatedUndo = await fetch(
       `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(body.batchId)}/undo`,
-      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+      { method: "POST", headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` } },
     );
     expect(repeatedUndo.status).toBe(200);
     expect(await repeatedUndo.json()).toMatchObject({ alreadyUndone: true });
@@ -981,7 +981,7 @@ describe("profile data health check", () => {
 
     const undo = await fetch(
       `${baseUrl}/api/profile-data/health-check/batches/legacy-profile-repair/undo`,
-      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+      { method: "POST", headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` } },
     );
     expect(undo.status).toBe(200);
     expect(await undo.json()).toMatchObject({
@@ -1017,7 +1017,7 @@ describe("profile data health check", () => {
     ]);
 
     const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(workspaceResponse.status).toBe(200);
     const workspaceBody = await workspaceResponse.json() as {
@@ -1041,7 +1041,7 @@ describe("profile data health check", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${signToken(manager)}`,
+        authorization: `Bearer ${signLegacyTokenForTests(manager)}`,
       },
       body: JSON.stringify({ findingIds: [aliasFinding?.id] }),
     });
@@ -1057,7 +1057,7 @@ describe("profile data health check", () => {
 
     const undoResponse = await fetch(
       `${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(applied.batchId)}/undo`,
-      { method: "POST", headers: { authorization: `Bearer ${signToken(manager)}` } },
+      { method: "POST", headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` } },
     );
     expect(undoResponse.status).toBe(200);
     expect((await db.select().from(importAliasesTable)).map((row) => row.externalName).sort())
@@ -1083,7 +1083,7 @@ describe("profile data health check", () => {
     });
 
     const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
-      headers: { authorization: `Bearer ${signToken(manager)}` },
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
     });
     expect(workspaceResponse.status).toBe(200);
     const body = await workspaceResponse.json() as {
@@ -1109,7 +1109,7 @@ describe("profile data health check", () => {
 
     const apply = await fetch(`${baseUrl}/api/profile-data/health-check/apply`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${signToken(manager)}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${signLegacyTokenForTests(manager)}` },
       body: JSON.stringify({ findingIds: [finding?.id] }),
     });
     expect(apply.status).toBe(200);

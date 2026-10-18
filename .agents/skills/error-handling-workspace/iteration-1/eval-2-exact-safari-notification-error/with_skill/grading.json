@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "The response routes this exact Safari Notification reference error to .agents/memory/pwa-update-prompts.md or explicitly identifies the PWA update policy as the source.",
+      "passed": true,
+      "evidence": "PWA policy source is cited or named."
+    },
+    {
+      "text": "The response limits the recovery action to the exact message `Can't find variable: Notification` and offers an explicit staff-clicked `Update and reload` action.",
+      "passed": true,
+      "evidence": "Exact Safari message and explicit Update and reload action are present."
+    },
+    {
+      "text": "The response says worker checking/activation happens only after the staff member clicks, with ordinary reload as the fallback when no waiting worker can be activated.",
+      "passed": true,
+      "evidence": "Worker check follows staff action and has an ordinary-reload fallback."
+    },
+    {
+      "text": "The response rejects automatic reload and broad ReferenceError matching.",
+      "passed": true,
+      "evidence": "Automatic reload and broad ReferenceError matching are rejected."
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4,
+    "pass_rate": 1.0
+  }
+}

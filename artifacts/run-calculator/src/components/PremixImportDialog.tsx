@@ -11,6 +11,7 @@ import { isCelluloseIngredient } from "@workspace/mixes";
 import type { Mix } from "@workspace/mixes";
 import type { PremixImportPrepared } from "@/premixImport";
 import { useAccessibleDialog } from "./useAccessibleDialog";
+import { WorkbookSourceCitation } from "./WorkbookSourceCitation";
 
 type Props = {
   open: boolean;
@@ -422,6 +423,11 @@ export default function PremixImportDialog({
                           {groupItems.map((it) => {
                     const c = it.candidate;
                     const m = c.mix;
+                    const evidence = prepared.sourceByMixId?.[it.key];
+                    const productMatchUnverified =
+                      evidence?.productMatchVerified !== true ||
+                      m.brand !== evidence?.resolvedBrand ||
+                      m.flavor !== evidence?.resolvedFlavor;
                     const isSel = selected.has(it.key);
                     const flavorOpts = m.brand ? flavorsByBrand[m.brand] ?? [] : [];
                     const redirectId = redirects.get(it.key) ?? "";
@@ -499,6 +505,34 @@ export default function PremixImportDialog({
                                 No product match — pick a brand or it won't match a run.
                               </div>
                             )}
+                            <div className="mt-1 space-y-0.5">
+                              {(evidence?.productBrand || evidence?.productFlavor) ? (
+                                <>
+                                  <WorkbookSourceCitation source={evidence?.productBrand} label="Product brand" unverified={productMatchUnverified} />
+                                  <WorkbookSourceCitation source={evidence?.productFlavor} label="Product flavor" unverified={productMatchUnverified} />
+                                </>
+                              ) : (
+                                <WorkbookSourceCitation source={evidence?.name} label="Product / mix name" unverified={productMatchUnverified} />
+                              )}
+                              <WorkbookSourceCitation source={evidence?.name} label="Mix name" />
+                              <WorkbookSourceCitation source={evidence?.batchSize} label="Batch total" />
+                              {m.daysEarly > 0 && (
+                                <WorkbookSourceCitation source={evidence?.daysEarly} label="Pull timing" />
+                              )}
+                              {m.notes && (
+                                <WorkbookSourceCitation source={evidence?.daysEarly} label="Workbook note" />
+                              )}
+                              {(evidence?.components ?? []).map((component, index) => (
+                                <div key={`${component.ingredient.cell}-${index}`} className="space-y-0.5">
+                                  <p className="text-[11px] text-foreground">
+                                    {component.ingredientName}: {component.perPizzaValue} lbs/pizza · {component.perBatchValue} lbs/batch
+                                  </p>
+                                  <WorkbookSourceCitation source={component.ingredient} label="Ingredient name" />
+                                  <WorkbookSourceCitation source={component.perPizza} label="Per-pizza amount" />
+                                  <WorkbookSourceCitation source={component.perBatch} label="Per-batch amount" />
+                                </div>
+                              ))}
+                            </div>
                             {(prepared?.existingMixes?.length ?? 0) > 0 && (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <label
@@ -657,6 +691,19 @@ export default function PremixImportDialog({
                         <span className="text-foreground">{p.ingredient}</span>
                         {p.perBatch > 0 && <> — {p.perBatch} lbs/batch</>}
                         {p.mixName && <> · from {p.mixName}</>}
+                        <div className="mt-0.5">
+                          {(() => {
+                            const source = prepared.sourceByPrepItem?.[
+                              `${p.mixName.trim().toLowerCase()}::${p.ingredient.trim().toLowerCase()}`
+                            ];
+                            return (
+                              <>
+                                <WorkbookSourceCitation source={source?.ingredient} label="Ingredient" />
+                                {p.perBatch > 0 && <WorkbookSourceCitation source={source?.perBatch} label="Per-batch amount" />}
+                              </>
+                            );
+                          })()}
+                        </div>
                         {p.alsoInMix && (
                           <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-700">
                             stays in mix — prep before use

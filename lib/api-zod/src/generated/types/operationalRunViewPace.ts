@@ -9,6 +9,7 @@ import type { OperationalRunViewPacePaceStatus } from './operationalRunViewPaceP
 
 export type OperationalRunViewPace = {
   ppm: number;
+  /** @nullable */
   paceStatus: OperationalRunViewPacePaceStatus;
   paceDelta: number;
   catchUpPpm: number | null;

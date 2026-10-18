@@ -1,22 +1,12 @@
 import { createHash } from "node:crypto";
+import {
+  SYNC_SNAPSHOT_ID_RE,
+  buildSyncDeltaData,
+  canonicalSyncJson,
+  isSyncRecord,
+} from "@workspace/sync-contract";
 
-export const SYNC_SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
-
-export function canonicalSyncValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalSyncValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => [key, canonicalSyncValue(child)]),
-    );
-  }
-  return value;
-}
-
-export function canonicalSyncJson(value: unknown): string {
-  return JSON.stringify(canonicalSyncValue(value));
-}
+export { SYNC_SNAPSHOT_ID_RE, canonicalSyncJson };
 
 /** Stable identity for a canonical sync document (object key order independent). */
 export function syncSnapshotId(data: unknown): string {
@@ -39,7 +29,35 @@ export function isPartialSyncPayload(payload: unknown): payload is Record<string
 export function isValidPartialSyncContract(payload: Record<string, unknown>): boolean {
   return payload.syncVersion === 1
     && typeof payload.baseSnapshotId === "string"
-    && SYNC_SNAPSHOT_ID_RE.test(payload.baseSnapshotId);
+    && SYNC_SNAPSHOT_ID_RE.test(payload.baseSnapshotId)
+    && (payload.resultingSnapshotId === undefined
+      || (typeof payload.resultingSnapshotId === "string"
+        && SYNC_SNAPSHOT_ID_RE.test(payload.resultingSnapshotId)));
+}
+
+/**
+ * Builds the version-one peer delta. `null` is intentional: it is the wire
+ * tombstone for both a removed top-level section and a removed keyed entry.
+ * The result is safe to apply only to `baseSnapshotId`; callers must fall
+ * back to a complete frame when that dependency is not available.
+ */
+export function buildSyncPeerDelta(previous: unknown, next: unknown): Record<string, unknown> | null {
+  if (!isSyncRecord(previous) || !isSyncRecord(next)) return null;
+  const baseSnapshotId = syncSnapshotId(previous);
+  const resultingSnapshotId = syncSnapshotId(next);
+  if (baseSnapshotId === resultingSnapshotId) return null;
+  const delta: Record<string, unknown> = {
+    syncVersion: 1,
+    completeness: "partial",
+    baseSnapshotId,
+    resultingSnapshotId,
+  };
+  Object.assign(delta, buildSyncDeltaData(previous, next));
+  return delta;
+}
+
+export function syncWireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value));
 }
 
 export type SyncWriteEnvelope<T> =
@@ -49,9 +67,14 @@ export type SyncWriteEnvelope<T> =
 
 export function buildSyncWriteEnvelope<T>(
   data: T,
-  options: { requestedSnapshotId?: unknown; partialFallback?: boolean },
+  options: {
+    requestedSnapshotId?: unknown;
+    partialFallback?: boolean;
+    snapshotIdOverride?: string;
+  },
 ): SyncWriteEnvelope<T> {
-  const snapshotId = data === null || data === undefined ? undefined : syncSnapshotId(data);
+  const snapshotId = options.snapshotIdOverride
+    ?? (data === null || data === undefined ? undefined : syncSnapshotId(data));
   if (!options.partialFallback && snapshotId && options.requestedSnapshotId === snapshotId) {
     return { ok: true, unchanged: true, snapshotId };
   }

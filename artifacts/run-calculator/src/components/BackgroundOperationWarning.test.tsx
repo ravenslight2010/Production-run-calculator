@@ -48,6 +48,11 @@ describe("BackgroundOperationWarning", () => {
           operation: "server-job-prune",
           lastFailureAt: "2026-09-15T12:30:00.000Z",
         }],
+        automaticTrackingBackoff: {
+          deferredDateCount: 0,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: null,
+        },
         windowMs: 300_000,
       },
     });
@@ -64,11 +69,42 @@ describe("BackgroundOperationWarning", () => {
   it("clears the warning when the shared diagnostics return no warnings", () => {
     mocks.hasCapability.mockReturnValue(true);
     mocks.useDiagnostics.mockReturnValue({
-      data: { warnings: [], windowMs: 300_000 },
+      data: {
+        warnings: [],
+        automaticTrackingBackoff: {
+          deferredDateCount: 0,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: null,
+        },
+        windowMs: 300_000,
+      },
     });
 
     render(<BackgroundOperationWarning />);
 
     expect(screen.queryByTestId("background-operation-warning")).toBeNull();
+  });
+
+  it("shows bounded automatic-tracking recovery without requiring a repeated-failure warning", () => {
+    mocks.hasCapability.mockReturnValue(true);
+    mocks.useDiagnostics.mockReturnValue({
+      data: {
+        warnings: [],
+        automaticTrackingBackoff: {
+          deferredDateCount: 100,
+          deferredDateCountCapped: true,
+          nextEligibleRetryAt: "2026-09-15T12:31:00.000Z",
+        },
+        windowMs: 300_000,
+      },
+    });
+
+    render(<BackgroundOperationWarning />);
+
+    expect(screen.getByTestId("automatic-tracking-backoff").textContent)
+      .toContain("100+ dates");
+    expect(screen.getByTestId("automatic-tracking-backoff")
+      .querySelector("time")?.getAttribute("datetime"))
+      .toBe("2026-09-15T12:31:00.000Z");
   });
 });

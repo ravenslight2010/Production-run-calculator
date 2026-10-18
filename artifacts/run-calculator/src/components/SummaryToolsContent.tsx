@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useId, useState } from "react";
 import { BarChart2, ChevronDown } from "lucide-react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "./OperationalReportPanel";
@@ -20,6 +20,8 @@ export default memo(function SummaryToolsContent() {
     isManager, history, dayState, currentRunId, form,
     setActiveTab, setManageCategory, setShowManageDialog,
   } = useHomeTabCtx();
+  const [reportDetailsOpen, setReportDetailsOpen] = useState(false);
+  const reportDisclosureId = useId();
 
   if (!isManager) return null;
 
@@ -56,15 +58,30 @@ export default memo(function SummaryToolsContent() {
                         setShowManageDialog(true);
                       }}
                     />
-                    <details className="group mt-3 rounded-xl border border-border/50 bg-card/40" data-testid="summary-report-details">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 select-none">
+                    <div className="mt-3 rounded-xl border border-border/50 bg-card/40" data-testid="summary-report-disclosure">
+                      <button
+                        id={`${reportDisclosureId}-toggle`}
+                        type="button"
+                        aria-expanded={reportDetailsOpen}
+                        aria-controls={`${reportDisclosureId}-panel`}
+                        data-testid="summary-report-toggle"
+                        className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-3 text-left select-none"
+                        onClick={() => setReportDetailsOpen((open) => !open)}
+                      >
                         <span className="flex items-center gap-2 text-sm font-semibold">
                           <BarChart2 className="h-4 w-4 text-muted-foreground" /> Reports and trends
                           <span className="text-xs font-normal text-muted-foreground">Generate or export a report</span>
                         </span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                      </summary>
-                      <div className="border-t border-border/40 p-3">
+                        <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${reportDetailsOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      <div
+                        id={`${reportDisclosureId}-panel`}
+                        role="region"
+                        aria-labelledby={`${reportDisclosureId}-toggle`}
+                        data-testid="summary-report-panel"
+                        hidden={!reportDetailsOpen}
+                        className="border-t border-border/40 p-3"
+                      >
                         <OperationalReportPanel
                           onOpenQuality={(range: OperationalReportDetailRange) => {
                             setActiveTab("quality");
@@ -104,7 +121,7 @@ export default memo(function SummaryToolsContent() {
                           }
                         />
                       </div>
-                    </details>
+                    </div>
                   </div>
   );
 });

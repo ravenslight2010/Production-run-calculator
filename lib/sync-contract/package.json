@@ -1,0 +1,16 @@
+{
+  "name": "@workspace/sync-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./stale-base-recovery": "./src/staleBaseRecovery.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "5.0.4"
+  }
+}

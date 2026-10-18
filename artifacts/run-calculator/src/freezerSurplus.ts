@@ -3,11 +3,26 @@ import {
   normalizePositiveCases,
   normalizeSurplusProduct,
   type FreezerSurplusAllocation,
+  type FreezerSurplusAdjustment,
   type FreezerSurplusLedger,
   type FreezerSurplusLot,
 } from "@workspace/freezer-pull";
 
-export type { FreezerSurplusAllocation, FreezerSurplusLedger, FreezerSurplusLot };
+export type {
+  FreezerSurplusAllocation,
+  FreezerSurplusAdjustment,
+  FreezerSurplusLedger,
+  FreezerSurplusLot,
+};
+
+export type FreezerSurplusAdjustmentInput = {
+  eventId: string;
+  eventType: FreezerSurplusAdjustment["eventType"];
+  cases: number;
+  reason: string;
+  runId?: string;
+  correctsEventId?: string;
+};
 
 export function getFreezerSurplusRemainingMs(input: {
   endedAt?: number | null;
@@ -147,4 +162,83 @@ export function replaceFreezerSurplusAllocation(input: {
       allocations: input.allocations,
     }),
   });
+}
+
+export async function fetchFreezerSurplusAdjustments(): Promise<FreezerSurplusAdjustment[]> {
+  const response = await fetch("/api/freezer-surplus/adjustments");
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    adjustments?: unknown;
+  } | null;
+  if (!response.ok) {
+    throw new Error(
+      typeof body?.error === "string" ? body.error : "Couldn't load finished-case adjustment history.",
+    );
+  }
+  if (!Array.isArray(body?.adjustments)) {
+    throw new Error("The finished-case adjustment history response was invalid.");
+  }
+  const adjustments = body.adjustments.filter((value): value is FreezerSurplusAdjustment => {
+    if (!value || typeof value !== "object") return false;
+    const event = value as Record<string, unknown>;
+    return (
+      typeof event.eventId === "string" &&
+      typeof event.lotId === "string" &&
+      (event.eventType === "damage" || event.eventType === "return" || event.eventType === "correction") &&
+      typeof event.cases === "number" &&
+      Number.isSafeInteger(event.cases) &&
+      typeof event.reason === "string" &&
+      typeof event.actorId === "string" &&
+      typeof event.createdAt === "string"
+    );
+  });
+  if (adjustments.length !== body.adjustments.length) {
+    throw new Error("The finished-case adjustment history contained an invalid event.");
+  }
+  return adjustments;
+}
+
+export async function recordFreezerSurplusAdjustment(
+  lotId: string,
+  input: FreezerSurplusAdjustmentInput,
+): Promise<{ ledger: FreezerSurplusLedger; adjustment: FreezerSurplusAdjustment }> {
+  const response = await fetch(`/api/freezer-surplus/lots/${encodeURIComponent(lotId)}/adjustments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    createdAdjustment?: unknown;
+    lots?: unknown;
+    allocations?: unknown;
+  } | null;
+  if (!response.ok) {
+    throw new Error(
+      typeof body?.error === "string" ? body.error : "The finished-case adjustment was not accepted.",
+    );
+  }
+  const event = body?.createdAdjustment;
+  if (!event || typeof event !== "object") {
+    throw new Error("The finished-case adjustment response was invalid.");
+  }
+  const parsedEvent = event as Record<string, unknown>;
+  if (
+    typeof parsedEvent.eventId !== "string" ||
+    typeof parsedEvent.lotId !== "string" ||
+    (parsedEvent.eventType !== "damage" &&
+      parsedEvent.eventType !== "return" &&
+      parsedEvent.eventType !== "correction") ||
+    typeof parsedEvent.cases !== "number" ||
+    !Number.isSafeInteger(parsedEvent.cases) ||
+    typeof parsedEvent.reason !== "string" ||
+    typeof parsedEvent.actorId !== "string" ||
+    typeof parsedEvent.createdAt !== "string"
+  ) {
+    throw new Error("The finished-case adjustment response was invalid.");
+  }
+  return {
+    ledger: parseFreezerSurplusLedger(body),
+    adjustment: parsedEvent as unknown as FreezerSurplusAdjustment,
+  };
 }

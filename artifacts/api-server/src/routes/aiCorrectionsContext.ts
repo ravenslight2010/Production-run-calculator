@@ -8,6 +8,11 @@ import {
   normalizeCorrections,
   type AiCorrection,
 } from "@workspace/ai-memory";
+import { safeAiErrorMetadata } from "../lib/aiDataBoundary";
+
+export const MAX_AI_CORRECTION_ROWS_LOADED = 500;
+export const MAX_AI_CORRECTION_CONTEXT_ENTRIES = 100;
+export const MAX_AI_CORRECTION_CONTEXT_BYTES = 32 * 1024;
 
 // Read side of the shared, factory-wide corrections memory. Loads the confirmed
 // "read fromText as toText" mappings (domain-tagged) so every name-resolving AI
@@ -25,14 +30,15 @@ export async function loadCorrections(log: ContextLogger): Promise<AiCorrection[
       .select()
       .from(aiCorrectionsTable)
       .where(eq(aiCorrectionsTable.scope, currentScope()))
-      .orderBy(desc(aiCorrectionsTable.updatedAt));
+      .orderBy(desc(aiCorrectionsTable.updatedAt))
+      .limit(MAX_AI_CORRECTION_ROWS_LOADED);
     return dropConflictingCorrections(
       normalizeCorrections(
         rows.map((r) => ({ domain: r.domain, fromText: r.fromText, toText: r.toText })),
       ),
     );
   } catch (err) {
-    log.error({ err }, "failed to load ai corrections for prompt");
+    log.error(safeAiErrorMetadata(err), "failed to load ai corrections for prompt");
     return [];
   }
 }
@@ -51,6 +57,11 @@ export function appendCorrectionsBlock(
     domains && domains.length > 0
       ? filterCorrectionsByDomain(corrections, domains)
       : corrections;
-  const block = buildCorrectionsBlock(relevant);
+  const bounded = relevant.slice(0, MAX_AI_CORRECTION_CONTEXT_ENTRIES);
+  let block = buildCorrectionsBlock(bounded, { limit: bounded.length });
+  while (bounded.length > 0 && Buffer.byteLength(block, "utf8") > MAX_AI_CORRECTION_CONTEXT_BYTES) {
+    bounded.pop();
+    block = buildCorrectionsBlock(bounded, { limit: bounded.length });
+  }
   return block ? `${userPrompt}\n\n${block}` : userPrompt;
 }

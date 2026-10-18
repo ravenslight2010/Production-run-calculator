@@ -1,10 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, sauceRecipesTable, type SauceRecipeRow } from "@workspace/db";
 import { SaveSauceRecipesBody, DeleteSauceRecipesBody } from "@workspace/api-zod";
 import { normalizeNamedRecipe, type NamedRecipe } from "@workspace/named-recipes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
 
@@ -18,6 +21,21 @@ import { broadcastMasterDataChanged } from "./sync";
 // Gated on "manage-inventory" since this is warehouse/inventory master-data.
 
 const MAX_BATCH = 500;
+const SAUCE_RECIPE_AUDIT_FIELDS = [
+  "name",
+  "notes",
+  "components",
+  "enabled",
+  "brand",
+  "flavors",
+] as const;
+
+function requestCorrelationId(req: Request): string {
+  const candidate = (req as Request & { correlationId?: unknown }).correlationId;
+  return typeof candidate === "string" && candidate.length > 0 && candidate.length <= 128
+    ? candidate
+    : randomUUID();
+}
 
 class RecipeRevisionConflict extends Error {
   constructor(readonly rejectedIds: string[]) {
@@ -62,6 +80,13 @@ function toDbValues(item: NamedRecipe) {
     flavors: item.flavors ?? [],
     updatedAt: new Date(),
   };
+}
+
+function changedRecipeFields(next: NamedRecipe, existing: SauceRecipeRow): string[] {
+  const previous = toApiItem(existing);
+  return SAUCE_RECIPE_AUDIT_FIELDS.filter(
+    (field) => !isDeepStrictEqual(next[field], previous[field]),
+  );
 }
 
 function nextRevision(previous?: Date): Date {
@@ -111,6 +136,7 @@ router.post(
       // commit some rows and drop the rest (clients rename in batches and
       // re-point local references only after this endpoint succeeds — a
       // partial commit would strand references to half-renamed names).
+      const correlationId = requestCorrelationId(req);
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtext(${"sauce-recipes:" + currentScope()}))`,
@@ -141,6 +167,9 @@ router.post(
           const existing = existingById.get(recipe.id);
           const values = toDbValues(recipe);
           values.updatedAt = nextRevision(existing?.updatedAt);
+          const fieldNames = existing
+            ? changedRecipeFields(recipe, existing)
+            : [...SAUCE_RECIPE_AUDIT_FIELDS];
           if (
             existing &&
             recipe.updatedAt &&
@@ -164,6 +193,13 @@ router.post(
                 updatedAt: values.updatedAt,
               },
             });
+          if (!existing || fieldNames.length > 0) {
+            await writeAuditEvent(tx, {
+              action: existing ? "sauce_recipe_updated" : "sauce_recipe_created",
+              resource: `sauce_recipe:${recipe.id}`,
+              changes: { fieldNames, correlationId },
+            });
+          }
         }
       });
       invalidateMasterDataBootstrapCache();
@@ -202,14 +238,28 @@ router.delete(
 
     try {
       if (ids.length > 0) {
-        await db
-          .delete(sauceRecipesTable)
-          .where(
-            and(
-              inArray(sauceRecipesTable.id, ids),
-              eq(sauceRecipesTable.scope, currentScope()),
-            ),
-          );
+        const correlationId = requestCorrelationId(req);
+        await db.transaction(async (tx) => {
+          const deletedRows = await tx
+            .delete(sauceRecipesTable)
+            .where(
+              and(
+                inArray(sauceRecipesTable.id, ids),
+                eq(sauceRecipesTable.scope, currentScope()),
+              ),
+            )
+            .returning({ id: sauceRecipesTable.id });
+          for (const row of deletedRows) {
+            await writeAuditEvent(tx, {
+              action: "sauce_recipe_deleted",
+              resource: `sauce_recipe:${row.id}`,
+              changes: {
+                fieldNames: [...SAUCE_RECIPE_AUDIT_FIELDS],
+                correlationId,
+              },
+            });
+          }
+        });
       }
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");

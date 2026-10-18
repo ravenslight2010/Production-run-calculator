@@ -51,9 +51,10 @@ export function loadRunValues(id: string): FormValues {
     ? normalize({ ...DEFAULT_VALUES, ...parsed } as Record<string, unknown>, parsed)
     : DEFAULT_VALUES;
 }
-export function saveRunValues(id: string, values: FormValues): void {
-  browserRecordStore.record(RUN_KEY(id), () => values, { decode: () => null }).write(values);
+export function saveRunValues(id: string, values: FormValues): boolean {
+  const written = browserRecordStore.record(RUN_KEY(id), () => values, { decode: () => null }).write(values);
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(WRITE_EVENT, { detail: { id } }));
+  return written;
 }
 export function subscribeRunValuesWrites(listener: (id: string) => void): () => void {
   if (typeof window === "undefined") return () => {};

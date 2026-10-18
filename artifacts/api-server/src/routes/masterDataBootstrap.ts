@@ -18,7 +18,10 @@ const router = Router();
 // process-local cache. Disable only that test-mode cache so fixture inserts
 // are visible to the real bootstrap request; production retains the short
 // transport-saving TTL.
-const CACHE_TTL_MS = process.env.E2E_TEST_DB === "1" ? 0 : 5_000;
+const CACHE_TTL_MS =
+  process.env.E2E_TEST_DB === "1" && !process.env.VITEST_WORKER_ID
+    ? 0
+    : 5_000;
 const cache = new Map<
   string,
   {

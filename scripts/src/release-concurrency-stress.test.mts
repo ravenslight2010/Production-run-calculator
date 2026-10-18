@@ -25,10 +25,17 @@ import {
 } from "./release-concurrency-stress.mts";
 import {
   apiIntegrationTestShardInventoryErrors,
+  apiSyncReleaseShardInventoryErrors,
   API_RELEASE_INTEGRATION_SCRIPT_NAMES,
+  API_RELEASE_SYNC_SHARD_SCRIPT_NAMES,
+  API_RELEASE_SYNC_SSE_SCRIPT_NAME,
+  API_INTEGRATION_SHARD_TIMEOUT_MS,
+  API_INTEGRATION_SHARD_WARNING_MS,
   API_SHARD_TIMEOUT_MS,
+  API_SHARD_WARNING_MS,
   assertApiIntegrationTestShardInventory,
   RELEASE_CHECK_API_SHARD_STEPS,
+  RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP,
   releaseGateLabelsForMode,
 } from "./release-check.mts";
 
@@ -275,6 +282,45 @@ async function run(): Promise<void> {
     [],
     "every API integration test file must belong to exactly one logical release shard",
   );
+  const duplicateIntegrationShardIndexes = {
+    ...apiPackageJson.scripts,
+    [API_RELEASE_INTEGRATION_SCRIPT_NAMES.general[5]]:
+      apiPackageJson.scripts?.[
+        API_RELEASE_INTEGRATION_SCRIPT_NAMES.general[5]
+      ]?.replace("--shard=6/6", "--shard=1/6"),
+  };
+  assert.match(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      duplicateIntegrationShardIndexes,
+    ).join("\n"),
+    /each Vitest shard position exactly once/,
+    "integration shard commands must cover every Vitest shard position exactly once",
+  );
+  const syncTestSource = await readFile(
+    resolve(rootDir, "artifacts/api-server/src/routes/sync.integration.test.ts"),
+    "utf8",
+  );
+  assert.deepEqual(
+    apiSyncReleaseShardInventoryErrors(
+      syncTestSource,
+      apiPackageJson.scripts ?? {},
+    ),
+    [],
+    "every non-SSE sync test group must belong to exactly one bounded sync shard",
+  );
+  const duplicateSyncShardScripts = {
+    ...apiPackageJson.scripts,
+    "test:release:sync:3": apiPackageJson.scripts?.["test:release:sync:1"],
+  };
+  assert.match(
+    apiSyncReleaseShardInventoryErrors(
+      syncTestSource,
+      duplicateSyncShardScripts,
+    ).join("\n"),
+    /completed-run inventory corrections from sync writes/,
+    "overlapping sync shard assignments must identify the affected test group",
+  );
 
   const duplicateFixtureScripts = {
     ...apiPackageJson.scripts,
@@ -308,9 +354,66 @@ async function run(): Promise<void> {
     "missing assignments must report the affected integration test path",
   );
 
-  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 7);
+  const missingSyncConvergenceFixtureScripts = {
+    ...apiPackageJson.scripts,
+    [API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated.syncConvergence[0]]:
+      "bash ../../scripts/src/run-isolated-sync-convergence.sh",
+  };
+  assert.match(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      missingSyncConvergenceFixtureScripts,
+    ).join("\n"),
+    /src\/routes\/sync\.convergence\.integration\.test\.ts/,
+    "the isolated convergence test must be named by its dedicated release script",
+  );
+
+  assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 12);
+  const nonSseSyncReleaseSteps = RELEASE_CHECK_API_SHARD_STEPS.filter((step) =>
+    step.label.startsWith("API sync tests"),
+  );
+  assert.deepEqual(
+    nonSseSyncReleaseSteps.map((step) => step.args.at(-1)),
+    API_RELEASE_SYNC_SHARD_SCRIPT_NAMES,
+    "the release gate must execute every non-SSE sync shard exactly once",
+  );
+  const syncSseReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find((step) =>
+    step.label.startsWith("API sync SSE tests"),
+  );
+  assert.equal(
+    syncSseReleaseStep?.args.at(-1),
+    API_RELEASE_SYNC_SSE_SCRIPT_NAME,
+    "SSE coverage must remain in its separate release step",
+  );
   const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
   const fullReleaseGateInventory = releaseGateLabelsForMode("full");
+  assert.equal(
+    RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.args.at(-1),
+    API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated.syncConvergence[0],
+    "the isolated convergence release lane must invoke its dedicated API test script",
+  );
+  assert.equal(
+    RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.group,
+    "api-test-shards",
+    "the isolated convergence lane must share the bounded API test concurrency limit",
+  );
+  assert.equal(
+    RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.timeoutMs,
+    API_SHARD_TIMEOUT_MS,
+    "the isolated convergence lane must use the bounded API shard timeout",
+  );
+  assert.ok(
+    standardReleaseGateInventory.includes(
+      RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.label,
+    ),
+    "the standard release must run isolated API sync convergence",
+  );
+  assert.ok(
+    fullReleaseGateInventory.includes(
+      RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.label,
+    ),
+    "the full release must run isolated API sync convergence",
+  );
   assert.ok(
     standardReleaseGateInventory.includes("browser calendar tests"),
     "the standard release must retain the isolated desktop-and-phone calendar gate",
@@ -319,13 +422,30 @@ async function run(): Promise<void> {
     fullReleaseGateInventory.includes("browser calendar tests"),
     "the full release must retain the standard isolated calendar gate",
   );
+  const generalIntegrationSteps = RELEASE_CHECK_API_SHARD_STEPS.filter(
+    (step) => step.label.startsWith("API integration tests"),
+  );
+  assert.equal(generalIntegrationSteps.length, 6);
   assert.ok(
-    RELEASE_CHECK_API_SHARD_STEPS.every(
+    generalIntegrationSteps.every(
       (step) =>
         step.group === "api-test-shards" &&
-        step.timeoutMs === API_SHARD_TIMEOUT_MS,
+        step.timeoutMs === API_INTEGRATION_SHARD_TIMEOUT_MS &&
+        step.warningMs === API_INTEGRATION_SHARD_WARNING_MS,
     ),
-    "the disposable lane must reuse the exact bounded API release shard definitions",
+    "general integration shards must use their longer bounded timeout",
+  );
+  const remainingApiSteps = RELEASE_CHECK_API_SHARD_STEPS.filter(
+    (step) => !generalIntegrationSteps.includes(step),
+  );
+  assert.ok(
+    remainingApiSteps.every(
+      (step) =>
+        step.group === "api-test-shards" &&
+        step.timeoutMs === API_SHARD_TIMEOUT_MS &&
+        step.warningMs === API_SHARD_WARNING_MS,
+    ),
+    "unit, role, and sync shards must keep the shorter API timeout",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").every(

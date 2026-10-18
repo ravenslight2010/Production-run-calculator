@@ -16,7 +16,37 @@ import { loadRunValues } from "../storage";
 import { withTempOverrides, DEFAULT_VALUES, type RunMeta } from "../types";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import { Factory, ArrowRight, Droplets, Layers, Clock, AlertTriangle, BarChart2, Warehouse } from "lucide-react";
+import type { ScreenSyncStatus } from "../screenSyncState";
 
+function ScreenSyncIndicator({ status }: { status: ScreenSyncStatus }) {
+  const label = status === "live"
+    ? "Live sync"
+    : status === "reconnecting"
+      ? "Reconnecting"
+      : "Stale data";
+  const description = status === "live"
+    ? "Live sync connected; the canonical production state is current."
+    : status === "reconnecting"
+      ? "Reconnecting and adopting the latest canonical production state."
+      : "The display may be out of date. Waiting for an authorized sync connection.";
+  const color = status === "live"
+    ? "text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
+    : status === "reconnecting"
+      ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
+      : "text-red-400 border-red-500/40 bg-red-500/10";
+  return (
+    <span
+      className={`rounded-full border px-2.5 py-1 text-xs sm:text-sm font-semibold whitespace-nowrap ${color}`}
+      role="status"
+      aria-label={label}
+      title={description}
+      data-testid="screen-sync-status"
+      data-status={status}
+    >
+      {label}
+    </span>
+  );
+}
 
 export default function ScreenModeView() {
   const {
@@ -33,6 +63,7 @@ export default function ScreenModeView() {
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
+    screenSyncStatus,
   } = useLiveRun();
 
   if (screenMode === "dashboard") {
@@ -41,7 +72,7 @@ export default function ScreenModeView() {
     const dashDowntimeSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
     const dashMinutesDelta = calc.ppm > 0 && calc.paceDelta !== 0 ? Math.round(Math.abs(calc.paceDelta) * v.pizzasPerCase / calc.ppm) : 0;
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-6 gap-6 select-none overflow-x-hidden">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-6 gap-5 sm:gap-6 select-none">
         {/* Top bar */}
         <div className="responsive-row flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -50,7 +81,10 @@ export default function ScreenModeView() {
             </div>
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Production Dashboard</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Run name + status */}
@@ -67,13 +101,13 @@ export default function ScreenModeView() {
           {/* PPM */}
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Pizzas / Min</p>
-            <p className="text-8xl font-black tabular-nums text-primary">{calc.ppm > 0 ? fmtComma(calc.ppm) : "—"}</p>
+            <p className="screen-mode-number font-black tabular-nums text-primary">{calc.ppm > 0 ? fmtComma(calc.ppm) : "—"}</p>
           </div>
 
           {/* Cases progress */}
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cases Done</p>
-            <p className="text-7xl font-black tabular-nums">
+            <p className="screen-mode-number font-black tabular-nums">
               {fmtComma(calc.casesCompleted)}
               <span className="text-3xl text-muted-foreground"> / {fmtComma(v.casesNeeded)}</span>
             </p>
@@ -101,7 +135,7 @@ export default function ScreenModeView() {
           {/* Pace + time */}
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Pace</p>
-            <p className={`text-6xl font-black ${paceColor}`}>{paceLabel}</p>
+            <p className={`screen-mode-number ${paceColor} font-black`}>{paceLabel}</p>
             {calc.paceDelta !== 0 && (
               <p className="text-2xl font-bold text-muted-foreground">
                 {calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))} cases
@@ -143,25 +177,37 @@ export default function ScreenModeView() {
     const mm = Math.floor(secUntilNextBatch / 60);
     const ss = Math.floor(secUntilNextBatch % 60);
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-8 gap-5 sm:gap-8 select-none">
         {/* Top bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Droplets className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Dough Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
 
         {/* Big countdown */}
-        {runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
+        {runStatus === "running" && autoTrackProgress && doughSubTab !== "crusts" ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border border-emerald-600/40 bg-emerald-950/20 p-12">
+            <p className="text-lg font-bold uppercase tracking-widest text-emerald-400">
+              Automatic Dough Tracking Active
+            </p>
+            <p className="max-w-2xl text-center text-2xl font-semibold text-muted-foreground">
+              Batch progress updates automatically at the current line pace.
+            </p>
+          </div>
+        ) : runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
           <div className={`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`}>
             <p className={`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`}>
               {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
             </p>
-            <p className={`text-[10rem] font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`}>
+            <p className={`screen-mode-countdown font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`}>
               {batchDue ? "GO" : `${fmtCountdownParts(mm, ss)}`}
             </p>
             <div className="flex items-center gap-8 text-center mt-4">
@@ -201,7 +247,7 @@ export default function ScreenModeView() {
         )}
 
         {/* Dough stats row */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="responsive-metric-grid">
           <div className="rounded-2xl bg-card border border-border p-4 text-center">
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{doughSubTab === "crusts" ? "Stacks Ready" : "Trays on Line"}</p>
             <p className="text-3xl font-black tabular-nums">{v.traysOnLine > 0 ? v.traysOnLine : "—"}</p>
@@ -257,14 +303,17 @@ export default function ScreenModeView() {
     if ((v.app2CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 2 Cheese Recipe`, rows: v.app2CheeseRecipe.filter((r: any) => r.ingredient && Number(r.lbs) > 0).map((r: any) => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
 
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-8 gap-5 sm:gap-6 select-none">
         {/* Top bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Layers className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Frontline Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Run name + status */}
@@ -306,7 +355,7 @@ export default function ScreenModeView() {
             </div>
           </div>
         ) : items.length > 0 ? (
-          <div className="grid grid-cols-2 gap-4 flex-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
             {items.map((item: any, i: any) => (
               <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
                 <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{item.label}</p>
@@ -338,7 +387,7 @@ export default function ScreenModeView() {
 
         {/* Time remaining footer */}
         {(runStatus === "running" || runStatus === "paused") && calc.adjustedTimeSec > 0 && (
-          <div className="flex items-center gap-8 px-6 py-4 rounded-2xl bg-muted/20 border border-border/50 text-muted-foreground">
+          <div className="responsive-row flex items-center gap-6 sm:gap-8 px-4 sm:px-6 py-4 rounded-2xl bg-muted/20 border border-border/50 text-muted-foreground">
             <div><p className="text-xs uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
             <div><p className="text-xs uppercase tracking-wider">Time Left</p><p className="text-3xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p></div>
             {calc.ppm > 0 && <div><p className="text-xs uppercase tracking-wider">PPM</p><p className="text-3xl font-black tabular-nums">{fmtComma(calc.ppm)}</p></div>}
@@ -360,14 +409,17 @@ export default function ScreenModeView() {
     const upcomingRuns = dayState.runs.filter((_: any, i: any) => i > dayState.currentIndex);
 
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-8 gap-5 sm:gap-6 select-none">
         {/* Top bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Clock className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Backline Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Current run block */}
@@ -389,7 +441,7 @@ export default function ScreenModeView() {
           {(runStatus === "running" || runStatus === "paused") && v.casesNeeded > 0 && (
             <div className="flex flex-col gap-3">
               <div className="flex items-end gap-4">
-                <p className="text-6xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
+                <p className="screen-mode-number font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
                 <p className="text-3xl text-muted-foreground font-bold mb-1">/ {fmtComma(v.casesNeeded)} cases</p>
                 {calc.casesInFreezer > 0 && (
                   <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in Freeze tunnel</p>
@@ -425,7 +477,7 @@ export default function ScreenModeView() {
               </p>
               {freezerDraining && (
                 <>
-                  <p className="text-[8rem] font-black tabular-nums leading-none text-amber-400">
+                  <p className="screen-mode-countdown font-black tabular-nums leading-none text-amber-400">
                     {fmtCountdownParts(fmm, fss)}
                   </p>
                   <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
@@ -489,14 +541,17 @@ export default function ScreenModeView() {
     const summary = computeSummaryStats(v);
     const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-8 gap-5 sm:gap-8 select-none">
         {/* Top bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Droplets className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Sauce Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         {/* Run name + status */}
@@ -524,7 +579,7 @@ export default function ScreenModeView() {
         ) : calc.sauceBatches > 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border border-border bg-card p-12">
             <p className="text-lg font-bold uppercase tracking-widest text-muted-foreground">Sauce Needed</p>
-            <p className="text-[10rem] font-black tabular-nums leading-none text-primary">{fmtNum(calc.sauceBatches, 2)}</p>
+            <p className="screen-mode-countdown font-black tabular-nums leading-none text-primary">{fmtNum(calc.sauceBatches, 2)}</p>
             <p className="text-3xl font-bold text-muted-foreground">batches</p>
             {bd && (
               <div className="flex items-center gap-8 text-center mt-4">
@@ -557,14 +612,17 @@ export default function ScreenModeView() {
     ];
     const warehouseGroups = groupWarehouseNeedRows(warehouseRows);
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-8 gap-5 sm:gap-6 select-none">
         {/* Top bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Warehouse className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Warehouse</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
 
         <h1 className="text-4xl font-black">Warehouse Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
@@ -575,7 +633,7 @@ export default function ScreenModeView() {
             {warehouseGroups.map((group) => (
               <section key={group.area}>
                 <h2 className="mb-3 text-lg font-bold uppercase tracking-widest text-muted-foreground">{group.area}</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div className="responsive-metric-grid">
                   {group.rows.map((row, i) => (
                     <div key={`${group.area}-${i}`} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
                       <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground truncate">{row.label}</p>
@@ -621,15 +679,18 @@ export default function ScreenModeView() {
       0,
     );
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+      <div className="screen-mode-surface min-h-screen bg-background text-foreground flex flex-col p-4 sm:p-8 gap-5 sm:gap-6 select-none">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <BarChart2 className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Shift Summary</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ScreenSyncIndicator status={screenSyncStatus} />
+            <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-4 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
           {dayState.runs.map((run: any, i: any) => {
             const vals = runValuesById.get(run.id) ?? DEFAULT_VALUES;
             const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);

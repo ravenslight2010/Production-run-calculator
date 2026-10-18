@@ -153,6 +153,19 @@ export function checkEvaluationReportRetention(
       )
       .map((filePath) => path.relative(sourceDirectory, filePath)),
   );
+  const sourceCounts = new Map<string, number>();
+  for (const entry of [...reporters, ...nonReporters]) {
+    if (!entry || typeof entry.source !== "string") continue;
+    sourceCounts.set(entry.source, (sourceCounts.get(entry.source) ?? 0) + 1);
+  }
+  for (const [source, count] of sourceCounts) {
+    if (count > 1) {
+      failures.push({
+        file: "evaluation-reporters.json",
+        reason: `source ${source} is classified more than once`,
+      });
+    }
+  }
   const registeredSources = new Set(reporters.map((reporter) => reporter.source));
   const excludedSources = new Set(nonReporters.map((entry) => entry.source));
   const privacyTests = new Set<string>();

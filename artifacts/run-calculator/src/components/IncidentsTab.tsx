@@ -27,6 +27,16 @@ import {
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
+import {
+  fieldCheckDiagnosticLabel,
+  getFieldCheckQueueStatus,
+  FIELD_CHECK_QUEUE_EVENT,
+  productionRunSaveFailureLabel,
+  type FieldCheckQueueStatus,
+} from "../fieldChecks";
+import { FieldEvidenceFilters } from "./FieldEvidenceFilters";
+import { downloadFieldCheckExport } from "../fieldCheckExport";
+import type { GetFieldChecksParams } from "../inventoryShared";
 import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
@@ -260,18 +270,59 @@ const FIELD_STATUS_CLASS: Record<FieldCheckSummary["status"], string> = {
   unsupported: "bg-muted text-muted-foreground",
 };
 
+const FIELD_COVERAGE_LABEL: Record<FieldCheckSummary["coverage"], string> = {
+  "never-observed": "Never observed",
+  current: "Current success",
+  stale: "Stale last success",
+  "no-success": "Observed, no success",
+};
+
+function queueAgeLabel(ageMs: number): string {
+  if (ageMs < 60_000) return "under 1 minute";
+  if (ageMs < 60 * 60_000) return `${Math.floor(ageMs / 60_000)} minutes`;
+  if (ageMs < 24 * 60 * 60_000) return `${Math.floor(ageMs / (60 * 60_000))} hours`;
+  return `${Math.floor(ageMs / (24 * 60 * 60_000))} days`;
+}
+
 function FieldChecksPanel({
   report,
   isLoading,
   error,
   canConfirmHardware,
+  canDownload,
+  filters,
+  onApplyFilters,
 }: {
   report: Awaited<ReturnType<typeof fetchFieldChecks>> | undefined;
   isLoading: boolean;
   error: unknown;
   canConfirmHardware: boolean;
+  canDownload: boolean;
+  filters: GetFieldChecksParams;
+  onApplyFilters: (filters: GetFieldChecksParams) => void;
 }) {
   const queryClient = useQueryClient();
+  const [downloadError, setDownloadError] = useState(false);
+  const [localQueue, setLocalQueue] = useState<FieldCheckQueueStatus>(() => getFieldCheckQueueStatus());
+  useEffect(() => {
+    const refreshLocalQueue = () => setLocalQueue(getFieldCheckQueueStatus());
+    window.addEventListener(FIELD_CHECK_QUEUE_EVENT, refreshLocalQueue);
+    const interval = window.setInterval(refreshLocalQueue, 30_000);
+    refreshLocalQueue();
+    return () => {
+      window.removeEventListener(FIELD_CHECK_QUEUE_EVENT, refreshLocalQueue);
+      window.clearInterval(interval);
+    };
+  }, []);
+  function downloadReport() {
+    if (!canDownload || !report || isLoading || error) return;
+    setDownloadError(false);
+    try {
+      downloadFieldCheckExport(report);
+    } catch {
+      setDownloadError(true);
+    }
+  }
   const [deviceCategory, setDeviceCategory] = useState<"android-phone" | "android-tablet" | "ipad" | "iphone">("android-phone");
   const confirmation = useMutation({
     mutationFn: (input: {
@@ -308,10 +359,35 @@ function FieldChecksPanel({
         </div>
         {report && (
           <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${FIELD_STATUS_CLASS[report.overallStatus]}`}>
-            {FIELD_STATUS_LABEL[report.overallStatus]}
+            Overall health: {FIELD_STATUS_LABEL[report.overallStatus]}
           </span>
         )}
       </div>
+      <p className="text-xs text-muted-foreground" aria-label="This browser's local field-check delivery queue">
+        This browser only: {localQueue.available
+          ? `${localQueue.count} observation${localQueue.count === 1 ? "" : "s"} retained locally · ${localQueue.retryableCount} eligible for delivery${localQueue.expiredCount > 0
+            ? ` · ${localQueue.expiredCount} expired, still unconfirmed, and not retried`
+            : ""}${localQueue.displacedCount > 0
+            ? ` · ${localQueue.displacedCount} earlier observation${localQueue.displacedCount === 1 ? "" : "s"} displaced by the browser queue limit; delivery is unconfirmed`
+            : ""}${localQueue.oldestAgeMs === null ? "" : ` · oldest ${queueAgeLabel(localQueue.oldestAgeMs)}`}. This is not a facility-wide delivery status.`
+          : "queue status unavailable; delivery is unconfirmed."}
+      </p>
+      <FieldEvidenceFilters filters={filters} onApply={onApplyFilters} />
+      {canDownload && (
+        <div className="space-y-1">
+          <button type="button" onClick={downloadReport}
+            disabled={!report || isLoading || !!error}
+            className="min-h-11 rounded-md border border-border px-3 text-sm disabled:opacity-50">
+            Download safe field-check report
+          </button>
+          <p className="text-xs text-muted-foreground">
+            JSON for the displayed population with bounded diagnostic details only. Advisory, not release or physical-device verification.
+          </p>
+          {downloadError && <p role="alert" className="text-sm text-red-400">
+            Couldn’t download the report. Observations are unchanged. Try again.
+          </p>}
+        </div>
+      )}
       {isLoading ? (
         <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground" role="status">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading field evidence…
@@ -360,7 +436,7 @@ function FieldChecksPanel({
                 <div key={check.name} className="rounded-md border border-border bg-background/50 p-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-foreground">
-                      {check.label}: {check.status === "healthy" ? "Confirmed" : FIELD_STATUS_LABEL[check.status]}
+                       {check.label}: Health {FIELD_STATUS_LABEL[check.status]} · Coverage {FIELD_COVERAGE_LABEL[check.coverage]}
                     </span>
                     {canConfirmHardware && (
                       <div className="flex gap-1">
@@ -385,6 +461,7 @@ function FieldChecksPanel({
                       </div>
                     )}
                   </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{check.evidence}</p>
                   {check.lastObservedAt && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       Last recorded {timeAgo(check.lastObservedAt)}
@@ -404,14 +481,23 @@ function FieldChecksPanel({
               </p>
               {actionable.flatMap((check) =>
                 check.recentFailures.slice(0, 3).map((failure, index) => (
-                  <div key={`${check.name}-${failure.observedAt}-${index}`} className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
+                  <div key={`${check.name}-${failure.observedAt}-${index}`} className="break-words rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-semibold text-foreground">{check.label}</span>
                       <span className="text-muted-foreground">{timeAgo(failure.observedAt)}</span>
                     </div>
                     <p className="mt-1 text-muted-foreground">
                       {failure.outcome === "incomplete" ? "Repeatedly incomplete" : "Failed"} · build {failure.appBuild} · {failure.deviceCategory}
+                      {check.name === "production-run-save-sync" && productionRunSaveFailureLabel(failure.metrics.failureCode)
+                        ? ` · ${productionRunSaveFailureLabel(failure.metrics.failureCode)}`
+                        : ""}
                     </p>
+                    {fieldCheckDiagnosticLabel(check.name, failure.metrics) && (
+                      <p className="mt-1 text-muted-foreground">{fieldCheckDiagnosticLabel(check.name, failure.metrics)}</p>
+                    )}
+                    {failure.appBuild === "local" && (
+                      <p className="text-muted-foreground">Unidentified local build; not release verification evidence.</p>
+                    )}
                     <p className="text-muted-foreground">
                       {check.observedBy === "browser" ? "Browser-observed" : "Guided hardware"} evidence only; measurements are bounded and contain no production payload.
                     </p>
@@ -432,16 +518,39 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium text-foreground">{check.label}</p>
         <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FIELD_STATUS_CLASS[check.status]}`}>
-          {FIELD_STATUS_LABEL[check.status]}
+          Health: {FIELD_STATUS_LABEL[check.status]}
         </span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">{check.evidence}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">
+        Evidence coverage: {FIELD_COVERAGE_LABEL[check.coverage]}
+      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Failures: {check.failureCount} · Incomplete: {check.incompleteCount} · {check.issueStatus === "recovered" ? "Recovered" : check.issueStatus === "open" ? "Open" : "No issue recorded"}
+      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Server receipt delay estimate: {check.lastReceiptDelayMs === null
+          ? "Unknown/unconfirmed"
+          : `${queueAgeLabel(check.lastReceiptDelayMs)} after the browser timestamp (clock differences may affect this estimate)`}
+      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
         Last success: {check.lastSuccessfulAt ? timeAgo(check.lastSuccessfulAt) : "Not yet"}
+        {typeof check.lastSuccessfulMetrics?.durationMs === "number"
+          ? ` · ${Math.round(check.lastSuccessfulMetrics.durationMs)} ms`
+          : ""}
       </p>
       {check.recentFailures.length > 0 && (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Recent failures: {check.recentFailures.length} · latest {timeAgo(check.recentFailures[0].observedAt)} · {check.recentFailures[0].deviceCategory}
+          Recent non-successes: {check.recentFailures.length} · latest {check.recentFailures[0].outcome} · {timeAgo(check.recentFailures[0].observedAt)} · {check.recentFailures[0].deviceCategory}
+          {typeof check.recentFailures[0].metrics.durationMs === "number"
+            ? ` · ${Math.round(check.recentFailures[0].metrics.durationMs)} ms`
+            : ""}
+          {check.name === "production-run-save-sync" &&
+          productionRunSaveFailureLabel(check.recentFailures[0].metrics.failureCode)
+            ? ` · ${productionRunSaveFailureLabel(check.recentFailures[0].metrics.failureCode)}`
+            : ""}
+          {fieldCheckDiagnosticLabel(check.name, check.recentFailures[0].metrics)
+            ? ` · ${fieldCheckDiagnosticLabel(check.name, check.recentFailures[0].metrics)}` : ""}
         </p>
       )}
       {check.status === "needs-review" && (
@@ -477,14 +586,15 @@ export default function IncidentsTab() {
   const [platform, setPlatform] = useState<PlatformFilter>("all");
   const [source, setSource] = useState<SourceFilter>("all");
   const [workflowState, setWorkflowState] = useState<WorkflowFilter>("all");
+  const [fieldFilters, setFieldFilters] = useState<GetFieldChecksParams>({});
   const [selectedIncidentId] = useState(() => {
     const match = window.location.hash.match(/^#incidents\/(.+)$/);
     return match ? decodeURIComponent(match[1]) : null;
   });
   const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
   const { data: fieldChecks, isLoading: fieldChecksLoading, error: fieldChecksError } = useQuery({
-    queryKey: ["fieldChecks"],
-    queryFn: fetchFieldChecks,
+    queryKey: ["fieldChecks", fieldFilters],
+    queryFn: () => fetchFieldChecks(fieldFilters),
     enabled: canReview,
     refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
@@ -525,9 +635,9 @@ export default function IncidentsTab() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
           <LifeBuoy className="w-5 h-5 text-primary" /> Reported issues
-        </CardTitle>
+        </h1>
       </CardHeader>
       <CardContent className="space-y-3">
         <FieldChecksPanel
@@ -535,6 +645,9 @@ export default function IncidentsTab() {
           isLoading={fieldChecksLoading}
           error={fieldChecksError}
           canConfirmHardware={canConfirmHardware}
+          canDownload={canReview}
+          filters={fieldFilters}
+          onApplyFilters={setFieldFilters}
         />
         {hasIncidents && <IncidentPatternsPanel disabled={isLoading} />}
         <section aria-labelledby="incident-list-heading" className="space-y-3">

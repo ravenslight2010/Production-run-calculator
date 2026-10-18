@@ -4,7 +4,7 @@
 // exhausted retry surfaces as reason "rate-limited" so routes can return a
 // friendly HTTP 429 instead of a generic 502. Non-429 provider throws must
 // still fail fast with NO retry (each of those attempts is a paid call).
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import {
   fetchModelJsonWithRetry,
   setAiRateLimitBackoffMsForTests,
@@ -32,6 +32,31 @@ function rateLimit429(): Error & { status: number } {
 }
 
 describe("429 rate-limit retry", () => {
+  it("logs only bounded provider metadata, never provider messages or payloads", async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const secret = "Bearer should-never-be-logged";
+    await fetchModelJsonWithRetry({
+      label: "test",
+      log,
+      call: async () => {
+        throw Object.assign(new Error(secret), { status: 500, response: { body: secret } });
+      },
+    });
+    expect(JSON.stringify(log.error.mock.calls)).not.toContain(secret);
+    expect(log.error).toHaveBeenCalledWith(
+      { status: 500, errorType: "Error", attempt: 1 },
+      "test call failed",
+    );
+  });
+
+  it("logs malformed response length but never response content", async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const secret = "raw-provider-payload";
+    await fetchModelJsonWithRetry({ label: "test", log, call: async () => secret });
+    expect(JSON.stringify(log.warn.mock.calls)).not.toContain(secret);
+    expect(log.warn).toHaveBeenCalledTimes(2);
+  });
+
   it("retries once after a 429 and succeeds on the second attempt", async () => {
     let calls = 0;
     const result = await fetchModelJsonWithRetry({

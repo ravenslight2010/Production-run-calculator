@@ -103,8 +103,9 @@ export type ApproveResult =
 export async function approveResetRequest(
   id: string,
   actorCapabilities: readonly Capability[],
+  executor: Pick<typeof db, "select" | "update"> = db,
 ): Promise<ApproveResult> {
-  const [request] = await db
+  const [request] = await executor
     .select()
     .from(passwordResetRequestsTable)
     .where(
@@ -117,7 +118,7 @@ export async function approveResetRequest(
     return { ok: false, status: 404, error: "No pending request with that id" };
   }
 
-  const [user] = await db
+  const [user] = await executor
     .select({ username: usersTable.username })
     .from(usersTable)
     .where(eq(usersTable.id, request.userId));
@@ -135,7 +136,7 @@ export async function approveResetRequest(
 
   const code = newResetCode();
   const expiresAt = new Date(Date.now() + RESET_CODE_TTL_MS);
-  await db
+  await executor
     .update(passwordResetRequestsTable)
     .set({
       status: "approved",

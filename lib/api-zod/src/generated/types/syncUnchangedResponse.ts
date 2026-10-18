@@ -5,9 +5,18 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OperationalProjection } from './operationalProjection';
 
 export interface SyncUnchangedResponse {
   unchanged: true;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId: string;
+  /** @minimum 0 */
+  resetEpoch: number;
+  rollover: boolean;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 }

@@ -15,4 +15,9 @@ describe("Home form lifecycle fences", () => {
     expect(shouldAutosaveHomeForm(changed, changed, "run-a", "run-a", false)).toBe(false);
     expect(shouldAutosaveHomeForm(changed, DEFAULT_VALUES, "run-a", "run-a", false)).toBe(false);
   });
+
+  it("never autosaves a changed form on a read-only station display", () => {
+    const changed = { ...DEFAULT_VALUES, casesNeeded: 20 };
+    expect(shouldAutosaveHomeForm(DEFAULT_VALUES, changed, "run-a", "run-a", false, true)).toBe(false);
+  });
 });

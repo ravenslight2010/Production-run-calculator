@@ -35,7 +35,12 @@ function stateHarness() {
     fenceReleased: false,
   };
   const before = structuredClone(state);
-  const adoptUnchanged = vi.fn((body: { snapshotId: string; canonicalRevision?: number }) => {
+  const adoptUnchanged = vi.fn((body: {
+    snapshotId: string;
+    canonicalRevision?: number;
+    operationalProjection?: SyncPayload["operationalProjection"];
+    serverTime?: number;
+  }) => {
     state.snapshotId = body.snapshotId;
     state.canonicalRevision = body.canonicalRevision ?? state.canonicalRevision;
   });
@@ -55,6 +60,7 @@ function stateHarness() {
       isCurrent: options.current ?? (() => true),
       adoptUnchanged,
       adoptCanonical,
+      adoptReset: vi.fn(() => false),
     });
     if (result.accepted) {
       state.queuedWrite.pending = false;
@@ -76,7 +82,7 @@ async function canonicalResponse(
   headers: Record<string, string> = {},
 ): Promise<Response> {
   const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
-  return new Response(JSON.stringify(payload), {
+  return new Response(JSON.stringify({ ...payload, resetEpoch: 0, rollover: false }), {
     status: 200,
     headers: {
       "X-Sync-Response": "complete",
@@ -157,5 +163,73 @@ describe("foreground recovery response transaction", () => {
     expect(harness.state.runValues).toEqual(payload.runValues);
     expect(harness.state.queuedWrite.pending).toBe(false);
     expect(harness.state.fenceReleased).toBe(true);
+  });
+
+  it("adopts the live projection delivered with an unchanged wake response", async () => {
+    const harness = stateHarness();
+    const snapshotId = "a".repeat(64);
+    harness.state.snapshotId = snapshotId;
+    const operationalProjection = {
+      runId: "run-1",
+      serverTimeMs: 10_000,
+      capturedAtServerMs: 10_000,
+    } as NonNullable<SyncPayload["operationalProjection"]>;
+    const response = new Response(JSON.stringify({
+      unchanged: true,
+      snapshotId,
+      canonicalRevision: 5,
+      operationalProjection,
+      serverTime: 10_000,
+      resetEpoch: 0,
+      rollover: false,
+    }), { status: 200 });
+
+    const result = await harness.consume(response);
+
+    expect(result).toEqual({ accepted: true, kind: "unchanged", snapshotId });
+    expect(harness.adoptUnchanged).toHaveBeenCalledWith({
+      snapshotId,
+      canonicalRevision: 5,
+      operationalProjection,
+      serverTime: 10_000,
+    });
+    expect(harness.state.canonicalRevision).toBe(5);
+    expect(harness.state.fenceReleased).toBe(true);
+  });
+
+  it("processes a newer reset before canonical adoption and keeps the fence raised", async () => {
+    const harness = stateHarness();
+    const payload = canonicalPayload();
+    const response = await canonicalResponse(payload);
+    const body = await response.json() as Record<string, unknown>;
+    const resetResponse = new Response(JSON.stringify({ ...body, resetEpoch: 7 }), {
+      status: 200,
+      headers: response.headers,
+    });
+    const adoptReset = vi.fn(() => true);
+    const result = await consumeForegroundRecoveryResponse({
+      response: resetResponse,
+      expectedDate: DATE,
+      requestedSnapshotId: harness.state.snapshotId,
+      isCurrent: () => true,
+      adoptUnchanged: harness.adoptUnchanged,
+      adoptCanonical: harness.adoptCanonical,
+      adoptReset,
+    });
+    expect(result).toEqual({ accepted: false, reason: "reset" });
+    expect(adoptReset).toHaveBeenCalledWith({ resetEpoch: 7, rollover: false });
+    expectRejectedStateUnchanged(harness);
+  });
+
+  it("rejects a canonical response without authoritative reset state", async () => {
+    const harness = stateHarness();
+    const payload = canonicalPayload();
+    const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
+    const response = new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "X-Sync-Response": "complete", "X-Sync-Snapshot": snapshotId },
+    });
+    await expect(harness.consume(response)).rejects.toThrow("malformed reset state");
+    expectRejectedStateUnchanged(harness);
   });
 });

@@ -1,3 +1,5 @@
+import { computeFrontlineEffectiveBatchWeight } from "./stagedSupply";
+
 export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
 export function suggestedDoughStaging(traysNeeded: number, batchesNeeded: number): SuggestedDoughStagingReturn {
   return {
@@ -90,7 +92,10 @@ export function computeAppSlotInfo(input: {
   ppm: number;
 }) {
   const recipeLbs = (input.recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
-  const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : input.batchLbs;
+  const configuredBatchLbs = recipeLbs > 0 ? recipeLbs : input.batchLbs;
+  // Frontline operational batches are never represented above 50 lb. Missing,
+  // invalid, and oversized configured weights all use the safe 50 lb unit.
+  const effectiveBatchLbs = computeFrontlineEffectiveBatchWeight(configuredBatchLbs);
   const type = String(input.type).trim();
   const productionPizzas = input.casesNeeded > 0 && input.pizzasPerCase > 0
     ? input.casesNeeded * input.pizzasPerCase
@@ -108,7 +113,7 @@ export function computeAppSlotInfo(input: {
     cadence: effectiveBatchLbs > 0 && input.ozPerPizza > 0 && input.ppm > 0
       ? effectiveBatchLbs * 16 / input.ozPerPizza / input.ppm * 60 : 0,
     validForClaim: !!type && !type.toLowerCase().includes("mix") &&
-      effectiveBatchLbs > 0 && input.ozPerPizza > 0 && required > 0 && input.ppm > 0,
+      input.ozPerPizza > 0 && required > 0 && input.ppm > 0,
   };
 }
 export function computeNetSecondDue(input: { currentDue: number; anchor: number; cadence: number }): number {

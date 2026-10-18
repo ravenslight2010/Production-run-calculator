@@ -1,0 +1,241 @@
+{
+  "format": "workbook-ai-retry-attempt",
+  "formatVersion": 2,
+  "capturedAt": "2026-10-14T01:13:25.133Z",
+  "source": {
+    "gitRevision": "5a94f22468a0644e8e88092bd6ecafed07d4544a",
+    "manifestSha256": "3f02a637c59555d0c124f1f879a8eb73890d254b2e0a12a4c0678b289ac1730d",
+    "environment": "isolated-test-database-with-real-provider",
+    "dataClass": "internal-summary-only"
+  },
+  "providerHealthy": false,
+  "stoppedReason": "PROVIDER_UNHEALTHY_ON_TARGET_PROBE",
+  "counts": {
+    "AI_PROVIDER_FAILURE": 1,
+    "RETRY_NOT_ATTEMPTED": 24
+  },
+  "uniqueFailedHashes": 25,
+  "parserRequests": 1,
+  "authorization": {
+    "managerAuthenticated": true,
+    "useAiTools": true
+  },
+  "controls": {
+    "maxRequests": 8,
+    "windowMs": 62000,
+    "rateLimitRetryWaitMs": 65000,
+    "max429Attempts": 3,
+    "noApply": true,
+    "appRouteCostLimiter": true
+  },
+  "canonicalDataUnchanged": true,
+  "canonicalTableCount": 24,
+  "requestSummaries": [
+    {
+      "sha256": "54c6e9660c5da91e80f41180d5b181d53758d55e688ad5684e5217d130fc100c",
+      "chunkIndex": 0,
+      "attempt": 1,
+      "httpStatus": 502,
+      "durationMs": 57275,
+      "workbookCharacterCount": 2428
+    }
+  ],
+  "results": [
+    {
+      "sha256": "54c6e9660c5da91e80f41180d5b181d53758d55e688ad5684e5217d130fc100c",
+      "representativePath": "attached_assets/Aldo's_Pizza_Specs_-_09_1783188271692.xlsx",
+      "importer": "spec-import:pizza-spec",
+      "status": "AI_PROVIDER_FAILURE",
+      "chunkCount": 1,
+      "successfulChunks": 0,
+      "droppedRowCount": 0,
+      "output": {
+        "profileCount": 0,
+        "recipeCount": 0,
+        "recipeRowCount": 0,
+        "numericWeightRowCount": 0,
+        "recipesWithUnits": 0,
+        "recipesMissingUnits": 0,
+        "rowsWithSourceLocations": 0,
+        "profileNamesNotFoundInSource": 0,
+        "recipeNamesNotFoundInSource": 0,
+        "ingredientNamesNotFoundInSource": 0,
+        "recipeKindCounts": {},
+        "warningCount": 0,
+        "unresolvedCount": 0
+      },
+      "failureCodes": [
+        "HTTP_502"
+      ]
+    },
+    {
+      "sha256": "d87b649ae2d2ca131d97ab3660e3747b5f8c97bd63f03a54dedbf0fc53b8e2b4",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "76a9edd23a45017b9f52a08b403260e6207bb92de458e25803d37cab09785adf",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "af7809e978a0397882ce413a09fcad276153a37af256439c94d6b09ab6eb7f6a",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "649fa0eda4bd4e284cb56f39fbac4b20138e182fcee56dea44aa05e5ce0872e2",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "9ab3b8a302b24e6826658ea0ea21a854c4e9e08c2f237dad7325e17491148276",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "0f1c7fa684cb52a90a4395d5cab8663d611c3a59051f0d97bd01e3fae432f9b5",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "3eb4977e2fb4b1bd8c1807d68b08d6636bdfb828f3131421bdfa0a598845c876",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "1b86cbc2007a150a1dd00ba1c87592e0660c8184498acb430fd97d9e9539e178",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "61f465313520cf89033be836b1ad6b57b0e989c789d83ac470844db272ad618c",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "faede01f37b99bfbb0883aa74fce85b509f4b3b70d80b8e5df8f1a784fcd18aa",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "f0c61bbfac5c6e415797dae04316170e0e5c02ce4279e310b78caba53ed87f5c",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "1cde9d8b2e0215fd4c89ed3fe9a7eb9d1181509735e6fdfaf8335b2fe2a67312",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "81d0a1aad89918a6902926b0fdd82261e0c9c1a88db03b8666878086a20acedd",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "62f8b601999588a4fece6fdb6eee0888482ee2715ea6d312408311f225948cfb",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "a5c51684297725af452b72d346dc3abda8ad095c0a9854747327f6b22c47c087",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "e0ed4b1c5f4311d35d224f0ff963cd74a389fb53a77ccfbc321c627c6aa70013",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "5ed46df7d915252c049531f0a0591618baad5a986001c140160130ecca1b29fb",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "a9cd2422ce728c304f8f72e6a3ec7ddebcea349d5d6b8c4186c4cc1009b0444a",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "695687ffc705595a8562df6c59094d088117976a310622180eb4962591403d98",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "303ce22d0f394ba67a985e2b4eec056c6dd46947d58e93a077d5cf8e72b86d0d",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "3fd262c0b2dece4151b0c8808ebc37ed99723468634993f2bfb3007b91298453",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "e56d7504e9687b2873333c033b32cdb05a9b7e9290c69ca6791e8ae8a33380eb",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "890dcddac778b98abfe340b98cd8d4b77c3668b45a4c36b87cec7533eac09b10",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    },
+    {
+      "sha256": "60f12f0be76589ced5302dddfb6ef2fb3e1891e2ca6b64e22e463c6e3c7067bf",
+      "status": "RETRY_NOT_ATTEMPTED",
+      "failureCodes": [
+        "PROVIDER_UNHEALTHY_ON_TARGET_PROBE"
+      ]
+    }
+  ],
+  "sanitization": "No credentials, provider bodies, full recipes, source rows, or application payloads retained."
+}

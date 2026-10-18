@@ -8,7 +8,7 @@
     "rootDir": "src",
     "lib": ["es2022"]
   },
-  "references": [],
+  "references": [{ "path": "../inventory-math" }],
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
 }

@@ -1,4 +1,6 @@
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { assessmentRevision, captureReleaseIdentity, isAssessmentRevision, isDeploymentRevision, isEvidenceRevision, isSourceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -11,7 +13,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import {
   validateComparableEvaluationManifest,
   validateEvaluationManifest,
@@ -22,10 +24,18 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256,
   SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
   computeSourceLibraryEvidenceId,
+  loadSourceLibraryPoolExceptionApproval,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryDatabaseOwner,
+  readSourceLibraryDeploymentHandoff,
   summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
   type SourceLibraryPreflightDiagnostic,
@@ -36,7 +46,6 @@ import {
 } from "./report-key-rotation-preflight.mts";
 import {
   diagnosticsEqualForPairs,
-  releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
   TYPESCRIPT_7_HISTORY_LIMIT,
@@ -52,6 +61,21 @@ import {
 import {
   TYPESCRIPT_7_SUPPORTED_RUNNERS,
 } from "./typescript-7-native-contract.mts";
+import {
+  discoverRetainedEvaluationPaths,
+  evaluationManifestFromEvidence,
+  RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
+  retainedEvaluationDirectories,
+} from "./retained-evaluation-contract.mjs";
+import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
+import { preparePublishedEvidence } from "./prepare-published-evidence.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import {
+  BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
+  parseFullBrowserTestCounts,
+  parseStructuredBrowserTestCounts,
+} from "./test-results.mjs";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
@@ -148,6 +172,13 @@ export type ReleaseEvidenceOptions = {
   allowIncompleteCheckpoint?: boolean;
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   expectedSourceLibraryRevision?: string;
+  expectedReadinessDeploymentId?: string;
+  expectedDeployedRevision?: string;
+  /**
+   * Published standard/full verification must opt into the readiness
+   * requirement explicitly. Development and disposable fixtures use false.
+   */
+  requireReadinessEvidence?: boolean;
 };
 
 export function validateReleaseAiEvaluationEvidence(
@@ -164,9 +195,7 @@ export function validateReleaseAiEvaluationEvidence(
     throw new Error("AI evaluation evidence must be an object");
   }
   const record = report as Record<string, unknown>;
-  const manifest = "evaluationManifest" in record
-    ? record.evaluationManifest
-    : record;
+  const manifest = evaluationManifestFromEvidence(record);
   if (
     !manifest
     || typeof manifest !== "object"
@@ -181,6 +210,15 @@ export function validateReleaseAiEvaluationEvidence(
 }
 
 async function importCorpusEvaluationRequirements(): Promise<EvaluationComparabilityRequirements> {
+  if (
+    !discoverReleaseRetainedEvaluationPaths().includes(
+      IMPORT_CORPUS_EVALUATION_SOURCE,
+    )
+  ) {
+    throw new Error(
+      "canonical import corpus evaluation manifest is outside the shared retained-evaluation inventory",
+    );
+  }
   let canonical: unknown;
   try {
     canonical = JSON.parse(
@@ -238,18 +276,24 @@ export type BrowserDurationRegression = {
 // release window.
 export const API_SHARD_TIMEOUT_MS = 8 * 60_000;
 export const API_SHARD_WARNING_MS = 6 * 60_000;
+// The general integration shards run many per-file disposable database setup
+// hooks serially. Give only these six shards a longer, still-bounded window.
+export const API_INTEGRATION_SHARD_TIMEOUT_MS = 12 * 60_000;
+export const API_INTEGRATION_SHARD_WARNING_MS = 10 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
 export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 159 cases can exceed
-// the API shard budget on a cold release environment, so give the complete
+// reset or observe shared disposable live-day state. The suite can exceed the
+// API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
-// retries.
-const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
-const FULL_BROWSER_WARNING_MS = 40 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 159;
+// retries. The exact coverage count lives in the shared browser contract.
+const FULL_BROWSER_TIMEOUT_MS = 90 * 60_000;
+const FULL_BROWSER_WARNING_MS = 80 * 60_000;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
+export const FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS = 20 * 60_000;
+export const FULL_RESPONSIVE_WEBKIT_GATE_LABEL =
+  "browser phone/tablet WebKit compatibility";
 const RELEASE_BROWSER_ENV = {
   E2E_TEST_DB: "1",
   E2E_APPROVED_DESTRUCTIVE_MODE: "1",
@@ -257,6 +301,30 @@ const RELEASE_BROWSER_ENV = {
   PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18084",
 } as const;
 const rootDir = new URL("../../", import.meta.url).pathname;
+function approvedSourceLibraryPoolExceptionSha256(reportBytes: Buffer): string {
+  const approval = loadSourceLibraryPoolExceptionApproval(
+    resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+    reportBytes,
+  );
+  if (
+    approval.formatVersion === 1 &&
+    approval.historical &&
+    approval.id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+    approval.sha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256
+  ) {
+    return approval.sha256;
+  }
+  if (
+    approval.formatVersion !== 2 ||
+    approval.historical ||
+    approval.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID ||
+    APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256 === null ||
+    approval.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256
+  ) {
+    throw new Error("Source-library owner-approved pool exception hash is not pinned.");
+  }
+  return approval.sha256;
+}
 const STATEFUL_RELEASE_LOCK_DIR =
   "/tmp/run-calculator-release-stateful-gates.lock";
 const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
@@ -376,6 +444,32 @@ const releaseEvidenceDir = resolveReleaseEvidenceDir(
   releaseMode,
   evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR,
 );
+function testResultsBrowserMainCountSummaryPath(): string | undefined {
+  const sidecarPath = process.env.TEST_RESULTS_RELEASE_STEPS_PATH?.trim();
+  const reportId = process.env.TEST_RESULTS_REPORT_ID?.trim();
+  if (
+    !sidecarPath ||
+    !reportId ||
+    !/^(?:github:[0-9]{1,32}:(?:[0-9]{1,8}|unknown)|local:[\w-]{1,64})$/.test(
+      reportId,
+    )
+  ) {
+    return undefined;
+  }
+  const destination = resolve(rootDir, sidecarPath);
+  const relativeDestination = relative(rootDir, destination);
+  if (
+    relativeDestination === ".." ||
+    relativeDestination.startsWith(`..${sep}`) ||
+    relativeDestination.length === 0
+  ) {
+    return undefined;
+  }
+  return `${destination}${BROWSER_MAIN_COUNT_SUMMARY_SUFFIX}`;
+}
+
+const browserMainCountSummaryPath =
+  testResultsBrowserMainCountSummaryPath();
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
 const fullBrowserReportPath = resolve(
   rootDir,
@@ -386,6 +480,11 @@ const webkitBrowserEvidencePath = resolve(
   rootDir,
   releaseEvidenceDir,
   "browser-smoke/webkit-result.json",
+);
+const responsiveWebKitEvidencePath = resolve(
+  rootDir,
+  releaseEvidenceDir,
+  "browser-compatibility/webkit-result.json",
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
@@ -661,7 +760,7 @@ export function validateTypescript7ComparisonEvidence(
       const isCurrent = index === revisions.length - 1;
       return isCurrent
         ? revision !== expectedRevision
-        : !/^[a-f0-9]{40}$/.test(revision);
+        : !isEvidenceRevision(revision);
     }) ||
     distinctRevisions.size !== revisionSamples.length ||
     revisions.at(-1) !== expectedRevision ||
@@ -790,12 +889,61 @@ export function validateTypescript7ComparisonEvidence(
 }
 const IMPORT_CORPUS_EVALUATION_SOURCE = resolve(
   rootDir,
-  "lib/corpus-harness/snapshots/evaluation-manifest.json",
+  RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
 );
+export function discoverReleaseRetainedEvaluationPaths(
+  projectRoot = rootDir,
+): string[] {
+  return discoverRetainedEvaluationPaths(
+    retainedEvaluationDirectories(projectRoot),
+  );
+}
+export type RetainedEvaluationInventoryEntry = {
+  sourcePath: string;
+  sourceRelativePath: string;
+  evidencePath: string;
+};
+
+export function retainedEvaluationEvidenceInventory(
+  projectRoot = rootDir,
+): RetainedEvaluationInventoryEntry[] {
+  const canonicalSourcePath = resolve(
+    projectRoot,
+    RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
+  );
+  return discoverReleaseRetainedEvaluationPaths(projectRoot).map(
+    (sourcePath) => {
+      const sourceRelativePath = relative(projectRoot, sourcePath)
+        .split(sep)
+        .join("/");
+      if (
+        sourceRelativePath === "" ||
+        sourceRelativePath.startsWith("../") ||
+        sourceRelativePath === ".."
+      ) {
+        throw new Error(
+          `Retained evaluation path is outside the project root: ${sourcePath}`,
+        );
+      }
+      return {
+        sourcePath,
+        sourceRelativePath,
+        evidencePath:
+          sourcePath === canonicalSourcePath
+            ? IMPORT_CORPUS_EVALUATION_EVIDENCE
+            : `ai-evaluations/${sourceRelativePath}`,
+      };
+    },
+  );
+}
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
+export const READINESS_EVIDENCE_PATH =
+  "readiness-recovery/readiness-recovery.json";
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
+  "readiness-recovery/README.md",
+  READINESS_EVIDENCE_PATH,
   "report-key-rotation-preflight.json",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
@@ -804,7 +952,11 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "browser-compatibility/webkit-result.json",
+  "screen-off-wake/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
+  "sse-topology-observation-2026-10-09.json",
+  "web-push-license-approval-2026-10-09.md",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
@@ -817,15 +969,29 @@ const REPORT_KEY_ROTATION_PREFLIGHT_LABEL =
 const REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE =
   "report-key-rotation-preflight.json";
 
+export const API_RELEASE_SYNC_SHARD_SCRIPT_NAMES = [
+  "test:release:sync:1",
+  "test:release:sync:2",
+  "test:release:sync:3",
+] as const;
+export const API_RELEASE_SYNC_SSE_SCRIPT_NAME = "test:release:sync-sse";
+
 export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
   general: [
     "test:release:integration:1",
     "test:release:integration:2",
     "test:release:integration:3",
+    "test:release:integration:4",
+    "test:release:integration:5",
+    "test:release:integration:6",
   ],
   dedicated: {
     roles: ["test:release:roles"],
-    sync: ["test:release:sync", "test:release:sync-sse"],
+    sync: [
+      ...API_RELEASE_SYNC_SHARD_SCRIPT_NAMES,
+      API_RELEASE_SYNC_SSE_SCRIPT_NAME,
+    ],
+    syncConvergence: ["test:sync-convergence:isolated"],
   },
 } as const;
 
@@ -893,6 +1059,31 @@ export function apiIntegrationTestShardInventoryErrors(
     (path) => (logicalAssignments.get(path)?.length ?? 0) > 1,
   );
   const errors: string[] = [];
+  const generalShardIndexes = new Set<number>();
+  const invalidShardDefinitions = API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.filter(
+    (scriptName) => {
+      const shard = scripts[scriptName]?.match(/(?:^|\s)--shard=(\d+)\/(\d+)(?:\s|$)/);
+      if (!shard) return true;
+      const index = Number(shard[1]);
+      const total = Number(shard[2]);
+      if (
+        total !== API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.length ||
+        index < 1 ||
+        index > total ||
+        generalShardIndexes.has(index)
+      ) return true;
+      generalShardIndexes.add(index);
+      return false;
+    },
+  );
+  if (
+    invalidShardDefinitions.length > 0 ||
+    generalShardIndexes.size !== API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.length
+  ) {
+    errors.push(
+      `General API integration scripts must use each Vitest shard position exactly once across ${API_RELEASE_INTEGRATION_SCRIPT_NAMES.general.length} shards.`,
+    );
+  }
   if (generalMembershipMismatch.length > 0) {
     errors.push(
       `General API integration shard membership differs for:\n${generalMembershipMismatch.join("\n")}`,
@@ -916,6 +1107,102 @@ export function apiIntegrationTestShardInventoryErrors(
   return errors;
 }
 
+export function apiSyncReleaseShardInventoryErrors(
+  syncTestSource: string,
+  scripts: ApiReleaseScripts,
+): string[] {
+  const errors: string[] = [];
+  const shardPatterns: Array<{ name: string; pattern: RegExp }> = [];
+  const describeTitles = [
+    ...syncTestSource.matchAll(/^describe\("([^"]+)"\s*,/gm),
+  ].map((match) => match[1]);
+  if (describeTitles.length === 0) {
+    return ["No top-level describe groups found in the sync integration test."];
+  }
+
+  for (const scriptName of API_RELEASE_SYNC_SHARD_SCRIPT_NAMES) {
+    const command = scripts[scriptName];
+    if (!command) {
+      errors.push(`Missing API sync release shard script: ${scriptName}`);
+      continue;
+    }
+    if (!command.includes("src/routes/sync.integration.test.ts")) {
+      errors.push(
+        `API sync release shard ${scriptName} does not name src/routes/sync.integration.test.ts.`,
+      );
+      continue;
+    }
+    const patternMatch = command.match(/--testNamePattern='([^']+)'/);
+    if (!patternMatch) {
+      errors.push(
+        `API sync release shard ${scriptName} must declare a bounded test-name pattern.`,
+      );
+      continue;
+    }
+    try {
+      shardPatterns.push({
+        name: scriptName,
+        pattern: new RegExp(patternMatch[1]),
+      });
+    } catch {
+      errors.push(
+        `API sync release shard ${scriptName} has an invalid test-name pattern.`,
+      );
+    }
+  }
+
+  let ssePattern: RegExp | undefined;
+  const sseCommand = scripts[API_RELEASE_SYNC_SSE_SCRIPT_NAME];
+  if (!sseCommand) {
+    errors.push(
+      `Missing API sync release shard script: ${API_RELEASE_SYNC_SSE_SCRIPT_NAME}`,
+    );
+  } else if (!sseCommand.includes("src/routes/sync.integration.test.ts")) {
+    errors.push(
+      `API sync release shard ${API_RELEASE_SYNC_SSE_SCRIPT_NAME} does not name src/routes/sync.integration.test.ts.`,
+    );
+  } else {
+    const patternMatch = sseCommand.match(/--testNamePattern='([^']+)'/);
+    if (!patternMatch) {
+      errors.push(
+        `API sync release shard ${API_RELEASE_SYNC_SSE_SCRIPT_NAME} must declare a bounded test-name pattern.`,
+      );
+    } else {
+      try {
+        ssePattern = new RegExp(patternMatch[1]);
+      } catch {
+        errors.push(
+          `API sync release shard ${API_RELEASE_SYNC_SSE_SCRIPT_NAME} has an invalid test-name pattern.`,
+        );
+      }
+    }
+  }
+
+  for (const title of describeTitles) {
+    const matchingShards = shardPatterns
+      .filter(({ pattern }) => pattern.test(title))
+      .map(({ name }) => name);
+    const isSseGroup = /\/sync\/events/u.test(title);
+    const matchesSseShard = ssePattern?.test(title) ?? false;
+    if (isSseGroup) {
+      if (matchingShards.length > 0 || !matchesSseShard) {
+        errors.push(
+          `SSE sync test group "${title}" must belong only to ${API_RELEASE_SYNC_SSE_SCRIPT_NAME}.`,
+        );
+      }
+    } else if (matchingShards.length !== 1) {
+      errors.push(
+        `Non-SSE sync test group "${title}" belongs to ${matchingShards.length} release shards (${matchingShards.join(", ") || "none"}); expected exactly one.`,
+      );
+    } else if (matchesSseShard) {
+      errors.push(
+        `Non-SSE sync test group "${title}" is also assigned to ${API_RELEASE_SYNC_SSE_SCRIPT_NAME}.`,
+      );
+    }
+  }
+  return errors;
+}
+
 export async function assertApiIntegrationTestShardInventory(
   projectRoot = rootDir,
 ): Promise<void> {
@@ -933,6 +1220,16 @@ export async function assertApiIntegrationTestShardInventory(
     integrationTestPaths,
     apiPackageJson.scripts ?? {},
   );
+  const syncTestSource = await readFile(
+    resolve(apiRoot, "src/routes/sync.integration.test.ts"),
+    "utf8",
+  );
+  errors.push(
+    ...apiSyncReleaseShardInventoryErrors(
+      syncTestSource,
+      apiPackageJson.scripts ?? {},
+    ),
+  );
   if (errors.length > 0) {
     throw new Error(
       `API release shard inventory is invalid:\n${errors.join("\n")}`,
@@ -942,54 +1239,98 @@ export async function assertApiIntegrationTestShardInventory(
 
 export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
-    label: "API unit tests (release shard 1/7)",
+    label: "API unit tests (release shard 1/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
+    env: {
+      NODE_ENV: "test",
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+    },
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 2/7)",
+    label: "API integration tests (release shard 2/12)",
     args: [
       "--filter",
       "@workspace/api-server",
       "run",
       "test:release:integration:1",
     ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 3/7)",
+    label: "API integration tests (release shard 3/12)",
     args: [
       "--filter",
       "@workspace/api-server",
       "run",
       "test:release:integration:2",
     ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
   {
-    label: "API integration tests (release shard 4/7)",
+    label: "API integration tests (release shard 4/12)",
     args: [
       "--filter",
       "@workspace/api-server",
       "run",
       "test:release:integration:3",
     ],
-    timeoutMs: API_SHARD_TIMEOUT_MS,
-    warningMs: API_SHARD_WARNING_MS,
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
   {
-    label: "API role/capability tests (release shard 5/7)",
+    label: "API integration tests (release shard 5/12)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:4",
+    ],
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 6/12)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:5",
+    ],
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API integration tests (release shard 7/12)",
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:6",
+    ],
+    timeoutMs: API_INTEGRATION_SHARD_TIMEOUT_MS,
+    warningMs: API_INTEGRATION_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API role/capability tests (release shard 8/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:roles"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -997,15 +1338,31 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
   {
-    label: "API sync tests (release shard 6/7)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
+    label: "API sync tests (release shard 9/12)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync:1"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
     stage: "release-tests",
   },
   {
-    label: "API sync SSE tests (release shard 7/7)",
+    label: "API sync tests (release shard 10/12)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync:2"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync tests (release shard 11/12)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync:3"],
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
+    group: "api-test-shards",
+    stage: "release-tests",
+  },
+  {
+    label: "API sync SSE tests (release shard 12/12)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
@@ -1013,6 +1370,20 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
 ] as const;
+
+export const RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP: ReleaseStep = {
+  label: "API sync convergence tests (isolated PostgreSQL)",
+  args: [
+    "--filter",
+    "@workspace/api-server",
+    "run",
+    "test:sync-convergence:isolated",
+  ],
+  timeoutMs: API_SHARD_TIMEOUT_MS,
+  warningMs: API_SHARD_WARNING_MS,
+  group: "api-test-shards",
+  stage: "release-tests",
+};
 
 export const PRODUCTION_AUDIT_TIMEOUT_MS = 5 * 60_000;
 export const PRODUCTION_AUDIT_WARNING_MS = 4 * 60_000;
@@ -1023,6 +1394,21 @@ export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
   timeoutMs: PRODUCTION_AUDIT_TIMEOUT_MS,
   warningMs: PRODUCTION_AUDIT_WARNING_MS,
   stage: "prerequisites",
+};
+
+export const WEBKIT_IDENTITY_CONTRACT_STEP: ReleaseStep = {
+  label: "WebKit identity contracts",
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "run",
+    "test:webkit-case-contract",
+  ],
+  // The contract uses Playwright --list against the dedicated release and
+  // compatibility configs; it must stay a bounded discovery check, not a
+  // browser run.
+  timeoutMs: 2 * 60_000,
+  stage: "browser-guard",
 };
 
 const sourceLibraryReport = resolve(
@@ -1046,7 +1432,9 @@ const sourceLibraryFromDate =
 const sourceLibraryEvidenceInput =
   (cliOptionValue("--source-library-evidence") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT?.trim()) ||
-  undefined;
+  (existsSync(resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE))
+    ? resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE)
+    : undefined);
 export function resolveSourceLibraryEvidenceEnvironment(
   configuredEnvironment: string | undefined,
   importsEvidence: boolean,
@@ -1067,26 +1455,124 @@ const configuredSourceLibraryRevision =
   (cliOptionValue("--source-library-revision") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
   undefined;
+const configuredSourceLibraryDatabaseOwner =
+  (cliOptionValue("--source-library-database-owner") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER?.trim()) ||
+  undefined;
+function discoverCurrentPublishedHandoff(): string | undefined {
+  const candidate = resolve(
+    rootDir,
+    ".local/build-identity/published-source-handoff.json",
+  );
+  if (!existsSync(candidate)) return undefined;
+  try {
+    readSourceLibraryDeploymentHandoff(candidate);
+    return candidate;
+  } catch {
+    // A stale or malformed default record is not evidence. Leave the required
+    // identity unresolved so release validation fails closed with its normal
+    // missing-handoff message.
+    return undefined;
+  }
+}
+const configuredSourceLibraryDeploymentHandoff =
+  (cliOptionValue("--source-library-deployment-handoff") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
+  discoverCurrentPublishedHandoff();
+let configuredSourceLibraryDeploymentHandoffInvalid = false;
+let parsedSourceLibraryDeploymentHandoff:
+  | ReturnType<typeof readSourceLibraryDeploymentHandoff>
+  | undefined;
+if (configuredSourceLibraryDeploymentHandoff) {
+  try {
+    parsedSourceLibraryDeploymentHandoff = readSourceLibraryDeploymentHandoff(
+      configuredSourceLibraryDeploymentHandoff,
+    );
+  } catch {
+    // Invalid or stale deployment evidence is treated as unavailable here.
+    // The release entry point can then retain a bounded BLOCKED checkpoint.
+    configuredSourceLibraryDeploymentHandoffInvalid = true;
+  }
+}
+const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
+  ? ["--revision", configuredSourceLibraryRevision]
+  : [];
+const sourceLibraryDatabaseOwnerArgs = configuredSourceLibraryDatabaseOwner
+  ? ["--database-owner", configuredSourceLibraryDatabaseOwner]
+  : [];
+const sourceLibraryDeploymentHandoffArgs =
+  configuredSourceLibraryDeploymentHandoff
+    ? ["--deployment-handoff", configuredSourceLibraryDeploymentHandoff]
+    : [];
+const configuredReadinessDeploymentId =
+  (cliOptionValue("--readiness-deployment-id") ??
+    process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim() ??
+    parsedSourceLibraryDeploymentHandoff?.deploymentId) ||
+  undefined;
+const configuredDeployedRevision =
+  (cliOptionValue("--deployed-revision") ??
+    process.env.READINESS_EVIDENCE_DEPLOYED_REVISION?.trim() ??
+    parsedSourceLibraryDeploymentHandoff?.deployedRevision) ||
+  undefined;
 
 export function resolveSourceLibraryReleaseRevision(
   releaseRevision: string,
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
+  deploymentHandoffPath?: string,
 ): string {
-  const revision =
-    configuredRevision ??
-    (environment === "development" ? releaseRevision : undefined);
-  if (!revision) {
+  const explicitRevision = configuredRevision?.trim() || undefined;
+  const handoffRevision = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath).deployedRevision
+    : undefined;
+  if (
+    explicitRevision !== undefined &&
+    handoffRevision !== undefined &&
+    explicitRevision !== handoffRevision
+  ) {
     throw new Error(
-      "Production source-library evidence requires --source-library-revision with the exact deployed 40-character Git commit SHA.",
+      "Source-library revision conflicts with the deployed revision in the deployment handoff.",
     );
   }
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+  const revision =
+    explicitRevision ??
+    handoffRevision ??
+    (environment === "development"
+      ? (isDeploymentRevision(releaseRevision) ? releaseRevision : captureReleaseIdentity(rootDir).sourceRevision)
+      : undefined);
+  if (!revision) {
     throw new Error(
-      "Source-library evidence revision must be the exact deployed 40-character Git commit SHA.",
+      "Production source-library evidence requires --source-library-revision or --source-library-deployment-handoff with the exact deployed source-sha256 identity (legacy exact deployed 40-character Git commit SHA remains readable).",
+    );
+  }
+  if (!isDeploymentRevision(revision)) {
+    throw new Error(
+      "Source-library evidence revision must be the exact deployed source-sha256 identity (or legacy exact deployed 40-character Git commit SHA).",
     );
   }
   return revision;
+}
+
+export function resolveSourceLibraryReleaseDatabaseOwner(
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredDatabaseOwner: string | undefined,
+  deploymentHandoffPath?: string,
+  importsPublishedAppRuntimeEvidence = false,
+): string | undefined {
+  const owner = resolveSourceLibraryDatabaseOwner(
+    configuredDatabaseOwner,
+    deploymentHandoffPath,
+  );
+  if (
+    environment === "release" &&
+    owner === undefined &&
+    !(importsPublishedAppRuntimeEvidence && deploymentHandoffPath?.trim())
+  ) {
+    throw new Error(
+      "Production source-library evidence requires --source-library-database-owner or --source-library-deployment-handoff with the approved PostgreSQL database owner.",
+    );
+  }
+  return owner;
 }
 export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL =
   "source-library reconciliation database preflight";
@@ -1097,7 +1583,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     "@workspace/scripts",
     "exec",
     "tsx",
-    "./src/verify-source-library-reconciliation.mts",
+    "./src/verify-source-library-reconciliation-cli.mts",
     "--report",
     sourceLibraryReport,
     "--heal-id",
@@ -1106,6 +1592,9 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--preflight",
   ],
   stage: "source-library-preflight",
@@ -1117,7 +1606,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     "@workspace/scripts",
     "exec",
     "tsx",
-    "./src/verify-source-library-reconciliation.mts",
+    "./src/verify-source-library-reconciliation-cli.mts",
     "--report",
     sourceLibraryReport,
     "--heal-id",
@@ -1126,6 +1615,9 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1159,6 +1651,8 @@ export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
     sourceLibraryHealId,
     "--from-date",
     sourceLibraryFromDate,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1197,6 +1691,14 @@ export function sourceLibraryReconciliationRequired(
   return false;
 }
 
+export function sourceLibraryReconciliationPreflightEnabled(
+  required: boolean,
+  importsEvidence: boolean,
+  fixtureSteps: string | undefined,
+): boolean {
+  return required && !importsEvidence && fixtureSteps === undefined;
+}
+
 const requiresProductionSourceLibraryReconciliation =
   sourceLibraryReconciliationRequired();
 const importsProductionSourceLibraryReconciliation =
@@ -1204,11 +1706,109 @@ const importsProductionSourceLibraryReconciliation =
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
+export function publishedReleaseReadinessRequired(
+  mode: ReleaseMode,
+  hasProductionEvidence: boolean,
+): boolean {
+  return (
+    (mode === "standard" || mode === "full") &&
+    hasProductionEvidence
+  );
+}
+
+export type PublishedReadinessMissingEvidence =
+  | "readiness deployment ID"
+  | "deployed source revision"
+  | "current published deployment handoff";
+
+const PUBLISHED_READINESS_MISSING_EVIDENCE = new Set<PublishedReadinessMissingEvidence>([
+  "readiness deployment ID",
+  "deployed source revision",
+  "current published deployment handoff",
+]);
+
+export function missingPublishedReadinessEvidence(options: {
+  deploymentId: string | undefined;
+  deployedRevision: string | undefined;
+  invalidHandoff?: boolean;
+}): PublishedReadinessMissingEvidence[] {
+  const missing: PublishedReadinessMissingEvidence[] = [];
+  if (options.invalidHandoff) {
+    missing.push("current published deployment handoff");
+  }
+  if (!options.deploymentId) missing.push("readiness deployment ID");
+  if (!options.deployedRevision) missing.push("deployed source revision");
+  return missing;
+}
+
+export function formatPublishedReadinessBlockedCheckpoint(options: {
+  mode: ReleaseMode;
+  assessedRevision: string;
+  missingEvidence: readonly PublishedReadinessMissingEvidence[];
+}): string {
+  if (!isEvidenceRevision(options.assessedRevision)) {
+    throw new Error("Blocked release checkpoint requires a valid assessed revision.");
+  }
+  if (
+    options.missingEvidence.length === 0 ||
+    options.missingEvidence.length > PUBLISHED_READINESS_MISSING_EVIDENCE.size ||
+    new Set(options.missingEvidence).size !== options.missingEvidence.length ||
+    options.missingEvidence.some(
+      (item) => !PUBLISHED_READINESS_MISSING_EVIDENCE.has(item),
+    )
+  ) {
+    throw new Error("Blocked release checkpoint requires missing evidence.");
+  }
+  return [
+    "# Release Check Checkpoint — BLOCKED / NO-GO",
+    `Mode: ${options.mode}`,
+    `Assessed revision: ${options.assessedRevision}`,
+    "Missing evidence:",
+    ...options.missingEvidence.map((item) => `- ${item}`),
+    "",
+  ].join("\n");
+}
+
+const requiresPublishedReadiness = publishedReleaseReadinessRequired(
+  releaseMode,
+  hasProductionSourceLibraryReconciliation,
+);
 const sourceLibraryPreflightEnabled =
-  requiresProductionSourceLibraryReconciliation &&
-  process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined;
+  sourceLibraryReconciliationPreflightEnabled(
+    requiresProductionSourceLibraryReconciliation,
+    importsProductionSourceLibraryReconciliation,
+    process.env.RELEASE_CHECK_FIXTURE_STEPS,
+  );
+
+export const RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS: readonly ReleaseStep[] = [
+  {
+    label: "API server typecheck",
+    args: ["--filter", "@workspace/api-server", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "run calculator typecheck",
+    args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "mockup sandbox typecheck",
+    args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "scripts typecheck",
+    args: ["--filter", "@workspace/scripts", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+];
 
 const steps: ReleaseStep[] = [
+  {
+    label: "audit protection publish configuration",
+    args: ["run", "check:audit-protection-config"],
+    stage: "prerequisites",
+  },
   ...(sourceLibraryPreflightEnabled
     ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP]
     : []),
@@ -1249,30 +1849,23 @@ const steps: ReleaseStep[] = [
     stage: "prerequisites",
   },
   {
+    label: "immutable build-source identity contracts",
+    args: ["run", "test:build-identity"],
+    timeoutMs: 60_000,
+    stage: "prerequisites",
+  },
+  {
+    label: "real API/web build-source integration",
+    args: ["run", "test:build-identity:integration"],
+    timeoutMs: 5 * 60_000,
+    stage: "prerequisites",
+  },
+  {
     label: "shared library typechecks",
     args: ["run", "typecheck:libs"],
     stage: "shared-output",
   },
-  {
-    label: "API server typecheck",
-    args: ["--filter", "@workspace/api-server", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "run calculator typecheck",
-    args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "mockup sandbox typecheck",
-    args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "scripts typecheck",
-    args: ["--filter", "@workspace/scripts", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
+  ...RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS,
   {
     label: typescript7Promotion
       ? "TypeScript 7 promotion gate"
@@ -1330,10 +1923,17 @@ const steps: ReleaseStep[] = [
     concurrencyLimit: 1,
   },
   ...RELEASE_CHECK_API_SHARD_STEPS,
+  RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP,
   {
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:budget"],
     stage: "release-tests",
+    env: {
+      // The merged suite is larger than the 150s default budget assumed, and
+      // shared CI runners are slower than the tuning environment; the default
+      // budget still guards local and standard-lane runs.
+      CALCULATOR_TEST_BUDGET_MS: "300000",
+    },
   },
   {
     label: "production rules tests",
@@ -1395,9 +1995,14 @@ const steps: ReleaseStep[] = [
     ],
     stage: "browser-guard",
   },
+  WEBKIT_IDENTITY_CONTRACT_STEP,
   {
     label: "browser smoke tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:smoke"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.smoke.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1406,18 +2011,24 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser calendar tests",
+    command: "bash",
     args: [
-      "--filter",
-      "@workspace/run-calculator",
-      "run",
-      "test:e2e:calendar",
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.calendar.config.ts",
     ],
+    env: {
+      ...RELEASE_BROWSER_ENV,
+    },
     stage: "browser-calendar",
     concurrencyLimit: 1,
   },
   {
     label: "browser accessibility tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.a11y.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1426,9 +2037,14 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser WebKit smoke",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.webkit.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
+      BROWSER_TEST_INSTALL_WEBKIT: "1",
       PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
       RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
     },
@@ -1437,10 +2053,37 @@ const steps: ReleaseStep[] = [
   },
 ];
 
+export { steps as RELEASE_CHECK_STEPS };
+
+export const FULL_RESPONSIVE_WEBKIT_GATE_STEP: ReleaseStep = {
+  label: FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+  command: "bash",
+  args: [
+    "scripts/src/run-isolated-browser-suite.sh",
+    "--playwright-config=playwright.compatibility.config.ts",
+    "--project=phone-webkit",
+    "--project=tablet-webkit",
+  ],
+  env: {
+    ...RELEASE_BROWSER_ENV,
+    BROWSER_TEST_INSTALL_WEBKIT: "1",
+    PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: responsiveWebKitEvidencePath,
+    RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
+  },
+  timeoutMs: FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+  stage: "browser-responsive-webkit",
+  concurrencyLimit: 1,
+};
+
 if (fullRun) {
+  steps.push(FULL_RESPONSIVE_WEBKIT_GATE_STEP);
   steps.push({
     label: FULL_BROWSER_GATE_LABEL,
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
@@ -1454,7 +2097,12 @@ if (fullRun) {
 
 export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   const labels = steps
-    .filter((step) => mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL)
+    .filter(
+      (step) =>
+        mode === "full" ||
+        (step.label !== FULL_BROWSER_GATE_LABEL &&
+          step.label !== FULL_RESPONSIVE_WEBKIT_GATE_LABEL),
+    )
     .map((step) => {
       if (
         mode === "typescript-7-promotion" &&
@@ -1475,10 +2123,19 @@ export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   // from the command that happened to launch verification.
   if (
     mode === "full" &&
-    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined &&
-    !labels.includes(FULL_BROWSER_GATE_LABEL)
+    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined
   ) {
-    labels.push(FULL_BROWSER_GATE_LABEL);
+    if (!labels.includes(FULL_RESPONSIVE_WEBKIT_GATE_LABEL)) {
+      const fullBrowserIndex = labels.indexOf(FULL_BROWSER_GATE_LABEL);
+      if (fullBrowserIndex === -1) {
+        labels.push(FULL_RESPONSIVE_WEBKIT_GATE_LABEL);
+      } else {
+        labels.splice(fullBrowserIndex, 0, FULL_RESPONSIVE_WEBKIT_GATE_LABEL);
+      }
+    }
+    if (!labels.includes(FULL_BROWSER_GATE_LABEL)) {
+      labels.push(FULL_BROWSER_GATE_LABEL);
+    }
   }
   return labels;
 }
@@ -1580,6 +2237,12 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
         : []),
       "onboarding bypass guard",
     ],
+    "browser-responsive-webkit": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
     "browser-full": [
       ...(sourceLibraryPreflightEnabled
         ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
@@ -1675,10 +2338,23 @@ export function releaseConcurrencyLimit(
   return configuredLimit;
 }
 
+export function defaultReleaseConcurrencyForEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): number {
+  // Replit workspaces have a tighter process/thread budget than the release
+  // CI runners. This only selects test scheduling; it is not a production or
+  // destructive-test safety signal.
+  return environment.REPL_IMAGE?.trim() ||
+    environment.REPLIT_ENVIRONMENT?.trim() ||
+    environment.REPLIT_DEV_DOMAIN?.trim()
+    ? 1
+    : RELEASE_CHECK_DEFAULT_CONCURRENCY;
+}
+
 function configuredReleaseConcurrency(): number {
   const configured = process.env.RELEASE_CHECK_MAX_CONCURRENCY;
   if (configured === undefined || configured.trim() === "") {
-    return RELEASE_CHECK_DEFAULT_CONCURRENCY;
+    return defaultReleaseConcurrencyForEnvironment(process.env);
   }
   const value = Number(configured);
   if (!Number.isInteger(value) || value < 1 || value > 16) {
@@ -1702,16 +2378,28 @@ function printHelp(): void {
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
   );
   console.log(
+    "  pnpm run release:check -- --prepare-published-evidence --published-url <official-primary-url>  Capture current source, readiness, and reconciliation evidence after an owner publish",
+  );
+  console.log(
     "  pnpm run release:check:full -- --verify-evidence  Verify full retained evidence files",
   );
   console.log(
     "  --source-library-evidence <path>  Import fresh revision-bound production reconciliation evidence",
   );
   console.log(
-    "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
+    "  --source-library-revision <identity>   Exact deployed source-sha256 identity for production reconciliation evidence",
   );
   console.log(
-    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
+    "  --source-library-deployment-handoff <path>   Validate an expiring published source handoff and obtain its source identity",
+  );
+  console.log(
+    "  --readiness-deployment-id <id>   Expected published deployment ID for retained readiness evidence",
+  );
+  console.log(
+    "  --deployed-revision <identity>  Expected deployed source-sha256 identity for retained readiness evidence",
+  );
+  console.log(
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation-cli.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -1730,7 +2418,7 @@ function printHelp(): void {
     "The full browser suite requires a disposable isolated test database.",
   );
   console.log(
-    "The API test gate runs seven bounded shards; role/capability and sync SSE tests run separately.",
+    "The API test gate runs nine bounded steps; non-SSE sync tests use three coverage-checked shards, with role/capability and sync SSE tests isolated.",
   );
   console.log(
     `Parallel release stages use at most ${RELEASE_CHECK_DEFAULT_CONCURRENCY} children by default; API/database shards are capped at ${RELEASE_CHECK_API_CONCURRENCY}. Set RELEASE_CHECK_MAX_CONCURRENCY=1 for constrained local environments.`,
@@ -1759,7 +2447,14 @@ export async function verifyReleaseEvidence(
   evidenceRoot = resolve(rootDir, releaseEvidenceDir),
   options: ReleaseEvidenceOptions = {},
 ): Promise<void> {
-  const expected = new Set<string>(RELEASE_EVIDENCE_ALLOWLIST);
+  const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
+  const retainedEvaluationEvidencePaths = retainedEvaluationInventory.map(
+    (entry) => entry.evidencePath,
+  );
+  const expected = new Set<string>([
+    ...RELEASE_EVIDENCE_ALLOWLIST,
+    ...retainedEvaluationEvidencePaths,
+  ]);
   const unexpected: string[] = [];
 
   let files: string[];
@@ -1790,7 +2485,7 @@ export async function verifyReleaseEvidence(
       [
         "Release evidence contains files outside its allowlist:",
         ...unexpected.map((file) => `- ${file}`),
-        `Allowed files: ${RELEASE_EVIDENCE_ALLOWLIST.join(", ")}`,
+        `Allowed files: ${[...expected].join(", ")}`,
       ].join("\n"),
     );
   }
@@ -1812,6 +2507,19 @@ export async function verifyReleaseEvidence(
     }
   }
   if (checkpointReport.trim() !== "" && !options.allowIncompleteCheckpoint) {
+    if (
+      checkpointReport.startsWith(
+        "# Release Check Checkpoint — BLOCKED / NO-GO",
+      )
+    ) {
+      throw new Error(
+        [
+          `Release check was blocked before its gates at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence and has no resumable gate state.`,
+          "Supply a current published deployment handoff or the explicit deployment ID and deployed revision, then rerun without --resume.",
+          "The retained release-check-report.md was left unchanged.",
+        ].join(" "),
+      );
+    }
     throw new Error(
       [
         `Release check has an incomplete checkpoint at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence.`,
@@ -1845,14 +2553,25 @@ export async function verifyReleaseEvidence(
   const requiresSourceLibraryEvidence = expectedGateLabels.includes(
     "source-library reconciliation verification",
   );
+  const requiresReadinessEvidence = options.requireReadinessEvidence === true;
   const requiresWebKitEvidence = expectedGateLabels.includes(
     "browser WebKit smoke",
   );
   const requiresFullBrowserEvidence = evidenceMode === "full";
+  if (
+    requiresReadinessEvidence &&
+    (!options.expectedReadinessDeploymentId ||
+      !options.expectedDeployedRevision)
+  ) {
+    throw new Error(
+      "Published release readiness verification requires the expected deployment ID and deployed revision before GO validation; pass --readiness-deployment-id and --deployed-revision.",
+    );
+  }
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
-    IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    ...retainedEvaluationEvidencePaths,
     TYPESCRIPT_7_COMPARISON_EVIDENCE,
+    ...(requiresReadinessEvidence ? [READINESS_EVIDENCE_PATH] : []),
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -1861,6 +2580,9 @@ export async function verifyReleaseEvidence(
       : []),
     ...(requiresFullBrowserEvidence
       ? ["browser-full/FINAL-REPORT.md" as const]
+      : []),
+    ...(requiresFullBrowserEvidence
+      ? ["browser-compatibility/webkit-result.json" as const]
       : []),
     ...(requiresWebKitEvidence
       ? ["browser-smoke/webkit-result.json" as const]
@@ -1876,6 +2598,31 @@ export async function verifyReleaseEvidence(
         .join("\n")}`,
     );
   }
+  const retainedEvaluationSection = report
+    .split("## Retained evaluations\n\n")[1]
+    ?.split("\n## ")[0];
+  const expectedRetainedEvaluationLines = retainedEvaluationInventory.map(
+    (entry) => `- [${entry.sourceRelativePath}](${entry.evidencePath})`,
+  );
+  const actualRetainedEvaluationLines =
+    retainedEvaluationSection === undefined
+      ? []
+      : retainedEvaluationSection
+          .split("\n")
+          .filter((line) => line.startsWith("- ["));
+  if (
+    retainedEvaluationSection === undefined ||
+    JSON.stringify(actualRetainedEvaluationLines) !==
+      JSON.stringify(expectedRetainedEvaluationLines)
+  ) {
+    throw new Error(
+      [
+        "Release report retained evaluation inventory is incomplete or stale.",
+        "Expected retained evaluation paths:",
+        ...expectedRetainedEvaluationLines.map((line) => `- ${line}`),
+      ].join("\n"),
+    );
+  }
   const emptyEvidence: string[] = [];
   for (const file of requiredEvidence) {
     const stats = await lstat(resolve(evidenceRoot, file));
@@ -1886,6 +2633,28 @@ export async function verifyReleaseEvidence(
       `Required release evidence is empty:\n${emptyEvidence
         .map((file) => `- ${file}`)
         .join("\n")}`,
+    );
+  }
+  if (
+    requiresReadinessEvidence &&
+    files.includes(READINESS_EVIDENCE_PATH)
+  ) {
+    if (
+      options.expectedReadinessDeploymentId === undefined ||
+      options.expectedDeployedRevision === undefined
+    ) {
+      throw new Error(
+        "Readiness evidence verification requires the expected published deployment ID and deployed revision; pass --readiness-deployment-id and --deployed-revision.",
+      );
+    }
+    validateReadinessEvidence(
+      await readFile(resolve(evidenceRoot, READINESS_EVIDENCE_PATH)),
+      {
+        expectedDeploymentId: options.expectedReadinessDeploymentId,
+        expectedRevision: options.expectedDeployedRevision,
+        expectedEnvironment: "release",
+        expectedModes: ["normal", "recovery"],
+      },
     );
   }
   const revision = options.currentRevision ?? (await currentRevision());
@@ -1907,14 +2676,36 @@ export async function verifyReleaseEvidence(
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
+    requireReadinessEvidence: requiresReadinessEvidence,
     expectedSourceLibraryEnvironment,
     expectedSourceLibraryRevision,
     expectedTypescript7TrendHistory: typescript7TrendHistory,
   });
-  validateReleaseAiEvaluationEvidence(
-    await readFile(resolve(evidenceRoot, IMPORT_CORPUS_EVALUATION_EVIDENCE)),
-    await importCorpusEvaluationRequirements(),
-  );
+  for (const entry of retainedEvaluationInventory) {
+    const evidence = await readFile(resolve(evidenceRoot, entry.evidencePath));
+    if (entry.evidencePath === IMPORT_CORPUS_EVALUATION_EVIDENCE) {
+      validateReleaseAiEvaluationEvidence(
+        evidence,
+        await importCorpusEvaluationRequirements(),
+      );
+    } else {
+      let parsedEvidence: unknown;
+      try {
+        parsedEvidence = JSON.parse(evidence.toString("utf8"));
+      } catch {
+        throw new Error(
+          `Retained evaluation evidence is malformed JSON: ${entry.evidencePath}`,
+        );
+      }
+      const manifest = evaluationManifestFromEvidence(parsedEvidence);
+      if (manifest === undefined) {
+        throw new Error(
+          `Retained evaluation evidence has no supported manifest envelope: ${entry.evidencePath}`,
+        );
+      }
+      validateEvaluationManifest(manifest);
+    }
+  }
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
@@ -1928,6 +2719,10 @@ export async function verifyReleaseEvidence(
       expectedReportSha256: createHash("sha256")
         .update(sourceLibraryReportBytes)
         .digest("hex"),
+      expectedPoolExceptionsSha256:
+        expectedSourceLibraryEnvironment === "release"
+          ? approvedSourceLibraryPoolExceptionSha256(sourceLibraryReportBytes)
+          : undefined,
     });
   }
   if (requiresWebKitEvidence) {
@@ -1940,6 +2735,14 @@ export async function verifyReleaseEvidence(
     });
   }
   if (requiresFullBrowserEvidence) {
+    const responsiveWebKitEvidence = await readFile(
+      resolve(evidenceRoot, "browser-compatibility/webkit-result.json"),
+    );
+    validateWebKitBrowserEvidence(responsiveWebKitEvidence, {
+      currentRevision: revision,
+      requirePass: /^Decision:\s*GO\s*$/m.test(report),
+      expectedCaseIdentities: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+    });
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
       "utf8",
@@ -2063,7 +2866,11 @@ export function validateReportKeyRotationEvidence(
 
 export function validateWebKitBrowserEvidence(
   evidenceBytes: Uint8Array,
-  options: { currentRevision: string; requirePass?: boolean },
+  options: {
+    currentRevision: string;
+    requirePass?: boolean;
+    expectedCaseIdentities?: readonly string[];
+  },
 ): void {
   const MAX_EVIDENCE_BYTES = 64 * 1024;
   if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
@@ -2130,6 +2937,7 @@ export function validateWebKitBrowserEvidence(
     "infrastructure",
     "optional-environment-gap",
   ]);
+  const discoveredIdentities: string[] = [];
   for (const testCase of record.cases) {
     if (!testCase || typeof testCase !== "object" || Array.isArray(testCase)) {
       throw new Error("WebKit browser evidence contains an invalid test case.");
@@ -2146,12 +2954,44 @@ export function validateWebKitBrowserEvidence(
       );
     }
     if (
+      options.expectedCaseIdentities !== undefined &&
+      options.requirePass === true &&
+      item.status !== "passed"
+    ) {
+      throw new Error(
+        "WebKit compatibility evidence cannot support GO unless every phone/tablet journey passed.",
+      );
+    }
+    if (options.expectedCaseIdentities !== undefined) {
+      if (typeof item.projectName !== "string" || !item.projectName.trim()) {
+        throw new Error(
+          "WebKit browser evidence is missing a project name for a compatibility case.",
+        );
+      }
+      discoveredIdentities.push(
+        `${item.file} :: ${item.projectName} › ${item.title}`,
+      );
+    }
+    if (
       item.failureClassification !== undefined &&
       (typeof item.failureClassification !== "string" ||
         !validClassifications.has(item.failureClassification))
     ) {
       throw new Error(
         "WebKit browser evidence contains an invalid failure classification.",
+      );
+    }
+  }
+  if (options.expectedCaseIdentities !== undefined) {
+    const expected = [...options.expectedCaseIdentities].sort();
+    const discovered = [...discoveredIdentities].sort();
+    if (
+      discovered.length !== expected.length ||
+      new Set(discovered).size !== discovered.length ||
+      discovered.some((identity, index) => identity !== expected[index])
+    ) {
+      throw new Error(
+        "WebKit browser evidence does not match the reviewed phone/tablet project inventory.",
       );
     }
   }
@@ -2165,6 +3005,7 @@ export function validateSourceLibraryReconciliationEvidence(
     expectedHealId?: string;
     expectedFromDate?: string;
     expectedReportSha256?: string;
+    expectedPoolExceptionsSha256?: string;
     maxAgeMs?: number;
     now?: Date;
   } = {},
@@ -2205,6 +3046,26 @@ export function validateSourceLibraryReconciliationEvidence(
   ) {
     throw new Error(
       "Source-library reconciliation evidence is missing a valid development/release environment.",
+    );
+  }
+  if (
+    output.databaseAttestation !== undefined &&
+    output.databaseAttestation !== "external-owner-check" &&
+    output.databaseAttestation !== "development-no-owner-check" &&
+    output.databaseAttestation !== "published-app-runtime-connection"
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence has an invalid database attestation.",
+    );
+  }
+  if (
+    (evidenceEnvironment === "release" &&
+      output.databaseAttestation === "development-no-owner-check") ||
+    (evidenceEnvironment === "development" &&
+      output.databaseAttestation === "published-app-runtime-connection")
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence database attestation does not match its environment.",
     );
   }
   if (
@@ -2287,6 +3148,82 @@ export function validateSourceLibraryReconciliationEvidence(
   ) {
     throw new Error(
       "Source-library reconciliation evidence targets the wrong source report.",
+    );
+  }
+  const poolExceptions = output.poolExceptions;
+  if (poolExceptions !== undefined) {
+    const pools = output.pools;
+    const exceptionId =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).id
+        : undefined;
+    const exceptionSha256 =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).sha256
+        : undefined;
+    const approvedMismatches =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).approvedMismatches
+        : undefined;
+    const unresolvedMismatches =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).unresolvedMismatches
+        : undefined;
+    const absentException = exceptionId === null && exceptionSha256 === null &&
+      approvedMismatches === 0;
+    const historicalException =
+      exceptionId === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+      exceptionSha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256;
+    const fingerprintBoundException =
+      exceptionId === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID &&
+      /^[a-f0-9]{64}$/u.test(String(exceptionSha256 ?? ""));
+    if (
+      !poolExceptions ||
+      typeof poolExceptions !== "object" ||
+      Array.isArray(poolExceptions) ||
+      Object.keys(poolExceptions).sort().join(",") !==
+        ["approvedMismatches", "id", "sha256", "unresolvedMismatches"]
+          .sort()
+          .join(",") ||
+      (!absentException && !historicalException && !fingerprintBoundException) ||
+      !pools ||
+      typeof pools !== "object" ||
+      Array.isArray(pools) ||
+      !Number.isSafeInteger(approvedMismatches) ||
+      Number(approvedMismatches) < 0 ||
+      Number(approvedMismatches) > 1_000_000 ||
+      !Number.isSafeInteger(unresolvedMismatches) ||
+      Number(unresolvedMismatches) < 0 ||
+      Number(unresolvedMismatches) > 1_000_000 ||
+      !Number.isSafeInteger((pools as Record<string, unknown>).mismatches) ||
+      Number((pools as Record<string, unknown>).mismatches) < 0 ||
+      Number((pools as Record<string, unknown>).mismatches) > 1_000_000 ||
+      Number(approvedMismatches) + Number(unresolvedMismatches) !==
+        Number((pools as Record<string, unknown>).mismatches)
+    ) {
+      throw new Error(
+        "Source-library reconciliation evidence has an invalid owner-approved pool-exception summary.",
+      );
+    }
+    if (
+      options.expectedPoolExceptionsSha256 !== undefined &&
+      !(
+        (fingerprintBoundException &&
+          exceptionSha256 === options.expectedPoolExceptionsSha256 &&
+          unresolvedMismatches === 0) ||
+        (historicalException &&
+          exceptionSha256 === options.expectedPoolExceptionsSha256 &&
+          approvedMismatches === 0 &&
+          unresolvedMismatches === 0)
+      )
+    ) {
+      throw new Error(
+        "Source-library reconciliation evidence is missing the pinned fingerprint-bound owner approval or has unresolved pool mismatches.",
+      );
+    }
+  } else if (options.expectedPoolExceptionsSha256 !== undefined) {
+    throw new Error(
+      "Source-library reconciliation evidence is missing the pinned owner-approved pool-exception summary.",
     );
   }
   if (
@@ -2503,6 +3440,7 @@ export function validateReleaseReport(
   options: {
     currentRevision: string;
     expectedMode?: ReleaseMode;
+    requireReadinessEvidence?: boolean;
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     expectedSourceLibraryRevision?: string;
@@ -2519,6 +3457,19 @@ export function validateReleaseReport(
       `Release report revision is missing or stale (expected ${options.currentRevision}).`,
     );
   }
+  if (isAssessmentRevision(revision)) {
+    const source = report.match(/^Source version:\s*(\S+)\s*$/m)?.[1];
+    const policy = report.match(/^Source policy:\s*(\S+)\s*$/m)?.[1];
+    const verification = report.match(/^Verification input fingerprint:\s*(\S+)\s*$/m)?.[1];
+    if (!isSourceRevision(source) || !policy || !verification ||
+        assessmentRevision(policy, source.slice("source-sha256:".length), verification) !== revision) {
+      throw new Error("Release report source and verification-input binding is missing or stale.");
+    }
+    if (options.expectedSourceLibraryEnvironment === "release" &&
+        source !== options.expectedSourceLibraryRevision) {
+      throw new Error("Release report tested source does not match the expected deployed source.");
+    }
+  }
   if (!mode || (options.expectedMode && mode !== options.expectedMode)) {
     if (mode && options.expectedMode && mode !== options.expectedMode) {
       throw new Error(
@@ -2533,6 +3484,16 @@ export function validateReleaseReport(
   }
   if (!decision) {
     throw new Error("Release report is malformed: missing GO/NO-GO decision.");
+  }
+  if (
+    decision === "GO" &&
+    options.requireReadinessEvidence === true &&
+    report.match(/^Readiness evidence:\s*(\S+)\s*$/m)?.[1] !==
+      READINESS_EVIDENCE_PATH
+  ) {
+    throw new Error(
+      "Release report cannot record GO without the retained readiness evidence path.",
+    );
   }
   if (options.expectedTypescript7TrendHistory !== undefined) {
     const summaries = [
@@ -2634,9 +3595,9 @@ export function validateReleaseReport(
   if (
     options.expectedSourceLibraryEnvironment === "release" &&
     (!deployedRevision ||
-      !/^[a-f0-9]{40}$/u.test(deployedRevision) ||
+      !isDeploymentRevision(deployedRevision) ||
       options.expectedSourceLibraryRevision === undefined ||
-      !/^[a-f0-9]{40}$/u.test(options.expectedSourceLibraryRevision) ||
+      !isDeploymentRevision(options.expectedSourceLibraryRevision) ||
       deployedRevision !== options.expectedSourceLibraryRevision)
   ) {
     throw new Error(
@@ -2860,6 +3821,7 @@ export function formatReleaseReport(
     sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     sourceLibraryRevision?: string;
     deployedRevision?: string;
+    requireReadinessEvidence?: boolean;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
@@ -2870,6 +3832,9 @@ export function formatReleaseReport(
   } = {},
 ): string {
   const isCheckpoint = metadata.reportKind === "checkpoint";
+  const retainedEvaluationInventory = isCheckpoint
+    ? []
+    : retainedEvaluationEvidenceInventory();
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
@@ -2928,6 +3893,27 @@ export function formatReleaseReport(
           )
           .join("; ");
   const revision = metadata.revision ?? "unknown";
+  const assessedIdentity = isAssessmentRevision(revision)
+    ? (releaseIdentitySnapshot?.revision === revision ? releaseIdentitySnapshot : captureReleaseIdentity(rootDir))
+    : undefined;
+  const reportSourceLibraryEnvironment =
+    metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment;
+  const developmentOnlyEvidence =
+    reportSourceLibraryEnvironment === "development" &&
+    metadata.requireReadinessEvidence !== true;
+  const deployedRevision =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : metadata.deployedRevision ??
+        (reportSourceLibraryEnvironment === "release"
+          ? metadata.sourceLibraryRevision ?? revision
+          : "not applicable");
+  const readinessEvidence =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
+        ? READINESS_EVIDENCE_PATH
+        : "not produced";
   const decision =
     metadata.decision ??
     (results.length ===
@@ -2979,6 +3965,11 @@ export function formatReleaseReport(
     "",
     `Generated: ${new Date().toISOString()}`,
     `Revision: ${revision}`,
+    ...(assessedIdentity ? [
+      `Source version: ${assessedIdentity.sourceRevision}`,
+      `Source policy: ${assessedIdentity.sourcePolicy}`,
+      `Verification input fingerprint: ${assessedIdentity.verificationFingerprintSha256}`,
+    ] : []),
     `Mode: ${mode}`,
     ...(isCheckpoint
       ? [
@@ -2987,14 +3978,10 @@ export function formatReleaseReport(
         ]
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
-    `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
+    `Source-library evidence environment: ${reportSourceLibraryEnvironment}`,
     `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
-    `Deployed revision: ${
-      metadata.deployedRevision ??
-      ((metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment) === "release"
-        ? metadata.sourceLibraryRevision ?? revision
-        : "not applicable")
-    }`,
+    `Deployed revision: ${deployedRevision}`,
+    `Readiness evidence: ${readinessEvidence}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     formatTypescript7TrendHistorySummary(typescript7TrendHistory),
@@ -3042,11 +4029,23 @@ export function formatReleaseReport(
       "browser-smoke/webkit-result.json",
       "WebKit browser smoke evidence",
     ),
+    evidenceLink(
+      "browser-compatibility/webkit-result.json",
+      "Phone/tablet WebKit compatibility evidence",
+    ),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     evidenceLink(
       SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
       "Source-library reconciliation evidence",
     ),
+    "",
+    "## Retained evaluations",
+    "",
+    ...(retainedEvaluationInventory.length === 0
+      ? ["- No retained evaluation manifests were discovered."]
+      : retainedEvaluationInventory.map((entry) =>
+          evidenceLink(entry.evidencePath, entry.sourceRelativePath),
+        )),
     "",
     "## Browser duration review",
     "",
@@ -3116,6 +4115,7 @@ async function writeReleaseReport(
     revision: string;
     sourceLibraryRevision: string;
     deployedRevision?: string;
+    requireReadinessEvidence?: boolean;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
@@ -3129,18 +4129,17 @@ async function writeReleaseReport(
   const reportPath = resolve(rootDir, releaseEvidenceDir, reportFile);
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
   if (metadata.reportKind !== "checkpoint") {
-    const retainedImportCorpusEvaluationPath = resolve(
-      rootDir,
-      releaseEvidenceDir,
-      IMPORT_CORPUS_EVALUATION_EVIDENCE,
-    );
-    await mkdir(resolve(retainedImportCorpusEvaluationPath, ".."), {
-      recursive: true,
-    });
-    await writeFile(
-      retainedImportCorpusEvaluationPath,
-      await readFile(IMPORT_CORPUS_EVALUATION_SOURCE),
-    );
+    for (const entry of retainedEvaluationEvidenceInventory()) {
+      const retainedEvaluationPath = resolve(
+        rootDir,
+        releaseEvidenceDir,
+        entry.evidencePath,
+      );
+      await mkdir(resolve(retainedEvaluationPath, ".."), {
+        recursive: true,
+      });
+      await writeFile(retainedEvaluationPath, await readFile(entry.sourcePath));
+    }
   }
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
     file.startsWith("clean-start/"),
@@ -3163,7 +4162,9 @@ async function writeReleaseReport(
     ),
   );
   if (metadata.reportKind !== "checkpoint") {
-    availableEvidenceFiles.add(IMPORT_CORPUS_EVALUATION_EVIDENCE);
+    for (const entry of retainedEvaluationEvidenceInventory()) {
+      availableEvidenceFiles.add(entry.evidencePath);
+    }
   }
   let typescript7TrendHistory: Typescript7TrendHistorySummary | undefined;
   try {
@@ -3180,6 +4181,14 @@ async function writeReleaseReport(
     );
   } catch {
     // The retained evidence verifier reports the missing comparison artifact.
+  }
+  try {
+    await access(
+      resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH),
+    );
+    availableEvidenceFiles.add(READINESS_EVIDENCE_PATH);
+  } catch {
+    // Published readiness validation reports a missing artifact when required.
   }
   try {
     await access(
@@ -3202,6 +4211,19 @@ async function writeReleaseReport(
   } catch {
     // Full browser evidence validation below reports a missing file when the
     // full release decision requires it.
+  }
+  try {
+    await access(
+      resolve(
+        rootDir,
+        releaseEvidenceDir,
+        "browser-compatibility/webkit-result.json",
+      ),
+    );
+    availableEvidenceFiles.add("browser-compatibility/webkit-result.json");
+  } catch {
+    // Full browser evidence validation below reports a missing compatibility
+    // result when the full release decision requires it.
   }
   try {
     await access(
@@ -3250,6 +4272,7 @@ async function writeReleaseReport(
           (sourceLibraryEnvironment === "release"
             ? metadata.sourceLibraryRevision
             : undefined),
+        requireReadinessEvidence: metadata.requireReadinessEvidence,
         sourceLibraryPreflight: results.find(
           (result) =>
             result.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
@@ -3371,45 +4394,95 @@ async function readCheckpoint(
   }
 }
 
+let releaseIdentitySnapshot: ReturnType<typeof captureReleaseIdentity> | undefined;
 async function currentRevision(): Promise<string> {
-  return new Promise((resolveRevision, reject) => {
-    execFile(
-      "git",
-      [...releaseRevisionGitArgs],
-      { cwd: rootDir },
-      (error, stdout) =>
-        error ? reject(error) : resolveRevision(stdout.trim()),
-    );
+  releaseIdentitySnapshot = captureReleaseIdentity(rootDir);
+  return releaseIdentitySnapshot.revision;
+}
+
+export async function promoteSourceLibraryEvidenceAtPaths(options: {
+  sourceLibraryRevision: string;
+  pendingPath: string;
+  retainedPath: string;
+  reportPath: string;
+  expectedEnvironment: SourceLibraryEvidenceEnvironment;
+  expectedHealId: string;
+  expectedFromDate: string;
+}): Promise<void> {
+  let evidencePath = options.pendingPath;
+  try {
+    await rename(options.pendingPath, options.retainedPath);
+    evidencePath = options.retainedPath;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // A prior finalization attempt may already have promoted the artifact
+    // before failing while writing or verifying the retained report. Keep
+    // that promotion resumable, but validate the retained bytes below.
+    evidencePath = options.retainedPath;
+  }
+  const [retainedEvidence, reportBytes] = await Promise.all([
+    readFile(evidencePath),
+    readFile(options.reportPath),
+  ]);
+  validateSourceLibraryReconciliationEvidence(retainedEvidence, {
+    expectedEnvironment: options.expectedEnvironment,
+    expectedRevision: options.sourceLibraryRevision,
+    expectedHealId: options.expectedHealId,
+    expectedFromDate: options.expectedFromDate,
+    expectedReportSha256: createHash("sha256")
+      .update(reportBytes)
+      .digest("hex"),
+    expectedPoolExceptionsSha256:
+      options.expectedEnvironment === "release"
+        ? approvedSourceLibraryPoolExceptionSha256(reportBytes)
+        : undefined,
   });
 }
 
 async function promoteSourceLibraryEvidence(
   sourceLibraryRevision: string,
 ): Promise<void> {
-  const pendingPath = resolve(
-    rootDir,
-    releaseEvidenceDir,
-    SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
-  );
-  const retainedPath = resolve(
-    rootDir,
-    releaseEvidenceDir,
-    SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
-  );
-  await rename(pendingPath, retainedPath);
-  const [retainedEvidence, reportBytes] = await Promise.all([
-    readFile(retainedPath),
-    readFile(sourceLibraryReport),
-  ]);
-  validateSourceLibraryReconciliationEvidence(retainedEvidence, {
+  await promoteSourceLibraryEvidenceAtPaths({
+    sourceLibraryRevision,
+    pendingPath: resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+    ),
+    retainedPath: resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+    ),
+    reportPath: sourceLibraryReport,
     expectedEnvironment: sourceLibraryEnvironment,
-    expectedRevision: sourceLibraryRevision,
     expectedHealId: sourceLibraryHealId,
     expectedFromDate: sourceLibraryFromDate,
-    expectedReportSha256: createHash("sha256")
-      .update(reportBytes)
-      .digest("hex"),
   });
+}
+
+async function publishedReadinessEvidenceIsCurrent(): Promise<boolean> {
+  if (!requiresPublishedReadiness) return true;
+  if (!configuredReadinessDeploymentId || !configuredDeployedRevision) {
+    return false;
+  }
+  try {
+    await access(resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH));
+    validateReadinessEvidence(
+      await readFile(
+        resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH),
+      ),
+      {
+        expectedDeploymentId: configuredReadinessDeploymentId,
+        expectedRevision: configuredDeployedRevision,
+        expectedEnvironment: "release",
+        expectedModes: ["normal", "recovery"],
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function main(): Promise<void> {
@@ -3418,14 +4491,59 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (process.argv.includes("--prepare-published-evidence")) {
+    if ((releaseMode !== "standard" && releaseMode !== "full") ||
+        process.argv.includes("--verify-evidence")) {
+      console.error(
+        "Published evidence preparation is supported only for standard or full release mode, without --verify-evidence.",
+      );
+      process.exit(1);
+    }
+    const publishedUrl = cliOptionValue("--published-url");
+    if (!publishedUrl) {
+      console.error(
+        "Published evidence preparation requires --published-url from successful Replit deployment metadata.",
+      );
+      process.exit(1);
+    }
+    try {
+      const result = await preparePublishedEvidence({
+        url: publishedUrl,
+        evidenceDirectory: resolve(rootDir, releaseEvidenceDir),
+        expectedFile: resolve(rootDir, ".local/build-identity/expected-source.json"),
+        reportPath: sourceLibraryReport,
+        healId: sourceLibraryHealId,
+        fromDate: sourceLibraryFromDate,
+      });
+      console.log(
+        `Current published evidence prepared for ${result.appBuildId}: ${result.files.join(", ")}`,
+      );
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "evidence preparation failed";
+      console.error(`Published evidence preparation BLOCKED: ${message}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   if (process.argv.includes("--verify-evidence")) {
     try {
       const revision = await currentRevision();
+      if (hasProductionSourceLibraryReconciliation) {
+        resolveSourceLibraryReleaseDatabaseOwner(
+          sourceLibraryEnvironment,
+          configuredSourceLibraryDatabaseOwner,
+          configuredSourceLibraryDeploymentHandoff,
+          sourceLibraryEvidenceInput !== undefined,
+        );
+      }
       const sourceLibraryRevision = hasProductionSourceLibraryReconciliation
         ? resolveSourceLibraryReleaseRevision(
             revision,
             sourceLibraryEnvironment,
             configuredSourceLibraryRevision,
+            configuredSourceLibraryDeploymentHandoff,
           )
         : revision;
       await verifyReleaseEvidence(undefined, {
@@ -3433,6 +4551,9 @@ async function main(): Promise<void> {
         expectedMode:
           releaseMode === "standard" ? undefined : releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
+        expectedReadinessDeploymentId: configuredReadinessDeploymentId,
+        expectedDeployedRevision: configuredDeployedRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
       });
       process.exit(0);
     } catch (error) {
@@ -3445,7 +4566,6 @@ async function main(): Promise<void> {
     }
   }
   await assertApiIntegrationTestShardInventory();
-  console.log(`Release check started (${releaseMode} mode).`);
   let revision: string;
   try {
     revision = await currentRevision();
@@ -3457,13 +4577,64 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
+  const missingPublishedEvidence = requiresPublishedReadiness
+    ? missingPublishedReadinessEvidence({
+        deploymentId: configuredReadinessDeploymentId,
+        deployedRevision: configuredDeployedRevision,
+        invalidHandoff: configuredSourceLibraryDeploymentHandoffInvalid,
+      })
+    : [];
+  if (missingPublishedEvidence.length > 0) {
+    const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
+    const checkpointReportPath = resolve(
+      evidenceRoot,
+      RELEASE_CHECKPOINT_REPORT,
+    );
+    try {
+      await mkdir(evidenceRoot, { recursive: true });
+      await writeFile(
+        checkpointReportPath,
+        formatPublishedReadinessBlockedCheckpoint({
+          mode: releaseMode,
+          assessedRevision: revision,
+          missingEvidence: missingPublishedEvidence,
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+    } catch (error) {
+      console.error(
+        `Could not write blocked release checkpoint: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      process.exit(1);
+    }
+    console.error(
+      "Published release evidence is missing; no release gates were run and production readiness is NO-GO.",
+    );
+    console.error(
+      `Release checkpoint (BLOCKED / NO-GO): ${checkpointReportPath}`,
+    );
+    process.exit(1);
+  }
+  console.log(`Release check started (${releaseMode} mode).`);
+  const releaseRunStartedAt = Date.now();
   let sourceLibraryRevision: string;
   try {
+    if (hasProductionSourceLibraryReconciliation) {
+      resolveSourceLibraryReleaseDatabaseOwner(
+        sourceLibraryEnvironment,
+        configuredSourceLibraryDatabaseOwner,
+        configuredSourceLibraryDeploymentHandoff,
+        sourceLibraryEvidenceInput !== undefined,
+      );
+    }
     sourceLibraryRevision = hasProductionSourceLibraryReconciliation
       ? resolveSourceLibraryReleaseRevision(
           revision,
           sourceLibraryEnvironment,
           configuredSourceLibraryRevision,
+          configuredSourceLibraryDeploymentHandoff,
         )
       : revision;
   } catch (error) {
@@ -3475,6 +4646,9 @@ async function main(): Promise<void> {
   const checkpointReportPath = resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT);
   const logPath = resolve(evidenceRoot, "release-check.log");
   await mkdir(evidenceRoot, { recursive: true });
+  if (fullRun && browserMainCountSummaryPath) {
+    await rm(browserMainCountSummaryPath, { force: true });
+  }
   const resume = process.argv.includes("--resume");
   let concurrencyLimit: number;
   try {
@@ -3696,6 +4870,29 @@ async function main(): Promise<void> {
           const [{ step, index }] = waiting.splice(nextIndex, 1);
           if (step.group === "api-test-shards") apiActive += 1;
           console.log(`[${index + 1}/${steps.length}] ${step.label}`);
+          const isApiUnitReleaseStep =
+            step.label === "API unit tests (release shard 1/12)";
+          const releaseVitestCountsDirectory =
+            process.env.TEST_RESULTS_RELEASE_VITEST_COUNTS_DIR?.trim();
+          const releaseVitestRunId =
+            process.env.TEST_RESULTS_RELEASE_VITEST_RUN_ID?.trim();
+          const releaseVitestSourceRevision =
+            process.env.TEST_RESULTS_RELEASE_VITEST_SOURCE_REVISION?.trim();
+          const apiUnitVitestCountEnvironment: Record<string, string> =
+            isApiUnitReleaseStep &&
+            releaseVitestCountsDirectory &&
+            releaseVitestRunId &&
+            /^[a-zA-Z0-9:._-]{1,200}$/.test(releaseVitestRunId) &&
+            releaseVitestSourceRevision &&
+            /^[a-f0-9]{40,64}$/i.test(releaseVitestSourceRevision)
+              ? {
+                  TEST_RESULTS_VITEST_COUNTS_DIR:
+                    releaseVitestCountsDirectory,
+                  TEST_RESULTS_VITEST_RUN_ID: releaseVitestRunId,
+                  TEST_RESULTS_VITEST_SOURCE_REVISION:
+                    releaseVitestSourceRevision,
+                }
+              : {};
           let task: Promise<void>;
           task = (async () => {
             const isSourceLibraryStep =
@@ -3703,8 +4900,10 @@ async function main(): Promise<void> {
               step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label;
             const effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
+              step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
-              isSourceLibraryStep
+              isSourceLibraryStep ||
+              Object.keys(apiUnitVitestCountEnvironment).length > 0
                 ? {
                     ...step,
                     ...(isSourceLibraryStep
@@ -3718,11 +4917,20 @@ async function main(): Promise<void> {
                       : {}),
                     env: {
                       ...step.env,
-                      ...(step.label === FULL_BROWSER_GATE_LABEL
+                      ...(step.label === FULL_BROWSER_GATE_LABEL ||
+                      step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
                         ? { RELEASE_REVISION: revision }
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
                           : {}),
+                      ...(step.label === FULL_BROWSER_GATE_LABEL &&
+                      browserMainCountSummaryPath
+                        ? {
+                            PLAYWRIGHT_RELEASE_COUNT_SUMMARY_PATH:
+                              browserMainCountSummaryPath,
+                          }
+                        : {}),
+                      ...apiUnitVitestCountEnvironment,
                     },
                   }
                 : step;
@@ -3821,6 +5029,109 @@ async function main(): Promise<void> {
     await releaseStatefulLock?.();
   }
 
+  async function writeTestResultsStepSidecar(
+    releaseResults: readonly ReleaseStepResult[],
+  ): Promise<void> {
+    const sidecarPath = process.env.TEST_RESULTS_RELEASE_STEPS_PATH;
+    const reportId = process.env.TEST_RESULTS_REPORT_ID;
+    if (
+      !sidecarPath ||
+      !reportId ||
+      !/^(?:github:[0-9]{1,32}:[0-9]{1,8}|local:[\w-]{1,64})$/.test(reportId)
+    ) {
+      return;
+    }
+    const destination = resolve(sidecarPath);
+    const relativeDestination = relative(rootDir, destination);
+    if (
+      relativeDestination === ".." ||
+      relativeDestination.startsWith(`..${sep}`) ||
+      relativeDestination.length === 0
+    ) {
+      return;
+    }
+    const outcomes = await Promise.all(releaseResults
+      .filter(
+        (result) =>
+          result.label.length <= 160 &&
+          /^[A-Za-z0-9 ()/.:_-]+$/.test(result.label) &&
+          Number.isFinite(result.elapsedMs) &&
+          result.elapsedMs >= 0,
+      )
+      .map(async ({ label, status, elapsedMs }) => {
+        const summaryPath =
+          label === "browser WebKit smoke"
+            ? "browser-smoke/webkit-result.json"
+            : label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
+              ? "browser-compatibility/webkit-result.json"
+              : label === FULL_BROWSER_GATE_LABEL
+                ? browserMainCountSummaryPath
+              : undefined;
+        let counts;
+        if (summaryPath) {
+          try {
+            const summary = JSON.parse(
+              await readFile(
+                label === FULL_BROWSER_GATE_LABEL
+                  ? summaryPath
+                  : resolve(rootDir, releaseEvidenceDir, summaryPath),
+                "utf8",
+              ),
+            );
+            const expectedReleaseStatus =
+              status === "INFRASTRUCTURE TIMEOUT" ||
+              status === "INFRASTRUCTURE ERROR"
+                ? status
+                : status === "PASS"
+                  ? "PASS"
+                  : "FAIL";
+            counts =
+              label === FULL_BROWSER_GATE_LABEL
+                ? parseFullBrowserTestCounts(summary, {
+                    expectedRunId: reportId,
+                    expectedRevision: revision,
+                    notBeforeMs: releaseRunStartedAt,
+                    notAfterMs: Date.now(),
+                    expectedCaseCount: FULL_BROWSER_EXPECTED_CASES,
+                    expectedReleaseStatus,
+                  }) ?? undefined
+                : parseStructuredBrowserTestCounts(summary, {
+                    expectedRevision: revision,
+                    notBeforeMs: releaseRunStartedAt,
+                    notAfterMs: Date.now(),
+                    expectedProjects:
+                      label === "browser WebKit smoke"
+                        ? ["webkit"]
+                        : ["phone-webkit", "tablet-webkit"],
+                    expectedReleaseStatus,
+                  }) ?? undefined;
+          } catch {
+            // Missing or malformed runner evidence leaves counts unavailable.
+          }
+        }
+        return {
+          label,
+          status,
+          durationMs: Math.round(elapsedMs),
+          ...(counts ? { counts } : {}),
+        };
+      }));
+    await writeFile(
+      destination,
+      `${JSON.stringify({ runId: reportId, outcomes })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
+
+  try {
+    await writeTestResultsStepSidecar(results);
+  } catch {
+    // The optional summary sidecar must not change release-gate behavior.
+  }
+
+  if (isAssessmentRevision(revision) && captureReleaseIdentity(rootDir).revision !== revision) {
+    throw new Error("Production source or verification inputs changed during the release run; rerun against a stable source snapshot.");
+  }
   console.log("\nRelease check summary:");
   for (const result of results) {
     console.log(
@@ -3845,7 +5156,9 @@ async function main(): Promise<void> {
     results.length === steps.length &&
     results.every((result) => result.passed)
   ) {
-    const releaseDecision = hasProductionSourceLibraryReconciliation
+    const releaseDecision =
+      hasProductionSourceLibraryReconciliation &&
+      (await publishedReadinessEvidenceIsCurrent())
       ? "GO"
       : "NO-GO";
     try {
@@ -3859,6 +5172,7 @@ async function main(): Promise<void> {
       const reportPath = await writeReleaseReport(results, {
         revision,
         sourceLibraryRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
         decision: releaseDecision,
         expectedLabels: releaseGateLabelsForMode(releaseMode),
         timing: {
@@ -3873,6 +5187,9 @@ async function main(): Promise<void> {
         currentRevision: revision,
         expectedMode: releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
+        expectedReadinessDeploymentId: configuredReadinessDeploymentId,
+        expectedDeployedRevision: configuredDeployedRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
         allowIncompleteCheckpoint: true,
       });
       await rm(checkpointReportPath, { force: true });

@@ -251,10 +251,23 @@ export default function SpecReconcilePanel({
   }, [autoCheckSignal]);
 
   useEffect(() => {
-    if (!reopenRequest || reopenRequest.importType !== "spec") return;
-    const sheet = sheets.find((item) => item.id === reopenRequest.snapshotId);
-    if (sheet) void handleAiCheck(sheet);
-  }, [reopenRequest?.requestId, sheets]);
+    const request = reopenRequest;
+    if (!request || request.importType !== "spec") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const latest = await fetchSavedSpecSheets();
+        if (cancelled) return;
+        setSheets(latest);
+        const sheet = latest.find((item) => item.id === request.snapshotId);
+        if (sheet) void handleAiCheck(sheet);
+        else setResultError("Couldn't find the saved source for that import.");
+      } catch {
+        if (!cancelled) setResultError("Couldn't load saved spec sheets.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reopenRequest?.requestId]);
 
   function handleCheckAll() {
     setCheckingAll(true);

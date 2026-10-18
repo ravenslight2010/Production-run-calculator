@@ -40,6 +40,7 @@ node_modules
 /release-evidence/report-key-rotation-preflight.json
 /release-evidence/browser-smoke/webkit-result.json
 /release-evidence/.source-library-reconciliation.json.pending
+/api-load-workload/
 /release-evidence-full/
 /rollback-rehearsal-report.md
 /libpeerconnection.log
@@ -57,8 +58,22 @@ Thumbs.db
 
 # Replit
 .cache/
+!/.config/
+/.config/*
+!/.config/bashrc
 !/.local/
 .local/*
 !.local/custom_skills/
 !.local/custom_skills/**
+!.local/evidence/
+!.local/evidence/workbook-import-audit/
+!.local/evidence/workbook-import-audit/**
+# Keep the local workbook-audit evidence available to workspace tasks, but out of Git checkpoints.
+.local/evidence/workbook-import-audit/
 .local/custom_skills/**/.fingerprint
+.local/custom_skills/review-before-shipping/
+.local/test-evidence/
+
+# Local audit originals are excluded by managed checkpoints; retain curated
+# source-bound handoffs under docs/evidence rather than blocking task rebases.
+/.local/evidence/workbook-import-audit/

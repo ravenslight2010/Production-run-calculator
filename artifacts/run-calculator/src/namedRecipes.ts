@@ -41,7 +41,7 @@ export class StaleNamedRecipeSnapshotError extends Error {
     readonly canonicalItems: NamedRecipe[],
     readonly rejectedIds: string[],
   ) {
-    super(`The ${kind} recipe list changed before this save completed`);
+    super(`The ${kind} recipes changed before this save completed. Reopen the import review or editor to use the latest recipes; this save was not applied.`);
   }
 }
 

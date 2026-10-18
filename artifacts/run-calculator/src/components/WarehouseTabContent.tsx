@@ -26,6 +26,7 @@ import { FreezerSurplusPanel } from "./FreezerSurplusPanel";
 import ReorderCard from "./ReorderCard";
 import UseFirstCard from "./UseFirstCard";
 import SurplusMixCard from "./SurplusMixCard";
+import { WarehouseSwitchoverBanner } from "./WarehouseSwitchoverBanner";
 
 export default memo(function WarehouseTabContent() {
   const {
@@ -33,7 +34,7 @@ export default memo(function WarehouseTabContent() {
     cycleCountSchedules, dayState, freezerPullPlan,
     freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
     isSupervisor, markCountedMutation,
-    refreshFreezerSurplus, replaceRunSurplus, runValuesById,
+    adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById,
     scheduledDays, scheduledValues, setPinError, setPinInput, setScheduleDeleteConfirm,
     setScheduledDays, setScheduleView, setShowPinDialog, setShowScheduleDialog,
     todayScheduledValues, toggleStagedItem,
@@ -58,6 +59,7 @@ export default memo(function WarehouseTabContent() {
                     Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
                   </p>
                 </div>
+                <WarehouseSwitchoverBanner />
                 <FreezerSurplusPanel
                   mode="warehouse"
                   ledger={freezerSurplus}
@@ -88,6 +90,7 @@ export default memo(function WarehouseTabContent() {
                     await replaceRunSurplus(run, allocations);
                     await refreshFreezerSurplus();
                   }}
+                  onAdjust={adjustFinishedCaseStock}
                 />
                 {/* Pull Out Freezer: for each upcoming scheduled run within an
                     item's days-early window whose recipe uses a tagged

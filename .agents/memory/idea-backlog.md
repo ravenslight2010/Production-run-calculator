@@ -1,5 +1,7 @@
 # Idea Backlog
 
+> Historical mirror retained for context. The current catalog is `docs/idea-backlog.md`; sync sequencing is governed by `docs/sync-reliability-unified-plan-2026-09-19.md`, and cross-domain ordering by `research/additional-domain-research-synthesis-2026-09-19.md`. Do not use status lines below as current authority.
+
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
 **Prioritized research synthesis (2026-09-18):** see [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) for ordered phases (stabilize → inventory truth → floor UX → QC/allergen → AI portfolio → reporting), status corrections, and explicit non-priorities. Prefer that document when choosing *what to build next*; keep this file as the catalog of ideas and detailed notes. See also [capability-research-pack-2026-09-18.md](capability-research-pack-2026-09-18.md) (every capability area mapped against industry/MES norms) and [further-research-2026-09-18.md](further-research-2026-09-18.md) (sync architecture, payload measurement, FSMA/allergen scope, station UX decisions).
@@ -397,10 +399,49 @@ Add dedicated tracking for physical stations currently missing from the app.
 - New open-ended assistants that recombine already-visible live-run facts
 - Presenting deterministic math as dependent on a model
 
+### Local-first adapter + distillation research (2026-09-26 to 09-28)
+Directly addresses the "AI model routing / fallback providers" item above, and goes
+further: `feat/local-ai-adapter` (merged content, see branch-map work) implements a
+self-hosted local model server as an alternative to the Gemini dependency, motivated by
+the Sept 2026 Gemini model-retirement incident that broke Render imports for days (PR
+#81 fixed it by moving to `gemini-3.6-flash`; the local adapter is a structural hedge
+against the next retirement, not just another patch).
+
+Research chain, each gated on the one before it:
+1. **`local-ai-installation-research-2026-09-26.md`** — can AI run in-app with no
+   external API? Concludes: not in-browser (floor tablet hardware, shared-hardware
+   quality concerns), but a self-hosted local model server is viable — this is what
+   `feat/local-ai-adapter` implements.
+2. **`how-to-build-ai-research-2026-09-28.md`** / **`how-to-build-an-ai-research-2026-09-28.md`** —
+   general + project-mapped research on what "building AI" actually requires (fine-tuning
+   cost/hardware, RAG-vs-fine-tuning decision frameworks), concluding fine-tuning is
+   **low priority** relative to extraction + correction memory, consistent with the value
+   audit's "Keep" column above.
+3. **`ai-phase0-adapter-dataset-design-2026-09-28.md`** — the gate: only pursue
+   distillation/fine-tuning if a Phase-0 benchmark shows the local base model genuinely
+   trailing Gemini on this app's own import corpus. Dataset curation can start now;
+   training waits on that result.
+4. **`qlora-distillation-techniques-2026-09-28.md`**, **`qlora-unsloth-config-and-train-checklist-2026-09-28.md`**,
+   **`near-dup-hashing-research-2026-09-28.md`**, **`ai-deep-dive-continuation-2026-09-28.md`** —
+   the conditional fallback path's technical detail (QLoRA/Unsloth config, train/dev/
+   holdout leakage prevention), prepared ahead of the gate so no time is lost if it
+   triggers.
+5. **`lib/distill-dataset`** (new shared package) — implements the dataset-hygiene
+   functions the gate's dataset-curation step needs now (near-dup detection via word
+   shingles + Jaccard similarity, train/holdout leakage checks) — this part is usable
+   immediately regardless of whether the fine-tuning gate ever triggers, since clean
+   dataset curation has value on its own.
+
+Also: `pre-implementation-research-pack-2026-09-19.md` and
+`all-remaining-deep-dives-2026-09-19.md` are earlier (Sept 19) research in the same vein,
+previously sitting only in `attached_assets/` as raw uploads — moved into `docs/` here
+for discoverability.
+
 ### Code References
 - `artifacts/api-server/src/routes/ai*.ts` — AI route handlers
 - `lib/ai-memory/` — shared AI memory system
 - `lib/integrations-openai-ai-server/` — AI server integration
+- `lib/distill-dataset/` — dataset hygiene for the conditional fine-tuning fallback
 - `artifacts/run-calculator/src/components/ai/` — AI UI components
 - `docs/ai-feature-value-audit-2026-09-05.md` — decision standard
 

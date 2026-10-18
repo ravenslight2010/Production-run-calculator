@@ -30,6 +30,14 @@ export class ParseSpecRateLimitError extends Error {
   }
 }
 
+/** Authorization failures must never trigger a fallback or retry request. */
+export class ParseSpecAuthorizationError extends Error {
+  constructor(readonly status: 401 | 403, detail?: string) {
+    super(detail || `AI spec parsing is not authorized (${status}).`);
+    this.name = "ParseSpecAuthorizationError";
+  }
+}
+
 /**
  * Creates a per-import sliding-window rate pacer.  Await `pace()` before
  * every requestParseSpecSheet call; it sleeps when PARSE_PACE_SAFE_MAX calls
@@ -147,7 +155,13 @@ export async function requestParseSpecSheet(
       return await submitAndWaitForServerJob<ParseSpecSheetResult>({
         type: "workbook-parse", input, signal,
       });
-    } catch {
+    } catch (error) {
+      const status = error instanceof Error
+        ? Number(error.message.match(/\((401|403)\)/)?.[1])
+        : 0;
+      if (status === 401 || status === 403) {
+        throw new ParseSpecAuthorizationError(status, error instanceof Error ? error.message : undefined);
+      }
       // Rollout/offline compatibility: direct parsing remains the established
       // synchronous path and never changes import review/confirmation behavior.
     }
@@ -174,6 +188,9 @@ export async function requestParseSpecSheet(
       detail = ((await res.json()) as { error?: string }).error ?? "";
     } catch {}
     if (res.status === 429) throw new ParseSpecRateLimitError(detail);
+    if (res.status === 401 || res.status === 403) {
+      throw new ParseSpecAuthorizationError(res.status, detail);
+    }
     throw new Error(detail || `Parse-spec-sheet request failed (${res.status})`);
   }
   return (await res.json()) as ParseSpecSheetResult;

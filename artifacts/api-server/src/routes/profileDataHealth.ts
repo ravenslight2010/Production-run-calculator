@@ -665,16 +665,9 @@ export function createProfileDataHealthService(database: typeof db = db): Profil
           action: "profile_data_health_repair",
           resource: "brand_profiles",
           changes: {
-            profiles: applied
-              .filter((repair) => repair.repairType === "profile-link")
-              .map((repair) => ({ profileKey: repair.profileKey, recipeKind: repair.recipeKind, fields: repair.fields })),
-            aliases: applied
-              .filter((repair) => repair.repairType === "delete-alias")
-              .map((repair) => ({ source: repair.source, rowId: repair.rowId })),
-            repairedRuns,
+            count: applied.length,
+            outcome: "success",
           },
-          ipAddress: actor.ipAddress,
-          userAgent: actor.userAgent,
         });
       }
        return {

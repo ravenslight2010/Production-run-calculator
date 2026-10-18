@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseCheeseSheet,
   parseCheeseWorkbook,
+  parseCheeseWorkbookWithSources,
   cheeseImportId,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
@@ -156,6 +157,26 @@ describe("parseCheeseSheet - Aldo (two columns)", () => {
     expect(std.flavors).toEqual([]);
     const parm = sheet.recipes.find((r) => r.name === "Aldo's Parmesan / Oregano Mix")!;
     expect(parm.flavors).toEqual([]);
+  });
+});
+
+describe("parseCheeseWorkbookWithSources", () => {
+  it("records verified sheet/cell locations for recipe fields", () => {
+    const parsed = parseCheeseWorkbookWithSources([{ ...ALDO, sourceFile: "cheese.xlsx" }]);
+    const evidence = parsed.sourceByRecipeId[cheeseImportId("Aldo", "Aldo's Standard Cheese Mix")]!;
+    expect(evidence.recipeName).toEqual({
+      file: "cheese.xlsx",
+      sheet: "Aldo",
+      cell: "A5",
+    });
+    expect(evidence.shredderSetting).toMatchObject({ sheet: "Aldo", cell: "A2" });
+    expect(evidence.assignmentCells[0]).toMatchObject({ sheet: "Aldo", cell: "A3" });
+    expect(evidence.components[0]).toMatchObject({
+      ingredient: { sheet: "Aldo", cell: "A7" },
+      lbs: { sheet: "Aldo", cell: "B7" },
+    });
+    expect(evidence.cellulosePercent).toMatchObject({ sheet: "Aldo", cell: "B14" });
+    expect(parsed.recipes[0]).not.toHaveProperty("sourceEvidence");
   });
 });
 

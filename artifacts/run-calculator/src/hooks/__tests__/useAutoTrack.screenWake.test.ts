@@ -430,6 +430,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
       form,
       autoTrackBlocked,
+      autoTrackWakeRebaseReason: "authoritative-peer-packaging",
     });
 
     const { rerender } = renderHook(
@@ -528,7 +529,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
         runStatus: "ended",
         endedAt: wakeMs - 1_000,
         autoTrackBlocked: true,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "lifecycle-replacement",
       }));
     });
 
@@ -540,7 +541,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
         runStatus: "ended",
         endedAt: wakeMs - 1_000,
         autoTrackBlocked: false,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "lifecycle-replacement",
       }));
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
@@ -564,7 +565,225 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       onPackagingProgressAutoAdvance,
     }));
 
-    expect(onPackagingProgressAutoAdvance).toHaveBeenCalled();
+    expect(onPackagingProgressAutoAdvance).toHaveBeenCalledWith(
+      "manual-deadline-race-6",
+      expect.any(Number),
+      expect.any(Number),
+    );
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(0);
+  });
+
+  it("8. preserves a manual skid correction through suppression expiry and a 20-minute wake", () => {
+    const elapsed0 = 780;
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+    });
+    const foregroundBarrierRef = { current: false };
+    const manualSuppressionRef = { current: 0 };
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      nowMs: number,
+      elapsedSec: number,
+      overrides: Partial<Props> = {},
+    ): Props => ({
+      runId: "wake-manual-correction-8",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+      autoTrackBlockedRef: foregroundBarrierRef,
+      externalAutoSuppressRef: manualSuppressionRef,
+      ...overrides,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, elapsed0) },
+    );
+
+    act(() => {
+      vi.setSystemTime(T0 + 500);
+      rerender(props(T0 + 500, elapsed0));
+    });
+
+    // The operator corrects both packaging controls. The normal one-minute
+    // suppression blocks an otherwise-due automatic tick.
+    store.skidsCompleted = 1;
+    store.casesOnCurrentSkid = 4;
+    const suppressionExpiredAt = T0 + 60_001;
+    manualSuppressionRef.current = suppressionExpiredAt;
+    const suppressedTick = T0 + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(suppressedTick);
+      rerender(props(suppressedTick, elapsed0 + CASE_PERIOD_MS / 1000 + 1));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(14);
+
+    // Twenty minutes later, foreground recovery holds the wake clock and
+    // confirms the same corrected packaging register. Suppression expired while
+    // hidden, with no render that could advance packaging in between.
+    const wakeAt = suppressionExpiredAt + 20 * 60_000;
+    const elapsedAtWake = elapsed0 + 60 + 20 * 60;
+    foregroundBarrierRef.current = true;
+    vi.setSystemTime(wakeAt);
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(14);
+
+    // The acknowledgement releases without the hook observing a blocked render,
+    // matching React batching the fence release and acknowledgement together. It
+    // must fully rebase bookkeeping rather than apply the hidden-time backlog.
+    foregroundBarrierRef.current = false;
+    act(() => {
+      rerender(props(wakeAt, elapsedAtWake, {
+        autoTrackBlocked: false,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 1,
+      }));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(14);
+
+    // Automatic tracking continues incrementally from the corrected total.
+    const nextTick = wakeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(nextTick);
+      rerender(props(nextTick, elapsedAtWake + CASE_PERIOD_MS / 1000 + 1, {
+        autoTrackBlocked: false,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 1,
+      }));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(15);
+
+    // A later wake acknowledgement must rebase again rather than reusing the
+    // first wake's one-shot guard and applying a second hidden-time backlog.
+    const secondWakeAt = nextTick + 20 * 60_000;
+    const elapsedAtSecondWake = elapsedAtWake + CASE_PERIOD_MS / 1000 + 1 + 20 * 60;
+    foregroundBarrierRef.current = true;
+    vi.setSystemTime(secondWakeAt);
+    foregroundBarrierRef.current = false;
+    act(() => {
+      rerender(props(secondWakeAt, elapsedAtSecondWake, {
+        autoTrackBlocked: false,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 2,
+      }));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(15);
+
+    const secondNextTick = secondWakeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(secondNextTick);
+      rerender(props(
+        secondNextTick,
+        elapsedAtSecondWake + CASE_PERIOD_MS / 1000 + 1,
+        {
+          autoTrackBlocked: false,
+          autoTrackWakeRebaseReason: "manual-packaging-ownership",
+          autoTrackWakeAcknowledgement: 2,
+        },
+      ));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(16);
+  });
+
+  it("9. persists an old drain tick by run ID without clobbering the newly selected run", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+    });
+    const selectedRunIdRef = { current: "drain-run-9" };
+    const persisted: Record<string, number> = {};
+    const onPackagingProgressAutoAdvance = vi.fn((
+      runId: string,
+      skidsCompleted: number,
+      casesOnCurrentSkid: number,
+    ) => {
+      persisted[runId] = skidsCompleted * BASE_V.casesPerSkid + casesOnCurrentSkid;
+      // Model a foreground/manual selection landing between the old run's
+      // calculation and its shared-form write.
+      selectedRunIdRef.current = "selected-run-9";
+      store.skidsCompleted = 7;
+      store.casesOnCurrentSkid = 4;
+      return runId === selectedRunIdRef.current;
+    });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      nowMs: number,
+      elapsedSec: number,
+      overrides: Partial<Props> = {},
+    ): Props => ({
+      runId: "drain-run-9",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      onPackagingProgressAutoAdvance,
+      ...overrides,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, 780) },
+    );
+
+    const baselineAt = T0 + 500;
+    act(() => {
+      vi.setSystemTime(baselineAt);
+      rerender(props(baselineAt, 780));
+    });
+
+    const wakeAt = baselineAt + 20 * 60_000;
+    const elapsedAtWake = 780 + 20 * 60;
+    const foregroundBarrierRef = { current: true };
+    act(() => {
+      vi.setSystemTime(wakeAt);
+      rerender(props(wakeAt, elapsedAtWake, {
+        autoTrackBlocked: true,
+        autoTrackBlockedRef: foregroundBarrierRef,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+      }));
+    });
+
+    foregroundBarrierRef.current = false;
+    act(() => {
+      rerender(props(wakeAt, elapsedAtWake, {
+        autoTrackBlocked: false,
+        autoTrackBlockedRef: foregroundBarrierRef,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 1,
+      }));
+    });
+
+    const nextTick = wakeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(nextTick);
+      rerender(props(nextTick, elapsedAtWake + CASE_PERIOD_MS / 1000 + 1, {
+        autoTrackBlocked: false,
+        autoTrackBlockedRef: foregroundBarrierRef,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 1,
+      }));
+    });
+
+    expect(onPackagingProgressAutoAdvance).toHaveBeenCalledWith(
+      "drain-run-9",
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(persisted["drain-run-9"]).toBeGreaterThan(0);
+    // The selected run's handoff value is still present; the old drain tick
+    // was persisted independently and rejected at the shared-form boundary.
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(74);
+    expect(selectedRunIdRef.current).toBe("selected-run-9");
   });
 });

@@ -4,13 +4,18 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./app-knowledge": "./src/appKnowledge.ts",
+    "./local-candidate": "./src/localCandidate.ts",
+    "./spec-import-gold-review": "./src/spec-import-gold-review.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "^4.10.2",
     "vitest": "^4.1.9"
   }
 }

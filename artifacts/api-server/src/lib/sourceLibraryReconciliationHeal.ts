@@ -1,4 +1,3 @@
-import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import {
@@ -12,7 +11,7 @@ import {
   specImportAliasesTable,
 } from "@workspace/db";
 import {
-  SOURCE_LIBRARY_RECONCILIATION_PLAN_GZIP_BASE64,
+  SOURCE_LIBRARY_RECONCILIATION_PLAN_JSON_BASE64,
   SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256,
 } from "./sourceLibraryReconciliationPlan.generated";
 import type { db } from "@workspace/db";
@@ -109,7 +108,7 @@ export function loadSourceLibraryReconciliationPlan(): SourceLibraryReconciliati
 }
 export { SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256 };
 function generatedPlanJson(): string {
-  const json = gunzipSync(Buffer.from(SOURCE_LIBRARY_RECONCILIATION_PLAN_GZIP_BASE64, "base64")).toString("utf8");
+  const json = Buffer.from(SOURCE_LIBRARY_RECONCILIATION_PLAN_JSON_BASE64, "base64").toString("utf8");
   const hash = createHash("sha256").update(json).digest("hex");
   if (hash !== SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256) {
     throw new Error("Source-library reconciliation generated plan hash does not match its reviewed contract");

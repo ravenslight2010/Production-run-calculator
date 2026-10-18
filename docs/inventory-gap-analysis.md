@@ -1,5 +1,17 @@
 # Inventory System — Gap Analysis
 
+**Current status reconciliation: 2026-10-08.** The analysis below is a 2026-09-19 snapshot and is retained as historical context, not as the active implementation backlog.
+
+| Area | Current status | Evidence / remaining work |
+|---|---|---|
+| Actual-case consumption | **Implemented in source; verification partial** | Completed-run consumption uses persisted `actualCases` when positive, with planned-value fallback; a direct scaling assertion was not located. |
+| Prep-mix deduction | **Implemented for recorded day-start events** | Server-owned, idempotent drawdown and surplus creation are covered by `inventory.integration.test.ts`; broader reconciliation remains. |
+| Packaging | **Formula paths exist; verification partial** | Run and daily-supply lines are present; focused tests do not assert every item/mode combination. |
+| Freezer pull | **Core allocation/inventory paths exist; parity verification partial** | The server updates surplus allocations and finished-case stock; add combined balance/stock assertions for replacement/release and reset scope. |
+| Waste, stoppage loss, returns, final-total reconciliation | **Open** | Require defined physical events, accepted quantities, correction rules, and audit boundaries. |
+
+Use the dated status above and [inventory auto-deduction plan](inventory-autodeduction-plan.md) for current work. Do not repeat the old planned-case, missing-mix-deduction, or missing-packaging claims below as current facts.
+
 ## What Inventory Currently Covers
 
 The `computeRunLines` function in `lib/inventory-math/src/index.ts` computes consumption for these categories at **run-end** only:

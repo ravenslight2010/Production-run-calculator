@@ -476,7 +476,11 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
 
     expect(screen.getByText(/ingredients and oz-per-pizza amounts will be replaced/)).toBeTruthy();
     expect(screen.getByText(/mix settings stay as-is/)).toBeTruthy();
-    expect(screen.getByText(/Will change to: Red Pepper 1.25 oz\/pizza · Onion 0.75 oz\/pizza/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Will change to: Red Pepper 1\.25 oz\/pizza \(location unverified\) · Onion 0\.75 oz\/pizza \(location unverified\)/,
+      ),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByText(/^Apply/));
 

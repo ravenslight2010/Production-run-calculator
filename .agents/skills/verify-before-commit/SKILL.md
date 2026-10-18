@@ -1,11 +1,11 @@
 ---
 name: verify-before-commit
-description: Verify changes before committing or pushing, and on any change to the repo. Use whenever about to commit, push, or claim a "green build" / "tests pass" / "ready to deploy" for this app. Encodes the local verification discipline for this repo: git status always clean before commit, locked dependency overrides kept in sync, typecheck (not build) because this machine is ARM, rely on CI for the real test gate, and check .agents/memory before touching unfamiliar areas.
+description: Verify local repository state and supported checks before committing or pushing changes, and before claiming changed-code typechecks or tests are green. Use release-checklist for full pre-publish verification and production-go for the final production GO/NO-GO decision.
 ---
 
 # Verify Before Commit
 
-Run before every commit, push, or "ready" claim so "works on my (ARM) machine, broken in CI" doesn't happen.
+Run before every commit or push, and before claiming local verification for a code change is green, so "works on my (ARM) machine, broken in CI" doesn't happen. For full pre-publish gates, use `release-checklist`; for the final production GO/NO-GO decision, use `production-go`.
 
 1. **Check `.agents/memory/` first** — before touching any unfamiliar subsystem, read the relevant memory docs (215 files). The repo's operational knowledge lives there (see `replit.md` for the runbook). Don't guess.
 

@@ -1,4 +1,5 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
+import { DEFAULT_RUN_TO_TIME } from "../runToTime";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -7,6 +8,7 @@ import {
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
 import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
+import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import {
   coordinateForegroundAdoption,
   createForegroundSyncTodayRequest,
@@ -16,9 +18,19 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
+import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
+import {
+  clearPendingSyncIntent,
+  loadPendingSyncIntent,
+  savePendingSyncIntent,
+} from "../syncPendingIntent";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
+  computeAutomaticFrontlineSupply,
+  computeAutomaticSauceSupply,
+  computeFrontlineRunRequirement,
+  computeSauceRunRequirement,
   type AutoTrackSchedule,
   type Calc,
   type OperationalProjection,
@@ -29,16 +41,15 @@ import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/Ware
 import { InventoryTabCtx, type InventoryTabContextValue } from "../contexts/InventoryTabCtx";
 import { MixesTabCtx, type MixesTabContextValue } from "../contexts/MixesTabCtx";
 import { SetupTabCtx, type SetupTabContextValue } from "../contexts/SetupTabCtx";
-import WarehouseTabContent from "../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
 import InventoryTabContent from "../components/InventoryTabContent";
-import MixesTabContent from "../components/MixesTabContent";
-import SetupContent from "../components/SetupContent";
-import SummaryToolsContent from "../components/SummaryToolsContent";
-import ScreenModeView from "../components/ScreenModeView";
 import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
+import {
+  emitManualSectionError,
+  subscribeToManualSectionErrors,
+} from "../manualSectionErrors";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,
@@ -50,10 +61,11 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
-import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
+import { LiveRunTabContent } from "../components/live-stations/LiveRunTabContent";
+import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -70,7 +82,6 @@ import {
   type HistoryDay,
   DEFAULT_VALUES,
   PACKAGING_FIELDS,
-  DAY_KEY,
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
   DEFAULT_STOP_REASONS,
@@ -121,12 +132,20 @@ import {
   type IngredientSubstitution,
   type SubstitutionLogEntry,
   type PrepPhase,
+  type DayBreaks,
   withTempOverrides,
   PRE_POST_TUNNEL_DEFAULT_MIN,
   DOUGH_TRAY_SECTION_CAPACITY,
   DOUGH_TRAY_SECTION_COUNT,
   DOUGH_TRAY_ADVISORY_TOTAL,
 } from "../types";
+import {
+  calculateDayTimeline,
+  defaultDayBreaks,
+  estimatedRunDurationSec,
+  isValidLocalTime,
+  normalizeDayBreaks,
+} from "../dayTimeline";
 import {
   fmtElapsed,
   fmtTime,
@@ -144,20 +163,23 @@ import {
   todayStr,
   writeDayResetAt,
   runLabel,
-  shouldSignOutAfterRollover,
-  shouldPublishFreshRolloverState,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
+import { reconcileLiveScheduleSave } from "../scheduleLiveReconciliation";
 import { fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
+  buildMixRunSnapshotUpdates,
   isSharedRecipeRefreshEligible,
+  mergePendingRunSnapshotUpdates,
   orchestrateSharedRecipeRefresh,
   refreshNamedRecipeProfilesAndPropagate,
   runSharedRecipeRefresh,
+  shouldPropagateNamedRecipeRows,
 } from "../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
+import { normalizeSelectableName, selectableNames } from "../setupRecipeNames";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
   pauseDecisionRemainingMs,
@@ -182,6 +204,7 @@ import {
   profileHasRealData,
   backfillFromProfile,
   saveProfile,
+  saveProfileAndWaitForServer,
   mergeProfileIntoOpenForm,
   markProfileRemotelyDeleted,
   recipeRowsEqual,
@@ -212,7 +235,6 @@ import {
   applyMixCheeseOverlapDedupeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   applyProfileCleanupIfNeeded,
-  archiveDayToHistory,
   deleteProfilesForBrand,
   deleteProfileEntry,
   applyIngredientMerge,
@@ -273,9 +295,12 @@ import {
   freshDayState,
   isBlankRemovableRun,
   isEmptyOverPopulated,
+  isRunValueStampAheadOfServerTime,
   isPristineSeedRun,
   pickCurrentRunPushValue,
   reconcileOperationalIntentCanonical,
+  serverOwnedApp1BatchProgress,
+  serverOwnedApplicatorStockProgress,
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
@@ -284,8 +309,10 @@ import {
   shouldResetFormOnRunSwitch,
 } from "../domain/runSyncPolicy";
 import {
+  getEqualPackagingProgress,
   loadPackagingProgress,
   overlayPackagingProgress,
+  overlayPackagingProgressForRun,
   reconcilePackagingProgress,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
@@ -294,11 +321,15 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   consumeSyncWriteResponse,
+  shouldReplaySyncWrite,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
   isValidSyncSnapshotId,
-  readCurrentRecoveryJson,
+  mergeSparseServerRunMap,
+  persistedSyncPayload,
+  reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
+  syncWriteFieldCheck,
 } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -356,7 +387,6 @@ import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
-import DataHealthWorkspace from "../components/DataHealthWorkspace";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
 import {
   buildSyncDiagnosticReport,
@@ -364,7 +394,9 @@ import {
   loadSyncMeasurements,
   recordSyncDiagnostic,
   recordSyncMeasurement,
+  recordWakeRecoveryDiagnostic,
   type SyncDiagnostic,
+  type SyncDiagnosticFieldCheck,
   type SyncDiagnosticKind,
   type SyncMeasurementTrigger,
 } from "../syncDiagnostics";
@@ -372,14 +404,10 @@ import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
+import IngredientAllergenMappingManager from "../components/IngredientAllergenMappingManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
-import ManagerAttentionDialog, {
-  buildManagerAttentionItems,
-  managerAttentionCount,
-  type ManagerAttentionItem,
-} from "../components/ManagerAttentionDialog";
 import ApplicatorEvidenceReview from "../components/ApplicatorEvidenceReview";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
@@ -387,6 +415,7 @@ import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
 import { TickBar } from "../components/TickBar";
 import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../components/DoughRoleGate";
+import { IngredientSelect, TypeDropdown } from "../components/SetupPickerControls";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
@@ -401,7 +430,10 @@ import {
   confirmFreezerSurplus,
   fetchFreezerSurplus,
   getFreezerSurplusRemainingMs,
+  recordFreezerSurplusAdjustment,
   replaceFreezerSurplusAllocation,
+  type FreezerSurplusAdjustment,
+  type FreezerSurplusAdjustmentInput,
 } from "../freezerSurplus";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
@@ -444,9 +476,13 @@ import { cachedProfileKeys } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
-import MixReconcilePanel from "../components/MixReconcilePanel";
-import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
+import { createImportOperationId } from "../importOperations";
+import {
+  emitFieldCheckSignal,
+  FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
+  PRODUCTION_RUN_SAVE_FAILURE_CODES,
+} from "../fieldChecks";
 import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
@@ -455,6 +491,7 @@ import {
   buildBatchWeightMap,
   lookupBatchWeight,
   collectBatchWeightCandidatesFromProfile,
+  collectAcknowledgedBatchWeightSnapshotUpdates,
   filterStillCurrentBatchWeightEntries,
   enqueueBatchWeightPropagation,
   executeBatchWeightPropagation,
@@ -466,12 +503,25 @@ import FillMissingPanel from "../components/FillMissingPanel";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
+import ManagerAttentionDialog, {
+  buildManagerAttentionItems,
+  managerAttentionCount,
+  type ManagerAttentionItem,
+} from "../components/ManagerAttentionDialog";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
+import { TouchSelect } from "../components/TouchOptionPicker";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
+import {
+  dismissSauceAutoTrackFailure as dismissSauceAutoTrackFailureState,
+  noteSauceAutoTrackFailure,
+  resolveSauceAutoTrackFailure,
+  sauceAutoTrackBarrelId,
+  type SauceAutoTrackFailure,
+} from "../sauceAutoTrackFailure";
 import {
   applyRecipeSuggestion as applyRecipeSuggestionShared,
   type RecipeFieldId,
@@ -553,6 +603,12 @@ import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import {
+  createScreenSyncState,
+  getScreenSyncStatus,
+  reduceScreenSyncState,
+} from "../screenSyncState";
+import { detectCastGuidancePlatform, getCastGuidance } from "../castGuidance";
+import {
   getAutoTrackTiming,
   suggestedDoughStaging,
   type AutoTrackEventClaim,
@@ -565,7 +621,9 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
+import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
@@ -573,7 +631,7 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
-import { createPackagingControlAdapter, createPackagingManager } from "../packagingManager";
+import { createPackagingControlAdapter, createPackagingManager, runUnlockedManualSectionAction } from "../packagingManager";
 import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -757,7 +815,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import SetupProfileEditor from "@/components/SetupProfileEditor";
 import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -806,6 +863,48 @@ const loadDoughGuideImportDialog = () =>
     default: module.DoughGuideImportDialog,
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
+const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
+const loadScreenModeView = () => import("../components/ScreenModeView");
+const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
+const loadImportHistoryPanel = () => import("../components/ImportHistoryPanel");
+const loadMixReconcilePanel = () => import("../components/MixReconcilePanel");
+const loadGlanceOverlay = () => import("../components/GlanceOverlay");
+
+// Keep the initial production view focused on the live Run panel. Other tabs
+// are loaded only when their tab content is selected; DeferredSurface provides
+// a visible loading state and a retry action if a chunk request fails.
+const loadSetupContent = () => import("../components/SetupContent");
+const loadWarehouseTabContent = () => import("../components/WarehouseTabContent");
+const loadMixesTabContent = () => import("../components/MixesTabContent");
+const loadSummaryToolsContent = () => import("../components/SummaryToolsContent");
+const loadLivePackagingTabContent = () =>
+  import("../components/live-stations/LivePackagingTabContent").then((module) => ({
+    default: module.LivePackagingTabContent,
+  }));
+const loadLiveSauceTabContent = () =>
+  import("../components/live-stations/LiveSauceTabContent").then((module) => ({
+    default: module.LiveSauceTabContent,
+  }));
+const loadLiveFrontlineTabContent = () =>
+  import("../components/live-stations/LiveFrontlineTabContent").then((module) => ({
+    default: module.LiveFrontlineTabContent,
+  }));
+const loadLiveDoughTabContent = () =>
+  import("../components/live-stations/LiveDoughTabContent").then((module) => ({
+    default: module.LiveDoughTabContent,
+  }));
+const loadLiveSetupRecipesTabContent = () =>
+  import("../components/live-stations/LiveSetupRecipesTabContent").then((module) => ({
+    default: module.LiveSetupRecipesTabContent,
+  }));
+const loadLiveStoppagesTabContent = () =>
+  import("../components/live-stations/LiveStoppagesTabContent").then((module) => ({
+    default: module.LiveStoppagesTabContent,
+  }));
+const loadLiveSummaryTabContent = () =>
+  import("../components/live-stations/LiveSummaryTabContent").then((module) => ({
+    default: module.LiveSummaryTabContent,
+  }));
 
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
@@ -1152,1192 +1251,18 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   return rows;
 }
 
-function StatRow({
-  label,
-  value,
-  testId,
-  highlight,
-  sub,
-}: {
-  label: string;
-  value: string;
-  testId?: string;
-  highlight?: boolean;
-  sub?: string;
-}) {
-  return (
-    <div
-      className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
-    >
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex flex-col items-end gap-0.5">
-        <span
-          className={`font-mono font-semibold text-sm tabular-nums ${highlight ? "text-primary text-base" : "text-foreground"}`}
-          data-testid={testId}
-        >
-          {value}
-        </span>
-        {sub && (
-          <span className="text-xs text-muted-foreground font-normal leading-tight">
-            {sub}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function IngredientSelect({
-  value,
-  onChange,
-  options,
-  onAddOption,
-  onRemoveOption,
-  placeholder,
-  optionLabels,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption?: (v: string) => void;
-  onRemoveOption?: (v: string) => void;
-  placeholder?: string;
-  // Optional display label per option value (e.g. brand tags for colliding
-  // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
-  optionLabels?: ReadonlyMap<string, string>;
-}) {
-  const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
-  const [open, setOpen] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [dropUp, setDropUp] = useState(false);
-  const [rect, setRect] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
-  const confirmDeleteRef = useRef<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const scrollKeep = useDropdownScrollKeeper(open);
-  const filtered = (options ?? []).filter(o =>
-    labelOf(o).toLowerCase().includes(inputVal.toLowerCase())
-  );
-
-  function openDropdown() {
-    setInputVal("");
-    setConfirmDelete(null);
-    confirmDeleteRef.current = null;
-    if (triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const dropdownH = Math.min(filtered.length * 32 + 80, 280);
-      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
-      setRect({ top: r.top, bottom: r.bottom, left: r.left, width: r.width });
-    }
-    setOpen(true);
-  }
-
-  const dropStyle: React.CSSProperties = rect
-    ? {
-        position: "fixed",
-        left: Math.max(4, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 192) - 8)),
-        width: Math.max(rect.width, 192),
-        zIndex: 9999,
-        ...(dropUp
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
-      }
-    : {};
-
-  return (
-    <div className="relative w-full">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={openDropdown}
-        className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
-      >
-        <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
-          {(value && labelOf(value)) || placeholder || "Select…"}
-        </span>
-        <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
-      </button>
-      {open && (
-        <div
-          style={dropStyle}
-          className="bg-popover border border-border rounded-md shadow-xl py-1"
-        >
-          <input
-            autoFocus
-            value={inputVal}
-            onChange={e => setInputVal(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" && inputVal.trim() && onAddOption) {
-                onAddOption(inputVal.trim());
-                onChange(inputVal.trim());
-                setOpen(false);
-              }
-              if (e.key === "Escape") setOpen(false);
-            }}
-            onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
-            placeholder="Search or add…"
-            className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
-          />
-          <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-60 overflow-y-auto overscroll-contain">
-            {filtered.map(opt =>
-              confirmDelete === opt ? (
-                <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                  <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
-                  <span className="flex gap-1 shrink-0">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
-                  </span>
-                </div>
-              ) : (
-                <div key={opt} className="flex items-center">
-                  <button
-                    type="button"
-                    className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                    onMouseDown={() => { onChange(opt); setOpen(false); }}
-                  >
-                    {labelOf(opt)}
-                  </button>
-                  {onRemoveOption && (
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              )
-            )}
-            {inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && onAddOption && (
-              <button
-                type="button"
-                className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
-              >
-                <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CheeseRecipeCard({
-  label,
-  batches,
-  fields,
-  recipe,
-  fieldPrefix,
-  recipeName,
-  recipeNameOptions,
-  register,
-  ingredientOptions,
-  onAddIngredient,
-  onRemoveIngredient,
-  onSetIngredient,
-  onAppend,
-  onRemove,
-  onAddRecipeName,
-  onRemoveRecipeName,
-  onRecipeNameChange,
-  embedded,
-}: {
-  label: string;
-  batches: number;
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  fieldPrefix: string;
-  recipeName: string;
-  recipeNameOptions: string[];
-  register: any;
-  ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  onAddRecipeName: (v: string) => void;
-  onRemoveRecipeName: (v: string) => void;
-  onRecipeNameChange: (v: string) => void;
-  embedded?: boolean;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
-
-  const recipeSelector = (
-    <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
-    </div>
-  );
-
-  const body = (
-    <>
-      {fields.length === 0 ? (
-        <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the blend.</p>
-      ) : (
-        <div className="w-full mb-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mb-1 px-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
-            <span />
-          </div>
-          <div className="space-y-1.5">
-            {fields.map((field, idx) => {
-              const rowLbs = Number(recipe[idx]?.lbs ?? 0);
-              return (
-                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`}>
-                  <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs * Math.max(1, batches), 1)}</div>
-                  {confirmIdx === idx ? (
-                    <div className="flex items-center gap-1">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
-                    </div>
-                  ) : (
-                    <button type="button" onClick={() => setConfirmIdx(idx)} className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-            <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)} lbs</span>
-            <span />
-          </div>
-        </div>
-      )}
-      <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
-        <Plus className="w-3.5 h-3.5" /> Add Ingredient
-      </button>
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        <Separator className="my-3 opacity-30" />
-        <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-        {body}
-      </>
-    );
-  }
-
-  return (
-    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-      <div className="h-1 bg-amber-500/70 w-full" />
-      <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
-}
-
-// Pick-only cheese card for the run applicators. Cheese blends are now
-// factory-wide server master-data (managed on the Manage Lists → Cheese Recipes
-// screen and imported from the "Cheese Mix Recipe Specs" workbook), so on the
-// run the operator only PICKS one — its ingredient rows and shredder setting are
-// read-only here. Picking hydrates the run's recipe rows so cheese still
-// consumes exactly as before (cheese type → batches). Mirrors the mobile
-// applicator cheese card (replit.md parity).
-export function CheesePickCard({
-  label,
-  batches,
-  ozPerPizza,
-  recipe,
-  substitutions,
-  recipeName,
-  recipeNameOptions,
-  shredderSetting,
-  cellulose,
-  onRecipeNameChange,
-  embedded,
-  recipeMissing,
-  poolComponents,
-  optionLabels,
-}: {
-  label: string;
-  batches: number;
-  // The applicator's set Oz/Pizza for this blend. Drives the per-ingredient
-  // "Oz / Pizza" column so its total lines up with what the operator entered.
-  ozPerPizza: number;
-  /** Today's temporary ingredient overlays. These affect display only here; the saved recipe stays untouched. */
-  substitutions?: IngredientSubstitution[];
-  recipe: RecipeRow[];
-  // The picked recipe's components from the server cheese pool, when known.
-  // Carries each ingredient's blend share (sharePct / ozPerPizza / lbs
-  // priority — see @workspace/cheese-recipes), so the per-ingredient Oz/Pizza
-  // column is target oz × share even when the hydrated rows only hold lbs.
-  poolComponents?: CheeseComponent[];
-  recipeName: string;
-  recipeNameOptions: string[];
-  shredderSetting: string;
-  cellulose: string;
-  onRecipeNameChange: (v: string) => void;
-  embedded?: boolean;
-  // True when a non-empty recipeName does NOT match any recipe in the server
-  // cheese pool (e.g. a spec sheet referenced a blend name that was never
-  // imported). Drives an inline "pick a real blend" warning instead of a
-  // silent, confusing blank body.
-  recipeMissing?: boolean;
-  // Optional display label per recipe name (brand tags for colliding names).
-  optionLabels?: ReadonlyMap<string, string>;
-}) {
-  const updateReloadBlockerId = useId();
-  // A temporary substitution must be visible anywhere floor staff read the
-  // blend. Apply it to this display copy rather than the form's saved rows, so
-  // clearing tomorrow's overlay restores the original master recipe exactly.
-  const effectiveRecipe = applyRecipeSubstitutions(recipe, substitutions);
-  const displayRecipe = effectiveRecipe.rows;
-  const totalLbsPerBatch = displayRecipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  // Scale each component up to the pounds to pull/mix for this run, using the
-  // run's existing batch count so these numbers can never drift from the batch
-  // and total-lbs figures on the card. Shared with mobile via @workspace/inventory-math.
-  const pull = computeCheesePull(displayRecipe, batches);
-  // Per-pizza ounces of each component: the applicator's target Oz/Pizza split
-  // across ingredients by each one's SHARE of the blend, so the column total
-  // equals the operator's set Oz/Pizza. When the server pool recipe is known
-  // its components drive the shares (explicit sharePct first, then ozPerPizza,
-  // then lbs proportions — @workspace/cheese-recipes); otherwise fall back to
-  // the hydrated rows' lbs proportions (@workspace/inventory-math).
-  const namedPool = (poolComponents ?? []).filter(c => c.ingredient.trim());
-  const perPizzaOz =
-    !effectiveRecipe.changed && namedPool.length > 0 && namedPool.length === displayRecipe.length
-      ? cheesePerFlavorComponentOz(namedPool, ozPerPizza)
-      : computeCheesePerPizzaOz(displayRecipe, ozPerPizza);
-  // Always include the currently-picked name so a recipe assigned to another
-  // brand/flavor (or since disabled) still shows instead of silently clearing.
-  const options =
-    recipeName.trim() && !recipeNameOptions.includes(recipeName)
-      ? [recipeName, ...recipeNameOptions]
-      : recipeNameOptions;
-
-  const recipeSelector = (
-    <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <select
-        value={recipeName}
-        onChange={e => onRecipeNameChange(e.target.value)}
-        className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
-      >
-        <option value="">Pick a cheese recipe…</option>
-        {options.map(name => (
-          <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
-        ))}
-      </select>
-    </div>
-  );
-
-  const showMissingWarning = recipeName.trim() !== "" && !!recipeMissing;
-  useAutomaticUpdateReloadBlocker(
-    `missing-cheese-recipe-${updateReloadBlockerId}`,
-    showMissingWarning,
-  );
-  const body = (
-    <>
-      {effectiveRecipe.changed && (
-        <div
-          className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-          data-testid="temporary-cheese-recipe-overlay"
-        >
-          Today&apos;s temporary substitution is reflected below. The saved cheese recipe is unchanged.
-        </div>
-      )}
-      {showMissingWarning && (
-        <div className="flex items-start gap-2 mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          <span>
-            <span className="font-semibold text-amber-200">“{recipeName.trim()}”</span> isn't in Cheese Recipes — pick a blend above, or a manager can add it in Manage Lists.
-          </span>
-        </div>
-      )}
-      {(shredderSetting.trim() || cellulose.trim()) && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-muted-foreground">
-          {shredderSetting.trim() && (
-            <span>Shredder setting: <span className="font-mono text-foreground">{shredderSetting}</span></span>
-          )}
-          {cellulose.trim() && (
-            <span>Cellulose: <span className="font-mono text-foreground">{cellulose}</span></span>
-          )}
-        </div>
-      )}
-      {displayRecipe.length === 0 ? (
-        showMissingWarning ? null : (
-          <p className="text-xs text-muted-foreground mb-1">
-            {recipeName.trim()
-              ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
-              : "Pick a cheese recipe above to load its ingredients. Managers add recipes under Manage Lists → Cheese Recipes."}
-          </p>
-        )
-      ) : (
-        <div className="w-full mb-1">
-          <div className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 mb-1 px-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Oz<span className="hidden sm:inline"> / Pizza</span></span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Pull<span className="hidden sm:inline"> / Run</span></span>
-          </div>
-          <div className="space-y-1.5">
-            {displayRecipe.map((row, idx) => {
-              const rowLbs = Number(row.lbs ?? 0);
-              return (
-                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 items-center">
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm flex items-center truncate text-foreground/90">{row.ingredient || "—"}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(perPizzaOz.rows[idx] ?? 0, 2)}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs, 1)}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(pull.rows[idx].lbs, 1)}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-            <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(perPizzaOz.totalOz, 2)} oz</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(pull.totalLbs, 1)} lbs</span>
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        <Separator className="my-3 opacity-30" />
-        <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: displayRecipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-        {body}
-      </>
-    );
-  }
-
-  return (
-    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-      <div className="h-1 bg-amber-500/70 w-full" />
-      <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: displayRecipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
-}
-
-export function MixRecipeCard({
-  label,
-  totalRunLbs,
-  fields,
-  recipe,
-  fieldPrefix,
-  register,
-  ingredientOptions,
-  onAddIngredient,
-  onRemoveIngredient,
-  onSetIngredient,
-  onAppend,
-  onRemove,
-  embedded,
-  recipeName,
-  recipeNameOptions,
-  onAddRecipeName,
-  onRemoveRecipeName,
-  onRecipeNameChange,
-  recipeNameLabels,
-}: {
-  label: string;
-  totalRunLbs: number;
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  fieldPrefix: string;
-  register: any;
-  ingredientOptions: string[];
-  onAddIngredient?: (v: string) => void;
-  onRemoveIngredient?: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  embedded?: boolean;
-  recipeName?: string;
-  recipeNameOptions?: string[];
-  onAddRecipeName?: (v: string) => void;
-  onRemoveRecipeName?: (v: string) => void;
-  onRecipeNameChange?: (v: string) => void;
-  // Optional display label per recipe name (brand tags for colliding names).
-  recipeNameLabels?: ReadonlyMap<string, string>;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
-  const rowTotal = (rowLbs: number) =>
-    totalLbsPerBatch > 0 ? (rowLbs / totalLbsPerBatch) * totalRunLbs : 0;
-
-  const body = (
-    <>
-      {recipeNameOptions && onRecipeNameChange && (
-        <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
-        </div>
-      )}
-      {fields.length === 0 ? (
-        <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the mix.</p>
-      ) : (
-        <div className="w-full mb-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mb-1 px-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Oz<span className="hidden sm:inline"> / Pizza</span></span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
-            <span />
-          </div>
-          <div className="space-y-1.5">
-            {fields.map((field, idx) => {
-              const rowLbs = Number(recipe[idx]?.lbs ?? 0);
-              return (
-                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`}>
-                  <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowTotal(rowLbs), 1)}</div>
-                  {confirmIdx === idx ? (
-                    <div className="flex items-center gap-1">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
-                    </div>
-                  ) : (
-                    <button type="button" onClick={() => setConfirmIdx(idx)} className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-            <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 2)} oz</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalRunLbs, 1)} lbs</span>
-            <span />
-          </div>
-        </div>
-      )}
-      <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
-        <Plus className="w-3.5 h-3.5" /> Add Ingredient
-      </button>
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        <Separator className="my-3 opacity-30" />
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label} — Mix Recipe</span>
-          <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-        {body}
-      </>
-    );
-  }
-
-  return (
-    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-      <div className="h-1 bg-purple-500/70 w-full" />
-      <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{label} — Mix Recipe</CardTitle>
-          <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
-}
-
-export function DoughRecipeCard({
-  batchesNeeded,
-  fields,
-  recipe,
-  register,
-  targetWeight,
-  doughBatchYield,
-  ingredientOptions,
-  onAddIngredient,
-  onRemoveIngredient,
-  onSetIngredient,
-  onAppend,
-  onRemove,
-  onTargetWeightChange,
-  recipeName,
-  recipeNameOptions,
-  onAddRecipeName,
-  onRemoveRecipeName,
-  onRecipeNameChange,
-}: {
-  batchesNeeded: number;
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  register: any;
-  targetWeight: number;
-  doughBatchYield: number;
-  ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  onTargetWeightChange: (v: number) => void;
-  recipeName: string;
-  recipeNameOptions: string[];
-  onAddRecipeName: (v: string) => void;
-  onRemoveRecipeName: (v: string) => void;
-  onRecipeNameChange: (v: string) => void;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
-  // Recipe yield: how many doughballs does the batch make at the target weight?
-  const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0;
-  // Run yield: what the line actually produced (from doughBatchYield field)
-  const runYield = Number(doughBatchYield);
-  const yieldDiff = runYield - recipeYield;
-
-  return (
-    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-      <div className="h-1 bg-orange-500/70 w-full" />
-      <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
-            Dough Recipe
-          </CardTitle>
-          <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-            <IngredientSelect
-              value={recipeName}
-              onChange={onRecipeNameChange}
-              options={recipeNameOptions}
-              onAddOption={onAddRecipeName}
-              onRemoveOption={onRemoveRecipeName}
-              placeholder="Recipe name…"
-            />
-          </div>
-          <span className="text-xs text-muted-foreground shrink-0">
-            <span className="font-mono text-foreground">{batchesNeeded > 0 ? fmtNum(batchesNeeded, 2) : "—"}</span> batches needed
-          </span>
-          <RecipeShareButtons recipe={{ title: "Dough Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">
-        {/* Target weight + yield comparison */}
-        <div className={`grid grid-cols-1 gap-3 mb-4 ${runYield > 0 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
-          <div className="p-3 rounded-lg bg-muted/30">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
-              Target Weight (oz)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={targetWeight || ""}
-              onChange={e => onTargetWeightChange(Number(e.target.value))}
-              onFocus={e => e.target.select()}
-              placeholder="0.00"
-              className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 w-full"
-            />
-          </div>
-          <div className="p-3 rounded-lg bg-muted/30 text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Recipe Yield</p>
-            <p className="text-xl font-mono font-bold text-foreground">
-              {recipeYield > 0 ? fmtNum(recipeYield, 1) : "—"}
-            </p>
-            <p className="text-[10px] text-muted-foreground">doughballs / batch</p>
-          </div>
-          {runYield > 0 && (
-            <div className="p-3 rounded-lg bg-muted/30 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Run Yield</p>
-              <p className={`text-xl font-mono font-bold ${
-                recipeYield > 0
-                  ? Math.abs(yieldDiff) < 0.5 ? "text-green-400"
-                    : yieldDiff < 0 ? "text-red-400"
-                    : "text-amber-400"
-                  : "text-foreground"
-              }`}>
-                {fmtNum(runYield, 1)}
-              </p>
-              {recipeYield > 0 && (
-                <p className="text-[10px] text-muted-foreground font-mono">
-                  {yieldDiff > 0 ? "+" : ""}{fmtNum(yieldDiff, 1)} vs recipe
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Ingredient rows */}
-        {fields.length === 0 ? (
-          <p className="text-xs text-muted-foreground mb-3">
-            No ingredients yet. Add rows to build the recipe.
-          </p>
-        ) : (
-          <div className="w-full mb-3">
-            <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mb-1 px-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
-              <span />
-            </div>
-            <div className="space-y-1.5">
-              {fields.map((field, idx) => (
-                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
-                  <IngredientSelect
-                    value={recipe[idx]?.ingredient ?? ""}
-                    onChange={val => onSetIngredient(idx, val)}
-                    options={ingredientOptions}
-                    onAddOption={onAddIngredient}
-                    onRemoveOption={onRemoveIngredient}
-                  />
-                  <input
-                    {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    placeholder="0"
-                    onFocus={e => e.target.select()}
-                    className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
-                  />
-                  {confirmIdx === idx ? (
-                    <div className="flex items-center gap-1">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmIdx(idx)}
-                      className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-              <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
-              <span className="text-xs font-mono text-right font-semibold text-foreground">
-                {fmtNum(totalLbsPerBatch, 1)} lbs
-              </span>
-              <span />
-            </div>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={onAppend}
-          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add Ingredient
-        </button>
-      </CardContent>
-    </Card>
-  );
-}
-
-export function FrontlineRecipeCard({
-  fields,
-  recipe,
-  register,
-  ingredientOptions,
-  onAddIngredient,
-  onRemoveIngredient,
-  onSetIngredient,
-  onAppend,
-  onRemove,
-  recipeName,
-  recipeNameOptions,
-  onAddRecipeName,
-  onRemoveRecipeName,
-  onRecipeNameChange,
-  embedded,
-}: {
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  register: any;
-  ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  recipeName: string;
-  recipeNameOptions: string[];
-  onAddRecipeName: (v: string) => void;
-  onRemoveRecipeName: (v: string) => void;
-  onRecipeNameChange: (v: string) => void;
-  embedded?: boolean;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
-
-  const recipeSelector = (
-    <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
-    </div>
-  );
-
-  const body = (
-    <>
-      {fields.length === 0 ? (
-        <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the recipe.</p>
-      ) : (
-        <div className="w-full mb-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mb-1 px-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
-            <span />
-          </div>
-          <div className="space-y-1.5">
-            {fields.map((field, idx) => (
-              <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
-                <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                <input {...register(`frontlineRecipe.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                {confirmIdx === idx ? (
-                  <div className="flex items-center gap-1">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
-                  </div>
-                ) : (
-                  <button type="button" onClick={() => setConfirmIdx(idx)} className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-            <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span />
-          </div>
-        </div>
-      )}
-      <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
-        <Plus className="w-3.5 h-3.5" /> Add Ingredient
-      </button>
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        <Separator className="my-3 opacity-30" />
-        <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</span>
-          {recipeSelector}
-          <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-        {body}
-      </>
-    );
-  }
-
-  return (
-    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-      <div className="h-1 bg-red-500/70 w-full" />
-      <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</CardTitle>
-          {recipeSelector}
-          <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
-}
-
-export function ReadOnlyRecipeCard({
-  title,
-  subtitle,
-  recipe,
-  substitutions,
-  accent,
-  scalable = false,
-}: {
-  title: string;
-  subtitle?: string;
-  recipe: RecipeRow[];
-  /** Today's temporary overlay; applied only to the display copy. */
-  substitutions?: IngredientSubstitution[];
-  accent: string;
-  scalable?: boolean;
-}) {
-  const effectiveRecipe = applyRecipeSubstitutions(recipe, substitutions);
-  const rows = effectiveRecipe.rows.filter(
-    r => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
-  );
-  const total = rows.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  // Batch-size scaler: shows the recipe weights at a different batch size.
-  // "4" is the base recipe (1×); other sizes scale the displayed weights.
-  const SCALE_OPTIONS: { label: string; value: number }[] = [
-    { label: "½", value: 0.5 },
-    { label: "4", value: 1 },
-    { label: "5", value: 1.25 },
-    { label: "6", value: 1.5 },
-  ];
-  const [scale, setScale] = useState(1);
-  return (
-    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
-      <div className={`h-1 ${accent} w-full`} />
-      <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center gap-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <ClipboardList className="w-4 h-4" /> {title}
-          </CardTitle>
-          {subtitle ? (
-            <span className="text-xs text-muted-foreground font-mono truncate max-w-[55%] text-right">{subtitle}</span>
-          ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">
-        {effectiveRecipe.changed && (
-          <div
-            className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-            data-testid="temporary-read-only-recipe-overlay"
-          >
-            Today&apos;s temporary substitution is reflected below. The saved recipe is unchanged.
-          </div>
-        )}
-        {rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No recipe configured. Add ingredients in Setup.</p>
-        ) : (
-          <div className="w-full">
-            {scalable && (
-              <div className="flex items-center flex-wrap gap-2 mb-3">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Batch Size</span>
-                <div className="flex gap-1 rounded-lg bg-muted/30 p-1">
-                  {SCALE_OPTIONS.map(opt => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setScale(opt.value)}
-                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-                        scale === opt.value
-                          ? "bg-orange-500 text-white"
-                          : "text-muted-foreground hover:bg-muted/50"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                {scale !== 1 && (
-                  <span className="text-[10px] text-muted-foreground">
-                    ×{scale} — view only
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mb-1 px-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
-            </div>
-            <div className="space-y-0.5">
-              {rows.map((r, idx) => (
-                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 items-center py-1.5 px-1 rounded odd:bg-muted/20">
-                  <span className="text-sm text-foreground">{r.ingredient || "—"}</span>
-                  <span className="text-sm font-mono text-right text-foreground tabular-nums">{fmtNum(Number(r.lbs ?? 0) * scale, 1)}</span>
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-              <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
-              <span className="text-xs font-mono text-right font-semibold text-foreground tabular-nums">{fmtNum(total * scale, 1)} lbs</span>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+export {
+  CheesePickCard,
+  MixRecipeCard,
+  DoughRecipeCard,
+  FrontlineRecipeCard,
+} from "../components/RecipeCards";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
       {children}
     </p>
-  );
-}
-
-// useDropdownScrollKeeper lives in src/hooks/useDropdownScrollKeeper.ts
-// (moved out of home.tsx so Fast Refresh is not broken by a hook export)
-
-export function TypeDropdown({
-  label,
-  value,
-  onChange,
-  options,
-  onAddOption,
-  onRemoveOption,
-  allowClear,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption: (v: string) => void;
-  onRemoveOption: (v: string) => void;
-  allowClear?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [dropUp, setDropUp] = useState(false);
-  const [rect, setRect] = useState<{ top: number; bottom: number; right: number } | null>(null);
-  const confirmDeleteRef = useRef<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const scrollKeep = useDropdownScrollKeeper(open);
-  const filtered = options.filter(o =>
-    o.toLowerCase().includes(inputVal.toLowerCase())
-  );
-
-  const MENU_W = 176;
-  function openDropdown() {
-    setInputVal("");
-    setConfirmDelete(null);
-    confirmDeleteRef.current = null;
-    if (triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const dropdownH = Math.min(filtered.length * 32 + 80, 240);
-      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
-      setRect({ top: r.top, bottom: r.bottom, right: r.right });
-    }
-    setOpen(true);
-  }
-
-  const dropStyle: React.CSSProperties = rect
-    ? {
-        position: "fixed",
-        left: Math.max(4, Math.min(rect.right - MENU_W, window.innerWidth - MENU_W - 8)),
-        width: MENU_W,
-        zIndex: 9999,
-        ...(dropUp
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
-      }
-    : {};
-
-  return (
-    <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
-      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        {label}
-      </p>
-      <div className="relative">
-        <button
-          ref={triggerRef}
-          type="button"
-          onClick={openDropdown}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
-        >
-          <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
-            {value || "Select…"}
-          </span>
-          <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
-        </button>
-        {open && (
-          <div
-            style={dropStyle}
-            className="bg-popover border border-border rounded-md shadow-lg py-1"
-          >
-            <input
-              autoFocus
-              value={inputVal}
-              onChange={e => setInputVal(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && inputVal.trim()) {
-                  onAddOption(inputVal.trim());
-                  onChange(inputVal.trim());
-                  setOpen(false);
-                }
-                if (e.key === "Escape") setOpen(false);
-              }}
-              onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
-              placeholder="Search or add…"
-              className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
-            />
-            <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-48 overflow-y-auto overscroll-contain">
-              {allowClear && value && (
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors italic"
-                  onMouseDown={() => { onChange(""); setOpen(false); }}
-                >
-                  — None
-                </button>
-              )}
-              {filtered.map(opt =>
-                confirmDelete === opt ? (
-                  <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                    <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
-                    <span className="flex gap-1 shrink-0">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
-                    </span>
-                  </div>
-                ) : (
-                  <div key={opt} className="flex items-center">
-                    <button
-                      type="button"
-                      className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                      onMouseDown={() => { onChange(opt); setOpen(false); }}
-                    >
-                      {opt}
-                    </button>
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                )
-              )}
-              {inputVal.trim() && !options.includes(inputVal.trim()) && (
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                  onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
-                >
-                  <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -2397,280 +1322,6 @@ export function NumField({
 // How long a manual stepper edit holds off auto-track writes. 1 minute is the
 // user's explicit preference on web (a manual entry is the new baseline and
 // tracking should pick right back up from it, not go quiet for 10 minutes).
-const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
-
-/**
- * ManualOverrideBanner and manualOverrideBannerShow live in a dedicated
- * component file so this file does not export non-component symbols
- * (Vite Fast Refresh requires component-only exports from component files).
- */
-
-/** m:ss for the dough-timer countdowns (e.g. 105 → "1:45"). */
-function fmtMS(totalSec: number): string {
-  if (!Number.isFinite(totalSec)) return "—:—";
-  const s = Math.max(0, Math.round(totalSec));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-/** Compact seconds input (with m:ss preview) for the measured machine times. */
-function SecondsField({
-  control,
-  name,
-  label,
-}: {
-  control: any;
-  name: keyof FormValues;
-  label: string;
-}) {
-  return (
-    <FormField
-      control={control}
-      name={name}
-      render={({ field }) => (
-        <FormItem className="min-w-0 space-y-0">
-          <FormLabel className="text-[10px] text-muted-foreground block truncate font-normal">{label}</FormLabel>
-          <FormControl>
-            <div className="flex items-center gap-1 mt-0.5">
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                {...field}
-                value={field.value ?? 0}
-                onChange={(e) => {
-                  const val = e.target.value === "" ? "" : Number(e.target.value);
-                  if (val === "" || (Number.isFinite(val) && val >= 0)) field.onChange(val);
-                }}
-                onFocus={(e) => e.target.select()}
-                className="h-7 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                data-testid={`input-${name}`}
-              />
-              <span className="text-[10px] text-muted-foreground shrink-0 font-mono">= {fmtMS(Number(field.value) || 0)}</span>
-            </div>
-          </FormControl>
-        </FormItem>
-      )}
-    />
-  );
-}
-
-function StepperField({
-  control,
-  name,
-  label,
-  min = 0,
-  max,
-  step = 1,
-  disabled,
-  suggestion,
-  onSuggest,
-  onManualChange,
-}: {
-  control: any;
-  name: keyof FormValues;
-  label: string;
-  min?: number;
-  max?: number;
-  step?: number;
-  disabled?: boolean;
-  suggestion?: number | null;
-  onSuggest?: () => void;
-  onManualChange?: (nextValue: number) => void;
-}) {
-  const repeatRef = useRef<ReturnType<typeof createFrameRepeater> | null>(null);
-  const fieldRef = useRef<any>(null);
-  if (!repeatRef.current) repeatRef.current = createFrameRepeater();
-  const stopRepeat = useCallback(() => repeatRef.current?.stop(), []);
-  useEffect(() => {
-    const stopWhenHidden = () => {
-      if (document.hidden) stopRepeat();
-    };
-    window.addEventListener("blur", stopRepeat);
-    document.addEventListener("visibilitychange", stopWhenHidden);
-    return () => {
-      stopRepeat();
-      window.removeEventListener("blur", stopRepeat);
-      document.removeEventListener("visibilitychange", stopWhenHidden);
-    };
-  }, [stopRepeat]);
-  const startRepeat = (fn: () => void) => {
-    repeatRef.current?.start(fn);
-  };
-  return (
-    <FormField
-      control={control}
-      name={name}
-      render={({ field }) => {
-        fieldRef.current = field;
-        const current = Number(field.value) || 0;
-        const atMax = max !== undefined && current >= max;
-        const decrement = () => {
-          const cur = Number(fieldRef.current?.value) || 0;
-          navigator.vibrate?.(8);
-          const next = Math.max(min, cur - step);
-          fieldRef.current?.onChange(next);
-          onManualChange?.(next);
-        };
-        const increment = () => {
-          const cur = Number(fieldRef.current?.value) || 0;
-          if (max !== undefined && cur >= max) return;
-          navigator.vibrate?.(8);
-          const next = max !== undefined ? Math.min(max, cur + step) : cur + step;
-          fieldRef.current?.onChange(next);
-          onManualChange?.(next);
-        };
-        return (
-          <FormItem>
-            <div className="flex items-center justify-between gap-2">
-              <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
-              {suggestion !== null && suggestion !== undefined && suggestion !== current && onSuggest && (
-                <button
-                  type="button"
-                  onClick={() => { navigator.vibrate?.(8); onSuggest(); }}
-                  className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors shrink-0"
-                  title={`Set to expected value: ${suggestion}`}
-                >
-                  <Sparkles className="w-2.5 h-2.5" />
-                  Expected: {suggestion}
-                </button>
-              )}
-            </div>
-            <FormControl>
-              <div className={`flex items-stretch${disabled ? " opacity-50 pointer-events-none" : ""}`}>
-                <button
-                  type="button"
-                  onPointerDown={() => startRepeat(decrement)}
-                  onPointerUp={stopRepeat}
-                  onPointerLeave={stopRepeat}
-                   onPointerCancel={stopRepeat}
-                   onLostPointerCapture={stopRepeat}
-                   onBlur={stopRepeat}
-                  className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none"
-                  data-testid={`btn-dec-${name}`}
-                  disabled={disabled}
-                >
-                  −
-                </button>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  {...field}
-                  onChange={(e) => {
-                    const val = e.target.value === "" ? "" : Number(e.target.value);
-                    const next = max !== undefined && typeof val === "number" ? Math.min(max, val) : val;
-                    field.onChange(next);
-                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
-                  }}
-                  onFocus={e => e.target.select()}
-                  className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
-                  data-testid={`input-${name}`}
-                  disabled={disabled}
-                />
-                <button
-                  type="button"
-                  onPointerDown={() => startRepeat(increment)}
-                  onPointerUp={stopRepeat}
-                  onPointerLeave={stopRepeat}
-                   onPointerCancel={stopRepeat}
-                   onLostPointerCapture={stopRepeat}
-                   onBlur={stopRepeat}
-                  className={`h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none${atMax ? " opacity-30 cursor-not-allowed" : ""}`}
-                  data-testid={`btn-inc-${name}`}
-                  disabled={disabled || atMax}
-                >
-                  +
-                </button>
-              </div>
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        );
-      }}
-    />
-  );
-}
-
-// Vertical pipeline node for the Packaging tab timeline (graduated from the
-// "Merged A+B" canvas mockup). Purely presentational.
-function TimelineNode({
-  icon: Icon,
-  active,
-  done,
-  last,
-}: {
-  icon: React.ElementType;
-  active?: boolean;
-  done?: boolean;
-  last?: boolean;
-}) {
-  return (
-    <div className="relative flex flex-col items-center w-10 shrink-0 mr-3 pt-2">
-      <div
-        className={`w-10 h-10 rounded-full flex items-center justify-center z-10 border-2 ${
-          done
-            ? "bg-emerald-950/80 border-emerald-600/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
-            : active
-              ? "bg-primary/20 border-primary/50 text-primary shadow-[0_0_15px_rgba(255,149,0,0.3)]"
-              : "bg-muted/50 border-muted text-muted-foreground"
-        }`}
-      >
-        {done ? <CheckCircle2 className="w-5 h-5" /> : <Icon className="w-5 h-5" />}
-      </div>
-      {!last && (
-        <div
-          className={`w-1 grow mt-2 mb-[-8px] rounded-full ${
-            done ? "bg-emerald-600/30" : active ? "bg-gradient-to-b from-primary/50 to-muted" : "bg-muted"
-          }`}
-        />
-      )}
-    </div>
-  );
-}
-
-// Compact − value/max + stepper used in the Packaging draining panel
-// (graduated from the "Merged A+B" canvas mockup).
-function PkgMiniStepper({
-  value,
-  onDec,
-  onInc,
-  max,
-  label,
-}: {
-  value: number;
-  onDec: () => void;
-  onInc: () => void;
-  max?: number;
-  label: string;
-}) {
-  const atMax = max !== undefined && value >= max;
-  return (
-    <div className="flex-1 min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500/80 mb-1 truncate">{label}</p>
-      <div className="flex items-stretch h-10 w-full">
-        <button
-          type="button"
-          onClick={() => { navigator.vibrate?.(8); onDec(); }}
-          className="w-10 rounded-l-md border border-r-0 border-amber-700/30 bg-amber-950/50 hover:bg-amber-900/50 text-xl font-bold text-amber-400 transition-colors shrink-0 active:bg-amber-900/80 select-none"
-        >
-          −
-        </button>
-        <div className={`flex-1 border-y border-amber-700/30 bg-background/20 flex items-center justify-center text-lg font-mono font-bold tabular-nums${atMax ? " text-amber-500" : " text-amber-100"}`}>
-          {value}
-          {max !== undefined && <span className="text-xs text-amber-500/70 ml-1 font-sans font-normal">/{max}</span>}
-        </div>
-        <button
-          type="button"
-          onClick={() => { if (!atMax) { navigator.vibrate?.(8); onInc(); } }}
-          disabled={atMax}
-          className={`w-10 rounded-r-md border border-l-0 border-amber-700/30 bg-amber-950/50 hover:bg-amber-900/50 text-xl font-bold text-amber-400 transition-colors shrink-0 active:bg-amber-900/80 select-none${atMax ? " opacity-30 cursor-not-allowed" : ""}`}
-        >
-          +
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function NotesTextarea({ initialValue, onCommit, className }: { initialValue: string; onCommit: (v: string) => void; className?: string }) {
   const [local, setLocal] = useState(initialValue);
   const committed = useRef(initialValue);
@@ -3066,7 +1717,84 @@ const HOME_DIALOG_CARD_CLASS =
 const HOME_DIALOG_CARD_SCROLL_CLASS =
   `${HOME_DIALOG_CARD_CLASS} overflow-y-auto`;
 
+function LiveRunHandoffGuard() {
+  const { nextRunPrepActive } = useLiveRun();
+  const { currentRunId, dayState, dayStateRef, screenMode, setDayState, schedulePush } =
+    useHomeTabCtx();
+  useEffect(() => {
+    if (screenMode !== null || !nextRunPrepActive) return;
+    if (dayState.prepPhase?.prepHandoffFromRunId === currentRunId) return;
+    // First time nextRunPrepActive for this run: reset prep so the crew can log
+    // next-run batches from zero with prepCarriedOver: false (so startRun will
+    // carry them into the next run's batchesReady).
+    const newPrepPhase = {
+      prepStartedAt: Date.now(),
+      prepBatchesDough: 0,
+      prepBatchesSauce: 0,
+      prepCarriedOver: false,
+      prepHandoffFromRunId: currentRunId,
+    };
+    const newDs = { ...dayStateRef.current!, prepPhase: newPrepPhase };
+    saveDayState(newDs, { stampMeta: false });
+    setDayState(newDs);
+    schedulePush(newDs, 0);
+  }, [
+    nextRunPrepActive,
+    currentRunId,
+    screenMode,
+    dayState.prepPhase?.prepHandoffFromRunId,
+    dayStateRef,
+    setDayState,
+    schedulePush,
+  ]);
+  return null;
+}
+
+function loadPackagingAwareRunValues(runId: string): FormValues {
+  return overlayPackagingProgressForRun(runId, loadRunValues(runId));
+}
+
+function emitProductionRunSaveOutcome(
+  outcome: "success" | "failure" | "incomplete",
+  startedAt: number | null,
+  failureCode?: number,
+): void {
+  const now = typeof performance === "undefined" ? Date.now() : performance.now();
+  const durationMs = Math.min(
+    FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
+    Math.max(0, startedAt === null ? 0 : now - startedAt),
+  );
+  emitFieldCheckSignal("production-run-save-sync", outcome, {
+    durationMs,
+    ...(failureCode === undefined ? {} : { failureCode }),
+  });
+}
+
+function loadCachedSupervisorPin(): string | null {
+  try {
+    return typeof window === "undefined"
+      ? null
+      : localStorage.getItem(SUPERVISOR_PIN_KEY);
+  } catch {
+    // The server-backed preference still works when this offline cache is blocked.
+    return null;
+  }
+}
+
 export default function Home() {
+  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
+  const specImportOperationRef = useRef<string | null>(null);
+  const specImportStartedAtRef = useRef<number | null>(null);
+  function finishSpecImportOutcome(outcome: "success" | "failure" | "incomplete") {
+    const startedAt = specImportStartedAtRef.current;
+    if (startedAt === null) return;
+    specImportStartedAtRef.current = null;
+    const current = typeof performance === "undefined" ? Date.now() : performance.now();
+    const durationMs = Math.min(FIELD_CHECK_WORKFLOW_MAX_DURATION_MS, Math.max(0, current - startedAt));
+    emitFieldCheckSignal("spec-import-review-commit", outcome, { durationMs });
+  }
+  const premixImportOperationRef = useRef<string | null>(null);
+  const cheeseImportOperationRef = useRef<string | null>(null);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
   useEffect(() => {
     visibleTabScheduler.start();
@@ -3076,7 +1804,6 @@ export default function Home() {
   const {
     signOut,
     forceSignedOut,
-    consumeFreshSession,
     revalidate,
     me,
     markOnboardingSeen,
@@ -3179,21 +1906,57 @@ export default function Home() {
   const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
   // Keep operational corrections on explicit operator paths only.  Autosave and
   // automatic ticks deliberately never call this helper.
-  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>) => {
+  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>, baselineOverride?: Record<string, number>) => {
     const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
     if (!run) return;
-    queueOperationalIntent({
-      runId, values, effectiveAt: Date.now(), action: "correction",
+    const section = manualSectionForField(Object.keys(values)[0] ?? "");
+    if (!section) return;
+    const owner = currentRunIdRef.current ? `local:${currentRunIdRef.current}` : "local";
+    if (!claimManualSectionLock(runId, section, owner)) return;
+    const allBaseline = (baselineOverride ?? loadRunValues(runId) ?? {}) as unknown as Record<string, number>;
+    const baseline = Object.fromEntries(
+      MANUAL_SECTION_FIELDS[section].map((field) => [field, Number(allBaseline[field] ?? 0)]),
+    );
+    void submitManualSection({
+      runId, section, values, baseValues: baseline,
+      baseRevision: 0,
       observedGeneration: `${runId}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
+      onPersistenceFailure: (baseValues) => {
+        const restored = { ...loadRunValues(runId), ...baseValues };
+        const durable = saveRunValues(runId, restored);
+        if (currentRunIdRef.current === runId) {
+          for (const field of MANUAL_SECTION_FIELDS[section]) {
+            form.setValue(field as any, Number(baseValues[field] ?? 0), { shouldDirty: false, shouldTouch: false, shouldValidate: false });
+          }
+          markRunValuesUpdated(runId, Date.now());
+        }
+        setWriteError(durable
+          ? "This correction could not be sent. Your counts were restored; please try again."
+          : "Device storage is unavailable. Your correction remains fenced and will not sync; free storage and try again.");
+        return durable;
+      },
+    }).then((result) => {
+      releaseManualSectionLock(runId, section, owner);
+      if (result === "offline") {
+        // The section command remains the retry boundary; never downgrade an
+        // uncertain online delivery into a competing legacy snapshot intent.
+        window.dispatchEvent(new CustomEvent("calculator-manual-section-pending", { detail: { runId, section } }));
+      }
+      if (result === "persistence-failed") {
+        emitManualSectionError({
+          runId,
+          section,
+          message: "This correction could not be saved on this device. Your counts were restored; please try again.",
+        });
+      }
     });
-    void flushOperationalIntentOutbox();
   }, []);
   const packagingManager = useMemo(() => createPackagingManager({
     currentRunIdRef,
     autoSuppressUntilRef,
     dayStateRef,
     autoSuppressMs: AUTO_SUPPRESS_MS,
-    loadRunValues,
+    loadRunValues: loadPackagingAwareRunValues,
     saveRunValues,
     markRunValuesUpdated,
     markLocalEdit: (now) => { lastLocalEditRef.current = now; },
@@ -3202,7 +1965,22 @@ export default function Home() {
     recordManualProgress: recordManualPackagingProgress,
     recordAutomaticProgress: recordAutomaticPackagingProgress,
   }), [queueManualCorrection]);
-  const persistManualPackagingProgress = packagingManager.persistManualProgress;
+  const persistManualPackagingProgress = useEvent(
+    (
+      runId: string,
+      skidsCompleted: number,
+      casesOnCurrentSkid: number,
+      manualOverrideUntil?: number,
+    ) => {
+      packagingManager.persistManualProgress(
+        runId,
+        skidsCompleted,
+        casesOnCurrentSkid,
+        manualOverrideUntil,
+      );
+      invalidateOperationalCalcForPackagingRun(runId);
+    },
+  );
   const persistAutomaticPackagingProgress = packagingManager.persistAutomaticProgress;
   useEffect(() => {
     // A correction may arrive while this device is viewing another run. Adopt
@@ -3851,7 +2629,7 @@ export default function Home() {
     setDayState(ds);
     if (ds.runToTime) setRunToTime(ds.runToTime);
     const curId = ds.runs[ds.currentIndex]?.id ?? "";
-    const vals = { ...DEFAULT_VALUES, ...loadRunValues(curId) };
+    const vals = { ...DEFAULT_VALUES, ...loadPackagingAwareRunValues(curId) };
     form.reset(vals);
     resetFieldArrays(vals);
   }
@@ -4002,6 +2780,26 @@ export default function Home() {
     }
   }
 
+  const adjustFinishedCaseStock = useEvent(async (
+    lotId: string,
+    input: FreezerSurplusAdjustmentInput,
+  ): Promise<FreezerSurplusAdjustment> => {
+    setFreezerSurplusBusy(true);
+    setFreezerSurplusError(null);
+    try {
+      const result = await recordFreezerSurplusAdjustment(lotId, input);
+      setFreezerSurplus(result.ledger);
+      return result.adjustment;
+    } catch (error) {
+      setFreezerSurplusError(
+        error instanceof Error ? error.message : "Couldn't adjust finished-case stock.",
+      );
+      throw error;
+    } finally {
+      setFreezerSurplusBusy(false);
+    }
+  });
+
   const replaceRunSurplus = useEvent(async (
     run: RunMeta,
     allocations: Array<{ lotId: string; cases: number }>,
@@ -4032,7 +2830,7 @@ export default function Home() {
     resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: (() => {
       const ds = loadDayState();
-      return loadRunValues(ds.runs[ds.currentIndex]?.id ?? "");
+      return loadPackagingAwareRunValues(ds.runs[ds.currentIndex]?.id ?? "");
     })(),
     mode: "onChange",
   });
@@ -4225,7 +3023,8 @@ export default function Home() {
       const rows = (mix.components ?? [])
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
-      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
+      const name = normalizeSelectableName(mix.name);
+      if (rows.length > 0 && name) map.set(name.toLowerCase(), rows);
     }
     return map;
   }, [mixes]);
@@ -4233,7 +3032,7 @@ export default function Home() {
   // server Mixes master data — the single source for mixes across the app now
   // that the separate "Mix" recipe-type lists have been merged into Mixes.
   const serverMixNames = useMemo(
-    () => [...new Set(mixes.map((m) => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => selectableNames(mixes.map((m) => m.name)),
     [mixes],
   );
   // Factory-wide cheese recipes (server master-data, like Mixes but a SEPARATE
@@ -4250,7 +3049,7 @@ export default function Home() {
   const serverCheeseByName = useMemo(() => {
     const map = new Map<string, CheeseRecipe>();
     for (const r of enabledCheeseRecipes) {
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, r);
     }
     return map;
@@ -4266,33 +3065,43 @@ export default function Home() {
           ingredient: c.ingredient,
           lbs: c.lbs,
         }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [enabledCheeseRecipes]);
   const serverCheeseNames = useMemo(
-    () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => selectableNames(enabledCheeseRecipes.map((r) => r.name)),
     [enabledCheeseRecipes],
   );
   // Brand tags for cheese/mix names that collide across customers (same name
   // under 2+ brands, or a bare name whose brand-prefixed twin exists) — the
   // pickers show "Taco Mix (Marco's)" while the stored value stays the name.
   const cheeseNameBrandTags = useMemo(
-    () => brandTagLabels(enabledCheeseRecipes.map((r) => ({ name: r.name, brand: r.brand }))),
+    () => brandTagLabels(
+      enabledCheeseRecipes
+        .map((r) => ({ name: normalizeSelectableName(r.name), brand: normalizeSelectableName(r.brand) }))
+        .filter((r) => r.name),
+    ),
     [enabledCheeseRecipes],
   );
   const mixNameBrandTags = useMemo(
-    () => brandTagLabels(mixes.map((m) => ({ name: m.name, brand: m.brand ?? "" }))),
+    () => brandTagLabels(
+      mixes
+        .map((m) => ({ name: normalizeSelectableName(m.name), brand: normalizeSelectableName(m.brand) }))
+        .filter((m) => m.name),
+    ),
     [mixes],
   );
 
-  const { isManager, hasCapability } = useMe();
+  const { isManager, role: serverRole, hasCapability } = useMe();
   // Profile writes are gated on the manage-profiles capability (NOT the
   // manage-staff-derived isManager alias) so a custom role granted
   // manage-profiles can save profiles without full manager rights — matching
   // the server's POST/DELETE /brand-profiles gate exactly.
   const canManageProfiles = hasCapability("manage-profiles");
+  const [adoptedBrandsForProfilePurge, setAdoptedBrandsForProfilePurge] =
+    useState<string[] | null>(null);
   // Flip the central storage-level profile-write gate in lockstep: it stops
   // EVERY profile-writing helper (saveProfile, rename/merge fan-outs,
   // Move-to-Mixes relinks, packaging import patches, delete helpers) from
@@ -4313,10 +3122,25 @@ export default function Home() {
     profileBootHealsRef.current = true;
     applyMixSlotRecategorizeIfNeeded();
     applyProfileCleanupIfNeeded();
-    purgeOrphanedProfilesIfNeeded();
   }, [canManageProfiles]);
+  // Orphan cleanup can write profile tombstones back to the server. Do not
+  // treat a populated local Brands cache as authoritative: wait until the
+  // accepted sync merge has persisted its canonical Brands snapshot.
+  useEffect(() => {
+    if (
+      !canManageProfiles ||
+      !adoptedBrandsForProfilePurge ||
+      adoptedBrandsForProfilePurge.length === 0
+    ) {
+      return;
+    }
+    purgeOrphanedProfilesIfNeeded(adoptedBrandsForProfilePurge);
+  }, [canManageProfiles, adoptedBrandsForProfilePurge]);
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
+  const canManageAllergens = hasCapability("manage-allergens");
+  const canRecordQc = hasCapability("record-qc");
+  const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
@@ -4388,7 +3212,7 @@ export default function Home() {
       const rows = r.components
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
@@ -4399,7 +3223,7 @@ export default function Home() {
     const map = new Map<string, number>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const oz = r.doughballWeightOz ?? 0;
       if (key && oz > 0) map.set(key, oz);
     }
@@ -4411,7 +3235,7 @@ export default function Home() {
     const map = new Map<string, number>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const n = r.doughballsPerTray ?? 0;
       if (key && n > 0) map.set(key, n);
     }
@@ -4425,7 +3249,7 @@ export default function Home() {
     const map = new Map<string, DoughballVariant[]>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const variants = normalizeDoughballVariants(r.doughballVariants);
       if (key && variants.length > 0) map.set(key, variants);
     }
@@ -4438,17 +3262,17 @@ export default function Home() {
       const rows = r.components
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [sauceRecipesList]);
   const serverDoughNames = useMemo(
-    () => [...new Set(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    () => selectableNames(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name)),
     [doughRecipesList],
   );
   const serverSauceNames = useMemo(
-    () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    () => selectableNames(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name)),
     [sauceRecipesList],
   );
   // ── Unified ingredient universe ──
@@ -4606,7 +3430,7 @@ export default function Home() {
       const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
       const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
       const toNames = (pool: typeof brandMatches) =>
-        [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+        selectableNames(pool.map((r) => r.name));
       const first = toNames(flavorMatches);
       const firstSet = new Set(first);
       return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
@@ -4702,9 +3526,9 @@ export default function Home() {
   );
 
   // Server-side role (distinct from the local supervisor PIN toggle below).
-  // Declared BEFORE the propagation callbacks below so they can list isManager
-  // in their deps (referencing it in a deps array before declaration would be
-  // a render-time TDZ crash — see home-render-tdz).
+  // Managers and users assigned the supervisor role have supervisor access
+  // without entering the local floor PIN. The local toggle remains useful for
+  // operator accounts that unlock the floor temporarily.
 
   // After a batch weight is saved to the server, fan the new weight into every
   // saved brand/flavor profile that uses that ingredient in a plain applicator
@@ -4718,6 +3542,11 @@ export default function Home() {
       // and only applies these open-form updates if that run is still active.
       const openForm = form.getValues() as Record<string, unknown>;
       let openFormUpdates: Partial<Record<string, number>> = {};
+      const openRunSnapshotUpdates = collectAcknowledgedBatchWeightSnapshotUpdates(
+        openForm,
+        entries,
+        DEFAULT_PEP_TYPES,
+      );
 
       // Ensure all server profiles are present in localStorage before scanning
       // (gap-fill only — never clobbers local edits). This covers the race
@@ -4766,17 +3595,24 @@ export default function Home() {
             openForm,
             entries,
             defaultPepTypes: DEFAULT_PEP_TYPES,
-            saveProfile: (brand, flavor, updates) => {
+            saveProfile: async (brand, flavor, updates) => {
               const profile = loadProfile(brand, flavor);
               if (!profile) return false;
               // Profile writes are manager-only; non-managers still get the
               // in-memory heal (open-form update below) but never persist it.
-              return canManageProfiles && saveProfile(
+              if (!canManageProfiles) return false;
+              // The local profile queue is durable, but a local save is not an
+              // acknowledgement: do not fan the profile into run snapshots
+              // until the server has echoed this exact authoritative value.
+              // A failed acknowledgement stays queued by storage for a later
+              // retry; the profile/run fan-out is deliberately not replayed
+              // from this stale in-memory snapshot.
+              await saveProfileAndWaitForServer(
                 brand,
                 flavor,
                 { ...profile, ...updates } as FormValues,
-                { authoritative: true },
               );
+              return true;
             },
             propagateToPendingRuns: propagateProfileToPendingRuns,
             // The open form is applied only by refreshOpenForm after the
@@ -4788,13 +3624,14 @@ export default function Home() {
           openFormUpdates = result.plan.openFormUpdates;
           return result;
         },
-        refreshOpenForm: () => {
+        refreshOpenForm: async () => {
           // A started run owns an immutable production snapshot. Learned
           // batch weights may update its saved profile and future pending
           // runs, but they must never hydrate the live form and autosave the
           // new weight into the active run.
           const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
           if (!isSharedRecipeRefreshEligible(liveRun)) return;
+          const openRunUpdates: Record<string, unknown> = { ...openRunSnapshotUpdates };
           for (const [field, lbs] of Object.entries(openFormUpdates)) {
             if (lbs !== undefined) {
               form.setValue(
@@ -4802,8 +3639,10 @@ export default function Home() {
                 lbs as never,
                 { shouldDirty: true },
               );
+              openRunUpdates[field] = lbs;
             }
           }
+          await persistOpenPendingRunSnapshotUpdates(openRunUpdates);
         },
       });
     },
@@ -4823,6 +3662,7 @@ export default function Home() {
   // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
     (entries: { name: string; lbs: number }[]): Promise<void> => {
+      if (screenMode !== null) return Promise.resolve();
       const changes = normalizeBatchWeightChanges(entries);
       if (changes.length === 0) return batchWeightSaveChainRef.current;
       for (const change of changes) {
@@ -4874,7 +3714,7 @@ export default function Home() {
         });
       return batchWeightSaveChainRef.current;
     },
-    [cycleCountQc, propagateBatchWeightUpdates],
+    [cycleCountQc, propagateBatchWeightUpdates, screenMode],
   );
   const commitBatchWeightField = useCallback(
     (name: string, lbs: number): void => {
@@ -4890,6 +3730,7 @@ export default function Home() {
   // the saved recipes. Also updates the open form and pending runs.
   const propagateCheeseRecipeUpdates = useCallback(
     async (updatedRecipes: CheeseRecipe[]) => {
+      if (screenMode !== null) return;
       sharedRecipeRefreshGenerationRef.current += 1;
       acknowledgedCheeseSaveFingerprintRef.current = JSON.stringify(updatedRecipes);
       return enqueueSharedRecipeRefresh(async () => {
@@ -5006,23 +3847,33 @@ export default function Home() {
       }
           return count;
         },
-        refreshOpenForm: () => {
+        refreshOpenForm: async () => {
           const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
-          if (liveRun?.startedAt || liveRun?.endedAt) return;
+          const persistedRun = liveRun
+            ? loadDayState().runs.find((run) => run.id === liveRun.id)
+            : undefined;
+          if (!isSharedRecipeRefreshEligible(liveRun) || !isSharedRecipeRefreshEligible(persistedRun)) return;
           const cv = form.getValues() as unknown as Record<string, unknown>;
+          const openRunUpdates: Record<string, unknown> = {};
           for (const slot of cheeseSlots) {
             const { nameField, rowsField } = slot;
             const recipeName = ((cv[nameField] as string) ?? "").trim();
             if (!recipeName) continue;
             const freshRows = recipeByName.get(recipeName.toLowerCase());
             if (!freshRows) continue;
-            form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
-            // These rows are rendered through useFieldArray. Updating only the
-            // form value leaves the field-array snapshot stale; a later
-            // lifecycle/autosave can then publish the old recipe back to the
-            // pending run. Keep both representations in lockstep.
-            slot.replace(freshRows);
+            const currentRows = (cv[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+            const copy = freshRows.map((row) => ({ ...row }));
+            if (!recipeRowsEqual(currentRows, copy)) {
+              form.setValue(rowsField as Parameters<typeof form.setValue>[0], copy as never, { shouldDirty: true });
+              // These rows are rendered through useFieldArray. Updating only the
+              // form value leaves the field-array snapshot stale; a later
+              // lifecycle/autosave can then publish the old recipe back to the
+              // pending run. Keep both representations in lockstep.
+              slot.replace(copy);
+            }
+            openRunUpdates[rowsField] = copy;
           }
+          await persistOpenPendingRunSnapshotUpdates(openRunUpdates);
         },
       });
 
@@ -5035,7 +3886,7 @@ export default function Home() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form, canManageProfiles],
+    [form, canManageProfiles, screenMode],
   );
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
@@ -5119,7 +3970,7 @@ export default function Home() {
   // marker-guarded so it runs once, and re-armed on failure to retry next mount.
   const doughSauceMigratedRef = useRef(false);
   useEffect(() => {
-    if (doughSauceMigratedRef.current || !canManageInventory) return;
+    if (screenMode !== null || doughSauceMigratedRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-server-migrated-v1";
     try {
       if (localStorage.getItem(MARKER)) { doughSauceMigratedRef.current = true; return; }
@@ -5128,7 +3979,7 @@ export default function Home() {
     pushLocalDoughSauceToServer()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { doughSauceMigratedRef.current = false; });
-  }, [canManageInventory, pushLocalDoughSauceToServer]);
+  }, [canManageInventory, pushLocalDoughSauceToServer, screenMode]);
 
   // One-time name cleanup: rename existing server dough/sauce pool entries that
   // still carry spec-sheet formatting noise (sourcing qualifiers like
@@ -5142,7 +3993,7 @@ export default function Home() {
   // rename. Manager-only, marker-guarded, re-armed on failure.
   const nameCleanupRef = useRef(false);
   useEffect(() => {
-    if (nameCleanupRef.current || !canManageInventory) return;
+    if (screenMode !== null || nameCleanupRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-name-cleanup-v1";
     try {
       if (localStorage.getItem(MARKER)) { nameCleanupRef.current = true; return; }
@@ -5164,18 +4015,24 @@ export default function Home() {
           pending = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "{}") as Record<string, string>;
         } catch {}
         const pool = await fetchNamedRecipes(kind);
-        const taken = new Set(pool.map((r) => r.name.trim().toLowerCase()));
+        const taken = new Set(
+          pool
+            .map((r) => normalizeSelectableName(r.name).toLowerCase())
+            .filter(Boolean),
+        );
         const map: Record<string, string> = { ...pending };
         const changed: NamedRecipe[] = [];
         for (const r of pool) {
-          const clean = cleanSpecNamedRecipeName(kind, r.name);
-          if (!clean || clean === r.name) continue;
+          const rawName = normalizeSelectableName(r.name);
+          if (!rawName) continue;
+          const clean = cleanSpecNamedRecipeName(kind, rawName);
+          if (!clean || clean === rawName) continue;
           const key = clean.trim().toLowerCase();
           // Same name modulo trim/case: rename in place, no re-pointing needed
           // beyond the exact-string surfaces applyRecipeNameMerge covers.
-          if (taken.has(key) && key !== r.name.trim().toLowerCase()) continue;
+          if (taken.has(key) && key !== rawName.toLowerCase()) continue;
           taken.add(key);
-          map[r.name] = clean;
+          map[rawName] = clean;
           changed.push({ ...r, name: clean });
         }
         if (Object.keys(map).length === 0) continue;
@@ -5218,7 +4075,7 @@ export default function Home() {
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { nameCleanupRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  }, [canManageInventory, cycleCountQc, screenMode]);
 
   // One-time phantom-name heal: a dough/sauce name in the synced option list
   // that NO recipe anywhere backs (no server-pool entry, no local preset
@@ -5230,7 +4087,7 @@ export default function Home() {
   // resurrect it. Manager-only, marker-guarded, re-armed on failure.
   const phantomNameHealRef = useRef(false);
   useEffect(() => {
-    if (phantomNameHealRef.current || !canManageInventory) return;
+    if (screenMode !== null || phantomNameHealRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-phantom-names-heal-v1";
     try {
       if (localStorage.getItem(MARKER)) { phantomNameHealRef.current = true; return; }
@@ -5316,7 +4173,7 @@ export default function Home() {
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { phantomNameHealRef.current = false; });
-  }, [canManageInventory]);
+  }, [canManageInventory, screenMode]);
 
   // Best-effort follow-through for the one-time mix-slot cleanup migration:
   // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
@@ -5325,7 +4182,7 @@ export default function Home() {
   // survives failures and retries on the next mount/session.
   const pendingMixPushRef = useRef(false);
   useEffect(() => {
-    if (pendingMixPushRef.current || !canManageInventory) return;
+    if (screenMode !== null || pendingMixPushRef.current || !canManageInventory) return;
     const pending = loadPendingServerMixPushes();
     if (pending.length === 0) { pendingMixPushRef.current = true; return; }
     pendingMixPushRef.current = true;
@@ -5341,7 +4198,7 @@ export default function Home() {
       }
       clearPendingServerMixPushes();
     })().catch(() => { pendingMixPushRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  }, [canManageInventory, cycleCountQc, screenMode]);
 
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
@@ -5356,7 +4213,7 @@ export default function Home() {
   // the Get Started overview or the header menu (never auto-shown).
   const [showTour, setShowTour] = useState(false);
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
-  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
+  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? DEFAULT_RUN_TO_TIME);
 
   // Brand/flavor picker state
   const [brandInput, setBrandInput] = useState("");
@@ -5392,11 +4249,14 @@ export default function Home() {
   const resolvedPin =
     typeof serverPin === "string"
       ? serverPin
-      : (typeof window !== "undefined"
-          ? localStorage.getItem(SUPERVISOR_PIN_KEY)
-          : null);
+      : loadCachedSupervisorPin();
   const noFacilityPin = resolvedPin === "";
-  const isSupervisor = isManager || role === "supervisor" || noFacilityPin;
+  const isSupervisor =
+    isManager ||
+    serverRole === "supervisor" ||
+    me?.role === "supervisor" ||
+    role === "supervisor" ||
+    noFacilityPin;
 
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
@@ -5486,7 +4346,6 @@ export default function Home() {
   }, [showStopDialog]);
 
   // ── Screen casting mode ────────────────────────────────────────────────────
-  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
   // One-click Chromecast (Presentation API). Disabled on the cast display itself
   // (screenMode !== null) so TVs never try to reconnect/start presentations.
@@ -5513,13 +4372,24 @@ export default function Home() {
 
   // ── Online / offline ───────────────────────────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [screenSyncState, dispatchScreenSync] = useReducer(
+    reduceScreenSyncState,
+    navigator.onLine,
+    createScreenSyncState,
+  );
   useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
+    const on = () => {
+      setIsOnline(true);
+      if (screenMode !== null) dispatchScreenSync({ type: "online" });
+    };
+    const off = () => {
+      setIsOnline(false);
+      if (screenMode !== null) dispatchScreenSync({ type: "offline" });
+    };
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
-  }, []);
+  }, [screenMode]);
 
   // Finished-case surplus is authoritative server data, not a day-state
   // overlay. Load it for every signed-in web session so Packaging can record a
@@ -5532,6 +4402,27 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+  useEffect(() => subscribeToManualSectionErrors(setWriteError), []);
+  const [sauceAutoTrackFailure, setSauceAutoTrackFailure] = useState<SauceAutoTrackFailure | null>(null);
+  const reportSauceAutoTrackFailure = useCallback((
+    claim: AutoTrackEventClaim,
+    kind: "transient" | "permanent" = "transient",
+  ) => {
+    setSauceAutoTrackFailure((current) =>
+      noteSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId), kind),
+    );
+  }, []);
+  const clearSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
+    setSauceAutoTrackFailure((current) =>
+      resolveSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId)),
+    );
+  }, []);
+  const dismissSauceAutoTrackFailure = useCallback(() => {
+    setSauceAutoTrackFailure((current) => dismissSauceAutoTrackFailureState(current));
+  }, []);
+  const clearSauceAutoTrackFailureNotice = useCallback(() => {
+    setSauceAutoTrackFailure(null);
+  }, []);
   const syncDate = todayStr();
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate));
   const [lastAcknowledgedAt, setLastAcknowledgedAt] = useState<number | null>(() => {
@@ -5543,8 +4434,14 @@ export default function Home() {
     loadSyncDiagnostics(syncDate).filter((event) => event.kind === "failure" || event.kind === "stale").length,
   );
   const [syncRetryWaiting, setSyncRetryWaiting] = useState(false);
-  const recordSyncEvent = (kind: SyncDiagnosticKind, message: string, response?: string, runId?: string) => {
-    const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId });
+  const recordSyncEvent = (
+    kind: SyncDiagnosticKind,
+    message: string,
+    response?: string,
+    runId?: string,
+    fieldCheck?: SyncDiagnosticFieldCheck,
+  ) => {
+    const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId, fieldCheck });
     setSyncDiagnostics((current) => [...current, event].slice(-20));
     if (kind === "ack") setLastAcknowledgedAt(event.at);
   };
@@ -7249,6 +6146,7 @@ export default function Home() {
   const [caseUpdateAccepted, setCaseUpdateAccepted] = useState<Record<string, boolean>>({});
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [specImportAiRetryCount, setSpecImportAiRetryCount] = useState(0);
   const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
   const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
   const specPhotoPreviews = useMemo(
@@ -7274,6 +6172,17 @@ export default function Home() {
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
+  const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
+  const [scheduleBreaksExpanded, setScheduleBreaksExpanded] = useState(false);
+  const scheduleBreakSummary = useMemo(
+    () => scheduleEditorBreaks
+      .filter((breakSlot) => breakSlot.enabled)
+      .map((breakSlot) =>
+        `Break ${breakSlot.slot} · ${breakSlot.mode === "at-time" ? breakSlot.atTime ?? "clock time" : "after run"}`,
+      )
+      .join(" · "),
+    [scheduleEditorBreaks],
+  );
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -7336,14 +6245,14 @@ export default function Home() {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
-  // Run ids the schedule editor actually LOADED when it was opened. On save we
-  // may only treat a live run as "removed by the user" if the editor showed it
-  // to them (its id is in this set) — an editor opened blank ("Schedule New
-  // Day") must never delete today's existing runs it never displayed.
-  const scheduleEditorLoadedRunIdsRef = useRef<Set<string>>(new Set());
+  // Run snapshots the schedule editor actually loaded when it was opened. On
+  // save we may only treat a live run as removed if the editor showed it, while
+  // lifecycle changes that happened after opening must still be preserved.
+  const scheduleEditorLoadedRunsRef = useRef<RunMeta[]>([]);
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
     setScheduleCalendarOpen(false);
+    setScheduleBreaksExpanded(false);
     // TODAY is the live day — seed the editor from the in-memory day state (the
     // freshest copy this tab has, including in-flight form edits), NOT the
     // server row. Saving routes back through the live day-state path below.
@@ -7355,9 +6264,10 @@ export default function Home() {
         return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
       });
       setScheduleEditorRunValues(vals);
+      setScheduleEditorBreaks(normalizeDayBreaks(dayState.breaks));
       setScheduleEditorDate(date);
       setScheduleEditorRuns(runs);
-      scheduleEditorLoadedRunIdsRef.current = new Set(runs.map(r => r.id));
+      scheduleEditorLoadedRunsRef.current = dayState.runs.map((run) => ({ ...run }));
       setScheduleEditorIsLiveDay(true);
       setScheduleView("editor");
       return;
@@ -7370,6 +6280,7 @@ export default function Home() {
           if (payload?.dayState) {
             const storedVals = (payload.runValues ?? {}) as Record<string, FormValues>;
             setScheduleEditorRunValues(storedVals);
+            setScheduleEditorBreaks(normalizeDayBreaks(payload.dayState.breaks));
             setScheduleEditorDate(date);
             setScheduleEditorRuns(
               payload.dayState.runs.map(r => {
@@ -7377,7 +6288,7 @@ export default function Home() {
                 return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
               })
             );
-            scheduleEditorLoadedRunIdsRef.current = new Set(payload.dayState.runs.map(r => r.id));
+            scheduleEditorLoadedRunsRef.current = payload.dayState.runs.map((run) => ({ ...run }));
             setScheduleEditorIsLiveDay(false);
             setScheduleView("editor");
             return;
@@ -7387,15 +6298,25 @@ export default function Home() {
     }
     const newId = genId();
     setScheduleEditorRunValues({ [newId]: { ...DEFAULT_VALUES } });
+    setScheduleEditorBreaks(defaultDayBreaks());
     setScheduleEditorDate(todayStr());
     setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
-    scheduleEditorLoadedRunIdsRef.current = new Set();
+    scheduleEditorLoadedRunsRef.current = [];
     setScheduleEditorIsLiveDay(false);
     setScheduleView("editor");
   }
   async function saveScheduledDay() {
     if (!scheduleEditorDate) return;
     setScheduleError(null);
+    const invalidBreak = scheduleEditorBreaks.find((item) => item.enabled && (
+      item.mode === "after-run"
+        ? !item.runId || !scheduleEditorRuns.some((run) => run.id === item.runId)
+        : !isValidLocalTime(item.atTime)
+    ));
+    if (invalidBreak) {
+      setScheduleError(`Break ${invalidBreak.slot} needs a valid run or local clock time before the schedule can be saved.`);
+      return;
+    }
     const unreadyRun = findFirstUnreadyScheduledRun(scheduleEditorRuns, (run) => {
       const stored = scheduleEditorRunValues[run.id];
       const profile = run.brand ? loadProfile(run.brand, run.flavor) : null;
@@ -7426,27 +6347,21 @@ export default function Home() {
     if (scheduleEditorDate === todayStr()) {
       try {
         const now = Date.now();
-        const liveById = new Map(dayState.runs.map(r => [r.id, r]));
-        const editorIds = new Set(scheduleEditorRuns.map(r => r.id));
-        // Editor order first; existing runs keep their lifecycle fields
-        // (startedAt/stoppages/…) — saveDayState diff-stamps metaUpdatedAt.
-        const newRuns: RunMeta[] = scheduleEditorRuns.map(er => {
-          const live = liveById.get(er.id);
-          return live
-            ? { ...live, brand: er.brand, flavor: er.flavor }
-            : { id: er.id, brand: er.brand, flavor: er.flavor };
-        });
-        // Live runs the editor omitted: treat as user-deleted ONLY if the
-        // editor actually showed them and they never started; keep the rest.
-        for (const r of dayState.runs) {
-          if (editorIds.has(r.id)) continue;
-          if (scheduleEditorLoadedRunIdsRef.current.has(r.id) && !r.startedAt && !r.endedAt) {
-            tombstoneDeleted("runs", r.id);
-          } else {
-            newRuns.push(r);
-          }
+        const freshestDayState = dayStateRef.current;
+        const reconciliation = reconcileLiveScheduleSave(
+          scheduleEditorLoadedRunsRef.current,
+          scheduleEditorRuns,
+          freshestDayState.runs,
+        );
+        if (!reconciliation.ok) {
+          setScheduleError("Today's schedule must keep at least one run.");
+          setScheduleSaving(false);
+          return;
         }
-        if (newRuns.length === 0) { setScheduleSaving(false); return; } // never leave the day with 0 runs
+        const newRuns = reconciliation.runs;
+        for (const runId of reconciliation.removedRunIds) {
+          tombstoneDeleted("runs", runId);
+        }
         // Persist values with a fresh edit stamp ONLY when they actually
         // changed, so untouched runs don't gratuitously win the LWW merge.
         let currentValsChanged = false;
@@ -7461,9 +6376,9 @@ export default function Home() {
             if (r.id === currentRunId) currentValsChanged = true;
           }
         }
-        const prevCurId = dayState.runs[dayState.currentIndex]?.id;
+        const prevCurId = freshestDayState.runs[freshestDayState.currentIndex]?.id;
         const newIndex = Math.max(0, newRuns.findIndex(r => r.id === prevCurId));
-        const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+        const newDs = { ...freshestDayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks), breaksUpdatedAt: now };
         setDayState(newDs);
         saveDayState(newDs);
         // Re-load the form if the current run's stored values changed (or the
@@ -7475,7 +6390,8 @@ export default function Home() {
           form.reset(curVals);
           resetFieldArrays(curVals);
         }
-        schedulePush(newDs, 0);
+        const response = await pushTodayCanonical(buildSyncPayload(newDs));
+        if (!response.ok) throw new Error(`schedule sync write failed: ${response.status}`);
         setScheduleView("list");
       } catch {
         setScheduleError("Couldn't save — check your connection and try again.");
@@ -7484,6 +6400,12 @@ export default function Home() {
       return;
     }
     try {
+      const scheduleBase = await fetchSchedulePayload(scheduleEditorDate);
+      if (!scheduleBase.available || !scheduleBase.snapshotId) {
+        setScheduleError("Couldn't load the latest plan before saving. Check your connection and try again.");
+        setScheduleSaving(false);
+        return;
+      }
       const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
       const runValues: Record<string, FormValues> = {};
       for (const r of scheduleEditorRuns) {
@@ -7496,7 +6418,10 @@ export default function Home() {
         runValues[r.id] = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
       }
       const payload: SyncPayload = {
-        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) },
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: scheduleBase.snapshotId,
+        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks), breaksUpdatedAt: Date.now() },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
@@ -7531,7 +6456,11 @@ export default function Home() {
       setScheduleDeleteConfirm(null);
     } catch {}
   }
-  async function fetchSchedulePayload(date: string): Promise<{ payload: SyncPayload | null; available: boolean }> {
+  async function fetchSchedulePayload(date: string): Promise<{
+    payload: SyncPayload | null;
+    available: boolean;
+    snapshotId?: string;
+  }> {
     try {
       const res = date === todayStr()
         ? await fetchWithTimeout(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" }, 10_000)
@@ -7541,6 +6470,7 @@ export default function Home() {
       return {
         payload: payload?.dayState ? payload : null,
         available: true,
+        snapshotId: res.headers.get("X-Sync-Snapshot") ?? undefined,
       };
     } catch {
       return { payload: null, available: false };
@@ -7566,12 +6496,12 @@ export default function Home() {
       setScheduleError("Choose a future scheduled day and today or a future date.");
       return false;
     }
-    const sourceResult = await fetchSchedulePayload(fromDate);
-    if (!sourceResult.available) {
+    const sourceFetch = await fetchSchedulePayload(fromDate);
+    if (!sourceFetch.available) {
       setScheduleError("Couldn't load the source day. Check your connection and try again.");
       return false;
     }
-    const src = sourceResult.payload;
+    const src = sourceFetch.payload;
     if (!src?.dayState) {
       setScheduleError("That scheduled day is no longer available. Refresh and try again.");
       return false;
@@ -7636,7 +6566,7 @@ export default function Home() {
       // between the read and this write.
       syncVersion: 1,
       completeness: "complete",
-      baseSnapshotId: undefined,
+      baseSnapshotId: targetResult.snapshotId,
       dayState: {
         ...(base.dayState ?? src.dayState),
         runs: target,
@@ -7704,7 +6634,7 @@ export default function Home() {
           },
           syncVersion: 1,
           completeness: "complete",
-          baseSnapshotId: undefined,
+          baseSnapshotId: sourceFetch.snapshotId,
           runValues: vals.source,
           runValuesUpdatedAt: stamps.source,
           packagingProgress: packaging.source,
@@ -7771,7 +6701,7 @@ export default function Home() {
     syncRetryTimerRef, syncPushQueueRef, connectSse, writeToday, requestBaselinePush,
     registerForegroundRecovery,
     autoTrackBlocked, setAutoTrackBlocked,
-    autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock,
+    autoTrackWakeRebaseReason, setAutoTrackWakeRebaseReason,
     pendingForegroundStopRunId, setPendingForegroundStopRunId,
     foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement,
     foregroundRecoveryNotice, setForegroundRecoveryNotice,
@@ -7803,6 +6733,7 @@ export default function Home() {
         initialSnapshot?: boolean;
         peerReceivedAt?: number;
         peerResponseBytes?: number;
+        allowForegroundCanonicalFormReset?: boolean;
       },
     ) => void
   >(() => {});
@@ -7820,6 +6751,21 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
+  // A partial fallback for a missing row returns the canonical empty snapshot
+  // identity, but the row still does not exist. The next write must be a
+  // complete seed against that empty identity rather than another partial
+  // delta, which the server must reject without a row to materialize.
+  const forceCompleteSyncRef = useRef(false);
+  // A snapshot ID alone does not prove that this client has successfully
+  // established a writable complete row. In particular, a missing-row
+  // fallback still returns a snapshot ID. Require one acknowledged complete
+  // write before allowing partial payloads, otherwise queued partial writes
+  // can loop against the missing-row fallback and lifecycle commands can race
+  // a row that does not exist yet.
+  const completeSyncEstablishedRef = useRef(false);
+  // Exact server snapshot used as the base for peer partial frames. Never
+  // substitute the locally merged React state here.
+  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
@@ -7840,6 +6786,18 @@ export default function Home() {
   const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
   const [serverCalcReceipt, setServerCalcReceipt] =
     useState<OperationalSnapshotReceipt | null>(null);
+  function invalidateOperationalCalcForPackagingRun(runId: string) {
+    if (serverCalcReceiptRef.current?.runId !== runId) return;
+    // The register now owns this run's corrected packaging counters. Revoke
+    // the cached calculation's display receipt so LiveRunContext falls back to
+    // those values until a fresh server projection arrives. Keep the projection
+    // ref as a monotonic watermark so a late, older frame cannot be adopted.
+    serverCalcReceiptRef.current = null;
+    setServerCalcReceipt(null);
+    serverCalcRef.current = null;
+    setServerCalc(null);
+    setServerProjection(null);
+  }
   // Operational commands have their own canonical adoption fence. A command
   // response is not terminal until this callback has installed its snapshot
   // and receipt, so ordinary snapshot writes and auto-track cannot race it.
@@ -7859,6 +6817,20 @@ export default function Home() {
     snapshotId: string | undefined,
   ) {
     if (!projection || !snapshotId || !Number.isFinite(projection.serverTimeMs)) return;
+    // A deterministic browser fixture can advance the authoritative
+    // projection clock ahead of wall time.  The ordinary SSE heartbeat and
+    // calc tick must not move that projection backwards when they arrive
+    // afterward with the real server clock.  Production heartbeats are
+    // monotonic too, so accepting a lower timestamp would otherwise make a
+    // wake/reload display regress to an older counter.
+    const previousProjection = serverProjectionRef.current;
+    if (
+      previousProjection
+      && previousProjection.runId === projection.runId
+      && previousProjection.serverTimeMs > projection.serverTimeMs
+    ) {
+      return;
+    }
     const offset = projection.serverTimeMs - Date.now();
     serverClockOffsetMsRef.current = offset;
     setServerClockOffsetMs(offset);
@@ -7952,11 +6924,12 @@ export default function Home() {
   // The normal snapshot sync remains a recovery path; this separate queue keeps
   // operator occurrence times and can be retried after a tab/browser restart.
   useEffect(() => {
+    if (screenMode !== null) return;
     setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
       const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
       operationalAdoptionInFlightRef.current += 1;
       setAutoTrackBlocked(true);
-      setAutoTrackRebaseAfterBlock(false);
+      setAutoTrackWakeRebaseReason(null);
       adoptOperationalRevision(intent.canonicalRevision);
       if (intent.serverTime !== undefined) {
         operationalServerTimeOffsetRef.current = intent.serverTime - Date.now();
@@ -7985,7 +6958,12 @@ export default function Home() {
       const payload = data as SyncPayload;
       const acceptedFinalization =
         outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
-      if (outcome === "accepted" && !acceptedFinalization) {
+      const acceptedStockStart =
+        outcome === "accepted"
+        && intent.action === "lifecycle"
+        && intent.lifecycle === "start"
+        && payload.runValues[intent.runId]?.applicatorStockInitialized === true;
+      if (outcome === "accepted" && !acceptedFinalization && intent.action !== "correction" && !acceptedStockStart) {
         applySyncCallbackRef.current(payload);
         adoptReceipt();
         adoptionSucceeded = true;
@@ -8082,7 +7060,7 @@ export default function Home() {
           && !foregroundSyncBarrierRef.current
           && adoptionSucceeded
         ) {
-          setAutoTrackRebaseAfterBlock(true);
+          setAutoTrackWakeRebaseReason("manual-packaging-ownership");
           setAutoTrackBlocked(false);
         }
       }
@@ -8094,7 +7072,7 @@ export default function Home() {
       setOperationalIntentCanonicalAdopter(undefined);
       window.removeEventListener("online", flush);
     };
-  }, []);
+  }, [screenMode]);
   // Cursor recovery complements the normal snapshot/SSE paths for a device
   // that missed accepted offline commands. It adopts canonical materialized
   // snapshots only; commands themselves are never replayed in the browser.
@@ -8115,6 +7093,9 @@ export default function Home() {
   }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
+    if (screenMode !== null) {
+      return Promise.reject(new Error("Station displays are read-only"));
+    }
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
@@ -8176,7 +7157,7 @@ export default function Home() {
     );
     if (response.status === 401) {
       reportUnauthorized();
-      throw new Error("Sign in again to continue automatic tracking");
+      throw Object.assign(new Error("Automatic tracking needs authentication"), { retryable: false });
     }
     const body = await response.json().catch(() => null) as {
       error?: string;
@@ -8189,13 +7170,21 @@ export default function Home() {
       snapshotId?: string;
     } | null;
     if (!response.ok || !body?.outcome || !body.state || !body.values) {
-      throw new Error(body?.error ?? "Automatic tracking could not sync");
+      const retryable = response.status === 408
+        || response.status === 425
+        || response.status === 429
+        || response.status >= 500;
+      throw Object.assign(
+        new Error(body?.error ?? "Automatic tracking could not sync"),
+        { retryable },
+      );
     }
     if (body.stale) {
-      throw new Error("Automatic tracking is waiting for today's reset");
+      throw Object.assign(new Error("Automatic tracking is waiting for today's reset"), { retryable: false });
     }
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
+      adoptedCanonicalSnapshotRef.current = persistedSyncPayload(body.data);
       publishAutoTrackCoordination(body.data);
       canonicalRunValuesUpdatedAtRef.current = { ...(body.data.runValuesUpdatedAt ?? {}) };
       if (body.outcome === "accepted" || body.outcome === "duplicate") {
@@ -8206,16 +7195,8 @@ export default function Home() {
     }
     return { outcome: body.outcome, state: body.state, values: body.values };
       });
-    const surfaced = request.catch((error) => {
-      if (claim.channel === "sauce-barrel") {
-        setWriteError(
-          "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.",
-        );
-      }
-      throw error;
-    });
-    autoTrackClaimQueueRef.current = surfaced.then(() => {}, () => {});
-    return surfaced;
+    autoTrackClaimQueueRef.current = request.then(() => {}, () => {});
+    return request;
   }
 
   // Mirror today's substitution overlay into the shared-calc module so every
@@ -8295,8 +7276,65 @@ export default function Home() {
         initialSnapshot?: boolean;
         peerReceivedAt?: number;
         peerResponseBytes?: number;
+        allowForegroundCanonicalFormReset?: boolean;
       },
     ) => {
+      let queuedIntentReapplied = false;
+      if (options?.initialSnapshot && payload.completeness !== "partial") {
+        const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+        const pending = loadPendingSyncIntent(scope, payload.dayState.date ?? "");
+        if (pending) {
+          if (pending.epoch !== getStoredResetEpoch()) {
+            clearPendingSyncIntent(scope, pending.date, pending.id);
+            recordSyncEvent(
+              "stale",
+              "Discarded queued sync recovery after a reset",
+              "reset-epoch",
+            );
+          } else if (!isValidSyncSnapshotId(syncSnapshotIdRef.current)) {
+            recordSyncEvent(
+              "stale",
+              "Queued sync recovery is retained until a valid server snapshot is available",
+              "stale-base-unrecoverable",
+            );
+          } else {
+            const canonical = persistedSyncPayload(payload);
+            const recovery = rebaseStaleSyncIntent(
+              pending.baseline,
+              pending.payload,
+              canonical,
+              {
+                snapshotId: syncSnapshotIdRef.current,
+                serverTime: payload.serverTime ?? Date.now() + serverClockOffsetMsRef.current,
+              },
+            );
+            if (recovery.reappliedChanges > 0) {
+              payload = recovery.payload;
+              queuedIntentReapplied = true;
+              const saved = savePendingSyncIntent({
+                ...pending,
+                baseSnapshotId: syncSnapshotIdRef.current,
+                baseline: canonical,
+                payload: recovery.payload,
+              });
+              recordSyncEvent(
+                "merge",
+                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${saved ? "" : " (recovery copy could not be updated)"}.`,
+                "stale-base-recovered",
+              );
+            } else {
+              clearPendingSyncIntent(scope, pending.date, pending.id);
+              if (recovery.retainedServerConflicts > 0) {
+                recordSyncEvent(
+                  "merge",
+                  `Kept ${recovery.retainedServerConflicts} newer server values during queued sync recovery`,
+                  "stale-base-conflicts",
+                );
+              }
+            }
+          }
+        }
+      }
       publishAutoTrackCoordination(payload);
       isSyncApplyingRef.current = true;
       const arraysEqual = (a: string[], b: string[]) =>
@@ -8331,7 +7369,7 @@ export default function Home() {
       // before. `rejectedStale` triggers a re-push so peers converge on our edit.
       const remoteUpd = payload.runValuesUpdatedAt ?? {};
       const localUpd = loadRunValuesUpdated();
-      let rejectedStale = false;
+      let rejectedStale = queuedIntentReapplied;
       const localPackaging = loadPackagingProgress();
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
@@ -8349,17 +7387,24 @@ export default function Home() {
         !!packagingRunAtApplyStart &&
         packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart);
       if (packagingFenceRaised) {
+        invalidateOperationalCalcForPackagingRun(packagingRunAtApplyStart!);
         const accepted = packagingMerge.merged[packagingRunAtApplyStart];
         autoSuppressUntilRef.current = Math.max(
           autoSuppressUntilRef.current,
           accepted?.manualOverrideUntil ?? 0,
         );
+        // A newly accepted packaging register changes the case counter's
+        // authoritative baseline even when the run lifecycle is unchanged.
+        // Rebase before releasing the sync fence so hidden time cannot be
+        // applied on top of the adopted manual correction.
+        setAutoTrackWakeRebaseReason("authoritative-peer-packaging");
         setAutoTrackBlocked(true);
       }
 
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
         const mergedUpd: Record<string, number> = { ...localUpd };
+        const runValueServerNow = Date.now() + serverClockOffsetMsRef.current;
         for (const [id, vals] of Object.entries(payload.runValues)) {
           const rTs = remoteUpd[id] ?? 0;
           const lTs = localUpd[id] ?? 0;
@@ -8379,6 +7424,7 @@ export default function Home() {
             localVals,
             rTs,
             lTs,
+            runValueServerNow,
           );
           let acceptedVals = localVals;
           if (!acceptWholeRun) {
@@ -8386,7 +7432,7 @@ export default function Home() {
             // empty-over-populated corruption, advance our stamp so the heal
             // re-push strictly wins; a genuinely-fresher local edit keeps its
             // stamp as-is (the merge already bumped re-pointed runs' stamps).
-            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now();
+            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = runValueServerNow;
             rejectedStale = true;
           } else {
             // Field-level preservation: casesNeeded is the planned target, set
@@ -8404,7 +7450,10 @@ export default function Home() {
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
             };
-            if (rTs > lTs) mergedUpd[id] = rTs;
+            if (
+              rTs > lTs
+              || isRunValueStampAheadOfServerTime(lTs, runValueServerNow)
+            ) mergedUpd[id] = rTs;
           }
           // Packaging progress is a separate causal register. Its winning pair
           // overlays whichever whole-run copy won above, so a stale automatic
@@ -8414,7 +7463,27 @@ export default function Home() {
             acceptedVals,
             packagingMerge.merged[id],
           );
+          // Server auto-track claims own only their slot counter. Merge that
+          // field even when an unrelated local edit has a newer run-wide stamp;
+          // the private ownership proof and correction generation prevent an
+          // older automatic event from overriding a manual App 1 correction.
+          const app1Progress = serverOwnedApp1BatchProgress(payload, id, localVals);
+          if (app1Progress) acceptedVals = { ...acceptedVals, ...app1Progress };
+          const stockProgress = serverOwnedApplicatorStockProgress(payload, id, localVals);
+          if (stockProgress) acceptedVals = { ...acceptedVals, ...stockProgress };
           saveRunValues(id, acceptedVals);
+        }
+        // A partial sync may carry an accepted progress register without a
+        // corresponding runValues entry. Persist that register against the
+        // same run ID so reload hydration and the shared form see the same
+        // winning counters without borrowing the selected run's snapshot.
+        for (const id of packagingMerge.acceptedRemoteIds) {
+          if (Object.prototype.hasOwnProperty.call(payload.runValues, id)) continue;
+          const progress = packagingMerge.merged[id];
+          if (!progress) continue;
+          const values = loadRunValues(id);
+          const overlaid = overlayPackagingProgress(values, progress);
+          if (!deepEqual(values, overlaid)) saveRunValues(id, overlaid);
         }
         saveRunValuesUpdated(mergedUpd);
       }
@@ -8428,7 +7497,10 @@ export default function Home() {
         formHandoffRef.current = true;
         const adopted = payload.dayState.runs[0];
         if (adopted) {
-          const adoptedValues = mergeRunDefaults(loadRunValues(adopted.id));
+          // The first canonical snapshot may carry newer automatic Packaging
+          // progress than its ordinary run values. Bind the form to the
+          // register-aware values before publishing the selected run.
+          const adoptedValues = mergeRunDefaults(loadPackagingAwareRunValues(adopted.id));
           lastFormRunIdRef.current = "";
           form.reset(adoptedValues);
           resetFieldArrays(adoptedValues);
@@ -8630,6 +7702,19 @@ export default function Home() {
                 ? (remotePrepPhase as PrepPhase)
                 : FRESH_PREP_PHASE)
             : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase);
+          const remoteBreaks = normalizeDayBreaks((payload.dayState as Record<string, unknown>).breaks);
+          const localBreaks = normalizeDayBreaks(prev.breaks);
+          const remoteBreakStamp = Number((payload.dayState as Record<string, unknown>).breaksUpdatedAt);
+          const localBreakStamp = Number((prev as Record<string, unknown>).breaksUpdatedAt);
+          const remoteBreaksAreNewer = Number.isFinite(remoteBreakStamp)
+            && remoteBreakStamp > 0
+            && remoteBreakStamp > (Number.isFinite(localBreakStamp) ? localBreakStamp : 0);
+          const mergedBreaks: DayBreaks = isReset || remoteBreaksAreNewer ? remoteBreaks : localBreaks;
+          const mergedBreaksUpdatedAt = isReset
+            ? (remoteBreakStamp > 0 ? remoteBreakStamp : undefined)
+            : remoteBreaksAreNewer
+            ? remoteBreakStamp
+            : (Number.isFinite(localBreakStamp) && localBreakStamp > 0 ? localBreakStamp : undefined);
           const newDs = {
             ...prev,
             runs: newRuns,
@@ -8641,6 +7726,8 @@ export default function Home() {
             substitutionLog: mergedSubLog,
             stagedItems: mergedStaged,
             prepPhase: mergedPrepPhase,
+            breaks: mergedBreaks,
+            ...(mergedBreaksUpdatedAt ? { breaksUpdatedAt: mergedBreaksUpdatedAt } : {}),
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -8698,22 +7785,51 @@ export default function Home() {
         const curRemoteTs = currentId ? (remoteUpd[currentId] ?? 0) : 0;
         const adoptedPackaging =
           !!currentId && packagingMerge.acceptedRemoteIds.has(currentId);
-        if (adoptedPackaging) {
+        const localEditQuietMs = Date.now() - lastLocalEditRef.current;
+        const equalPackagingEcho =
+          !!currentId &&
+          !adoptedPackaging &&
+          getEqualPackagingProgress(
+            localPackaging,
+            payload.packagingProgress,
+            currentId,
+          );
+        if (adoptedPackaging || equalPackagingEcho) {
           const progress = packagingMerge.merged[currentId!];
           autoSuppressUntilRef.current = Math.max(
             autoSuppressUntilRef.current,
             progress?.manualOverrideUntil ?? 0,
           );
         }
-        if (currentId && payload.runValues[currentId] && (adoptedPackaging || (
-          curLocalTs <= curRemoteTs &&
-          Date.now() - lastLocalEditRef.current > 2000 &&
-          pushAcknowledgedRef.current
-        ))
-          // Never blank the live form by resetting it to an all-default remote
-          // value while our stored copy is still populated (the same
-          // empty-over-populated corruption guarded on the run-values loop above).
-          && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
+        const currentRunValues = currentId
+          ? payload.runValues[currentId] as FormValues | undefined
+          : undefined;
+        const emptyOverPopulatedFormReset =
+          !!currentId &&
+          !!currentRunValues &&
+          isEmptyOverPopulated(currentRunValues, loadRunValues(currentId));
+        const canResetLiveForm = Boolean(
+          currentId &&
+          (currentRunValues || adoptedPackaging) &&
+          (
+            adoptedPackaging ||
+            (
+              curLocalTs <= curRemoteTs &&
+              // A successful foreground pull has already resolved this run's
+              // LWW merge. Its canonical value may bypass the ordinary quiet/
+              // acknowledgment guard, but a strictly newer local edit remains.
+              (
+                options?.allowForegroundCanonicalFormReset ||
+                (
+                  localEditQuietMs > 2000 &&
+                  pushAcknowledgedRef.current
+                )
+              )
+            )
+          ) &&
+          !emptyOverPopulatedFormReset,
+        );
+        if (canResetLiveForm) {
           // Read the already-reconciled durable copy rather than the raw payload:
           // the whole-run LWW and packaging register may have selected different
           // sides, and the form must adopt that combined result atomically.
@@ -8738,6 +7854,59 @@ export default function Home() {
             resetFieldArrays(merged);
           }
         }
+        // Equal packaging versions do not appear in acceptedRemoteIds, but
+        // they still confirm the durable register as the winner. Reconcile
+        // only its two owned fields so an idle echo cannot reset unrelated
+        // active-form edits (or clear their RHF dirty state).
+        if (currentId && equalPackagingEcho) {
+          const values = form.getValues();
+          if (values.skidsCompleted !== equalPackagingEcho.skidsCompleted) {
+            form.setValue("skidsCompleted", equalPackagingEcho.skidsCompleted, {
+              shouldDirty: false,
+              shouldTouch: false,
+              shouldValidate: false,
+            });
+          }
+          if (values.casesOnCurrentSkid !== equalPackagingEcho.casesOnCurrentSkid) {
+            form.setValue("casesOnCurrentSkid", equalPackagingEcho.casesOnCurrentSkid, {
+              shouldDirty: false,
+              shouldTouch: false,
+              shouldValidate: false,
+            });
+          }
+        }
+        if (currentId && payload.runValues[currentId]) {
+          const app1Progress = serverOwnedApp1BatchProgress(
+            payload,
+            currentId,
+            form.getValues(),
+          );
+          if (app1Progress) {
+            for (const [field, value] of Object.entries(app1Progress)) {
+              const key = field as "app1BatchesMade" | "app1BatchCorrectionGeneration";
+              if (form.getValues(key) !== value) {
+                form.setValue(key, value, {
+                  shouldDirty: false,
+                  shouldTouch: false,
+                  shouldValidate: false,
+                });
+              }
+            }
+          }
+          const stockProgress = serverOwnedApplicatorStockProgress(payload, currentId, form.getValues());
+          if (stockProgress) {
+            for (const [field, value] of Object.entries(stockProgress)) {
+              const key = field as keyof FormValues;
+              if (form.getValues(key) !== value) {
+                form.setValue(key, value as never, {
+                  shouldDirty: false,
+                  shouldTouch: false,
+                  shouldValidate: false,
+                });
+              }
+            }
+          }
+        }
       }
 
       // ── Brands ──
@@ -8757,6 +7926,9 @@ export default function Home() {
         const merged = dropDeleted(preDrop, deletedMap, "brands").sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
         setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
+        setAdoptedBrandsForProfilePurge((current) =>
+          current && arraysEqual(current, merged) ? current : merged,
+        );
       }
 
       // ── Brand flavors ──
@@ -8949,6 +8121,7 @@ export default function Home() {
             peerApplyMs,
             retries: 0,
             converged: true,
+            fallbackOutcome: "none",
           });
         }
         isSyncApplyingRef.current = false;
@@ -8995,6 +8168,7 @@ export default function Home() {
   // calls within the same day return applied=false with zero side-effects.
   // Managers-only gate on the server; non-managers get a harmless 403.
   useEffect(() => {
+    if (screenMode !== null) return;
     (async () => {
       try {
         await fetch("/api/inventory/consume-day-start", {
@@ -9006,7 +8180,7 @@ export default function Home() {
         /* best-effort — daily reset will retry next boot if needed */
       }
     })();
-  }, []);
+  }, [screenMode]);
 
     // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -9023,11 +8197,11 @@ export default function Home() {
         // Only flush after comparing each durable operation with the server
         // timestamp. A pre-read flush could let a sleeping device overwrite a
         // setting that another device saved while it was offline.
-        void flushFactoryQueue();
+        if (screenMode === null) void flushFactoryQueue();
         // One-time migration heals: push localStorage data to the server for
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
-        void runFactoryKvMigration(data);
+        if (screenMode === null) void runFactoryKvMigration(data);
       } catch {
         // Offline / error — keep whatever is in localStorage already
       }
@@ -9035,12 +8209,13 @@ export default function Home() {
     // Register write-through: every storage mutation for a cached factory key
     // bumps the local stamp and fires a server PUT.
     setKvMutationHook(({ key, value }) => {
+      if (screenMode !== null) return;
       if (FACTORY_KV_CACHED_KEYS.has(key)) {
         putFactoryKey(key, value);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [screenMode]);
 
   // ── Brand+flavor profile pool reconcile (boot) ──
   // Profiles live in their own factory-wide server pool with per-profile
@@ -9053,6 +8228,7 @@ export default function Home() {
   // recovery keep long-lived tabs converged; queued pushes retry on each pass.
   // Best-effort — a fetch failure changes nothing locally.
   useEffect(() => {
+    if (screenMode !== null) return;
     let cancelled = false;
     const pass = async () => {
       try {
@@ -9067,7 +8243,7 @@ export default function Home() {
     };
     void pass();
     return () => { cancelled = true; };
-  }, []);
+  }, [screenMode]);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
@@ -9098,15 +8274,17 @@ export default function Home() {
         if (!current()) return;
       }
       if (families.has("profiles")) {
-        try {
-          const result = await reconcileProfilesFromServerDetailed();
+        if (screenMode === null) {
+          try {
+            const result = await reconcileProfilesFromServerDetailed();
+            if (!current()) return;
+            if (result.changed) {
+              setDieTypes(healDieTypesFromProfiles());
+              applyProfileReconcileRef.current(result);
+            }
+          } catch {}
           if (!current()) return;
-          if (result.changed) {
-            setDieTypes(healDieTypesFromProfiles());
-            applyProfileReconcileRef.current(result);
-          }
-        } catch {}
-        if (!current()) return;
+        }
       }
       if (families.has("factory-data")) {
         try {
@@ -9114,7 +8292,7 @@ export default function Home() {
           if (!current()) return;
           hydrateFromServer(data);
           refreshFactoryDataConsumers();
-          await flushFactoryQueue();
+          if (screenMode === null) await flushFactoryQueue();
         } catch {}
         if (!current()) return;
       }
@@ -9202,6 +8380,7 @@ export default function Home() {
       getSnapshot: () => syncSnapshotIdRef.current,
       onOpen: () => {
       setSyncConnected(true);
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-open" });
       recordSyncEvent("connected", "Live sync connection opened");
       // The coordination hook routes stream drops through the foreground
       // recovery owner. Do not start a second reconnect push here; the initial
@@ -9216,9 +8395,12 @@ export default function Home() {
         if (streamDate !== todayStr()) return false;
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
-          completeness?: "complete";
+          completeness?: "complete" | "partial";
+          syncVersion?: number;
+          baseSnapshotId?: string;
           unchanged?: boolean;
           snapshotId?: string;
+          resultingSnapshotId?: string;
           reset?: boolean;
           rollover?: boolean;
           resetEpoch?: number;
@@ -9234,6 +8416,7 @@ export default function Home() {
           canonicalRevision?: number;
           masterDataChanged?: boolean;
           configurationInvalidated?: boolean;
+          canonicalReconcile?: boolean;
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
@@ -9248,6 +8431,41 @@ export default function Home() {
             || !isUnchangedSyncResponse(msg)
             || msg.snapshotId !== syncSnapshotIdRef.current
           ) return false;
+        } else if (msg.completeness === "partial") {
+          const partialStartedAt = typeof performance === "undefined" ? 0 : performance.now();
+          const reconstructed = await reconstructPartialSyncPayload(
+            adoptedCanonicalSnapshotRef.current,
+            syncSnapshotIdRef.current,
+            msg,
+          );
+          if (!reconstructed) {
+            // A delta with a missing/stale base is not a merge candidate.
+            // Enter the existing authoritative wake barrier; it owns retry,
+            // adoption, and write release ordering.
+            recordSyncEvent("failure", "Partial peer update was unusable; authoritative recovery required", "partial-fallback");
+            recordSyncMeasurement(todayStr(), {
+              path: "partial",
+              direction: "peer",
+              responseBytes: Math.min(new Blob([e.data as string]).size, 10 * 1024 * 1024),
+              requestBytes: 0,
+              latencyMs: 0,
+              mergeMs: 0,
+              peerApplyMs: 0,
+              retries: 0,
+              converged: false,
+              fallbackOutcome: "authoritative-recovery",
+            });
+            foregroundSyncBarrierRef.current = true;
+            void foregroundRecoveryRetryRef.current?.();
+            return false;
+          }
+          syncSnapshotIdRef.current = msg.snapshotId!;
+          adoptedCanonicalSnapshotRef.current = persistedSyncPayload(reconstructed);
+          recordSyncEvent("peer", "Partial peer update reconstructed", "partial");
+          applySyncCallbackRef.current(reconstructed, {
+            peerReceivedAt: partialStartedAt,
+            peerResponseBytes: new Blob([e.data as string]).size,
+          });
         } else if (msg.data) {
           if (
             !isCanonicalRecoverySyncPayload(msg.data, todayStr(), msg.completeness)
@@ -9294,15 +8512,19 @@ export default function Home() {
         }
         // Adopt server-computed summary stats when available (offline fallback: compute locally)
         if (msg.summaryStats && typeof msg.summaryStats === "object") {
-          serverSummaryStatsRef.current = msg.summaryStats;
+          serverSummaryStatsRef.current = msg.completeness === "partial"
+            ? mergeSparseServerRunMap(serverSummaryStatsRef.current, msg.summaryStats)
+            : msg.summaryStats;
         }
         if (msg.runLines && typeof msg.runLines === "object") {
-          serverRunLinesRef.current = msg.runLines;
+          serverRunLinesRef.current = msg.completeness === "partial"
+            ? mergeSparseServerRunMap(serverRunLinesRef.current, msg.runLines)
+            : msg.runLines;
         }
-        if (msg.initial) {
+        if (msg.initial || msg.canonicalReconcile) {
           // An initial frame is also the reconnect baseline: refresh every
           // independent configuration family in case its nudge was missed while
-          // this live stream was disconnected.
+          // this live stream was disconnected or its outbox cursor expired.
           reconcileConfigurationBaseline();
         } else if (
           (msg.configurationInvalidated || msg.masterDataChanged) &&
@@ -9360,6 +8582,7 @@ export default function Home() {
             }));
           }
           if (isValidSyncSnapshotId(msg.snapshotId)) syncSnapshotIdRef.current = msg.snapshotId;
+          adoptedCanonicalSnapshotRef.current = persistedSyncPayload(msg.data);
           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
@@ -9373,15 +8596,20 @@ export default function Home() {
           });
           if (!msg.initial) recordSyncEvent("merge", "Remote state merged into this device");
         } else if (msg.initial) {
-          // The server explicitly has no row. Settle the local automatic seed
-          // to default values before opening the baseline gate, so stale form
-          // contents cannot become a shared first run.
-          const seedId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id ?? "";
+          // A missing initial row is an authoritative empty baseline. Replace
+          // the local day snapshot before opening the writer gate; merely
+          // resetting the form leaves the stale run in localStorage, where the
+          // next normal merge can republish it after a reset-epoch reload.
+          const emptyDay = freshDayState();
+          dayStateRef.current = emptyDay;
+          setDayState(emptyDay);
+          saveDayState(emptyDay, { stampMeta: false });
+          saveRunValuesUpdated({});
+          savePackagingProgress({});
           formHandoffRef.current = true;
           lastFormRunIdRef.current = "";
           form.reset(DEFAULT_VALUES);
           resetFieldArrays(DEFAULT_VALUES);
-          lastFormRunIdRef.current = seedId;
           formHandoffRef.current = false;
         }
         return true;
@@ -9395,11 +8623,20 @@ export default function Home() {
       // effect. Fence automatic pushes until that reconnect delivers its own
       // initial snapshot.
       setSyncConnected(false);
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-error" });
       // The browser stream can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me; if the session is gone we land on login.
       revalidate();
     },
     onInitialBaseline: (shouldPush) => {
+      if (screenMode !== null) {
+        // The coordinator calls this only after the canonical baseline has
+        // been accepted and applied. A read-only display must not echo it.
+        dispatchScreenSync({ type: "canonical-adopted" });
+        pushAcknowledgedRef.current = true;
+        setSyncPendingCount(0);
+        return;
+      }
       // applySyncCallbackRef clears its sync-apply suppression in a frame.
       // The manager opens this gate only after Home has merged the baseline.
       if (shouldPush) requestAnimationFrame(() => {
@@ -9412,7 +8649,9 @@ export default function Home() {
         schedulePush(dayStateRef.current, 0);
       });
     },
-    onClose: () => {},
+    onClose: () => {
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-closed" });
+    },
     });
     return () => {
       cancelled = true;
@@ -9434,7 +8673,8 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async (): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify }): Promise<boolean> => {
+      if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       const isCurrentRecovery = () =>
@@ -9448,9 +8688,19 @@ export default function Home() {
           : "Still recovering: checking the current production state…",
       );
       // Raise both the synchronous ref fence and its rendered companion before
-      // the wake clock can publish hidden-time progress. A normal unchanged
-      // pull releases without rebasing, preserving ordinary screen-off catch-up.
-      setAutoTrackRebaseAfterBlock(false);
+      // the wake clock can publish hidden-time progress. Runs without manual
+      // packaging ownership retain ordinary screen-off catch-up. Once a manual
+      // correction exists, every wake adopts/rebases that register before
+      // automatic tracking resumes, even if the server snapshot is unchanged.
+      const activeRunId =
+        dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      const activePackagingProgress =
+        activeRunId ? loadPackagingProgress()[activeRunId] : undefined;
+      setAutoTrackWakeRebaseReason(
+        (activePackagingProgress?.correctionGeneration ?? 0) > 0
+          ? "manual-packaging-ownership"
+          : null,
+      );
       setAutoTrackBlocked(true);
       syncPushGenerationRef.current += 1;
       if (syncRetryTimerRef.current) {
@@ -9471,36 +8721,6 @@ export default function Home() {
       return (async () => {
         let reconciled = false;
         try {
-          // Check the reset epoch first because a device can miss the SSE reset
-          // frame while asleep. The ordinary reset wipe remains the single
-          // authority for clearing pre-reset local state.
-          const epochRes = await fetchWithTimeout(
-            "/api/sync/reset-epoch",
-            { cache: "no-store" },
-            10_000,
-          );
-          // A newer wake/reconnect owner may have superseded this response
-          // while the browser was asleep or the network was stalled. Obsolete
-          // responses must not update any canonical refs or release the fence.
-          if (!isCurrentRecovery()) return false;
-          if (epochRes.ok) {
-            const parsedEpoch = await readCurrentRecoveryJson(epochRes, isCurrentRecovery)
-              .catch(() => ({ current: isCurrentRecovery(), body: null }));
-            if (!parsedEpoch.current) return false;
-            const epochBody = parsedEpoch.body as { epoch?: number; rollover?: boolean } | null;
-            if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
-              const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
-              const adopted = epochBody.rollover
-                ? applyRolloverEpoch(epochBody.epoch)
-                : applyResetWipe(epochBody.epoch);
-              if (adopted) {
-                window.location.reload();
-                return false;
-              }
-              synchronizationStateMachineRef.current.completeReset(generation);
-            }
-          }
-
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
           // transaction. A device can wake at local midnight, and the request
@@ -9512,19 +8732,40 @@ export default function Home() {
             syncTodayRequest.init,
             10_000,
           );
+          if (!res.ok) classify("non-retryable-http");
           const recovery = await consumeForegroundRecoveryResponse({
             response: res,
             expectedDate: clientDate,
             requestedSnapshotId: snapshot,
+            adoptReset: ({ resetEpoch, rollover }) => {
+              if (resetEpoch <= getStoredResetEpoch()) return false;
+              const generation = synchronizationStateMachineRef.current.beginReset(resetEpoch);
+              const adopted = rollover
+                ? applyRolloverEpoch(resetEpoch)
+                : applyResetWipe(resetEpoch);
+              if (adopted) {
+                window.location.reload();
+                return true;
+              }
+              synchronizationStateMachineRef.current.completeReset(generation);
+              return false;
+            },
             isCurrent: isCurrentRecovery,
             adoptUnchanged: (body) => {
               adoptOperationalRevision(body.canonicalRevision);
+              if (body.operationalProjection) {
+                adoptOperationalProjection(
+                  body.operationalProjection,
+                  body.snapshotId,
+                );
+              }
               syncSnapshotIdRef.current = body.snapshotId;
               pushAcknowledgedRef.current = true;
             },
             adoptCanonical: (payload, responseSnapshot) => {
               adoptOperationalRevision(payload.canonicalRevision);
               syncSnapshotIdRef.current = responseSnapshot;
+              adoptedCanonicalSnapshotRef.current = persistedSyncPayload(payload);
               if (payload.operationalProjection) {
                 adoptOperationalProjection(
                   payload.operationalProjection,
@@ -9533,9 +8774,14 @@ export default function Home() {
               }
             },
           });
-          if (!recovery.accepted) return false;
+          if (!recovery.accepted) {
+            classify("cancelled");
+            return false;
+          }
+          setIsOnline(true);
           if (recovery.kind === "unchanged") {
             reconciled = true;
+            if (screenMode !== null) dispatchScreenSync({ type: "recovery-succeeded" });
             return true;
           }
           const payload = recovery.payload;
@@ -9572,18 +8818,24 @@ export default function Home() {
                 };
               },
               persistLifecycle: (adoptedDayState) => {
-                setAutoTrackRebaseAfterBlock(true);
+                setAutoTrackWakeRebaseReason("lifecycle-replacement");
                 saveDayState(adoptedDayState, { stampMeta: false });
                 dayStateRef.current = adoptedDayState;
                 setDayState(adoptedDayState);
                 lastSyncSigRef.current = "";
               },
               applyGeneralMerge: (canonicalPayload) => {
-                applySyncCallbackRef.current(canonicalPayload);
+                applySyncCallbackRef.current(canonicalPayload, {
+                  allowForegroundCanonicalFormReset: true,
+                });
               },
-              reconcileProfiles: reconcileProfilesFromServerDetailed,
+              reconcileProfiles: () => screenMode === null
+                ? reconcileProfilesFromServerDetailed()
+                : Promise.resolve(
+                    { changed: false } as Awaited<ReturnType<typeof reconcileProfilesFromServerDetailed>>,
+                  ),
               applyProfiles: (profileResult) => {
-                if (!profileResult.changed) return;
+                if (screenMode !== null || !profileResult.changed) return;
                 setDieTypes(healDieTypesFromProfiles());
                 applyProfileReconcileRef.current(profileResult);
               },
@@ -9591,7 +8843,7 @@ export default function Home() {
               applyFactory: async (factoryData) => {
                 hydrateFromServer(factoryData);
                 refreshFactoryDataConsumers();
-                await flushFactoryQueue();
+                if (screenMode === null) await flushFactoryQueue();
               },
               isCurrent: isCurrentRecovery,
             });
@@ -9602,8 +8854,14 @@ export default function Home() {
            pushAcknowledgedRef.current = true;
          if (!isCurrentRecovery()) return false;
          reconciled = true;
+          if (screenMode !== null) dispatchScreenSync({ type: "recovery-succeeded" });
           return true;
-         } catch {
+         } catch (error) {
+            classify(
+              error instanceof Error && error.message.startsWith("foreground sync GET failed:")
+                ? "non-retryable-http"
+                : "connectivity-retry",
+            );
             // Failed pulls are not successful reconciliation. Keep the barrier
            // raised: releasing it here would let hidden-time auto-track or a
            // queued lifecycle write publish stale state. The wake guard clears
@@ -9616,6 +8874,7 @@ export default function Home() {
              foregroundStopIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
+           if (screenMode !== null) dispatchScreenSync({ type: "recovery-failed" });
            showForegroundRecoveryNotice(
              "failed",
              "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
@@ -9713,6 +8972,8 @@ export default function Home() {
           }
         }
       })();
+    }, (diagnostic) => {
+      recordWakeRecoveryDiagnostic({ date: todayStr(), ...diagnostic });
     });
     foregroundRecoveryRetryRef.current = foregroundRegistration.reconcile;
     return () => {
@@ -9729,6 +8990,7 @@ export default function Home() {
   // across a device that was offline during the merge. Best-effort: a failure
   // just leaves the existing local/sync behavior unchanged.
   useEffect(() => {
+    if (screenMode !== null) return;
     let cancelled = false;
     (async () => {
       let remoteNames: string[];
@@ -9764,7 +9026,7 @@ export default function Home() {
       prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [screenMode]);
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
   useEffect(() => {
@@ -9780,6 +9042,7 @@ export default function Home() {
   // Target Doughball Weight rides along (falling back to any weight the preset
   // already carried) so the weight follows the recipe name.
   useEffect(() => {
+    if (screenMode !== null) return;
     const name = v.doughRecipeName?.trim();
     if (!name || (v.doughRecipe ?? []).length === 0) return;
     const presets = loadDoughRecipePresets();
@@ -9789,7 +9052,7 @@ export default function Home() {
       ? { rows: v.doughRecipe ?? [], doughballWeightOz: ballOz }
       : { rows: v.doughRecipe ?? [] };
     saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight, screenMode]);
 
   // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
   // doughball weight, while the form still sits at 0 oz, adopts the pool
@@ -9844,15 +9107,17 @@ export default function Home() {
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
+    if (screenMode !== null) return;
     const name = v.frontlineRecipeName?.trim();
     if (!name || (v.frontlineRecipe ?? []).length === 0) return;
     const presets = loadFrontlineRecipePresets();
     presets[name] = v.frontlineRecipe ?? [];
     saveFrontlineRecipePresets(presets);
-  }, [v.frontlineRecipeName, v.frontlineRecipe]);
+  }, [v.frontlineRecipeName, v.frontlineRecipe, screenMode]);
 
   // Auto-save cheese blend recipe presets (one per applicator, shared pool by name)
   useEffect(() => {
+    if (screenMode !== null) return;
     const saves: [string | undefined, RecipeRow[]][] = [
       [v.app1CheeseRecipeName, v.app1CheeseRecipe ?? []],
       [v.app2CheeseRecipeName, v.app2CheeseRecipe ?? []],
@@ -9868,149 +9133,13 @@ export default function Home() {
       changed = true;
     }
     if (changed) saveCheeseRecipePresets(presets);
-  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
+  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe, screenMode]);
 
-  // Detect day change while the tab is open (visibility change + periodic check)
-  useEffect(() => {
-    async function checkDateRollover() {
-      // A Home mount immediately after sign-in is already today's
-      // re-authentication. Consume this marker before the async rollover work
-      // so a duplicate interval/timer check cannot make the same session skip
-      // a later rollover.
-      const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
-      const stored = (() => {
-        try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
-      })();
-      if (stored.date && stored.date !== todayStr()) {
-        // Auto-end any active run before archiving yesterday
-        const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
-        if (prevDs && stored.date) {
-          // Auto-deduct inventory for every run being closed by the rollover, the
-          // same as an explicit endRun. consume is idempotent per runId, so runs
-          // already deducted via endRun won't double-count.
-          for (const r of prevDs.runs) {
-            if (r.startedAt && !r.endedAt) {
-              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
-            }
-          }
-          const finalDs: DayState = {
-            ...prevDs,
-            runs: prevDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
-            ),
-          };
-          archiveDayToHistory(finalDs, stored.date);
-        }
-        const newDate = todayStr();
-        // Try to load any pre-scheduled data for the new day.
-        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
-        // there are no scheduled runs (GET succeeded with an empty row). If the
-        // GET itself fails (network error, transient 5xx), do NOT push — an
-        // empty push with a newer resetAt would wholesale-adopt over any
-        // previously saved scheduled runs (protectRunValues escape hatch). The
-        // session boundary (resetBoundaryAt) will be established on the next
-        // successful push once the connection recovers.
-        let serverConfirmedNoRuns = false;
-        // Retry once after a short delay when the initial fetch fails.
-        // On Render free-tier the service spins down after inactivity; a
-        // cold-start GET can time out while the server is still waking.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const res = await fetch(`/api/sync/${newDate}`);
-            if (res.ok) {
-              const payload = await res.json() as SyncPayload | null;
-              if (payload?.dayState?.runs?.length) {
-              // Apply the saved line-type (dough/crusts) preference to each run
-              // that has no subTab set — so brands always scheduled as "crusts"
-              // start in the right mode without a manual toggle every morning.
-              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
-                if (r.subTab) return r;
-                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
-                return pref ? { ...r, subTab: pref } : r;
-              });
-              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              clearActiveSubstitutions();
-              // Scheduled run values are a snapshot from scheduling time; blank
-              // sauce fields backfill from the CURRENT profile (mobile parity —
-              // its pull-up spreads the live profile).
-              const metaById = new Map(ds.runs.map(r => [r.id, r]));
-              const pulledVals: Record<string, FormValues> = {};
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
-                const meta = metaById.get(id);
-                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
-                saveRunValues(id, pulledVals[id]);
-              }
-              // Adopt the scheduled row's per-run value stamps: these values are
-              // server-sourced, not a local edit (stamping them with local time
-              // would fake one), but saving them completely unstamped would lose
-              // the per-run LWW merge to any peer that pushes a stamped copy.
-              {
-                const upd = loadRunValuesUpdated();
-                const remoteUpd = payload.runValuesUpdatedAt ?? {};
-                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
-                saveRunValuesUpdated(upd);
-              }
-              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-              saveDayState(ds);
-              setDayState(ds);
-              if (ds.runToTime) setRunToTime(ds.runToTime);
-              const firstId = ds.runs[0]?.id;
-              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
-              lastFormRunIdRef.current = firstId ?? "";
-              form.reset(firstVals);
-              resetFieldArrays(firstVals);
-              schedulePush(ds, 0);
-              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
-              // A restored session must sign out after rollover so a hard
-              // refresh cannot bypass the daily re-authentication boundary.
-              // A session just established by sign-in has already
-              // re-authenticated for this production day.
-              if (shouldSignOut) void signOut();
-              return;
-            }
-            serverConfirmedNoRuns = true;
-          }
-          } catch {}
-          // Brief pause before retry to allow a cold-starting server to
-          // finish waking; skip on the final attempt.
-          if (attempt === 0 && !serverConfirmedNoRuns) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 5_000));
-          }
-        }
-        // Fallback: fresh empty state. Only push to the server if the GET
-        // confirmed there are no scheduled runs — otherwise we'd risk wiping
-        // them via the wholesale-adopt escape hatch (see comment above).
-        const fresh = { ...freshDayState(), resetAt: Date.now() };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        saveDayState(fresh);
-        setDayState(fresh);
-        setRunToTime("19:15");
-        lastFormRunIdRef.current = "";
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
-        // See note above: restored sessions sign out after the daily reset,
-        // while the current sign-in transition is already re-authenticated.
-        if (shouldSignOut) void signOut();
-      }
-    }
-    // Run once on mount too. loadDayState() only resets the in-memory view when
-    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
-    // boundary, or sign out. Without this immediate call, the rollover (and its
-    // signOut) only fires up to 60s later via the interval — by which
-    // time another device's pushed resetAt may have already 401-bounced us to
-    // login, so the user sees the logout but never the reset. Mobile already
-    // rolls over on its mount effect; this brings web to parity.
-    void checkDateRollover();
-    const interval = setInterval(checkDateRollover, 60_000);
-    document.addEventListener("visibilitychange", checkDateRollover);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", checkDateRollover);
-    };
-  }, []);
+  // Daily rollover is server-owned. The initial SSE frame and the reset-epoch
+  // handshake are the only current-day bootstrap authorities: they adopt the
+  // canonical row before the baseline gate can release any automatic write.
+  // Do not inspect stale local day state, archive it, stamp a reset marker, or
+  // manufacture an empty replacement here.
 
   // Re-push on tab-foreground restore so a run-start (or any action) that
   // fired while the tab was backgrounded or the screen was off doesn't stay
@@ -10050,9 +9179,14 @@ export default function Home() {
     res: Response,
     applyToLiveDay: boolean,
     shouldConsume?: () => boolean,
-  ): Promise<{ body: unknown; stale: boolean }> {
+  ): Promise<{ body: unknown; stale: boolean; recoverableConflict: boolean }> {
     const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
+      onServerTime: (serverTime) => {
+        const offset = serverTime - Date.now();
+        serverClockOffsetMsRef.current = offset;
+        setServerClockOffsetMs(offset);
+      },
       onStale: (body) => {
         handleStaleSyncWrite(body);
       },
@@ -10060,6 +9194,12 @@ export default function Home() {
         ? (canonical) => applySyncCallbackRef.current(canonical)
         : undefined,
     });
+    if (result.malformed) {
+      throw new Error("sync write returned a malformed response");
+    }
+    if (res.status === 409 && !result.recoverableConflict) {
+      throw new Error("sync write returned a non-recoverable conflict");
+    }
     const snapshot = result.body?.snapshotId;
     adoptOperationalRevision(
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
@@ -10069,15 +9209,29 @@ export default function Home() {
       | { partialFallback?: boolean; data?: unknown }
       | null
       | undefined;
-    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
-      // A partial write against a missing row has no valid snapshot identity.
-      // Clear the partial baseline so the queued recovery push is complete.
-      syncSnapshotIdRef.current = "";
+    if (partialFallbackBody?.partialFallback) {
+      // A fallback is a full canonical rebase. The next write must be complete:
+      // an empty baseline can have a snapshot ID even when no daily row exists,
+      // and a partial replay cannot create that row.
+      forceCompleteSyncRef.current = true;
+      completeSyncEstablishedRef.current = false;
       lastSyncSigRef.current = "";
+    }
+    if (
+      result.body?.data
+      && typeof result.body.data === "object"
+      && !Array.isArray(result.body.data)
+      && result.body.data.completeness !== "partial"
+    ) {
+      adoptedCanonicalSnapshotRef.current = persistedSyncPayload(result.body.data);
+    }
+    if (!partialFallbackBody?.partialFallback) {
+      completeSyncEstablishedRef.current = true;
     }
     if (result.body?.data && typeof result.body.data === "object") {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
+      if (!partialFallbackBody?.partialFallback) forceCompleteSyncRef.current = false;
     }
     const operationalProjection = (
       result.body as (typeof result.body & { operationalProjection?: unknown }) | null | undefined
@@ -10094,31 +9248,93 @@ export default function Home() {
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
-    let res = await writeToday({
+    if (screenMode !== null) throw new Error("Station displays are read-only");
+    const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    const date = payload.dayState.date ?? todayStr();
+    const work = {
       payload,
+      baseSnapshot: adoptedCanonicalSnapshotRef.current ?? undefined,
+      pendingIntentId: genId(),
+    };
+    if (scope && work.baseSnapshot) {
+      const saved = savePendingSyncIntent({
+        version: 1,
+        id: work.pendingIntentId,
+        scope,
+        date,
+        epoch: getStoredResetEpoch(),
+        baseSnapshotId: payload.baseSnapshotId ?? syncSnapshotIdRef.current,
+        baseline: persistedSyncPayload(work.baseSnapshot),
+        payload,
+      });
+      if (!saved) {
+        recordSyncEvent(
+          "failure",
+          "Offline recovery context could not be saved for a page reload",
+          "pending-intent-storage",
+        );
+      }
+    }
+    let res = await writeToday({
+      payload: work.payload,
       clientId: clientId.current,
       snapshotId: syncSnapshotIdRef.current,
       epoch: getStoredResetEpoch(),
     });
     let result = await consumeCanonicalSyncWriteResponse(res, true);
-    // A stale partial snapshot can return successful transport with no
-    // canonical data. The local change is not acknowledged in that case.
-    // The response consumer clears the unusable snapshot identity, so replay
-    // the current local state as a complete write before reporting success.
+    if (!res.ok && !result.recoverableConflict) throw new Error(`sync write failed: ${res.status}`);
+    if (result.stale) throw new Error("sync write was rejected by the reset boundary");
+    // A stale base can return successful transport with the authoritative
+    // canonical snapshot instead of applying this write. Adopt it first, then
+    // rebuild once from the reconciled local state so only edits still eligible
+    // after canonical adoption are replayed against the new exact base.
     const partialFallbackBody = result.body as
-      | { partialFallback?: boolean; data?: unknown }
+      | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
       | null
       | undefined;
-    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
-      const recoveryPayload = buildSyncPayload(dayStateRef.current);
+    if (shouldReplaySyncWrite(partialFallbackBody)) {
+      if (!partialFallbackBody?.data) {
+        throw new Error("Stale sync response omitted its canonical data");
+      }
+      const recovery = rebasePendingSyncWork(
+        work,
+        partialFallbackBody.data,
+        partialFallbackBody.snapshotId,
+        partialFallbackBody.serverTime,
+      );
+      if (recovery.reappliedChanges === 0) {
+        clearPendingSyncIntent(scope, date, work.pendingIntentId);
+        return res;
+      }
       res = await writeToday({
-        payload: recoveryPayload,
+        payload: work.payload,
         clientId: clientId.current,
         snapshotId: syncSnapshotIdRef.current,
         epoch: getStoredResetEpoch(),
       });
       result = await consumeCanonicalSyncWriteResponse(res, true);
+      const secondFallback = result.body as
+        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+        | null
+        | undefined;
+      if (!res.ok && !result.recoverableConflict) {
+        throw new Error(`sync recovery write failed: ${res.status}`);
+      }
+      if (result.stale) throw new Error("sync recovery write was rejected by the reset boundary");
+      if (shouldReplaySyncWrite(secondFallback)) {
+        if (!secondFallback?.data) {
+          throw new Error("Repeated stale sync response omitted canonical data");
+        }
+        rebasePendingSyncWork(
+          work,
+          secondFallback.data,
+          secondFallback.snapshotId,
+          secondFallback.serverTime,
+        );
+        throw new Error("sync write remained stale after canonical rebase");
+      }
     }
+    clearPendingSyncIntent(scope, date, work.pendingIntentId);
     return res;
   }
 
@@ -10132,10 +9348,47 @@ export default function Home() {
       queuedAtPerf?: number;
       queuedAtEpoch?: number;
       trigger?: SyncMeasurementTrigger;
+      baseSnapshot?: SyncPayload;
+      pendingIntentId?: string;
+      recoveryBlocked?: boolean;
     },
   ) {
+    if (screenMode !== null) return;
     if (generation !== syncPushGenerationRef.current) return;
-    const work = { payload, sig, ...timing };
+    const pendingScope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    const pendingDate = payload.dayState.date ?? todayStr();
+    const priorIntent = loadPendingSyncIntent(pendingScope, pendingDate);
+    const matchesPriorIntent = priorIntent
+      && JSON.stringify(priorIntent.payload) === JSON.stringify(payload);
+    const baseSnapshot =
+      timing?.baseSnapshot
+      ?? (matchesPriorIntent ? priorIntent.baseline : undefined)
+      ?? adoptedCanonicalSnapshotRef.current
+      ?? undefined;
+    const pendingIntentId =
+      timing?.pendingIntentId
+      ?? (matchesPriorIntent ? priorIntent.id : undefined)
+      ?? genId();
+    const work = { payload, sig, ...timing, baseSnapshot, pendingIntentId };
+    if (pendingScope && baseSnapshot) {
+      const saved = savePendingSyncIntent({
+        version: 1,
+        id: pendingIntentId,
+        scope: pendingScope,
+        date: pendingDate,
+        epoch: getStoredResetEpoch(),
+        baseSnapshotId: payload.baseSnapshotId ?? syncSnapshotIdRef.current,
+        baseline: persistedSyncPayload(baseSnapshot),
+        payload,
+      });
+      if (!saved) {
+        recordSyncEvent(
+          "failure",
+          "Offline recovery context could not be saved for a page reload",
+          "pending-intent-storage",
+        );
+      }
+    }
     // A local edit, focus event, and online event can all arrive while a
     // request is retrying. Keep only the newest payload; never start a second
     // retry chain for the same tab.
@@ -10151,8 +9404,8 @@ export default function Home() {
     // date it was built on. A push queued just before midnight could otherwise
     // retry after midnight and write yesterday's runs into the new day's
     // /api/sync/today row — the same leak schedulePush guards. If the payload's
-    // build-date is no longer today, drop it (the rollover will push the fresh
-    // day instead).
+    // build-date is no longer today, drop it. The server-owned rollover and
+    // current-day baseline adoption will provide the next writable snapshot.
     if (payload.dayState.date && payload.dayState.date !== todayStr()) {
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       setSyncRetryWaiting(false);
@@ -10178,6 +9431,8 @@ export default function Home() {
       ...(timing?.queuedAtEpoch ? { syncMeta: { queuedAt: timing.queuedAtEpoch } } : {}),
     });
     const requestBytes = new Blob([requestBody]).size;
+    let responseStatus = 0;
+    let recoverableConflictResponse = false;
     writeToday({
       payload,
       clientId: clientId.current,
@@ -10186,70 +9441,166 @@ export default function Home() {
       signal: controller.signal,
       queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
+      responseStatus = res.status;
       if (generation !== syncPushGenerationRef.current) return;
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
       if (res.status === 401 || res.status === 403) {
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.authenticationRejected,
+        );
         if (res.status === 401) reportUnauthorized();
         setSyncPushFailed(true);
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("failure", "Sync needs attention before this change can be shared", String(res.status), currentRunId);
+        recordSyncEvent(
+          "failure",
+          "Sync needs attention before this change can be shared",
+          String(res.status),
+          currentRunId,
+          syncWriteFieldCheck(res),
+        );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
         return;
       }
-      // Any other non-success response must follow the retry path below.
+      // Any non-success response other than the documented canonical 409
+      // fallback must follow the retry path below.
       // consumeCanonicalSyncWriteResponse intentionally does not throw for
       // HTTP errors so callers can safely inspect their response bodies; a
       // sync write must not be recorded as acknowledged just because the
       // server returned parseable JSON with a 5xx status.
-      if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
+      if (!res.ok && res.status !== 409) throw new Error(`Sync write failed: ${res.status}`);
       const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
         true,
         () => generation === syncPushGenerationRef.current,
       );
+      recoverableConflictResponse = canonicalResult.recoverableConflict;
       if (generation !== syncPushGenerationRef.current) return;
-      // A stale partial snapshot is successful transport, but it did not
-      // persist this local change. The response consumer clears the stale
-      // snapshot identity; replay the latest local state as a complete write
-      // so lifecycle changes cannot leave another run absent until a timer
-      // happens to repair it.
+      if (!res.ok && !canonicalResult.recoverableConflict) {
+        throw new Error(`Sync write failed: ${res.status}`);
+      }
+      // A stale base is successful transport, but it did not persist this
+      // local change. Canonical response consumption runs first; rebuild from
+      // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
-        | { partialFallback?: boolean; data?: unknown }
+        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
         | null
         | undefined;
-      if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
-        const recoveryPayload = buildSyncPayload(dayStateRef.current);
-        res = await writeToday({
-          payload: recoveryPayload,
-          clientId: clientId.current,
-          snapshotId: syncSnapshotIdRef.current,
-          epoch: getStoredResetEpoch(),
-          signal: controller.signal,
-          queuedAtEpoch: timing?.queuedAtEpoch,
-        });
-        if (!res.ok) throw new Error(`Sync recovery write failed: ${res.status}`);
-        canonicalResult = await consumeCanonicalSyncWriteResponse(
-          res,
-          true,
-          () => generation === syncPushGenerationRef.current,
+      let replayedAfterPartialFallback = false;
+      let recoveredWithoutReplay = false;
+      if (shouldReplaySyncWrite(partialFallbackBody)) {
+        replayedAfterPartialFallback = true;
+        if (!partialFallbackBody?.data) {
+          work.recoveryBlocked = true;
+          throw new Error("Stale sync response omitted its canonical data");
+        }
+        let recovery = rebasePendingSyncWork(
+          work,
+          partialFallbackBody.data,
+          partialFallbackBody.snapshotId,
+          partialFallbackBody.serverTime,
         );
-        if (generation !== syncPushGenerationRef.current) return;
+        if (recovery.reappliedChanges > 0) {
+          res = await writeToday({
+            payload: work.payload,
+            clientId: clientId.current,
+            snapshotId: syncSnapshotIdRef.current,
+            epoch: getStoredResetEpoch(),
+            signal: controller.signal,
+            queuedAtEpoch: timing?.queuedAtEpoch,
+          });
+          responseStatus = res.status;
+          recoverableConflictResponse = false;
+          if (!res.ok && res.status !== 409) {
+            throw new Error(`Sync recovery write failed: ${res.status}`);
+          }
+          canonicalResult = await consumeCanonicalSyncWriteResponse(
+            res,
+            true,
+            () => generation === syncPushGenerationRef.current,
+          );
+          recoverableConflictResponse = canonicalResult.recoverableConflict;
+          if (generation !== syncPushGenerationRef.current) return;
+          if (!res.ok && !canonicalResult.recoverableConflict) {
+            throw new Error(`Sync recovery write failed: ${res.status}`);
+          }
+          const secondFallback = canonicalResult.body as
+            | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+            | null
+            | undefined;
+          if (shouldReplaySyncWrite(secondFallback)) {
+            if (!secondFallback?.data) {
+              work.recoveryBlocked = true;
+              throw new Error("Repeated stale sync response omitted canonical data");
+            }
+            // Preserve the intent against the newest canonical response before
+            // the bounded retry loop resumes. Never retry this same stale body.
+            recovery = rebasePendingSyncWork(
+              work,
+              secondFallback.data,
+              secondFallback.snapshotId,
+              secondFallback.serverTime,
+            );
+            if (recovery.reappliedChanges > 0) {
+              throw new Error("sync write remained stale after a second canonical rebase");
+            }
+            recoveredWithoutReplay = true;
+          }
+        } else {
+          recoveredWithoutReplay = true;
+        }
       }
       const { stale } = canonicalResult;
+      if (recoveredWithoutReplay && !stale) {
+        emitProductionRunSaveOutcome("success", requestStartedAt);
+        clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
+        pushAcknowledgedRef.current = true;
+        setSyncPushFailed(false);
+        setSyncPendingCount(0);
+        setSyncFailedCount(0);
+        setSyncRetryWaiting(false);
+        const queued = syncPushQueueRef.current.finish({ drainQueued: true });
+        if (queued) {
+          const freshPayload = buildSyncPayload(dayStateRef.current);
+          pushAcknowledgedRef.current = false;
+          setSyncPendingCount(1);
+          doFetch(
+            freshPayload,
+            3,
+            JSON.stringify(freshPayload),
+            syncPushGenerationRef.current,
+            false,
+            queued,
+          );
+        }
+        return;
+      }
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite,
+        );
         // The server dropped this write (data reset not yet honoured). The
         // handler wipes + reloads when adoption applies; either way this push
         // did NOT persist, so flag it instead of recording it as synced.
         setSyncPushFailed(true);
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("stale", "Server rejected the write after a reset; local change is retained", "reset-stale");
+        recordSyncEvent(
+          "stale",
+          "Server rejected the write after a reset; local change is retained",
+          "reset-stale",
+          undefined,
+          syncWriteFieldCheck({ ...res, stale: true }),
+        );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
         return;
@@ -10283,20 +9634,79 @@ export default function Home() {
       setSyncPushFailed(false);
       setSyncPendingCount(0);
       setSyncFailedCount(0);
-      recordSyncEvent("ack", "Server acknowledged the local change", "200", currentRunId);
+      recordSyncEvent(
+        "ack",
+        "Server acknowledged the local change",
+        "200",
+        currentRunId,
+        syncWriteFieldCheck(res),
+      );
+      emitProductionRunSaveOutcome("success", requestStartedAt);
+      clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
-      if (sig !== undefined) lastSyncSigRef.current = sig;
-      if (payload.history !== undefined) {
-        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+       if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
+       if (payload.history !== undefined) {
+         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+         if (work.payload.history !== payload.history) {
+           lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
+         }
+       } else if (work.payload.history !== undefined) {
+         lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       if (queued) {
-        doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        // A missing-row fallback may have queued several partial payloads
+        // before its complete seed finished. Those payloads all target the
+        // pre-seed snapshot and can recreate the fallback loop. Rebuild from
+        // the current ref against the newly adopted snapshot instead, and
+        // keep lifecycle actions behind this replacement write.
+        if (replayedAfterPartialFallback) {
+          const freshPayload = buildSyncPayload(dayStateRef.current);
+          const freshSig = JSON.stringify(freshPayload);
+          pushAcknowledgedRef.current = false;
+          doFetch(
+            freshPayload,
+            3,
+            freshSig,
+            syncPushGenerationRef.current,
+            false,
+            queued,
+          );
+        } else {
+          doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        }
       }
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
+      if (controller.signal.aborted) {
+        emitProductionRunSaveOutcome("incomplete", requestStartedAt);
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
+      if (responseStatus === 409 && !recoverableConflictResponse) {
+        work.recoveryBlocked = true;
+      }
+      if (work.recoveryBlocked) {
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.unrecoverableConflict,
+        );
+        setSyncRetryWaiting(false);
+        setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent(
+          "stale",
+          "Stale sync change was retained locally because it could not be safely rebased",
+          "stale-base-unrecoverable",
+          currentRunId,
+        );
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
       if (retriesLeft > 0) {
         setSyncRetryWaiting(true);
         const retryDelay = syncRetryDelay(3 - retriesLeft);
@@ -10311,12 +9721,23 @@ export default function Home() {
         }, retryDelay);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.retriesExhausted,
+        );
         pushAcknowledgedRef.current = true;
         // ...but tell the user their changes aren't backed up / shared yet.
         setSyncPushFailed(true);
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network");
+        recordSyncEvent(
+          "failure",
+          "Server did not acknowledge the change; local change is retained",
+          "network",
+          undefined,
+          syncWriteFieldCheck({ ok: false, status: 0, retriesExhausted: true }),
+        );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
       }
@@ -10334,7 +9755,10 @@ export default function Home() {
     const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = {};
     const storedPackagingProgress = loadPackagingProgress();
     const pushRuns: RunMeta[] = [];
-    const canSendPartial = Boolean(syncSnapshotIdRef.current);
+    const canSendPartial =
+      Boolean(syncSnapshotIdRef.current)
+      && completeSyncEstablishedRef.current
+      && !forceCompleteSyncRef.current;
     const baselineStamps = canonicalRunValuesUpdatedAtRef.current;
     const localStamps = loadRunValuesUpdated();
     for (const run of ds.runs) {
@@ -10356,9 +9780,9 @@ export default function Home() {
       const value =
         run.id === curId
           ? (formHandoffRef.current
-              ? loadRunValues(run.id)
-              : pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id)))
-          : loadRunValues(run.id);
+              ? loadPackagingAwareRunValues(run.id)
+              : pickCurrentRunPushValue(form.getValues(), loadPackagingAwareRunValues(run.id)))
+          : loadPackagingAwareRunValues(run.id);
       // NEVER push the untouched auto-created placeholder run. Every fresh
       // device/browser starts with one (freshDayState), and pushing it lets the
       // server's additive run-list union pin a blank "Unnamed Run" into every
@@ -10373,9 +9797,14 @@ export default function Home() {
       // recipe/setup values remain on the server and protectRunValues treats
       // omitted run IDs as unchanged. Keep the current form if autosave has
       // not stamped a keystroke yet.
-      const currentFormChanged = run.id === curId && !deepEqual(value, loadRunValues(run.id));
+      const currentFormChanged = run.id === curId && !deepEqual(value, loadPackagingAwareRunValues(run.id));
+      const hasCanonicalValueBaseline = Object.prototype.hasOwnProperty.call(
+        baselineStamps,
+        run.id,
+      );
       if (
         !canSendPartial ||
+        !hasCanonicalValueBaseline ||
         localStamps[run.id] !== baselineStamps[run.id] ||
         currentFormChanged
       ) {
@@ -10395,18 +9824,18 @@ export default function Home() {
     }
     // Brand+flavor profiles are NOT in the sync payload anymore — they live in
     // their own stamped factory-wide server pool (see profileServerSync.ts).
-    // Name lists, presets, tombstones, packaging settings, and stop reasons are
-    // NOT in the sync payload anymore — they live in the factory KV store
-    // (/api/factory-data) and are replicated via write-through PUTs + startup
-    // fetch (see factoryDataSync.ts).
+    // Name lists, presets, packaging settings, and stop reasons live in the
+    // factory KV store. Run tombstones are also retained in live sync because
+    // the server's additive same-day run merge needs them atomically with the
+    // shortened run list to prevent a stale peer from restoring removed runs.
     const history = loadHistory();
     const historySig = JSON.stringify(history);
     return {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
-      ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
-      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
-      runValues: fencePendingOperationalValues(runValues),
+      baseSnapshotId: syncSnapshotIdRef.current,
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks), breaksUpdatedAt: ds.breaksUpdatedAt },
+      runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
       ...(() => {
         try {
@@ -10416,6 +9845,9 @@ export default function Home() {
       })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
       ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
+      deletedItems: loadDeletedItems(),
+      deletedStamps: loadDeletedStamps(),
+      undeletedStamps: loadUndeletedStamps(),
     };
   }
 
@@ -10428,6 +9860,7 @@ export default function Home() {
     delay = SYNC_EDIT_DEBOUNCE_MS,
     trigger: SyncMeasurementTrigger = "edit",
   ) {
+    if (screenMode !== null) return;
     // Keep every timer-driven/debounced write asleep with the document. The
     // foreground reconciliation barrier pulls canonical state first, then
     // replays this pending local delta after adoption.
@@ -10447,11 +9880,30 @@ export default function Home() {
       syncApplyPushPendingRef.current = true;
       return;
     }
-    if (formHandoffRef.current) return;
+    if (formHandoffRef.current) {
+      return;
+    }
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
-    if (!requestBaselinePush()) return;
+    if (!requestBaselinePush()) {
+      return;
+    }
+    const currentSignature = JSON.stringify(
+      buildSyncPayload(dayStateRef.current),
+    );
+    if (
+      pushAcknowledgedRef.current
+      && currentSignature === lastSyncSigRef.current
+    ) {
+      if (pushTimerRef.current) {
+        clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+      }
+      syncPushTimingRef.current = null;
+      setSyncPendingCount(0);
+      return;
+    }
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     if (!syncPushTimingRef.current) {
       syncPushTimingRef.current = {
@@ -10469,19 +9921,31 @@ export default function Home() {
         syncPushTimingRef.current = null;
         return;
       }
+      // The timer may already be queued when a wake/reset raises the fence.
+      // Re-check it here; the schedulePush guard ran before this callback was
+      // delayed and cannot protect a callback that is already in the queue.
+      if (
+        foregroundSyncBarrierRef.current
+        || operationalAdoptionInFlightRef.current > 0
+        || formHandoffRef.current
+      ) {
+        foregroundPushPendingRef.current = true;
+        syncPushTimingRef.current = null;
+        return;
+      }
       // Never push a stale-dated day into today's sync row. A tab left open
-      // across midnight still holds yesterday's runs until the rollover fires;
+      // across midnight still holds yesterday's runs until the server-owned
+      // baseline is adopted;
       // pushing them to /api/sync/today (the server resolves "today" by its own
-      // clock) would leak yesterday's runs into today's row. The rollover then
-      // fetches that row and "pulls them up" as if they were pre-scheduled, so
-      // the daily reset never clears. Skip until the rollover swaps in the fresh
-      // day. The SSE-onopen reconnect re-push is the main offender here.
-      if (ds.date && ds.date !== todayStr()) {
+      // clock) would leak yesterday's runs into today's row. Skip until the
+      // canonical current-day baseline swaps in the fresh day. The SSE-onopen
+      // reconnect re-push is the main offender here.
+      if (dayStateRef.current.date && dayStateRef.current.date !== todayStr()) {
         syncPushTimingRef.current = null;
         pushAcknowledgedRef.current = true;
         return;
       }
-      const payload = buildSyncPayload(ds);
+      const payload = buildSyncPayload(dayStateRef.current);
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
@@ -10501,9 +9965,19 @@ export default function Home() {
     }, delay);
   }
   function retryLatestSync(): void {
+    if (screenMode !== null) return;
     const payload = latestSyncPayloadRef.current;
     if (!payload) {
       recordSyncEvent("local", "No retained change is available to retry");
+      return;
+    }
+    if (
+      document.hidden
+      || foregroundSyncBarrierRef.current
+      || operationalAdoptionInFlightRef.current > 0
+      || formHandoffRef.current
+    ) {
+      foregroundPushPendingRef.current = true;
       return;
     }
     setSyncPushFailed(false);
@@ -10515,6 +9989,86 @@ export default function Home() {
     syncPushQueueRef.current.reset();
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
+  }
+  function rebasePendingSyncWork(
+    work: {
+      payload: SyncPayload;
+      baseSnapshot?: SyncPayload;
+      pendingIntentId?: string;
+      sig?: string;
+      recoveryBlocked?: boolean;
+    },
+    canonicalInput: SyncPayload,
+    snapshotId: string | undefined,
+    serverTime?: number,
+  ): { reappliedChanges: number; retainedServerConflicts: number } {
+    try {
+      if (!work.baseSnapshot) throw new Error("Stale sync write has no captured canonical baseline");
+      if (!snapshotId) throw new Error("Stale sync response omitted its canonical snapshot identity");
+
+      const canonical = persistedSyncPayload(canonicalInput);
+      const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
+        snapshotId,
+        serverTime,
+      });
+      work.baseSnapshot = canonical;
+      work.payload = recovery.payload;
+      work.sig = JSON.stringify(recovery.payload);
+      work.recoveryBlocked = false;
+      latestSyncPayloadRef.current = recovery.payload;
+
+      const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+      const date = recovery.payload.dayState.date ?? todayStr();
+      const pending = loadPendingSyncIntent(scope, date);
+      let durable = false;
+      if (recovery.reappliedChanges > 0 && scope && work.pendingIntentId) {
+        if (!pending || pending.id === work.pendingIntentId) {
+          durable = savePendingSyncIntent({
+            version: 1,
+            id: work.pendingIntentId,
+            scope,
+            date,
+            epoch: getStoredResetEpoch(),
+            baseSnapshotId: snapshotId,
+            baseline: canonical,
+            payload: recovery.payload,
+          });
+        }
+      } else if (scope && work.pendingIntentId) {
+        clearPendingSyncIntent(scope, date, work.pendingIntentId);
+      }
+
+      if (recovery.reappliedChanges > 0) {
+        applySyncCallbackRef.current(recovery.payload);
+        recordSyncEvent(
+          "merge",
+          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${durable ? "" : " (reload recovery copy unavailable)"}.`,
+          "stale-base-recovered",
+          currentRunId,
+        );
+      } else if (recovery.retainedServerConflicts > 0) {
+        recordSyncEvent(
+          "merge",
+          `Kept ${recovery.retainedServerConflicts} newer server values during stale-base recovery`,
+          "stale-base-conflicts",
+          currentRunId,
+        );
+      } else {
+        recordSyncEvent(
+          "merge",
+          "Canonical server state already included the queued intent; no stale snapshot was replayed",
+          "stale-base-recovered",
+          currentRunId,
+        );
+      }
+      return {
+        reappliedChanges: recovery.reappliedChanges,
+        retainedServerConflicts: recovery.retainedServerConflicts,
+      };
+    } catch (error) {
+      work.recoveryBlocked = true;
+      throw error;
+    }
   }
   function resetFieldArrays(vals: FormValues) {
     replaceCheese1(vals.app1CheeseRecipe ?? []);
@@ -10544,6 +10098,7 @@ export default function Home() {
     propagateProfileToPendingRuns,
     schedulePush: (state, delay, trigger) => schedulePush(state, delay, trigger),
     flashSaved,
+    readOnly: screenMode !== null,
   });
 
   // ── Unified setup editing: edit once, updates everywhere ──────────────────
@@ -10560,6 +10115,13 @@ export default function Home() {
     savedValues?: FormValues,
     sharedRefreshGeneration?: number,
   ) {
+    if (screenMode !== null) return;
+    // Capture the selected run before any profile queue/bootstrap work. Both
+    // pending runs are eligible for shared recipe refresh, so checking only
+    // eligibility after an await can apply the old run's refresh to whichever
+    // pending run the operator selected in the meantime.
+    const originatingRunId =
+      dayStateRef.current?.runs[dayStateRef.current.currentIndex]?.id;
     // Boot reconciliation is best-effort background work. If an acknowledged
     // manager save arrived after it started, abandon the stale pass before it
     // can flush or fan out old profile rows.
@@ -10610,6 +10172,7 @@ export default function Home() {
     const liveDay = dayStateRef.current;
     const liveRun = liveDay?.runs[liveDay.currentIndex];
     if (!liveRun) return;
+    if (liveRun.id !== originatingRunId) return;
     if (
       (liveRun.brand ?? "").trim().toLowerCase() !== brand.trim().toLowerCase() ||
       (liveRun.flavor ?? "").trim().toLowerCase() !== flavor.trim().toLowerCase()
@@ -10627,7 +10190,7 @@ export default function Home() {
     if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
-    runSharedRecipeRefresh(liveRun, () => {
+    await runSharedRecipeRefresh(liveRun, async () => {
       const profile = loadProfile(liveRun.brand, liveRun.flavor);
       if (!profile) return;
       // Same guard as the spec-import reload: a mix recipe name must never land
@@ -10639,14 +10202,21 @@ export default function Home() {
       const current = form.getValues();
       const merged = mergeProfileIntoOpenForm(current, profile);
       if (merged === current) return;
-      const now = Date.now();
-      saveRunValues(liveRun.id, merged);
-      markRunValuesUpdated(liveRun.id, now);
-      lastLocalEditRef.current = now;
+      // Bulk profile propagation deliberately skips the selected run. Persist
+      // only the profile-owned changes here so the durable pending snapshot
+      // cannot be left behind the refreshed form or overwrite unrelated edits.
+      const openRunUpdates: Record<string, unknown> = {};
+      for (const field of Object.keys(DEFAULT_VALUES) as (keyof FormValues)[]) {
+        if (!deepEqual(current[field], merged[field])) {
+          openRunUpdates[field] = merged[field];
+        }
+      }
       lastFormRunIdRef.current = liveRun.id;
       form.reset(merged);
       resetFieldArrays(merged);
-      schedulePush(dayStateRef.current, 0);
+      await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
+        expectedRunId: liveRun.id,
+      });
       toast({
         title: "Run form updated",
         description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
@@ -10694,9 +10264,75 @@ export default function Home() {
   // (cases needed, temp overrides) and progress are never touched
   // (mergeProfileIntoOpenForm skips them), and untouched runs are never
   // re-stamped, so this can't clobber operator-entered data.
+  async function persistOpenPendingRunSnapshotUpdates(
+    updates: Record<string, unknown>,
+    options: { pushCanonicalIfUnchanged?: boolean; expectedRunId?: string } = {},
+  ): Promise<void> {
+    if (screenMode !== null) return;
+    if (Object.keys(updates).length === 0) return;
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay.runs[liveDay.currentIndex];
+    if (options.expectedRunId && liveRun?.id !== options.expectedRunId) return;
+    if (!isSharedRecipeRefreshEligible(liveRun)) return;
+    const persistedRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+    if (!isSharedRecipeRefreshEligible(persistedRun)) return;
+
+    const next = mergePendingRunSnapshotUpdates(
+      persistedRun,
+      loadRunValues(liveRun.id) as unknown as Record<string, unknown>,
+      updates,
+    );
+    if (!next) {
+      if (!options.pushCanonicalIfUnchanged) return;
+      const current = dayStateRef.current;
+      const currentRun = current.runs[current.currentIndex];
+      const currentPersistedRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+      if (
+        currentRun?.id !== liveRun.id
+        || !isSharedRecipeRefreshEligible(currentRun)
+        || !isSharedRecipeRefreshEligible(currentPersistedRun)
+      ) return;
+      const now = Date.now();
+      markRunValuesUpdated(liveRun.id, now);
+      lastLocalEditRef.current = now;
+      try {
+        await pushTodayCanonical(buildSyncPayload(current));
+      } catch {
+        schedulePush(dayStateRef.current, 0);
+      }
+      return;
+    }
+    const now = Date.now();
+    saveRunValues(liveRun.id, next as unknown as FormValues);
+    markRunValuesUpdated(liveRun.id, now);
+    lastLocalEditRef.current = now;
+
+    // The form edits above are now durable locally before Start can consume
+    // this run. Publish a fresh payload so the server response is adopted here
+    // and by peers; if Start wins after this boundary, its newer lifecycle
+    // stamp remains authoritative at the sync merge.
+    try {
+      const current = dayStateRef.current;
+      const currentRun = current.runs[current.currentIndex];
+      const currentPersistedRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+      if (
+        currentRun?.id !== liveRun.id
+        || !isSharedRecipeRefreshEligible(currentRun)
+        || !isSharedRecipeRefreshEligible(currentPersistedRun)
+      ) return;
+      await pushTodayCanonical(buildSyncPayload(current));
+    } catch {
+      // Keep the exact field patch and value stamp locally. The normal sync
+      // queue retries it without turning this pending refresh into a lifecycle
+      // or whole-profile write.
+      schedulePush(dayStateRef.current, 0);
+    }
+  }
+
   const propagateSigRef = useRef<Map<string, string>>(new Map());
   const profilePropagationChainsRef = useRef<Map<string, Promise<void>>>(new Map());
   async function propagateProfileToPendingRuns(brand: string, flavor: string) {
+    if (screenMode !== null) return;
     const b = (brand ?? "").trim();
     const f = (flavor ?? "").trim();
     if (!b && !f) return;
@@ -10715,6 +10351,7 @@ export default function Home() {
     }
   }
   async function propagateProfileToPendingRunsNow(b: string, f: string) {
+    if (screenMode !== null) return;
     const profile = loadProfile(b, f);
     if (!profile) return;
     // Cheap dedup: nav-saves fire on every tab change — skip the fan-out when
@@ -10787,7 +10424,10 @@ export default function Home() {
         if (!(day.runs ?? []).some(matches)) continue;
         const payloadResult = await fetchSchedulePayload(day.date);
         const payload = payloadResult.payload;
-        if (!payloadResult.available || !payload?.dayState?.runs) { allOk = false; continue; }
+        if (!payloadResult.available || !payloadResult.snapshotId || !payload?.dayState?.runs) {
+          allOk = false;
+          continue;
+        }
         const rv = { ...(payload.runValues ?? {}) };
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
@@ -10806,14 +10446,24 @@ export default function Home() {
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
+            body: JSON.stringify({
+              payload: {
+                ...payload,
+                syncVersion: 1,
+                completeness: "complete",
+                baseSnapshotId: payloadResult.snapshotId,
+                runValues: rv,
+                runValuesUpdatedAt: stamps,
+              },
+            }),
           },
           10_000,
         );
         if (res.status === 401) { reportUnauthorized(); return; }
         if (!res.ok) { allOk = false; continue; }
-        const { stale } = await consumeCanonicalSyncWriteResponse(res, false);
-        if (stale) { allOk = false; continue; }
+        const result = await consumeCanonicalSyncWriteResponse(res, false);
+        const fallback = result.body as { partialFallback?: boolean } | null;
+        if (result.stale || fallback?.partialFallback) { allOk = false; continue; }
         updatedAny = true;
       }
       if (updatedAny) void refreshScheduledDays();
@@ -10830,7 +10480,9 @@ export default function Home() {
     recipeName: string,
     rows: ReadonlyArray<{ ingredient: string; lbs: number }>,
     kind: "cheese" | "mix" | "dough" | "sauce" = "cheese",
+    previousPoolSignature?: string,
   ) {
+    if (screenMode !== null) return;
     const nameLc = recipeName.trim().toLowerCase();
     if (!nameLc || rows.length === 0) return;
     const ds = dayStateRef.current;
@@ -10851,18 +10503,31 @@ export default function Home() {
       const stored = loadRunValues(run.id);
       const next = { ...stored };
       let runChanged = false;
-      const slots = kind === "cheese" ? [1, 2, 3, 4] as const : [0] as const;
+      // Mix recipes are attached to the same applicator slots as cheese
+      // recipes. The legacy mixRecipe/mixRecipeName fields are not the
+      // canonical slot links used by pending runs.
+      const slots = kind === "cheese" || kind === "mix"
+        ? [1, 2, 3, 4] as const
+        : [0] as const;
       for (const slot of slots) {
         const nameField = kind === "cheese"
           ? `app${slot}CheeseRecipeName` as keyof FormValues
-          : kind === "mix" ? "mixRecipeName" as keyof FormValues
+          : kind === "mix" ? `app${slot}CheeseRecipeName` as keyof FormValues
           : kind === "dough" ? "doughRecipeName" as keyof FormValues : "frontlineRecipeName" as keyof FormValues;
         const rowsField = kind === "cheese"
           ? `app${slot}CheeseRecipe` as keyof FormValues
-          : kind === "mix" ? "mixRecipe" as keyof FormValues
+          : kind === "mix" ? `app${slot}CheeseRecipe` as keyof FormValues
           : kind === "dough" ? "doughRecipe" as keyof FormValues : "frontlineRecipe" as keyof FormValues;
         if (String(stored[nameField] ?? "").trim().toLowerCase() !== nameLc) continue;
         const currentRows = (stored[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+        if (
+          (kind === "dough" || kind === "sauce")
+          && !shouldPropagateNamedRecipeRows(
+            currentRows,
+            previousPoolSignature,
+            Boolean(run.brand?.trim() && run.flavor?.trim()),
+          )
+        ) continue;
         if (recipeRowsEqual(currentRows, rows)) continue;
         next[rowsField] = rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs })) as never;
         runChanged = true;
@@ -10912,6 +10577,13 @@ export default function Home() {
     canonicalItems: NamedRecipe[],
     submittedItems: NamedRecipe[],
   ) {
+    if (screenMode !== null) return;
+    // Capture before profile bootstrap: that GET can be delayed while the
+    // operator switches runs. The acknowledged refresh belongs to the run
+    // selected when this save was applied, not whichever run is selected after
+    // bootstrap completes.
+    const initiatingRunId =
+      dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     sharedRecipeRefreshGenerationRef.current += 1;
     return enqueueSharedRecipeRefresh(async () => {
       // The profile cache can still be empty while the authenticated bootstrap
@@ -10929,9 +10601,16 @@ export default function Home() {
       const acknowledgedNames = new Set(
         canonicalItems
           .filter((item) => submittedIds.has(item.id))
-          .map((item) => item.name.trim().toLowerCase()),
+          .map((item) => normalizeSelectableName(item.name).toLowerCase())
+          .filter(Boolean),
       );
-      await applyNamedPoolChange(kind, canonicalItems, undefined, acknowledgedNames);
+      await applyNamedPoolChange(
+        kind,
+        canonicalItems,
+        undefined,
+        acknowledgedNames,
+        initiatingRunId,
+      );
     });
   }
   async function applyNamedPoolChange(
@@ -10939,7 +10618,11 @@ export default function Home() {
     list: NamedRecipe[],
     backgroundGeneration?: number,
     acknowledgedNames?: ReadonlySet<string>,
+    initiatingRunId?: string,
   ) {
+    if (screenMode !== null) return;
+    const refreshRunId =
+      initiatingRunId ?? dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     const onNamedProfileSaved = (brand: string, flavor: string) => {
       // A manager acknowledgement is authoritative even when the profile was
       // already touched by the boot reconciler. Clear the propagation
@@ -10957,7 +10640,8 @@ export default function Home() {
     const byKey = new Map<string, NamedRecipePoolPatch>();
     for (const r of list) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const name = normalizeSelectableName(r.name);
+      const key = name.toLowerCase();
       if (!key) continue;
       const rows = normalizeRecipeRowsForCompare(r.components);
       const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
@@ -10977,7 +10661,7 @@ export default function Home() {
           : "";
       snap.set(key, JSON.stringify({ rows, weight, perTray, variantSig }));
       byKey.set(key, {
-        name: r.name,
+        name,
         rows,
         ...(weight > 0 ? { doughballWeightOz: weight } : {}),
         ...(perTray > 0 ? { doughballsPerTray: perTray } : {}),
@@ -11026,27 +10710,30 @@ export default function Home() {
     let formUpdated = false;
     const touched = await orchestrateSharedRecipeRefresh({
       getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+      initiatingRunId: refreshRunId,
         refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
         kind,
         changed,
         undefined,
         onNamedProfileSaved,
       ),
-      refreshOpenForm: () => {
+      refreshOpenForm: async () => {
         const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+        if (!liveRun || liveRun.id !== refreshRunId) return;
         const persistedRun = liveRun
           ? loadDayState().runs.find((run) => run.id === liveRun.id)
           : undefined;
-        if (liveRun?.startedAt || liveRun?.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
+        if (!isSharedRecipeRefreshEligible(liveRun) || !isSharedRecipeRefreshEligible(persistedRun)) return;
         const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
         const linked = String(linkedRaw ?? "").trim().toLowerCase();
         const hit = linked
           ? changed.find((c) => c.name.trim().toLowerCase() === linked)
           : undefined;
+        const openRunUpdates: Record<string, unknown> = {};
         if (hit) {
           const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
-          if (!recipeRowsEqual(curRows, hit.rows)) {
-            const copy = hit.rows.map((row) => ({ ...row }));
+          const copy = hit.rows.map((row) => ({ ...row }));
+          if (!recipeRowsEqual(curRows, copy)) {
             if (kind === "dough") {
               form.setValue("doughRecipe", copy, { shouldDirty: true });
               replaceDough(copy);
@@ -11056,6 +10743,7 @@ export default function Home() {
             }
             formUpdated = true;
           }
+          openRunUpdates[kind === "dough" ? "doughRecipe" : "frontlineRecipe"] = copy;
         }
         if (!hit) return;
         // Weight/per-tray are per-flavor — pool values only fill a blank form,
@@ -11070,10 +10758,20 @@ export default function Home() {
           form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
           formUpdated = true;
         }
+        if (Object.keys(openRunUpdates).length > 0) {
+          await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
+            expectedRunId: refreshRunId,
+          });
+        }
       },
     });
     for (const recipe of changed) {
-      await propagateRecipeRowsToPendingRuns(recipe.name, recipe.rows, kind);
+      await propagateRecipeRowsToPendingRuns(
+        recipe.name,
+        recipe.rows,
+        kind,
+        prev.get(recipe.name.trim().toLowerCase()),
+      );
     }
     if (!formUpdated && touched.length === 0) return;
     const label = kind === "dough" ? "dough" : "sauce";
@@ -11085,23 +10783,41 @@ export default function Home() {
     });
   }
   useEffect(() => {
+    if (screenMode !== null) return;
     // First-load reconciliation must share the acknowledgement queue. A
     // manager save can update the pool while this effect is starting; letting
     // the initial heal run independently can publish an older profile snapshot
     // after the acknowledged recipe edit.
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    const initiatingRunId =
+      dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     void enqueueSharedRecipeRefresh(() =>
-      applyNamedPoolChange("dough", doughRecipesList, backgroundGeneration),
+      applyNamedPoolChange(
+        "dough",
+        doughRecipesList,
+        backgroundGeneration,
+        undefined,
+        initiatingRunId,
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doughRecipesList]);
+  }, [doughRecipesList, screenMode]);
   useEffect(() => {
+    if (screenMode !== null) return;
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    const initiatingRunId =
+      dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     void enqueueSharedRecipeRefresh(() =>
-      applyNamedPoolChange("sauce", sauceRecipesList, backgroundGeneration),
+      applyNamedPoolChange(
+        "sauce",
+        sauceRecipesList,
+        backgroundGeneration,
+        undefined,
+        initiatingRunId,
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sauceRecipesList]);
+  }, [sauceRecipesList, screenMode]);
 
   // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
   // healing. Cheese and mix pools don't have a diff-and-update watcher like
@@ -11128,12 +10844,14 @@ export default function Home() {
     canonicalItems: typeof mixes,
     submittedItems: typeof mixes,
   ) {
+    if (screenMode !== null) return;
     sharedRecipeRefreshGenerationRef.current += 1;
     // Set this before awaited profile hydration. The pool observer runs from
     // the same React update and must not launch a second background repair for
     // an already acknowledged save.
     acknowledgedMixSaveFingerprintRef.current = JSON.stringify(canonicalItems);
     return enqueueSharedRecipeRefresh(async () => {
+      const selectedRunId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
       // See applyAcknowledgedNamedRecipeSave: pool saves are allowed to arrive
       // before the profile-cache bootstrap has completed.
       try {
@@ -11176,11 +10894,55 @@ export default function Home() {
             lbs: Math.max(0, component.perPizza ?? 0),
           }))
           .filter((row) => row.ingredient);
+        // A linked profile refresh updates the selected form, but the normal
+        // form autosave is not the acknowledgement boundary. Persist the
+        // recipe-only patch into this pending run's own snapshot now, so the
+        // source view and peers don't wait for a later form edit. Keep the
+        // selected-run identity and lifecycle fences intact across hydration.
+        const currentDay = dayStateRef.current;
+        const selectedRun = currentDay.runs[currentDay.currentIndex];
+        const persistedSelectedRun = selectedRun
+          ? loadDayState().runs.find((run) => run.id === selectedRun.id)
+          : undefined;
+        if (
+          selectedRunId
+          && selectedRun?.id === selectedRunId
+          && isSharedRecipeRefreshEligible(selectedRun)
+          && isSharedRecipeRefreshEligible(persistedSelectedRun)
+        ) {
+          const updates = buildMixRunSnapshotUpdates(
+            loadRunValues(selectedRun.id) as unknown as Record<string, unknown>,
+            recipe.name,
+            rows,
+          );
+          if (lastFormRunIdRef.current === selectedRun.id) {
+            const slotReplacers = [
+              ["app1CheeseRecipe", replaceCheese1],
+              ["app2CheeseRecipe", replaceCheese2],
+              ["app3CheeseRecipe", replaceCheese3],
+              ["app4CheeseRecipe", replaceCheese4],
+            ] as const;
+            for (const [field, replace] of slotReplacers) {
+              const nextRows = updates[field] as { ingredient: string; lbs: number }[] | undefined;
+              if (!nextRows) continue;
+              form.setValue(
+                field as Parameters<typeof form.setValue>[0],
+                nextRows as never,
+                { shouldDirty: true },
+              );
+              replace(nextRows);
+            }
+          }
+          await persistOpenPendingRunSnapshotUpdates(updates, {
+            pushCanonicalIfUnchanged: true,
+          });
+        }
         await propagateRecipeRowsToPendingRuns(recipe.name, rows, "mix");
       }
     });
   }
   useEffect(() => {
+    if (screenMode !== null) return;
     const markerKey = "run-calc-cheese-mix-row-heal-v1";
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
     const refresh = async () => {
@@ -11214,16 +10976,18 @@ export default function Home() {
         // Ongoing pass — recipe edits are authoritative for linked pending work,
         // not just for profiles whose rows happened to be empty.
         for (const r of cheeseRecipesList) {
-          if (r.enabled === false || !r.name.trim()) continue;
+          const name = normalizeSelectableName(r.name);
+          if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         for (const m of mixes) {
-          if (!m.name.trim()) continue;
+          const name = normalizeSelectableName(m.name);
+          if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
       } else {
         // First-time full heal — wait for pool data, run once per mount.
@@ -11231,16 +10995,18 @@ export default function Home() {
         if (cheeseMixFullHealDoneRef.current) return;
         cheeseMixFullHealDoneRef.current = true;
         for (const r of cheeseRecipesList) {
-          if (r.enabled === false || !r.name.trim()) continue;
+          const name = normalizeSelectableName(r.name);
+          if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         for (const m of mixes) {
-          if (!m.name.trim()) continue;
+          const name = normalizeSelectableName(m.name);
+          if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         localStorage.setItem(markerKey, "1");
       }
@@ -11258,13 +11024,14 @@ export default function Home() {
     // an acknowledged manager save.
     void enqueueSharedRecipeRefresh(refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cheeseRecipesList, mixes]);
+  }, [cheeseRecipesList, mixes, screenMode]);
 
   // Seed the currently-open form's mix applicator slots from server data
   // whenever the mixes pool changes and a slot has a name set but all-zero
   // recipe rows. Covers: page load before mixes arrive from the server, and
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
+    if (screenMode !== null) return;
     const liveDay = loadDayState();
     const liveRun = liveDay.runs[liveDay.currentIndex] ?? dayStateRef.current.runs[dayStateRef.current.currentIndex];
     runSharedRecipeRefresh(liveRun, () => {
@@ -11296,12 +11063,13 @@ export default function Home() {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverMixRowsByName]);
+  }, [serverMixRowsByName, screenMode]);
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
   // ingredient. Their sum should always equal appNOzPerPizza. Auto-sync
   // appNOzPerPizza from the row sum whenever it drifts (e.g. after the user
   // edits recipe rows or loads a profile where the total was never matched).
   useEffect(() => {
+    if (screenMode !== null) return;
     const slots = [
       { typeField: "app1Type", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza" },
       { typeField: "app2Type", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza" },
@@ -11325,6 +11093,7 @@ export default function Home() {
     v.app2Type, v.app2CheeseRecipe,
     v.app3Type, v.app3CheeseRecipe,
     v.app4Type, v.app4CheeseRecipe,
+    screenMode,
   ]);
 
   // One-time boot heal: write preTunnelMin = postTunnelMin = 2.5 into every
@@ -11334,10 +11103,18 @@ export default function Home() {
   // manager (the marker is only set then, so a manager device still heals
   // later); non-managers just get the open-form fix on every boot.
   useEffect(() => {
+    if (screenMode !== null) return;
     const MARKER = "run-calc-tunnel-pre-post-default-v1";
-    const alreadyHealed = !!localStorage.getItem(MARKER);
+    let alreadyHealed = false;
+    try {
+      alreadyHealed = !!localStorage.getItem(MARKER);
+    } catch {
+      // The marker is a local optimization, not a prerequisite for Home.
+    }
     if (!alreadyHealed && canManageProfiles) {
-      localStorage.setItem(MARKER, "1");
+      try { localStorage.setItem(MARKER, "1"); } catch {
+        // Retry the safe, idempotent heal on a later boot if storage returns.
+      }
 
     const toHeal: { brand: string; flavor: string }[] = [];
     for (const suffix of cachedProfileKeys()) {
@@ -11372,7 +11149,7 @@ export default function Home() {
   // Re-runs when canManageProfiles resolves (marker keeps the persist loop
   // one-time); form ref is stable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManageProfiles]);
+  }, [canManageProfiles, screenMode]);
 
   // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
   // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
@@ -11385,7 +11162,9 @@ export default function Home() {
     const name = String((kind === "dough" ? vals.doughRecipeName : vals.frontlineRecipeName) ?? "").trim();
     if (!name) return;
     const list = kind === "dough" ? doughRecipesList : sauceRecipesList;
-    const target = list.find((r) => r.enabled !== false && r.name.trim().toLowerCase() === name.toLowerCase());
+    const target = list.find(
+      (r) => r.enabled !== false && normalizeSelectableName(r.name).toLowerCase() === name.toLowerCase(),
+    );
     if (!target) return;
     const rows = normalizeRecipeRowsForCompare((kind === "dough" ? vals.doughRecipe : vals.frontlineRecipe) ?? []);
     const next: NamedRecipe = { ...target, components: rows };
@@ -11437,7 +11216,7 @@ export default function Home() {
   } = useRunLifecycleManager({
     dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
     flushFormWrites: flushPendingHomeFormWrites,
-    loadRunValues, saveRunValues, markRunValuesUpdated,
+    loadRunValues: loadPackagingAwareRunValues, saveRunValues, markRunValuesUpdated,
     canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
     setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
     foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
@@ -11459,6 +11238,7 @@ export default function Home() {
     getRunInsightsSignal: () => runInsightsAbortControllerRef.current.signal,
     genId, applyResumeToRun, canChoosePauseTunnelPolicy,
     pauseDecisionRemainingMs, shouldClosePauseDecision, schedulePush,
+    syncWritePending: () => !pushAcknowledgedRef.current,
   });
 
   // ── Temporary ingredient substitutions (day-state overlay) ─────────────────
@@ -11548,6 +11328,9 @@ export default function Home() {
       runs: [...dayState.runs, { id: newId, brand: "", flavor: "" }],
       currentIndex: newIndex,
     };
+    // schedulePush builds its payload from the synchronous ref so a queued
+    // write cannot capture the previous run list before React re-renders.
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     // Settle the form for the new run explicitly (like switchToRun does) so
@@ -12751,7 +12534,7 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const { runExcel } = await loadWorkbookWorkflow();
-      const parsed = runExcel.parseRunWorkbook(buf);
+      const parsed = runExcel.parseRunWorkbook(buf, file.name);
       // Multi-sheet schedule planner: keep only runs dated today-or-later (the
       // user's chosen behavior) and route to the multi-date override commit.
       const result = parsed.multiDay ? runExcel.filterImportFromDate(parsed, todayStr()) : parsed;
@@ -12874,6 +12657,8 @@ export default function Home() {
       return;
     }
     const files = selectedFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
+    finishSpecImportOutcome("incomplete");
+    specImportStartedAtRef.current = typeof performance === "undefined" ? Date.now() : performance.now();
     // Generation guard: parsing is slow (AI call), and a user importing files
     // back-to-back can close the dialog and pick the next file while the old
     // parse is still in flight. Without this guard the OLD promise resolves
@@ -12885,6 +12670,8 @@ export default function Home() {
     const abortController = new AbortController();
     specImportAbortRef.current = abortController;
     setSpecImportPrepared(null);
+    setSpecImportAiRetryCount(0);
+    specImportOperationRef.current = null;
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
@@ -12900,13 +12687,18 @@ export default function Home() {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
       // The multi-file preparation releases its input buffers. Keep a private
-      // copy only while this review is open for the explicit unresolved AI
-      // fallback; never persist the raw workbook bytes.
+      // copy only while an incomplete review is open so an authorized user can
+      // make one bounded retry; never persist the raw workbook bytes.
       specImportBuffersRef.current = buffers.map((buffer) => buffer.slice(0));
       specImportSourceNamesRef.current = files.map((file) => file.name);
       const prepared =
         buffers.length === 1
-          ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
+          ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(
+              buffers[0],
+              files[0]?.name,
+              abortController.signal,
+              { allowAi: canUseAiTools },
+            )
           : await (await loadWorkbookWorkflow()).specImport.prepareSpecImportMulti(
               buffers,
               (done, total) => {
@@ -12914,6 +12706,7 @@ export default function Home() {
               },
               files.map((f) => f.name),
               abortController.signal,
+              { allowAi: canUseAiTools },
             );
       if (gen !== specImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
@@ -12927,6 +12720,11 @@ export default function Home() {
       setSpecImportPrepared(prepared);
     } catch (err) {
       if (gen !== specImportGenRef.current) return;
+      finishSpecImportOutcome(
+        abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")
+          ? "incomplete"
+          : "failure",
+      );
       void recordImportHistory({
         importType: "spec",
         sourceKey: deriveSourceKey(files.map((file) => file.name)),
@@ -12953,7 +12751,13 @@ export default function Home() {
   async function handleSpecAiFallback() {
     const baseline = specImportPrepared;
     const buffers = specImportBuffersRef.current;
-    if (!canUseAiTools || !baseline?.unresolved?.length || buffers.length === 0) return;
+    if (
+      !canUseAiTools ||
+      !baseline?.unresolved?.length ||
+      buffers.length === 0 ||
+      specImportAiRetryCount >= 1
+    ) return;
+    setSpecImportAiRetryCount((count) => count + 1);
     const gen = ++specImportGenRef.current;
     specImportAbortRef.current?.abort();
     const controller = new AbortController();
@@ -12962,55 +12766,48 @@ export default function Home() {
     setSpecImportError(null);
     try {
       const workflow = await loadWorkbookWorkflow();
-      const aiPrepared =
+      const retried =
         buffers.length === 1
-          ? await workflow.specImport.prepareSpecImportWithAi(
+          ? await workflow.specImport.prepareSpecImport(
               buffers[0].slice(0),
               specImportSourceNamesRef.current[0],
               controller.signal,
+              { allowAi: true },
             )
-          : await workflow.specImport.prepareSpecImportMultiWithAi(
+          : await workflow.specImport.prepareSpecImportMulti(
               buffers.map((buffer) => buffer.slice(0)),
               undefined,
               specImportSourceNamesRef.current,
               controller.signal,
+              { allowAi: true },
             );
       if (gen !== specImportGenRef.current) return;
-      const profileKeys = new Set(
-        baseline.parsed.profiles.map((profile) => `${profile.brand}\u0000${profile.flavor}`.toLowerCase()),
-      );
-      const recipeKeys = new Set(
-        baseline.parsed.recipes.map((recipe) => `${recipe.kind}\u0000${recipe.name}`.toLowerCase()),
-      );
-      const merged = {
-        ...aiPrepared,
+      setSpecImportPrepared({
+        ...retried,
         sourceNames: baseline.sourceNames,
-        parsed: {
-          ...aiPrepared.parsed,
-          profiles: [
-            ...baseline.parsed.profiles,
-            ...aiPrepared.parsed.profiles.filter((profile) => {
-              const key = `${profile.brand}\u0000${profile.flavor}`.toLowerCase();
-              return !profileKeys.has(key);
-            }),
-          ],
-          recipes: [
-            ...baseline.parsed.recipes,
-            ...aiPrepared.parsed.recipes.filter((recipe) => {
-              const key = `${recipe.kind}\u0000${recipe.name}`.toLowerCase();
-              return !recipeKeys.has(key);
-            }),
-          ],
-        },
-      };
-      setSpecImportPrepared(merged);
-      toast({
-        title: "Unresolved items interpreted",
-        description: "Review the additions below. Nothing was applied automatically.",
       });
+      if (!retried.unresolved?.length) {
+        toast({
+          title: "Interpretation retry complete",
+          description: "Review the results below. Nothing was applied automatically.",
+        });
+      }
     } catch (err) {
       if (gen === specImportGenRef.current) {
-        setSpecImportError(err instanceof Error ? err.message : "Could not interpret the unresolved import items.");
+        const detail = err instanceof Error
+          ? err.message
+          : "Could not interpret the unresolved import items.";
+        setSpecImportError(null);
+        setSpecImportPrepared({
+          ...baseline,
+          note: [
+            baseline.note,
+            `The bounded AI retry did not complete: ${detail} Previously prepared results remain available for review.`,
+          ].filter(Boolean).join("\n"),
+          ...(err instanceof Error && err.name === "ParseSpecAuthorizationError"
+            ? { aiRetryBlocked: true }
+            : {}),
+        });
       }
     } finally {
       if (gen === specImportGenRef.current) setSpecImportLoading(false);
@@ -13029,11 +12826,15 @@ export default function Home() {
       return;
     }
     const files = specPhotoFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
+    finishSpecImportOutcome("incomplete");
+    specImportStartedAtRef.current = typeof performance === "undefined" ? Date.now() : performance.now();
     const gen = ++specImportGenRef.current;
     specImportAbortRef.current?.abort();
     const controller = new AbortController();
     specImportAbortRef.current = controller;
     setSpecImportPrepared(null);
+    specImportBuffersRef.current = [];
+    specImportSourceNamesRef.current = [];
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
@@ -13059,6 +12860,11 @@ export default function Home() {
       setSpecPhotoFiles([]);
     } catch (err) {
       if (gen === specImportGenRef.current) {
+        finishSpecImportOutcome(
+          controller.signal.aborted || (err instanceof Error && err.name === "AbortError")
+            ? "incomplete"
+            : "failure",
+        );
         setSpecImportError(err instanceof Error ? err.message : "Could not read or interpret those photos.");
       }
     } finally {
@@ -13105,6 +12911,9 @@ export default function Home() {
       destructiveReviewSignature,
       profilesMarkedForRemoval: profilesToRemove,
     };
+    // The workbook preview is transient UI data: keep it out of the commit
+    // pipeline, saved parse snapshots, and import-history summaries.
+    delete toCommit.sourcePreviewCells;
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
@@ -13112,9 +12921,12 @@ export default function Home() {
     // Capture the pre-import local state so the existing undo trail can restore
     // a workbook replacement when a manager decides it was not intended.
     const importRollbackBefore = captureMasterDataSnapshot();
+    const operationId = specImportOperationRef.current ?? createImportOperationId();
+    specImportOperationRef.current = operationId;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed } =
-        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
+      finishSpecImportOutcome("success");
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -13128,7 +12940,8 @@ export default function Home() {
         const key = deriveSourceKey(toCommit.sourceNames ?? []);
         specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
       } catch { /* history still records without the optional snapshot reference */ }
-      void recordImportHistory({
+      if (!resultHash || specSnapshotId !== null) void recordImportHistory({
+        operationId,
         importType: "spec",
         sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
         sourceLabel: (toCommit.sourceNames ?? []).join(", ") || "Spec sheet",
@@ -13482,6 +13295,8 @@ export default function Home() {
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
+      specImportBuffersRef.current = [];
+      specImportSourceNamesRef.current = [];
       // Duplicate review remains an explicit action from the merge surface;
       // imports never start a scan or spend provider budget in the background.
       // Auto-run spec cross-reference with the newly saved sheet.
@@ -13512,8 +13327,9 @@ export default function Home() {
           mixNote +
           cheeseNote +
           updatedNote +
-          autoLinkedNote,
+        autoLinkedNote,
       });
+      specImportOperationRef.current = null;
     } catch (err) {
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
         const reconfirmation = err as Error & {
@@ -13546,6 +13362,7 @@ export default function Home() {
           followUp: ["Retry the import; no rollback is implied by this record."],
         },
       }).catch(() => {});
+      finishSpecImportOutcome("failure");
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
       );
@@ -13572,6 +13389,7 @@ export default function Home() {
     const abortController = new AbortController();
     premixImportAbortRef.current = abortController;
     setPremixImportPrepared(null);
+    premixImportOperationRef.current = null;
     setPremixImportError(null);
     setPremixImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setPremixImportLoading(true);
@@ -13654,6 +13472,8 @@ export default function Home() {
     }
     setPremixImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
+    const operationId = premixImportOperationRef.current ?? createImportOperationId();
+    premixImportOperationRef.current = operationId;
     try {
       const result = await (await loadWorkbookWorkflow()).premixImport.commitPremixImport(
         premixImportPrepared,
@@ -13661,10 +13481,12 @@ export default function Home() {
         freezerPulls,
         newAliases,
         mixesToRemove,
+        operationId,
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
-      void recordImportHistory({
+      if (!operationId) void recordImportHistory({
+        operationId,
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared.sourceNames ?? []),
         sourceLabel: (premixImportPrepared.sourceNames ?? []).join(", ") || "Premix sheet",
@@ -13707,6 +13529,7 @@ export default function Home() {
           snapshotId: result.snapshotId ?? null,
         },
       }).catch(() => {});
+      premixImportOperationRef.current = null;
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void invalidateMasterDataSlice(cycleCountQc, "mixes");
@@ -13773,7 +13596,7 @@ export default function Home() {
     setShowShippingImport(true);
     try {
       const buffer = await file.arrayBuffer();
-      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer);
+      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer, file.name);
       if (gen !== shippingImportGenRef.current) return;
       setShippingImportPrepared(prepared);
     } catch (err) {
@@ -13971,8 +13794,10 @@ export default function Home() {
         file.arrayBuffer(),
         fetchNamedRecipes("dough").catch(() => [] as NamedRecipe[]),
       ]);
-      const extraDoughNames = serverDoughRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames);
+      const extraDoughNames = serverDoughRecipes
+        .map((r) => (typeof r?.name === "string" ? r.name.trim() : ""))
+        .filter((name): name is string => name.length > 0);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames, file.name);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
     } catch (err) {
@@ -14050,6 +13875,7 @@ export default function Home() {
     const abortController = new AbortController();
     cheeseImportAbortRef.current = abortController;
     setCheeseImportPrepared(null);
+    cheeseImportOperationRef.current = null;
     setCheeseImportError(null);
     setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setCheeseImportLoading(true);
@@ -14090,6 +13916,7 @@ export default function Home() {
           followUp: ["Retry the original source files. Nothing was applied."],
         },
       }).catch(() => {});
+      cheeseImportOperationRef.current = null;
       setCheeseImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -14128,8 +13955,10 @@ export default function Home() {
     setCheeseImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     const importRollbackBefore = captureMasterDataSnapshot();
+    const operationId = cheeseImportOperationRef.current ?? createImportOperationId();
+    cheeseImportOperationRef.current = operationId;
     try {
-      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove, operationId);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -14139,7 +13968,8 @@ export default function Home() {
           : `Cheese recipe import: ${(cheeseImportPrepared.sourceNames ?? []).join(", ") || "workbook"}`,
         importRollbackBefore,
       );
-      void recordImportHistory({
+      if (!operationId) void recordImportHistory({
+        operationId,
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
         sourceLabel: (cheeseImportPrepared.sourceNames ?? []).join(", ") || "Cheese recipe sheet",
@@ -14247,7 +14077,7 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const { runExcel } = await loadWorkbookWorkflow();
-      const parsed = runExcel.parseRunWorkbook(buf);
+      const parsed = runExcel.parseRunWorkbook(buf, file.name);
       // A multi-sheet planner spans many days, so it can't load into the single
       // open editor day — route it to the multi-date override commit instead
       // (today-or-later only), exactly like the toolbar import.
@@ -14274,10 +14104,24 @@ export default function Home() {
     // dropping any existing run metadata (started/ended times, stoppages,
     // actuals) or other day-level fields (shiftNotes, recipe presets, etc.).
     let existing: SyncPayload | null = null;
+    let existingSnapshotId: string | undefined;
     try {
-      const res = await fetch(`/api/sync/${date}`);
-      if (res.ok) existing = (await res.json()) as SyncPayload | null;
+      const res = await fetch(`/api/sync/${date}?today=${todayStr()}`);
+      if (res.ok) {
+        existingSnapshotId = res.headers.get("X-Sync-Snapshot") ?? undefined;
+        existing = (await res.json()) as SyncPayload | null;
+      }
     } catch {}
+    if (!existingSnapshotId) {
+      setShowImportDialog(false);
+      setImportResult(null);
+      toast({
+        variant: "destructive",
+        title: "Schedule was not saved",
+        description: "The latest plan could not be loaded. Check your connection and import the file again.",
+      });
+      return;
+    }
     const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
     const existingRuns: RunMeta[] = existingDayState.runs ?? [];
     const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
@@ -14294,6 +14138,9 @@ export default function Home() {
     const runValues = { ...existingRunValues, ...newRunValues };
     const outPayload: SyncPayload = {
       ...(existing ?? {}),
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: existingSnapshotId,
       dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -14407,10 +14254,21 @@ export default function Home() {
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
+      let existingSnapshotId: string | undefined;
       try {
-        const res = await fetch(`/api/sync/${date}`);
-        if (res.ok) existing = (await res.json()) as SyncPayload | null;
+        const res = await fetch(`/api/sync/${date}?today=${todayStr()}`);
+        if (res.ok) {
+          existingSnapshotId = res.headers.get("X-Sync-Snapshot") ?? undefined;
+          existing = (await res.json()) as SyncPayload | null;
+        }
       } catch {}
+      if (!existingSnapshotId) {
+        failed++;
+        done++;
+        lastErrorDetail = `Couldn't load the latest ${date} plan before saving it.`;
+        setImportProgress({ done, total: byDate.length });
+        continue;
+      }
       const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
       const existingRuns: RunMeta[] = existingDayState.runs ?? [];
       const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
@@ -14460,6 +14318,9 @@ export default function Home() {
       const runValues = { ...keptRunValues, ...newRunValues };
       const outPayload: SyncPayload = {
         ...(existing ?? {}),
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: existingSnapshotId,
         dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -14729,6 +14590,8 @@ export default function Home() {
 
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
+  useScreenWakeLock(showFloorMode);
+
   useEffect(() => {
     if (!floorModeEnabled) return; // Floor Mode disabled — never auto-activate
     const IDLE_MS = 3 * 60 * 1000;
@@ -14861,7 +14724,7 @@ export default function Home() {
     () => overlayCurrentRunValues(persistedRunValues, currentRunId, v),
     [persistedRunValues, currentRunId, v],
   );
-  const needsWarehouseSnapshot = activeTab === "warehouse" || screenMode === "warehouse";
+  const needsWarehouseSnapshot = activeTab === "warehouse" || activeTab === "quality" || screenMode === "warehouse";
   const needsInventorySnapshot = activeTab === "inventory";
   const needsSummarySnapshot = activeTab === "summary" || screenMode === "summary";
   const persistedRunSummaryStats = useMemo(
@@ -14945,6 +14808,22 @@ export default function Home() {
     }).map((detail) => [detail.id, detail] as const)) : new Map(),
     [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById, effectiveValuesForRun],
   );
+  const qcStagedIngredients = useMemo(() => {
+    if (!currentRunId) return [];
+    const stagedItems = dayState.stagedItems ?? {};
+    const rows: NeedRow[] = activeRunNeedDetails.get(currentRunId)?.rows ?? [];
+    return rows.flatMap((row) => {
+      const area = row.area;
+      if (area !== "Dough" && area !== "Sauce" && area !== "Frontline") return [];
+      return [{
+        area,
+        name: row.label,
+        quantity: row.value,
+        unit: row.sub ?? "",
+        staged: Boolean(stagedItems[`${currentRunId}::${row.label}__${row.sub ?? ""}`]),
+      }];
+    });
+  }, [currentRunId, activeRunNeedDetails, dayState.stagedItems]);
   const scheduledWarehouseRuns = useMemo(
     () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
       (day.runs ?? [])
@@ -15088,13 +14967,13 @@ export default function Home() {
     activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
     cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
     freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
-    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
     setPinError, setPinInput, setScheduleDeleteConfirm, setScheduledDays, setScheduleView,
     setShowPinDialog, setShowScheduleDialog, todayScheduledValues, toggleStagedItem,
   }), [activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
     cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
     freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
-    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
     todayScheduledValues, toggleStagedItem]);
   const inventoryTabCtxValue = useMemo<InventoryTabContextValue>(() => ({
     candidates: inventoryCandidates, runValsList: inventoryRunValues,
@@ -15179,7 +15058,7 @@ export default function Home() {
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
-    premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
+    premixImportProgress, printSummary, productionStartTime, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
     packagingManager, persistManualPackagingProgress, queueManualCorrection,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
@@ -15193,7 +15072,7 @@ export default function Home() {
     resumeRun, revalidate, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
-    scheduleEditorLoadedRunIdsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
+    scheduleEditorLoadedRunsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
     scheduleMoving, schedulePush, scheduleSaving, scheduleView, scheduledDays, screenMode,
     serverCheeseByName, serverCheeseNames, serverCheeseRowsByName, serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
     serverDoughVariantsByName, serverDoughWeightByName, serverMixNames, serverMixRowsByName, serverPin, serverSauceNames,
@@ -15224,7 +15103,7 @@ export default function Home() {
     setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setUndoBusy, setWriteError, setupEditorBrand,
+    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
@@ -15240,7 +15119,7 @@ export default function Home() {
     toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
-    v, ve, writeError,
+    v, ve, writeError, sauceAutoTrackFailure,
   }), [
     // ── Reactive state values that actually live in this context object ──
     // setState dispatches (set*), refs (*Ref), plain-function callbacks, and
@@ -15283,8 +15162,8 @@ export default function Home() {
     noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingResetCount, pepTypes,
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
-    premixImportPrepared, premixImportProgress, productionRules,
-    promotingRecipeKind, resolvedPin, pauseDecisionRunId, role, ruleViolations,
+    premixImportPrepared, premixImportProgress, productionStartTime, productionRules,
+    promotingRecipeKind, productionStartTime, resolvedPin, pauseDecisionRunId, role, ruleViolations,
     runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
     scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
@@ -15372,7 +15251,7 @@ export default function Home() {
       staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
       swipeCue, syncConnected, syncPushFailed,
       templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
-      upcomingRunLabels, v, ve, writeError,
+      upcomingRunLabels, v, ve, writeError, sauceAutoTrackFailure,
     ]
   );
 
@@ -15500,12 +15379,23 @@ export default function Home() {
       {showFloorMode && <FloorModeView />}
 
       {/* ── Glance overlay ──────────────────────────────────────────────── */}
-      {showGlance && <GlanceOverlay />}
+      {showGlance && (
+        <DeferredSurface
+          label="glance view"
+          load={loadGlanceOverlay}
+          componentProps={{}}
+          presentation="dialog"
+        />
+      )}
 
 
       {/* ── Screens / Cast Dialog ───────────────────────────────────────── */}
       {showScreensDialog && (() => {
         const base = window.location.origin + window.location.pathname;
+        const castGuidance = getCastGuidance(
+          detectCastGuidancePlatform(navigator.userAgent, navigator.maxTouchPoints ?? 0),
+          castSupported,
+        );
         const screens = [
           {
             key: "dashboard",
@@ -15565,15 +15455,7 @@ export default function Home() {
                 <button type="button" aria-label="Close cast to screens" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
-              {castSupported ? (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  Have a Chromecast? Tap <span className="font-semibold text-foreground">Cast</span> to send a screen straight to a TV — you can cast different screens to different devices at the same time. For AirPlay or Miracast TVs, use the QR code / URL or your device's screen mirroring.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  One-click casting needs Chrome or Edge. In this browser, use the QR code or URL on the TV's browser — or use AirPlay / Miracast screen mirroring from your device.
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-1.5">{castGuidance}</p>
               <div className="space-y-3 overflow-y-auto overscroll-contain flex-1 mt-3">
                 {screens.map(s => (
                   <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
@@ -15799,6 +15681,7 @@ export default function Home() {
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
            cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", pin: "Change PIN",
+          allergens: "Allergen Mappings",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
         };
@@ -15814,7 +15697,10 @@ export default function Home() {
           {
             key: "lists",
             label: "Lists",
-            subTabs: ["brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights"],
+            subTabs: [
+              "brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights",
+              ...(canManageAllergens ? ["allergens"] : []),
+            ],
           },
           {
             key: "settings",
@@ -16478,6 +16364,10 @@ export default function Home() {
                   );
                 })()}
 
+                {manageCategory === "allergens" && canManageAllergens && (
+                  <IngredientAllergenMappingManager />
+                )}
+
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
                 {manageCategory === "setupProfiles" && isSupervisor && (
                   <div className="space-y-3">
@@ -16519,23 +16409,30 @@ export default function Home() {
                       </div>
                     )}
                     {(canManageProfiles || canManageInventory) && (
-                      <ImportHistoryPanel
-                        refreshSignal={sheetListSignal}
-                        enabledImporters={enabledImporterTypes}
-                        onStart={startImporterFromOperations}
-                        onRetry={retryImporterFromHistory}
-                        onReopen={(request) => {
-                          setImportReopenRequest((previous) => ({
-                            ...request,
-                            requestId: (previous?.requestId ?? 0) + 1,
-                          }));
-                          setManageCategory(
-                            request.importType === "premix"
-                              ? "mixes"
-                              : request.importType === "cheese"
-                                ? "cheeseRecipes"
-                                : "import",
-                          );
+                      <DeferredSurface
+                        label="import history"
+                        load={loadImportHistoryPanel}
+                        componentProps={{
+                          refreshSignal: sheetListSignal,
+                          enabledImporters: enabledImporterTypes,
+                          onStart: startImporterFromOperations,
+                          onRetry: retryImporterFromHistory,
+                          onReopen: (request) => {
+                            setImportReopenRequest((previous) => ({
+                              ...request,
+                              requestId: (previous?.requestId ?? 0) + 1,
+                            }));
+                            if (request.importType === "spec") {
+                              setActiveTab("ai");
+                              setShowManageDialog(false);
+                            } else {
+                              setManageCategory(request.importType === "premix" ? "mixes" : "cheeseRecipes");
+                            }
+                            toast({
+                              title: "Saved import review reopened",
+                              description: "Review the retained source-versus-landed details before applying any scoped repair.",
+                            });
+                          },
                         }}
                       />
                     )}
@@ -16560,6 +16457,12 @@ export default function Home() {
                         <p className="text-[11px] text-muted-foreground">
                           Add one or more clear pages. They will be transcribed and shown in the same two-step review before anything is changed.
                         </p>
+                        {canUseAiTools && (
+                          <p className="text-[11px] text-muted-foreground" data-testid="spec-photo-ai-disclosure">
+                            Selected photos are sent to the configured AI provider for transcription.
+                            Credentials, logs, unrelated production records, and user details are not included.
+                          </p>
+                        )}
                         <CameraFilePicker
                           accept="image/*"
                           multiple
@@ -16607,10 +16510,20 @@ export default function Home() {
                       </div>
                     )}
                     {canImportSpec && (
-                      <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
-                        <Upload className="w-4 h-4" /> Import Spec Sheet
-                      </button>
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-muted-foreground" data-testid="spec-workbook-ai-disclosure">
+                          Workbooks are checked locally first. If valid spec or recipe content remains
+                          unresolved, authorized users automatically send extracted text from the selected
+                          workbook—including supporting rows and source context—plus bounded saved-name
+                          candidates and confirmed name corrections to the configured AI provider. Users
+                          without AI access get unresolved-content guidance. Nothing is applied until you
+                          review and confirm. Credentials, logs, and user details are not included.
+                        </p>
+                        <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                          <Upload className="w-4 h-4" /> Import Spec Sheet
+                        </button>
+                      </div>
                     )}
                     {canImportProfileGuide && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Shipping Guide clicked (picker opening)"); shippingImportInputRef.current?.click(); }}
@@ -16788,7 +16701,16 @@ export default function Home() {
                       ingredientSuggestions={unifiedIngredientUniverse}
                       onSaved={applyAcknowledgedMixSave}
                     />
-                    <MixReconcilePanel isManager={isManager} canManageInventory={canManageInventory} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
+                    <DeferredSurface
+                      label="mix reconciliation"
+                      load={loadMixReconcilePanel}
+                      componentProps={{
+                        isManager,
+                        canManageInventory,
+                        refreshSignal: sheetListSignal,
+                        reopenRequest: importReopenRequest,
+                      }}
+                    />
                   </div>
                 )}
 
@@ -16835,12 +16757,16 @@ export default function Home() {
                 {/* Audit log — manager-only read-only event history */}
                 {manageCategory === "audit" && canManageStaff && (
                   <div className="space-y-4">
-                    <DataHealthWorkspace
-                      onNavigate={(section) => {
-                        setManageCategory(section);
-                        setManageInput("");
-                        setPinChangeMsg("");
-                        setMgSelectedPreset(null);
+                    <DeferredSurface
+                      label="data health"
+                      load={loadDataHealthWorkspace}
+                      componentProps={{
+                        onNavigate: (section) => {
+                          setManageCategory(section);
+                          setManageInput("");
+                          setPinChangeMsg("");
+                          setMgSelectedPreset(null);
+                        },
                       }}
                     />
                     <SyncConflictStatsCard />
@@ -16976,7 +16902,7 @@ export default function Home() {
         )}
 
         {/* Header */}
-        <header className="responsive-row flex items-center justify-between gap-2 print:mb-4">
+        <header className="responsive-shell-header responsive-row flex items-center justify-between gap-3 print:mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0 print:hidden">
               <Factory className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -16991,7 +16917,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="responsive-row print:hidden flex items-center gap-1.5 shrink-0">
+          <div className="responsive-utility-row print:hidden flex items-center gap-1.5 shrink-0">
             <SyncStatusPopover
               status={syncStatus}
               connected={syncConnected}
@@ -17014,7 +16940,7 @@ export default function Home() {
               type="button"
               onClick={() => setShowScreensDialog(true)}
               title="Cast to other screens"
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               <Monitor className="w-4 h-4" />
             </button>
@@ -17024,7 +16950,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setShowFloorMode(true)}
                 title="Floor mode — big numbers, status color"
-                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
               >
                 <Layers className="w-4 h-4" />
               </button>
@@ -17034,7 +16960,7 @@ export default function Home() {
               type="button"
               onClick={toggleFullscreen}
               title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen / kiosk mode"}
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
@@ -17053,7 +16979,7 @@ export default function Home() {
                 }
               }}
               title={isManager ? "Manager — full access" : isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              className={`min-h-11 flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
                 isSupervisor
                   ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
                   : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
@@ -17080,13 +17006,13 @@ export default function Home() {
                       ? `More — ${managerAttentionTotal} manager action${managerAttentionTotal === 1 ? "" : "s"} need attention`
                       : "More"
                   }
-                  className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                  className="responsive-icon-button relative flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <Menu className="w-4 h-4" />
                   {managerAttentionTotal > 0 && (
                     <span
                       aria-label={`${managerAttentionTotal} manager actions need attention`}
-                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
+                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-700 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
                     >
                       {managerAttentionTotal}
                     </span>
@@ -17116,6 +17042,9 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("summary")}>
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setActiveTab("setup")}>
+                  <Settings className="w-4 h-4 mr-2" /> Setup
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onPointerEnter={preloadWarehouseInventorySurface}
                   onFocus={preloadWarehouseInventorySurface}
@@ -17142,9 +17071,9 @@ export default function Home() {
                     <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
-                {isManager && (
+                {(canRecordQc || isManager) && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
-                    <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
+                    <ShieldCheck className="w-4 h-4 mr-2" /> QC workflows &amp; history
                   </DropdownMenuItem>
                 )}
                 {isManager && (
@@ -17167,9 +17096,6 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => setActiveTab("setup")}>
-                  <Settings className="w-4 h-4 mr-2" /> Setup
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
@@ -17253,19 +17179,53 @@ export default function Home() {
 
               {/* ─── SETUP ─── */}
               <SetupTabCtx.Provider value={setupTabCtxValue}>
-                <ManagementDepartment setup={<SetupContent />} />
+                <ManagementDepartment
+                  setup={
+                    <DeferredSurface
+                      label="Setup"
+                      load={loadSetupContent}
+                      componentProps={{}}
+                    />
+                  }
+                />
               </SetupTabCtx.Provider>
 
               {/* ─── PACKAGING ─── */}
               <ProductionLineDepartment
-                packaging={<LivePackagingTabContent />}
-                sauce={<LiveSauceTabContent />}
-                frontline={<LiveFrontlineTabContent />}
+                packaging={
+                  <DeferredSurface
+                    label="Packaging"
+                    load={loadLivePackagingTabContent}
+                    componentProps={{}}
+                  />
+                }
+                sauce={
+                  <DeferredSurface
+                    label="Sauce"
+                    load={loadLiveSauceTabContent}
+                    componentProps={{}}
+                  />
+                }
+                frontline={
+                  <DeferredSurface
+                    label="Frontline"
+                    load={loadLiveFrontlineTabContent}
+                    componentProps={{}}
+                  />
+                }
               />
 
               {/* ─── WAREHOUSE ─── */}
               <WarehouseTabCtx.Provider value={warehouseTabCtxValue}>
-                <WarehouseInventoryDepartment warehouse={<WarehouseTabContent />} />
+                <WarehouseInventoryDepartment
+                  warehouse={
+                    <DeferredSurface
+                      label="Warehouse"
+                      load={loadWarehouseTabContent}
+                      componentProps={{}}
+                    />
+                  }
+                />
               </WarehouseTabCtx.Provider>
 
               <InventoryTabCtx.Provider value={inventoryTabCtxValue}>
@@ -17274,7 +17234,15 @@ export default function Home() {
 
               {/* ─── MIX PLAN ─── */}
               <MixesTabCtx.Provider value={mixesTabCtxValue}>
-                <WarehouseInventoryDepartment mixes={<MixesTabContent />} />
+                <WarehouseInventoryDepartment
+                  mixes={
+                    <DeferredSurface
+                      label="Mix Plan"
+                      load={loadMixesTabContent}
+                      componentProps={{}}
+                    />
+                  }
+                />
               </MixesTabCtx.Provider>
 
               <ManagementDepartment ai={
@@ -17329,7 +17297,13 @@ export default function Home() {
                           ...request,
                           requestId: (previous?.requestId ?? 0) + 1,
                         }));
-                        setActiveTab(request.importType === "premix" ? "mixes" : "summary");
+                        setActiveTab(
+                          request.importType === "premix"
+                            ? "mixes"
+                            : request.importType === "spec"
+                              ? "ai"
+                              : "summary",
+                        );
                       },
                     } : undefined}
                   />
@@ -17344,31 +17318,43 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="quality">
-                <QcQualitySurface />
+                <QcQualitySurface
+                  runId={currentRunId}
+                  runStartedAt={currentRun?.startedAt ?? null}
+                  runStoppages={currentRun?.stoppages}
+                  profileKey={canonicalProfileKey(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                  runIsActive={Boolean(currentRun?.startedAt && !currentRun.endedAt && !currentRun.pausedAt)}
+                  values={v}
+                  substitutions={dayState.substitutions ?? []}
+                  stagedIngredients={qcStagedIngredients}
+                  canRecordQc={canRecordQc}
+                  canManageQc={canManageQc}
+                  canViewPhotos={canManageInventory}
+                />
               </TabsContent>
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
               <TabsList className="station-nav fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden">
-                <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="run" data-testid="tab-run" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Run</span>
+                  <span className="text-xs truncate">Run</span>
                 </TabsTrigger>
-                <TabsTrigger value="dough" data-testid="tab-dough" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="dough" data-testid="tab-dough" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Layers className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Dough</span>
+                  <span className="text-xs truncate">Dough</span>
                 </TabsTrigger>
-                <TabsTrigger value="sauce" data-testid="tab-sauce" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="sauce" data-testid="tab-sauce" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Droplets className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Sauce</span>
+                  <span className="text-xs truncate">Sauce</span>
                 </TabsTrigger>
-                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="frontline" data-testid="tab-frontline" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Boxes className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Front</span>
+                  <span className="text-xs truncate">Front</span>
                 </TabsTrigger>
-                <TabsTrigger value="packaging" data-testid="tab-packaging" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="packaging" data-testid="tab-packaging" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Package className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Pack</span>
+                  <span className="text-xs truncate">Pack</span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="warehouse"
@@ -17376,24 +17362,56 @@ export default function Home() {
                   aria-label="Warehouse"
                   onPointerEnter={preloadWarehouseInventorySurface}
                   onFocus={preloadWarehouseInventorySurface}
-                  className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
+                  className="min-h-11 flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
                 >
                   <Warehouse className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                  <span className="whitespace-nowrap text-[9px] leading-tight sm:text-[10px]">Warehouse</span>
+                  <span className="whitespace-nowrap text-xs leading-tight">Warehouse</span>
                 </TabsTrigger>
               </TabsList>
 
-              <ProductionLineDepartment dough={<LiveDoughTabContent />} />
+              <ProductionLineDepartment
+                dough={
+                  <DeferredSurface
+                    label="Dough"
+                    load={loadLiveDoughTabContent}
+                    componentProps={{}}
+                  />
+                }
+              />
 
               {/* ─── SETUP (recipe editors) ─── */}
-              <ManagementDepartment setup={<LiveSetupRecipesTabContent />} />
+              <ManagementDepartment
+                setup={
+                  <DeferredSurface
+                    label="Setup recipes"
+                    load={loadLiveSetupRecipesTabContent}
+                    componentProps={{}}
+                  />
+                }
+              />
 
-              <ProductionLineDepartment stoppages={<LiveStoppagesTabContent />} />
+              <ProductionLineDepartment
+                stoppages={
+                  <DeferredSurface
+                    label="Stoppages"
+                    load={loadLiveStoppagesTabContent}
+                    componentProps={{}}
+                  />
+                }
+              />
 
               {/* ─── SUMMARY ─── */}
               <ProductionLineDepartment summary={<>
-                <SummaryToolsContent />
-                <LiveSummaryTabContent />
+                <DeferredSurface
+                  label="Summary tools"
+                  load={loadSummaryToolsContent}
+                  componentProps={{}}
+                />
+                <DeferredSurface
+                  label="Summary"
+                  load={loadLiveSummaryTabContent}
+                  componentProps={{}}
+                />
                 </>} />
 
             </HomeStationTabs>
@@ -17799,6 +17817,7 @@ export default function Home() {
             accept=".xlsx"
             multiple
             className="hidden"
+            data-testid="spec-workbook-input"
             onChange={handleSpecImportFile}
           />
         )}
@@ -17903,6 +17922,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            finishSpecImportOutcome("incomplete");
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.
@@ -17934,7 +17954,17 @@ export default function Home() {
               applying: specImportApplying,
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
+              aiRetryAvailable: specImportAiRetryCount === 0 &&
+                !specImportPrepared?.aiRetryBlocked &&
+                !specImportPrepared?.aiFallbackUnsupported,
               existingRecipeNamesByKind: existingImportRecipeNames,
+              inventoryImpactRun: currentRun?.brand && currentRun?.flavor
+                ? {
+                    brand: currentRun.brand,
+                    flavor: currentRun.flavor,
+                    values: form.getValues(),
+                  }
+                : null,
               onConfirm: handleSpecImportConfirm,
             }}
           />
@@ -18090,55 +18120,62 @@ export default function Home() {
             Standalone brand/flavor setup editor. Lets a manager/supervisor
             pick any brand/flavor and edit its saved setup directly — reuses
             saveProfile/loadProfile and never touches the current run. */}
-        <SetupProfileEditor
-          open={setupEditorOpen}
-          onClose={() => setSetupEditorOpen(false)}
-          onSaved={handleSetupProfileSaved}
-          initialBrand={setupEditorBrand}
-          initialFlavor={setupEditorFlavor}
-          isSupervisor={isSupervisor}
-          canManageProfiles={canManageProfiles}
-          brands={brands}
-          brandFlavors={brandFlavors}
-          allergenExtra={customAllergens}
-          onAddBrand={addBrand}
-          onRemoveBrand={removeBrand}
-          onAddFlavor={addFlavor}
-          onRemoveFlavor={removeFlavor}
-          dieTypes={dieTypes}
-          onAddDieType={addDieType}
-          circles={circles}
-          onAddCircle={circlesList.add}
-          onRemoveCircle={circlesList.remove}
-          shipperOptions={shipper}
-          onAddShipper={shipperList.add}
-          onRemoveShipper={shipperList.remove}
-          skidStackingOptions={skidStacking}
-          onAddSkidStacking={skidStackingList.add}
-          onRemoveSkidStacking={skidStackingList.remove}
-          gripSheetsOptions={gripSheets}
-          onAddGripSheets={gripSheetsList.add}
-          onRemoveGripSheets={gripSheetsList.remove}
-          ingredientTypes={ingredientTypeOptions}
-          onAddIngredientType={addIngredientType}
-          onRemoveIngredientType={removeIngredientType}
-          pepTypes={pepTypes}
-          onAddPepType={addPepType}
-          onRemovePepType={removePepType}
-          doughIngredients={doughIngredients}
-          onAddDoughIngredient={addDoughIngredient}
-          onRemoveDoughIngredient={removeDoughIngredient}
-          doughRecipeNames={doughRecipeNames}
-          onAddDoughRecipeName={addDoughRecipeName}
-          onRemoveDoughRecipeName={removeDoughRecipeName}
-          frontlineIngredients={frontlineIngredients}
-          onAddFrontlineIngredient={addFrontlineIngredient}
-          onRemoveFrontlineIngredient={removeFrontlineIngredient}
-          frontlineRecipeNames={frontlineRecipeNames}
-          onAddFrontlineRecipeName={addFrontlineRecipeName}
-          onRemoveFrontlineRecipeName={removeFrontlineRecipeName}
-          ingredientUniverse={unifiedIngredientUniverse}
-        />
+        {setupEditorOpen && (
+          <DeferredSurface
+            label="setup profile editor"
+            load={loadSetupProfileEditor}
+            presentation="dialog"
+            componentProps={{
+              open: setupEditorOpen,
+              onClose: () => setSetupEditorOpen(false),
+              onSaved: handleSetupProfileSaved,
+              initialBrand: setupEditorBrand,
+              initialFlavor: setupEditorFlavor,
+              isSupervisor,
+              canManageProfiles,
+              brands,
+              brandFlavors,
+              allergenExtra: customAllergens,
+              onAddBrand: addBrand,
+              onRemoveBrand: removeBrand,
+              onAddFlavor: addFlavor,
+              onRemoveFlavor: removeFlavor,
+              dieTypes,
+              onAddDieType: addDieType,
+              circles,
+              onAddCircle: circlesList.add,
+              onRemoveCircle: circlesList.remove,
+              shipperOptions: shipper,
+              onAddShipper: shipperList.add,
+              onRemoveShipper: shipperList.remove,
+              skidStackingOptions: skidStacking,
+              onAddSkidStacking: skidStackingList.add,
+              onRemoveSkidStacking: skidStackingList.remove,
+              gripSheetsOptions: gripSheets,
+              onAddGripSheets: gripSheetsList.add,
+              onRemoveGripSheets: gripSheetsList.remove,
+              ingredientTypes: ingredientTypeOptions,
+              onAddIngredientType: addIngredientType,
+              onRemoveIngredientType: removeIngredientType,
+              pepTypes,
+              onAddPepType: addPepType,
+              onRemovePepType: removePepType,
+              doughIngredients,
+              onAddDoughIngredient: addDoughIngredient,
+              onRemoveDoughIngredient: removeDoughIngredient,
+              doughRecipeNames,
+              onAddDoughRecipeName: addDoughRecipeName,
+              onRemoveDoughRecipeName: removeDoughRecipeName,
+              frontlineIngredients,
+              onAddFrontlineIngredient: addFrontlineIngredient,
+              onRemoveFrontlineIngredient: removeFrontlineIngredient,
+              frontlineRecipeNames,
+              onAddFrontlineRecipeName: addFrontlineRecipeName,
+              onRemoveFrontlineRecipeName: removeFrontlineRecipeName,
+              ingredientUniverse: unifiedIngredientUniverse,
+            }}
+          />
+        )}
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
@@ -18451,7 +18488,10 @@ export default function Home() {
                             <CalendarDays className="w-4 h-4 text-muted-foreground" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent align="start" className="w-auto p-0">
+                        <PopoverContent
+                          align="start"
+                          className="z-[71] max-h-[var(--radix-popover-content-available-height)] w-auto overflow-y-auto overscroll-contain p-0"
+                        >
                           <Calendar
                             mode="single"
                             selected={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : undefined}
@@ -18471,6 +18511,113 @@ export default function Home() {
                       {scheduleEditorIsLiveDay && (
                         <p className="text-[11px] text-muted-foreground mt-1">You're editing today's live plan — changes apply right away.</p>
                       )}
+                    </div>
+                    {/* Fixed standard breaks. Operators can see the saved plan,
+                        while managers and authorized supervisors can edit it. */}
+                    <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3" data-testid="schedule-breaks">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Standard breaks</label>
+                          <p className="text-[11px] text-muted-foreground mt-1">Each planned break is fixed at 30 minutes. A clock-time break never pauses production automatically.</p>
+                          <p className="text-[11px] text-primary/90 mt-1" data-testid="schedule-break-summary">
+                            {scheduleBreakSummary || "No breaks configured yet."}
+                          </p>
+                        </div>
+                        {isSupervisor && (
+                          <button
+                            type="button"
+                            aria-expanded={scheduleBreaksExpanded}
+                            aria-controls="schedule-break-fields"
+                            data-testid="schedule-break-toggle"
+                            onClick={() => setScheduleBreaksExpanded(prev => !prev)}
+                            className="shrink-0 rounded-md border border-primary/50 px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-colors sm:hidden"
+                          >
+                            {scheduleBreaksExpanded ? "Hide breaks" : "Add breaks"}
+                          </button>
+                        )}
+                      </div>
+                      <div
+                        id="schedule-break-fields"
+                        className={`${scheduleBreaksExpanded ? "block" : "hidden"} sm:block space-y-3`}
+                      >
+                        {scheduleEditorBreaks.map((breakSlot, index) => (
+                          <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
+                            <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
+                            <div className="grid grid-cols-2 gap-2">
+                              <TouchSelect
+                                aria-label={`Break ${breakSlot.slot} placement`}
+                                value={!breakSlot.enabled ? "off" : breakSlot.mode}
+                                disabled={!isSupervisor}
+                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index
+                                  ? { ...item, enabled: e.target.value !== "off", mode: e.target.value === "at-time" ? "at-time" : "after-run" }
+                                  : item) as DayBreaks)}
+                                className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                              >
+                                <option value="off">Not scheduled</option>
+                                <option value="after-run">After a run</option>
+                                <option value="at-time">At a clock time</option>
+                              </TouchSelect>
+                              {breakSlot.enabled && breakSlot.mode === "after-run" ? (
+                                <TouchSelect
+                                  aria-label={`Break ${breakSlot.slot} run`}
+                                  value={breakSlot.runId ?? ""}
+                                  disabled={!isSupervisor}
+                                  onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, runId: e.target.value || undefined } : item) as DayBreaks)}
+                                  className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                                >
+                                  <option value="">Select run…</option>
+                                  {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
+                                </TouchSelect>
+                              ) : (
+                                <input
+                                  aria-label={`Break ${breakSlot.slot} time`}
+                                  type="time"
+                                  value={breakSlot.atTime ?? ""}
+                                  disabled={!isSupervisor || !breakSlot.enabled}
+                                  onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, atTime: e.target.value || undefined } : item) as DayBreaks)}
+                                  className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                                />
+                              )}
+                            </div>
+                            {breakSlot.enabled && breakSlot.mode === "after-run" && !breakSlot.runId && (
+                              <p className="col-start-2 text-[11px] text-amber-400">Choose a run so this break is not left unassigned.</p>
+                            )}
+                            {breakSlot.enabled && breakSlot.mode === "after-run" && breakSlot.runId
+                              && !scheduleEditorRuns.some(run => run.id === breakSlot.runId) && (
+                              <p className="col-start-2 text-[11px] text-amber-400">The selected run was deleted or is no longer assigned.</p>
+                            )}
+                            {breakSlot.enabled && breakSlot.mode === "at-time" && !isValidLocalTime(breakSlot.atTime) && (
+                              <p className="col-start-2 text-[11px] text-amber-400">Enter a valid local time.</p>
+                            )}
+                          </div>
+                        ))}
+                        {(() => {
+                          const preview = calculateDayTimeline({
+                            date: scheduleEditorDate || todayStr(),
+                            productionStartTime,
+                            runs: scheduleEditorRuns.map(run => ({
+                              run: { id: run.id, brand: run.brand, flavor: run.flavor },
+                              durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
+                            })),
+                            breaks: scheduleEditorBreaks,
+                            nowMs: Date.now(),
+                          });
+                          return (
+                            <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
+                              <span className="font-semibold">Preview:</span>{" "}
+                              {preview.breaks.filter(item => item.break.enabled).map(item =>
+                                item.status === "unassigned"
+                                  ? `Break ${item.slot} unassigned`
+                                  : item.startMs ? `Break ${item.slot} ${new Date(item.startMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                                  : `Break ${item.slot} pending`,
+                              ).join(" · ") || "No breaks scheduled"}
+                              {preview.projectedFinishMs && (
+                                <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                     {/* Runs */}
                     <div>
@@ -18522,7 +18669,8 @@ export default function Home() {
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Brand</label>
-                                <select
+                                <TouchSelect
+                                  aria-label="Schedule brand"
                                   value={run.brand}
                                   onChange={e => {
                                     const brand = e.target.value;
@@ -18537,11 +18685,12 @@ export default function Home() {
                                 >
                                   <option value="">— Brand —</option>
                                   {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Flavor</label>
-                                <select
+                                <TouchSelect
+                                  aria-label="Schedule flavor"
                                   value={run.flavor}
                                   onChange={e => {
                                     const flavor = e.target.value;
@@ -18557,7 +18706,7 @@ export default function Home() {
                                 >
                                   <option value="">— Flavor —</option>
                                   {(brandFlavors[run.brand] ?? []).map(f => <option key={f} value={f}>{f}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                             </div>
                             <div>
@@ -18656,14 +18805,15 @@ export default function Home() {
                       </div>
                       <div className="mt-3">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
-                        <select
+                        <TouchSelect
+                          aria-label="Die type"
                           value={scheduleEditorRunValues[scheduleAdvancedRunId]?.dieType ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "dieType", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                     </section>
                     {/* ── Dough Recipe ───────────────────────────────────────── */}
@@ -18671,25 +18821,26 @@ export default function Home() {
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough Recipe</h3>
                       <div className="mb-2">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Recipe Name</label>
-                        <select
+                        <TouchSelect
+                          aria-label="Dough recipe name"
                           value={scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipeName ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "doughRecipeName", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {doughRecipeNames.map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                       <div className="space-y-1.5">
                         {(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).map((row, ri) => (
                           <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
+                            <TouchSelect aria-label="Dough ingredient" value={row.ingredient}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
                               {doughIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                            </select>
+                            </TouchSelect>
                             <input type="number" min="0" step="0.1" value={row.lbs || ""}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18717,13 +18868,13 @@ export default function Home() {
                         {([1, 2, 3, 4] as const).map(n => (
                           <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Applicator {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
+                            <TouchSelect aria-label={`Applicator ${n} type`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}Type` as keyof FormValues, e.target.value)}
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
                               {ingredientTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                            </TouchSelect>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
@@ -18745,13 +18896,13 @@ export default function Home() {
                         {([1, 2] as const).map(n => (
                           <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pepperoni {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
+                            <TouchSelect aria-label={`Pepperoni ${n} type`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Type` as keyof FormValues, e.target.value)}
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
                               {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
-                            </select>
+                            </TouchSelect>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Sticks</label>
@@ -18791,24 +18942,24 @@ export default function Home() {
                             <div key={n}>
                               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">App {n} Recipe</p>
                               <div className="mb-2">
-                                <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
+                                <TouchSelect aria-label={`App ${n} recipe name`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
                                   onChange={e => updateAdvancedField(scheduleAdvancedRunId!, nameField, e.target.value)}
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                 >
                                   <option value="">— Recipe Name —</option>
                                   {cheeseRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                               <div className="space-y-1.5">
                                 {rows.map((row, ri) => (
                                   <div key={ri} className="flex gap-2 items-center">
-                                    <select value={row.ingredient}
+                                    <TouchSelect aria-label={`App ${n} ingredient`} value={row.ingredient}
                                       onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
                                       className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                     >
                                       <option value="">— Ingredient —</option>
                                       {cheeseIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                                    </select>
+                                    </TouchSelect>
                                     <input type="number" min="0" step="0.1" value={row.lbs || ""}
                                       onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
                                       placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18827,24 +18978,24 @@ export default function Home() {
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Frontline Recipe</h3>
                       <div className="mb-2">
-                        <select value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
+                        <TouchSelect aria-label="Frontline recipe name" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "frontlineRecipeName", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {frontlineRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                       <div className="space-y-1.5">
                         {(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).map((row, ri) => (
                           <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
+                            <TouchSelect aria-label="Frontline ingredient" value={row.ingredient}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
                               {frontlineIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                            </select>
+                            </TouchSelect>
                             <input type="number" min="0" step="0.1" value={row.lbs || ""}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18903,9 +19054,11 @@ export default function Home() {
         }}
         autoTrackBlocked={autoTrackBlocked}
         autoTrackBlockedRef={foregroundSyncBarrierRef}
-        autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
+        autoTrackWakeRebaseReason={autoTrackWakeRebaseReason}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        onAutomaticClaimFailure={reportSauceAutoTrackFailure}
+        onAutomaticClaimSuccess={clearSauceAutoTrackFailure}
         onAutoTrackProgressChange={(enabled) => {
           updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
         }}
@@ -18915,11 +19068,19 @@ export default function Home() {
         serverClockOffsetMs={serverClockOffsetMs}
         operationalOnline={isOnline}
         operationalSyncConnected={syncConnected}
+        screenSyncStatus={getScreenSyncStatus(screenSyncState)}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
         <main>
-          {screenMode ? <ScreenModeView /> : mainContent}
+          {screenMode ? (
+            <DeferredSurface
+              label="screen mode"
+              load={loadScreenModeView}
+              componentProps={{}}
+              presentation="dialog"
+            />
+          ) : mainContent}
         </main>
         </LiveRunProvider>
         </DepartmentProvider>
@@ -19029,6 +19190,18 @@ function FloorModeView() {
     operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
   const [confirmComplete, setConfirmComplete] = useState(false);
+  const packagingLock = useManualControlLock(currentRun?.id, "floor-skid-done");
+  const packagingConflict = useManualControlConflict(currentRun?.id, "floor-skid-done");
+  const doughLock = useManualControlLock(currentRun?.id, "dough-trays");
+  const sauceLock = useManualControlLock(currentRun?.id, "sauce-batches");
+  const applicatorLocks = [
+    useManualControlLock(currentRun?.id, "applicator-1-batches"),
+    useManualControlLock(currentRun?.id, "applicator-2-batches"),
+    useManualControlLock(currentRun?.id, "applicator-3-batches"),
+    useManualControlLock(currentRun?.id, "applicator-4-batches"),
+  ];
+  const sectionLockedMessage = (lock: { peer?: boolean } | undefined) =>
+    lock ? (lock.peer ? "This section is being updated on another device." : "Saving this section…") : undefined;
 
         const totalSkids = v.casesNeeded > 0 && v.casesPerSkid > 0 ? Math.ceil(v.casesNeeded / v.casesPerSkid) : 0;
         const floorStatus = runStatus === "ended" ? "paused" : runStatus === "pending" ? "paused" : runStatus;
@@ -19231,17 +19404,33 @@ function FloorModeView() {
               {/* Action buttons */}
               {(runStatus === "running" || runStatus === "paused") && (
                 <div className="grid grid-cols-3 gap-2" aria-label="Case corrections">
+                  {(packagingLock || packagingConflict) && <p role="status" aria-live="polite" className="col-span-3 text-center text-xs text-amber-200">{packagingConflict ?? sectionLockedMessage(packagingLock)}</p>}
                   <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
-                    const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
-                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
-                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                  }} className="min-h-12 rounded-xl text-lg font-bold" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
+                    runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = Math.max(0, before.casesOnCurrentSkid - 1);
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
+                      form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                    });
+                  }} disabled={!!packagingLock} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
                   <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
                   <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
-                    const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
-                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
-                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                  }} disabled={v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
+                    runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = incrementFloorCaseCount(
+                        before.casesOnCurrentSkid,
+                        Number(form.getValues("casesPerSkid")) || 0,
+                      );
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
+                      form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                    });
+                  }} disabled={!!packagingLock || (v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid)} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -19290,17 +19479,23 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.vibrate?.(15);
-                      const nextSkids = v.skidsCompleted + 1;
-                      persistManualPackagingProgress(
-                        currentRun?.id ?? "",
-                        nextSkids,
-                        0,
+                      runUnlockedManualSectionAction(
+                        () => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer,
+                        () => {
+                          navigator.vibrate?.(15);
+                          const before = {
+                            skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                            casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                          };
+                          const nextSkids = before.skidsCompleted + 1;
+                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0, undefined, before);
+                          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                          form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+                        },
                       );
-                      form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
                     data-testid="floor-skid-done"
+                    disabled={!!packagingLock}
                     className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: accentBar, color: bg }}
                   >
@@ -19329,7 +19524,7 @@ function FloorModeView() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Keep running</AlertDialogCancel>
-                    <AlertDialogAction data-testid="floor-confirm-complete-run" className="bg-red-700 hover:bg-red-600" onClick={() => endRun(currentRun?.id)}>
+                    <AlertDialogAction data-testid="floor-confirm-complete-run" className="min-h-11 bg-red-700 hover:bg-red-600" onClick={() => endRun(currentRun?.id)}>
                       Complete run
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -19381,6 +19576,8 @@ export function ElapsedTimeBadge({
 
 /**
  * SetupMathConflictBadge — aggregate math conflicts for the Setup header.
+/**
+/**
  *
  * The count is intentionally derived during render so edits to any applicator
  * slot are reflected immediately, including in-place recipe-row updates from
@@ -19457,5656 +19654,3 @@ export function PerRunMixSlotBadge({
     />
   );
 }
-
-
-const LiveRunTabContent = memo(function LiveRunTabContent() {
-  const hx = useHomeCtx();
-  const {
-    ackKey, activeStopId, addBrand, addFlavor, addRun, allergenWarnings,
-    autoSuppressUntilRef, blankRunIds, blockingViolations, brandFlavors,
-    brandInput, brandScrollKeep, brands, checklistAcks, checklistSatisfied,
-    confirmDeleteBrand, confirmDeleteBrandRef, confirmDeleteFlavor,
-    confirmDeleteFlavorRef, confirmRemoveBlanks, confirmRemoveRun,
-    currentRun, customAllergens, dayState, dieLineDefaultOverrides, dieTypes,
-    doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
-    initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
-    logStop, nextRunDieType, openSetupEditor, pauseRun, removeBlankRuns, removeBrand,
-    removeFlavor, removeRun, pauseDecisionRunId, pendingForegroundStopRunId, resumeRun, ruleViolations,
-    runStatus, setBrandInput, setConfirmDeleteBrand, setConfirmDeleteFlavor,
-    setConfirmRemoveBlanks, setConfirmRemoveRun, setDayState, setDoughSubTab,
-    setFlavorInput, setManageCategory, setManageInput, setPinChangeMsg,
-    setPauseDecisionRunId, setPauseTunnelPolicy, setRunBrandFlavor, setShowBrandDrop, setShowFlavorDrop,
-    setShowGlance, setShowManageDialog, setShowReorderDialog, setShowStopDialog,
-    setStopNotes, setStopReason, showBrandDrop, showFlavorDrop, startRun, swipeCue,
-    switchToRun, toggleAck, upcomingRunLabels, v, ve,
-  } = hx;
-
-  const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
-    casesPct, casesFreezerPct, casesPctWithFreezer,
-    currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
-    showBatchDue, setShowBatchDue,
-    autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs, packagingDrainActive,
-    stallPrompt, setStallPrompt, stallCheck,
-    showPaceAlert, setShowPaceAlert, paceAlertMsg,
-    operationalDisplayState, operationalSnapshotReceipt,
-  } = useLiveRun();
-  const [showLineMap, setShowLineMap] = useState(false);
-  useAutomaticUpdateReloadBlocker(
-    "live-run-operational-alert",
-    Boolean(stallPrompt || showPaceAlert || showBatchDue),
-  );
-
-  // Confirm before starting a run that is not the next unstarted run in the
-  // schedule, so an accidental tap on the wrong run can be caught before it
-  // stamps a start time and forces a redo.
-  //
-  // Only named runs (brand or flavor set) count as "pending" for the purposes
-  // of the check — blank placeholder runs have no meaningful order and should
-  // not trigger a false-positive warning.
-  function handleStartRun() {
-    const readiness = getStartRunReadiness(v);
-    if (!readiness.ready) {
-      toast({
-        title: "Run not ready — Pizzas Per Case is missing",
-        description:
-          "Enter a positive Pizzas Per Case value in this product's setup before starting a run that requests cases.",
-        variant: "destructive",
-      });
-      openSetupEditor(currentRun?.brand || undefined, currentRun?.flavor || undefined);
-      return;
-    }
-    const firstPendingIdx = dayState.runs.findIndex(
-      (r: RunMeta) => !r.startedAt && (r.brand || r.flavor),
-    );
-    if (firstPendingIdx !== -1 && firstPendingIdx !== dayState.currentIndex) {
-      const nextRun = dayState.runs[firstPendingIdx];
-      const nextLabel =
-        [nextRun.brand, nextRun.flavor].filter(Boolean).join(" – ") ||
-        `Run ${firstPendingIdx + 1}`;
-      const thisRun = dayState.runs[dayState.currentIndex];
-      const thisLabel =
-        [thisRun?.brand, thisRun?.flavor].filter(Boolean).join(" – ") ||
-        `Run ${dayState.currentIndex + 1}`;
-      if (
-        !window.confirm(
-          `"${nextLabel}" is next in the schedule.\n\nStart "${thisLabel}" out of order instead?`,
-        )
-      )
-        return;
-    }
-    startRun();
-  }
-
-  return (
-    <>
-                <OperationalStateBadge
-                  displayState={operationalDisplayState}
-                  receipt={operationalSnapshotReceipt}
-                />
-                {/* ─── Line Map toggle ─── */}
-                <div className="flex justify-end mb-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowLineMap(prev => !prev)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
-                      showLineMap
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/60"
-                    }`}
-                  >
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Line Map</span>
-                  </button>
-                </div>
-                {showLineMap && <LineMapDashboard />}
-                {/* Blank-run sweep confirmation dialog */}
-                {confirmRemoveBlanks && (
-                  <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
-                    <div className="bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
-                      <h2 className="text-base font-bold">Remove {blankRunIds.length} blank run{blankRunIds.length > 1 ? "s" : ""}?</h2>
-                      <p className="text-sm text-muted-foreground">
-                        {blankRunIds.length > 1 ? "These runs have" : "This run has"} no brand, flavor, or data. Removing{" "}
-                        {blankRunIds.length > 1 ? "them" : "it"} clears{" "}
-                        {blankRunIds.length > 1 ? "them" : "it"} from all devices and can't be undone.
-                      </p>
-                      <div className="flex gap-2 justify-end">
-                        <button type="button" onClick={() => setConfirmRemoveBlanks(false)} className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted/40 transition-colors">Cancel</button>
-                        <button type="button" onClick={removeBlankRuns} className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors">Remove</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {/* ─── Run cockpit — identity, status & KPIs (graduated ManagerHub mockup) ─── */}
-                <div className="space-y-4 mb-4">
-                  {/* Top bar: run position + last-run recall + run actions */}
-                  <div className="flex items-start justify-between gap-2 flex-wrap">
-                    <div className="flex flex-col gap-1 min-w-0">
-                      <span className="text-xs text-muted-foreground font-bold uppercase tracking-wider bg-muted/40 px-2 py-1 rounded border border-border/50 w-fit">
-                        Run {dayState.currentIndex + 1} of {dayState.runs.length}
-                      </span>
-            {lastRunRecall && (
-              <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70 -mt-1">
-                <History className="w-3 h-3 shrink-0" />
-                <span>
-                  Last ran {lastRunRecall.date}
-                  {lastRunRecall.actualCases != null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.actualCases)} cases</span></span>}
-                  {lastRunRecall.casesNeeded != null && lastRunRecall.actualCases == null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.casesNeeded)} planned</span></span>}
-                  {lastRunRecall.wasteLbs != null && lastRunRecall.wasteLbs > 0 && <span> · <span className="text-amber-400/80">{fmtNum(lastRunRecall.wasteLbs, 1)} lbs waste</span></span>}
-                </span>
-              </div>
-            )}
-                    </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
-                {dayState.runs.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowReorderDialog(true)}
-                    title="Reorder runs"
-                    className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <GripVertical className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {(runStatus === "running" || runStatus === "paused") && (
-                  <button
-                    type="button"
-                    onClick={() => setShowGlance(true)}
-                    title="Glance view — large numbers for distance viewing"
-                    className="h-6 w-6 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                  >
-                    <Maximize2 className="w-3 h-3" />
-                  </button>
-                )}
-                {isSupervisor && blankRunIds.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRemoveBlanks(true)}
-                    title={`Remove ${blankRunIds.length} blank run${blankRunIds.length > 1 ? "s" : ""}`}
-                    className="h-6 flex items-center gap-1 text-xs font-bold text-destructive/70 bg-destructive/10 px-2 rounded border border-destructive/20 hover:bg-destructive/20 transition-colors"
-                  >
-                    <Eraser className="w-3 h-3" />
-                    <span className="hidden sm:inline">{blankRunIds.length} Blank</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={addRun}
-                  disabled={dayState.runs.length >= MAX_RUNS}
-                  className="h-6 flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-500/10 px-2 rounded border border-amber-500/20 hover:bg-amber-500/20 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span className="hidden sm:inline">New Run</span>
-                </button>
-              </div>
-                  </div>
-
-                  {/* Run setup — brand / flavor / target cases */}
-                  <div className="rounded-xl border-2 border-border/70 bg-card p-4">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold flex items-center gap-1">Run Setup <Pencil className="w-3 h-3 ml-1" /></div>
-                      <div className="flex items-center gap-1.5">
-              {v.dieType && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/40 border border-border/50 text-muted-foreground tabular-nums">
-                  {v.dieType}
-                </span>
-              )}
-              {isAllergen(normalizeAllergen(v.allergen)) && (() => {
-                const m = allergenMeta(normalizeAllergen(v.allergen));
-                return (
-                  <span
-                    className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide"
-                    style={{ backgroundColor: m.color, color: m.textColor }}
-                  >
-                    {m.label}
-                  </span>
-                );
-              })()}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-stretch gap-3">
-                      <div className="relative flex-1 min-w-[240px] bg-background/60 border border-border/60 rounded-lg p-2.5 pr-8">
-                        <div className="text-[10px] text-muted-foreground uppercase font-medium mb-0.5">Brand &amp; Flavor</div>
-                        <div className="flex items-center gap-1">
-              <div className="relative">
-                <div className="relative">
-                  <input
-                    value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
-                    placeholder="Brand…"
-                    className="w-28 bg-transparent border-none text-base font-bold outline-none cursor-pointer p-0"
-                    readOnly={!showBrandDrop}
-                    onClick={() => {
-                      setBrandInput(currentRun?.brand ?? "");
-                      setShowBrandDrop(true);
-                      setShowFlavorDrop(false);
-                    }}
-                    onChange={(e: any) => setBrandInput(e.target.value)}
-                    onKeyDown={(e: any) => {
-                      if (e.key === "Enter") {
-                        const b = addBrand(brandInput);
-                        setRunBrandFlavor(b, currentRun?.flavor ?? "");
-                        setShowBrandDrop(false);
-                      }
-                      if (e.key === "Escape") setShowBrandDrop(false);
-                    }}
-                    onBlur={() => setTimeout(() => { if (!confirmDeleteBrandRef.current) setShowBrandDrop(false); }, 150)}
-                  />
-                  {showBrandDrop && (
-                    <div ref={brandScrollKeep.listRef} onScroll={brandScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
-                      {brands
-                        .filter((b: any) => b.toLowerCase().includes(brandInput.toLowerCase()))
-                        .map((b: any) =>
-                          confirmDeleteBrand === b ? (
-                            <div key={b} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{b}"?</span>
-                              <span className="flex gap-1 shrink-0">
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeBrand(b); confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); setShowBrandDrop(false); }}>Yes</button>
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); }}>No</button>
-                              </span>
-                            </div>
-                          ) : (
-                            <div key={b} className="flex items-center">
-                              <button
-                                type="button"
-                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
-                                onMouseDown={() => { setRunBrandFlavor(b, currentRun?.flavor ?? ""); setShowBrandDrop(false); }}
-                              >
-                                {b}
-                              </button>
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                                onMouseDown={e => { e.stopPropagation(); confirmDeleteBrandRef.current = b; setConfirmDeleteBrand(b); }}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )
-                        )}
-                      {brandInput.trim() && !brands.includes(brandInput.trim()) && (
-                        <button
-                          type="button"
-                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                          onMouseDown={() => {
-                            const b = addBrand(brandInput);
-                            setRunBrandFlavor(b, currentRun?.flavor ?? "");
-                            setShowBrandDrop(false);
-                          }}
-                        >
-                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{brandInput.trim()}"</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-                        <span className="text-primary font-bold text-base mx-1">—</span>
-              <div className="relative">
-                <div className="relative">
-                  <input
-                    value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
-                    placeholder="Flavor…"
-                    className="w-28 bg-transparent border-none text-base font-bold outline-none cursor-pointer p-0"
-                    readOnly={!showFlavorDrop}
-                    onClick={() => {
-                      setFlavorInput(currentRun?.flavor ?? "");
-                      setShowFlavorDrop(true);
-                      setShowBrandDrop(false);
-                    }}
-                    onChange={(e: any) => setFlavorInput(e.target.value)}
-                    onKeyDown={(e: any) => {
-                      if (e.key === "Enter") {
-                        const f = addFlavor(flavorInput);
-                        setRunBrandFlavor(currentRun?.brand ?? "", f);
-                        setShowFlavorDrop(false);
-                      }
-                      if (e.key === "Escape") setShowFlavorDrop(false);
-                    }}
-                    onBlur={() => setTimeout(() => { if (!confirmDeleteFlavorRef.current) setShowFlavorDrop(false); }, 150)}
-                  />
-                  {showFlavorDrop && (
-                    <div ref={flavorScrollKeep.listRef} onScroll={flavorScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
-                      {!(currentRun?.brand) && (
-                        <p className="px-3 py-2 text-xs text-muted-foreground">Pick a brand first</p>
-                      )}
-                      {(brandFlavors[currentRun?.brand ?? ""] ?? [])
-                        .filter((f: any) => f.toLowerCase().includes(flavorInput.toLowerCase()))
-                        .map((f: any) =>
-                          confirmDeleteFlavor === f ? (
-                            <div key={f} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{f}"?</span>
-                              <span className="flex gap-1 shrink-0">
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeFlavor(f); confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); setShowFlavorDrop(false); }}>Yes</button>
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); }}>No</button>
-                              </span>
-                            </div>
-                          ) : (
-                            <div key={f} className="flex items-center">
-                              <button
-                                type="button"
-                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
-                                onMouseDown={() => { setRunBrandFlavor(currentRun?.brand ?? "", f); setShowFlavorDrop(false); }}
-                              >
-                                {f}
-                              </button>
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                                onMouseDown={e => { e.stopPropagation(); confirmDeleteFlavorRef.current = f; setConfirmDeleteFlavor(f); }}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )
-                        )}
-                      {currentRun?.brand && flavorInput.trim() && !(brandFlavors[currentRun.brand] ?? []).includes(flavorInput.trim()) && (
-                        <button
-                          type="button"
-                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                          onMouseDown={() => {
-                            const f = addFlavor(flavorInput);
-                            setRunBrandFlavor(currentRun?.brand ?? "", f);
-                            setShowFlavorDrop(false);
-                          }}
-                        >
-                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{flavorInput.trim()}"</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-                      </div>
-                        <ChevronDown className="w-4 h-4 text-muted-foreground/50 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      </div>
-                      <div className="w-32 bg-background/60 border border-border/60 rounded-lg p-2.5">
-              <div className="flex items-start justify-between gap-1 mb-0.5">
-                <label className="text-[10px] text-muted-foreground uppercase font-medium">Target Cases</label>
-                <Pencil className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
-              </div>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                data-testid="input-casesNeeded"
-                value={v.casesNeeded === 0 ? "" : v.casesNeeded}
-                onChange={e => form.setValue("casesNeeded", Number(e.target.value) || 0, { shouldDirty: true })}
-                placeholder="0"
-                className="w-full bg-transparent border-none p-0 text-lg font-black tabular-nums outline-none"
-              />
-              {Number(v.casesNeeded) === 0 && (
-                <p className="mt-1 text-[10px] font-medium text-amber-400 flex items-center gap-1">
-                  <span>⚠</span> Enter cases to enable calculations
-                </p>
-              )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Status controls — big touch targets */}
-                  {runStatus === "pending" && (
-                    <button
-                      type="button"
-                      onClick={handleStartRun}
-                      disabled={blockingViolations.length > 0}
-                      title={
-                        blockingViolations.length > 0
-                          ? `Blocked by production rule${blockingViolations.length > 1 ? "s" : ""}: ${blockingViolations.map((x: any) => x.name).join(", ")}`
-                          : undefined
-                      }
-                      data-testid="button-start-run"
-                      className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600"
-                    >
-                      <Play className="w-6 h-6 fill-current" /> START RUN
-                    </button>
-                  )}
-                  {runStatus === "running" && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={pauseRun}
-                        className="bg-amber-600 hover:bg-amber-500 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
-                      >
-                        <Pause className="w-5 h-5 fill-current" /> PAUSE RUN
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => endRun()}
-                        disabled={pendingForegroundStopRunId === currentRun?.id}
-                        className="bg-red-700 hover:bg-red-600 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
-                      >
-                        <Square className="w-5 h-5 fill-current" /> {pendingForegroundStopRunId === currentRun?.id ? "STOP REQUESTED" : "STOP RUN"}
-                      </button>
-                      {activeStopId ? (
-                        <button
-                          type="button"
-                          onClick={endStop}
-                          className="col-span-2 bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors animate-pulse"
-                        >
-                          <CircleDot className="w-4 h-4" /> END STOP
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          data-testid="button-log-stoppage"
-                          onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                          className="col-span-2 border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <OctagonX className="w-4 h-4" /> LOG STOPPAGE
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {runStatus === "running" && currentRun?.startedAt ? (
-                    <div className="flex items-center justify-center gap-2 flex-wrap">
-                      <div className="bg-card px-3 py-1.5 rounded-full border border-border/50 text-xs text-muted-foreground font-medium">
-                        Elapsed Time:{" "}
-                        <ElapsedTimeBadge
-                          data-testid="elapsed-card-value"
-                          className="text-foreground font-bold tabular-nums"
-                          nowMs={nowTime.getTime()}
-                          startedAt={currentRun.startedAt}
-                          pausedAt={currentRun.pausedAt ?? null}
-                        />
-                      </div>
-                      {(() => {
-                        const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
-                        const suppressed = Date.now() < autoSuppressUntilRef.current;
-                        const caseAutoActive = autoTrackProgress && !!autoTrackSuggestion && !suppressed &&
-                          (runStatus === "running" || packagingDrainActive);
-                        if (!caseAutoActive || casePeriodSec <= 0) return null;
-                        const nowMs = nowTime.getTime();
-                        const secLeft = tickDueRefs.case.current > 0
-                          ? Math.min(casePeriodSec, Math.max(0, (tickDueRefs.case.current - nowMs) / 1000))
-                          : casePeriodSec;
-                        return (
-                          <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
-                            Next case in{" "}
-                            <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  ) : null}
-                  {runStatus === "paused" && (
-                    <>
-                      {pauseDecisionRunId === currentRun?.id && currentRun?.pausedAt && (
-                        <PauseTunnelDecision
-                          pausedAt={currentRun.pausedAt}
-                          onChoose={setPauseTunnelPolicy}
-                          onDismiss={() => setPauseDecisionRunId(null)}
-                        />
-                      )}
-                      <button
-                        type="button"
-                        data-testid="resume-run"
-                        onClick={resumeRun}
-                        className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors"
-                      >
-                        <Play className="w-6 h-6 fill-current" /> RESUME RUN
-                      </button>
-                    </>
-                  )}
-                  {runStatus === "ended" && (
-                    <div className="flex items-center justify-center py-1">
-              {runStatus === "ended" && (() => {
-                const freezerMin2 = Number(ve.freezerTime) || 0;
-                const preTun2 = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                const postTun2 = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                const refEndedAt = lastEndedRun?.endedAt;
-                const nowMs2 = nowTime.getTime();
-                if (!refEndedAt || freezerMin2 <= 0) return (
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                    Ended
-                  </span>
-                );
-                // Compute actual virtual (pause-excluded) elapsed for the ended run.
-                // computeEndedRunElapsedSec caps open/unclosed pause stoppages at
-                // endedAt so auto-ended paused runs don't count the pause as production.
-                const endedElapsedSec = computeEndedRunElapsedSec({
-                  startedAt: lastEndedRun.startedAt,
-                  endedAt: refEndedAt,
-                  stoppages: lastEndedRun.stoppages,
-                });
-                const phases2 = lastEndedRun?.id === currentRun?.id
-                  ? linePhases
-                  : computeLinePhases({
-                      elapsedBatchSec: endedElapsedSec,
-                      pausedAt: null,
-                      lastResumeWallMs: 0,
-                      lastPauseStartWallMs: 0,
-                      pauseStopsTunnel: true,
-                      lastPauseStopsTunnel: true,
-                      runStatus: "ended",
-                      preTunnelMin: preTun2,
-                      postTunnelMin: postTun2,
-                      freezerTime: freezerMin2,
-                      nowMs: nowMs2,
-                      endedAt: refEndedAt,
-                    });
-                const activePhase = pickMostActivePhase(phases2);
-                if (!activePhase) return (
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                    Ended · Freeze tunnel clear
-                  </span>
-                );
-                const mm2 = Math.floor(activePhase.remainMs / 60000);
-                const ss2 = Math.floor((activePhase.remainMs % 60000) / 1000);
-                return (
-                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                    {activePhase.label} draining{activePhase.remainMs > 0 ? ` · ${fmtCountdownParts(mm2, ss2)}` : ""}
-                  </span>
-                );
-              })()}
-                    </div>
-                  )}
-            {/* Auto-detected stall nudge (advisory — never writes on its own) */}
-            {stallPrompt && (
-              <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-amber-950/40 border border-amber-700/30 text-amber-400" data-testid="stall-banner">
-                <span>⚠ Line looks stalled — about {fmtMins(stallCheck.behindMinutes)} behind with no stoppage logged</span>
-                <button
-                  type="button"
-                  data-testid="button-stall-log"
-                  className="px-2.5 py-1 rounded-md bg-amber-500 text-black font-bold hover-elevate active-elevate-2"
-                  onClick={() => { logStop("Auto-detected stall", ""); setStallPrompt(false); }}
-                >
-                  Log stoppage
-                </button>
-                <button
-                  type="button"
-                  data-testid="button-stall-dismiss"
-                  className="px-2.5 py-1 rounded-md border border-amber-700/40 hover-elevate"
-                  onClick={() => setStallPrompt(false)}
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
-            {showPaceAlert && currentRun?.id && (
-              <BehindPaceAlertBanner
-                runId={currentRun.id}
-                message={paceAlertMsg}
-                onDismiss={() => setShowPaceAlert(false)}
-              />
-            )}
-                  {/* 3-phase line status — filling at run start, draining only after
-                      a persisted pause or stop.
-                      Auto-hidden when all stages are in steady-state active. */}
-                  {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
-                    const freezerMin = Number(ve.freezerTime) || 0;
-                    if (freezerMin <= 0) return null;
-                    if (calc.ppm <= 0 && runStatus === "running") return null;
-                    // Thin display of the server-adopted context model (the
-                    // context falls back locally when offline/lagging).
-                    const phases = linePhases;
-                    const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
-                    // Hide the strip entirely when everything is in steady-state or empty.
-                    const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
-                    if (!anyVisible) return null;
-                    function phaseRowStyle(state: PhaseInfo["state"]) {
-                      if (state === "filling" || state === "resuming") return { text: "text-sky-400", dot: "bg-sky-400", badge: "bg-sky-950/40 border-sky-700/30" };
-                      if (state === "draining") return { text: "text-amber-400", dot: "bg-amber-400 animate-pulse", badge: "bg-amber-950/40 border-amber-700/30" };
-                      if (state === "paused") return { text: "text-muted-foreground", dot: "bg-muted-foreground", badge: "bg-muted/20 border-border/30" };
-                      return { text: "text-muted-foreground", dot: "bg-muted-foreground/40", badge: "bg-muted/10 border-border/20" };
-                    }
-                    function phaseLabel(phase: PhaseInfo): string {
-                      const mm = Math.floor(phase.remainMs / 60000);
-                      const ss = Math.floor((phase.remainMs % 60000) / 1000);
-                      const t = fmtCountdownParts(mm, ss);
-                      if (phase.state === "filling") return `${phase.label} — filling → ${t}`;
-                      if (phase.state === "draining") return phase.remainMs > 0 ? `${phase.label} — draining → ${t}` : `${phase.label} — draining`;
-                      if (phase.state === "resuming") return `${phase.label} — product arriving in ${t}`;
-                      if (phase.state === "paused") return `${phase.label} — stopped`;
-                      return phase.label;
-                    }
-                    return (
-                      <div className="mb-4 rounded-lg border border-border/40 bg-card/60 overflow-hidden divide-y divide-border/20">
-                        {rows.filter(r => r.state !== "empty").map((phase, i) => {
-                          const s = phaseRowStyle(phase.state);
-                          return (
-                            <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 ${s.badge}`}>
-                              <span className={`h-2 w-2 rounded-full shrink-0 ${s.dot}`} />
-                              <span className={`text-xs font-semibold ${s.text}`}>{phaseLabel(phase)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-
-                  {/* KPI tiles — completion, pace, estimated finish */}
-                  {(v.casesNeeded > 0 || calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {v.casesNeeded > 0 && (
-                        <div className="rounded-xl border border-border/60 bg-card/60 p-5 flex flex-col items-center justify-center relative overflow-hidden shadow-lg">
-                          <div className="absolute top-3 left-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Completion</div>
-                          <div className="absolute top-3 right-3 flex items-center gap-1.5">
-                            {runStatus === "running" ? (
-                              <>
-                                <span className="relative flex h-2.5 w-2.5">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                                </span>
-                                <span className="text-xs font-bold text-emerald-500 uppercase tracking-wide">Running</span>
-                              </>
-                            ) : runStatus === "paused" ? (
-                              <>
-                                <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-                                <span className="text-xs font-bold text-amber-400 uppercase tracking-wide">Paused</span>
-                              </>
-                            ) : runStatus === "ended" ? (
-                              <>
-                                <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" />
-                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Ended</span>
-                              </>
-                            ) : (
-                              <>
-                                <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" />
-                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Not started</span>
-                              </>
-                            )}
-                          </div>
-                          <div className="mt-7 mb-2 text-6xl font-black text-foreground tabular-nums tracking-tighter" data-testid="tile-cases-completed">
-                            {fmtComma(calc.casesCompleted)}
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap justify-center">
-                            {calc.casesCompleted >= v.casesNeeded ? (
-                              <div className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
-                                <CheckCircle2 className="w-4 h-4" /> Target reached!
-                              </div>
-                            ) : (
-                              <div className="text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20 tabular-nums">
-                                {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}% Done
-                              </div>
-                            )}
-                            {calc.casesInFreezer > 0 && (
-                              <div className="text-sm font-bold text-sky-400 bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/30 tabular-nums" data-testid="tile-cases-in-freezer">
-                                +{fmtComma(calc.casesInFreezer)} in Freeze tunnel
-                              </div>
-                            )}
-                          </div>
-                          <div className="w-full h-3.5 rounded-full mt-5 bg-muted/30 border border-border/40 overflow-hidden shadow-inner flex">
-                            <div
-                              className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500"
-                              style={{ width: `${casesPct * 100}%` }}
-                            />
-                            {casesFreezerPct > 0 && (
-                              <div
-                                className="h-full bg-sky-400/40 transition-all duration-500"
-                                style={{ width: `${casesFreezerPct * 100}%` }}
-                              />
-                            )}
-                          </div>
-                          <div className="w-full flex justify-between mt-2 text-xs text-muted-foreground font-medium tabular-nums">
-                            <span>0</span>
-                            <span>{fmtComma(Math.max(0, v.casesNeeded - calc.casesCompleted))} left</span>
-                            <span>{fmtComma(v.casesNeeded)}</span>
-                          </div>
-                        </div>
-                      )}
-                      {(calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
-                        <div className="flex flex-col gap-4">
-                          {calc.paceStatus !== null && (
-                            <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
-                              <div className="flex items-center justify-between gap-2 mb-2">
-                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pace</span>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded border tabular-nums ${
-                                  calc.paceStatus === "behind"
-                                    ? "text-red-400 bg-red-400/10 border-red-400/20"
-                                    : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
-                                }`}>
-                                  {calc.paceStatus === "on-pace" ? "On Pace" : calc.paceStatus === "ahead" ? `${calc.paceDelta} cases ahead` : `${Math.abs(calc.paceDelta)} cases behind`}
-                                </span>
-                              </div>
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-4xl font-black text-foreground tabular-nums tracking-tight">{calc.ppm}</span>
-                                <span className="text-sm text-muted-foreground font-bold uppercase">PPM</span>
-                              </div>
-                              {calc.catchUpPpm !== null && (
-                                <div className="text-xs font-medium text-muted-foreground mt-2">
-                                  Need <strong className="text-amber-500">{calc.catchUpPpm} PPM</strong> to finish on time
-                                </div>
-                              )}
-                              {(() => {
-                                const dtSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                                return dtSec > 0 ? (
-                                  <div className="text-xs font-medium text-muted-foreground mt-1 flex items-center gap-1.5">
-                                    <Clock className="w-3 h-3" />
-                                    {fmtTime(dtSec)} downtime
-                                  </div>
-                                ) : null;
-                              })()}
-                            </div>
-                          )}
-                          {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => {
-                            const projectedFinish = Date.now() + calc.totalTimeSec * 1000;
-                            const driftMs = initialFinishTimestampRef.current > 0
-                              ? projectedFinish - initialFinishTimestampRef.current
-                              : 0;
-                            const driftSec = driftMs / 1000;
-                            const showDrift = Math.abs(driftSec) >= 30;
-                            const ahead = driftSec < 0;
-                            return (
-                              <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
-                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Est. Finish</div>
-                                <div className="flex items-baseline gap-2">
-                                  <span className="text-3xl font-black text-foreground tabular-nums tracking-tight">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
-                                  <div className="text-sm font-medium text-foreground tabular-nums">{fmtTime(calc.adjustedTimeSec)} remaining</div>
-                                  {v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
-                                    <div className="text-xs font-semibold text-foreground/80 tabular-nums" data-testid="text-press-cases-left">
-                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + Freeze tunnel counted done)
-                                    </div>
-                                  )}
-                                  {Number(ve.freezerTime) > 0 && (
-                                    <div className="text-xs font-semibold text-sky-400 tabular-nums" data-testid="text-line-clear-time">
-                                      Freeze tunnel clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)}
-                                    </div>
-                                  )}
-                                  {showDrift && (
-                                    <div className={`text-xs font-bold border px-1.5 py-0.5 rounded tabular-nums ${
-                                      ahead
-                                        ? "text-emerald-400 border-emerald-400/20 bg-emerald-400/10"
-                                        : "text-red-400 border-red-400/20 bg-red-400/10"
-                                    }`}>
-                                      {ahead ? "−" : "+"}{fmtMins(Math.max(1, Math.round(Math.abs(driftSec) / 60)))}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {/* Ended-run banner */}
-                {currentRun?.endedAt && (() => {
-                  const emptyMs = Number(ve.freezerTime) * 60000;
-                  const remainMs = emptyMs > 0
-                    ? Math.max(0, currentRun.endedAt + emptyMs - nowTime.getTime())
-                    : 0;
-                  const draining = remainMs > 0;
-                  const mm = Math.floor(remainMs / 60000);
-                  const ss = Math.floor((remainMs % 60000) / 1000);
-                  const pct = emptyMs > 0 ? Math.max(0, 1 - remainMs / emptyMs) : 1;
-                  return (
-                    <div className="mb-4 rounded-lg border overflow-hidden">
-                      <div className={`flex items-start gap-2.5 px-4 py-3 ${draining ? "bg-amber-950/30 border-amber-700/30" : "bg-emerald-950/40 border-emerald-700/30"}`}>
-                        {draining
-                          ? <Timer className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                          : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />}
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`}>
-                            {draining
-                              ? `Freeze tunnel draining — ${fmtCountdownParts(mm, ss)} remaining`
-                              : emptyMs > 0 ? "Freeze tunnel empty — run complete." : "Run ended."}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} Freeze tunnel time` : ""} — switch to another run to continue.
-                          </p>
-                          {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
-                            <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
-                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                              Die change: <span className="font-bold">{v.dieType}</span> → <span className="font-bold">{nextRunDieType}</span>
-                            </div>
-                          )}
-                          {emptyMs > 0 && (
-                            <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-1000 ${draining ? "bg-amber-500" : "bg-emerald-500"}`}
-                                style={{ width: `${pct * 100}%` }}
-                              />
-                            </div>
-                          )}
-                          {/* Auto-advance to next run */}
-                          {!draining && dayState.runs[dayState.currentIndex + 1] && (
-                            <button
-                              type="button"
-                              onClick={() => switchToRun(dayState.currentIndex + 1)}
-                              className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
-                            >
-                              Switch to {runLabel(dayState.runs[dayState.currentIndex + 1])} →
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Missing-setup nudge — a running run with no line-speed /
-                    case / Freeze tunnel numbers can't compute anything: the count,
-                    timing, and tunnel status all silently sit at 0. Tell the
-                    operator exactly which numbers are missing instead. */}
-                {!currentRun?.endedAt && runStatus === "running" && (() => {
-                  const missing: string[] = [];
-                  if (calc.ppm <= 0) {
-                    if (doughSubTab === "crusts") {
-                      missing.push("Approximate Line Speed");
-                    } else {
-                      if (!(Number(ve.crustsPerCycle) > 0)) missing.push("Crusts Per Cycle");
-                      if (!(Number(ve.cycleSpeed) > 0)) missing.push("Cycle Speed");
-                      if (!(Number(v.speedAdjustment) > 0)) missing.push("Speed Adjustment");
-                    }
-                  }
-                   const summary = computeSummaryStats(v);
-                   if (!summary.productionNeedsAvailable) missing.push("Pizzas Per Case");
-                  const freezerMissing = !(Number(ve.freezerTime) > 0);
-                  if (missing.length === 0 && !freezerMissing) return null;
-                   const frontlineNeedsBlocked = !summary.productionNeedsAvailable;
-                  const headline = frontlineNeedsBlocked
-                    ? "Frontline quantities can't be calculated — Pizzas Per Case is not set"
-                    : missing.length > 0
-                    ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Total line time"] : [])].join(", ")} not set`
-                    : "Line phase status can't show yet — Total line time not set";
-                  const detail = frontlineNeedsBlocked
-                    ? "Open Setup Profiles for this product, enter Pizzas Per Case, and save the setup. Sauce, Frontline, warehouse pulls, and tracking stay unavailable until it is corrected."
-                    : missing.length > 0
-                    ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
-                    : "If this run uses a Freeze tunnel, scroll down and enter Freeze tunnel time (min) under the line settings to see the 3-stage filling/emptying status.";
-                  return (
-                    <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-missing-line-setup">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">{headline}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Warehouse switchover staging — measured at the PRESS (cased
-                    product + Freeze tunnel contents count as done): frontline must be
-                    staged 2 skids before the switchover, packaging 1 skid
-                    before. Short runs (< 2 skids total) show it from the start
-                    and tell warehouse to stage 2+ runs ahead. Mirrors the
-                    notifications in useNotifications. */}
-                {!currentRun?.endedAt && runStatus === "running" && (() => {
-                  const cps = Number(v.casesPerSkid) || 0;
-                  const needed = Number(v.casesNeeded) || 0;
-                  if (calc.ppm <= 0 || cps <= 0 || needed <= 0) return null;
-                  const pressLeft = calc.pressCasesLeft;
-                  if (pressLeft <= 0 || pressLeft > 2 * cps) return null;
-                  const shortRun = needed < 2 * cps;
-                  const packagingStage = pressLeft <= cps;
-                  const skidsLeft = pressLeft / cps;
-                  const names = upcomingRunLabels.slice(0, shortRun ? 3 : 1);
-                  const freezerMin = Number(ve.freezerTime) || 0;
-                  return (
-                    <div className="mb-4 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-warehouse-switchover">
-                      <Truck className="w-4 h-4 shrink-0 mt-0.5 text-violet-400" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">
-                          {shortRun
-                            ? `Warehouse: short run (under 2 skids) — stage frontline + packaging for the next 2+ runs now`
-                            : `Warehouse: ${fmtNum(skidsLeft, 1)} skid${skidsLeft === 1 ? "" : "s"} to switchover — stage ${packagingStage ? "packaging" : "frontline"} for the next run`}
-                        </p>
-                        {!shortRun && packagingStage && (
-                          <p className="text-xs font-semibold text-violet-400/90 mt-0.5" data-testid="text-switchover-packaging-stage">
-                            Under 1 skid left at the press — frontline should already be staged; packaging goes now.
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + Freeze tunnel counted done)
-                          {calc.adjustedTimeSec > 0 ? ` — press stops ~${fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}` : ""}
-                          {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
-                          {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-
-                {/* Die change warning — before run ends */}
-                {(runStatus === "running" || runStatus === "paused") && v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
-                  <div className="mb-4 flex items-start gap-2.5 px-4 py-3 rounded-lg bg-amber-950/30 border border-amber-600/40">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-bold text-amber-400">Die change required for next run</p>
-                      <p className="text-xs text-amber-300/80 mt-0.5">
-                        Current: <span className="font-semibold">{v.dieType}</span>
-                        {" → "}
-                        Next: <span className="font-semibold">{nextRunDieType}</span>
-                        {" — prepare changeover before ending this run."}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-
-                {/* Carry-over surplus feature removed (user request 2026-07-10):
-                    dough crew works ahead of the press on the NEXT run's dough,
-                    so surplus-carry prompts don't match how the floor works.
-                    The `carryOverDone` form field is kept for stored-data/sync
-                    compatibility but is no longer surfaced. */}
-
-                {/* Run Details (moved from Dough tab) — sub-view aware */}
-                {doughSubTab === "crusts" ? (
-                  <div className="rounded-xl border border-border/60 bg-card/60 shadow-md mt-4 overflow-hidden">
-                    <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
-                      <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
-                    </div>
-                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-crust-cases-left">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Total Time Left</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtTime(calc.totalTimeSec)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="cases-on-line-value">{fmtNum(calc.casesOnLine, 0)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtNum(calc.casesOnLastSkid, 0)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2 col-span-2">
-                        <span className="text-xs text-muted-foreground font-medium">Crust Supply</span>
-                        {calc.doughShortCases > 0 ? (
-                          <span className="text-sm font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">SHORT {fmtNum(calc.doughShortCases, 1)} cases</span>
-                        ) : calc.buffer > 0 ? (
-                          <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20">+{fmtNum(calc.buffer, 1)} cases ahead</span>
-                        ) : (
-                          <span className="text-sm font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-border/50">Balanced</span>
-                        )}
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Stacks Per Skid</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtNum(calc.traysPerSkid, 2)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Time Per Stack</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtTime(calc.timePerTraySec)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Time Per Skid</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtTime(calc.timePerSkidSec)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">PPM</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-ppm-crust">{fmtNum(calc.ppm, 1)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-border/60 bg-card/60 shadow-md mt-4 overflow-hidden">
-                    <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
-                      <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
-                    </div>
-                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-dough-cases-left">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="cases-on-line-value">{fmtNum(calc.casesOnLine, 0)}</span>
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2 col-span-2" data-testid="output-dough-status">
-                        <span className="text-xs text-muted-foreground font-medium">Dough Status</span>
-                        {calc.doughShortCases > 0 ? (
-                          <span className="text-sm font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">SHORT {fmtNum(calc.doughShortCases, 1)} cases</span>
-                        ) : calc.buffer > 0 ? (
-                          <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20">+{fmtNum(calc.buffer, 1)} cases ahead</span>
-                        ) : (
-                          <span className="text-sm font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-border/50">Balanced</span>
-                        )}
-                      </div>
-                      <div className="p-3 flex items-center justify-between gap-2 col-span-2">
-                        <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-last-skid-cases">{fmtNum(calc.casesOnLastSkid, 0)}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Temporary adjustments — this-run-only overrides of Setup values
-                    (moved here from the Packaging tab; tile style from the graduated ManagerHub mockup) */}
-                <div className="mt-6 pt-4 border-t border-border/60 space-y-4">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <Settings className="w-4 h-4 text-muted-foreground" />
-                      <h3 className="text-sm font-bold text-foreground">Temporary Adjustments</h3>
-                      {(Number(v.tempFreezerTime) > 0 || Number(v.tempCrustsPerCycle) > 0 || Number(v.tempCycleSpeed) > 0) && (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      data-testid="button-clear-temp-overrides"
-                      onClick={() => {
-                        form.setValue("tempFreezerTime", 0, { shouldDirty: true });
-                        form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
-                        form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
-                      }}
-                      className="text-[10px] font-bold text-amber-500 uppercase tracking-wider bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
-                    >
-                      Clear All
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    {([
-                      { name: "tempFreezerTime" as const, label: "Freeze Tunnel Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
-                      { name: "tempCrustsPerCycle" as const, label: "Crusts/Cycle", setup: Number(v.crustsPerCycle) > 0 ? fmtNum(Number(v.crustsPerCycle), 0) : null, step: "1", testId: "input-temp-crusts-per-cycle" },
-                      { name: "tempCycleSpeed" as const, label: "Cycle Speed", setup: Number(v.cycleSpeed) > 0 ? fmtNum(Number(v.cycleSpeed), 1) : null, step: "0.1", testId: "input-temp-cycle-speed" },
-                    ]).map((t: any) => (
-                      <FormField
-                        key={t.name}
-                        control={form.control}
-                        name={t.name}
-                        render={({ field }) => (
-                          <FormItem className="space-y-0">
-                            <div className={`bg-background/60 border rounded-lg p-3 relative transition-colors focus-within:border-amber-500/50 ${Number(v[t.name]) > 0 ? "border-amber-600/40" : "border-border/60 hover:border-border"}`}>
-                              {Number(v[t.name]) > 0 && (
-                                <div className="absolute top-0 right-0 w-2 h-2 bg-amber-500 rounded-full -mt-1 -mr-1 shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
-                              )}
-                              <div className="flex justify-between items-start mb-1 gap-1">
-                                <FormLabel className="text-[10px] text-muted-foreground uppercase font-bold leading-tight">
-                                  {t.label}{t.setup != null && <span className="normal-case font-medium text-muted-foreground/60"> · setup {t.setup}</span>}
-                                </FormLabel>
-                                <Pencil className="w-3 h-3 text-muted-foreground/50 shrink-0" />
-                              </div>
-                              <FormControl>
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  step={t.step}
-                                  data-testid={t.testId}
-                                  className="w-full bg-transparent border-0 p-0 text-lg font-black text-foreground tabular-nums focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  {...field}
-                                  value={field.value as any}
-                                  onChange={(e: any) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                                  onFocus={(e: any) => e.target.select()}
-                                />
-                              </FormControl>
-                            </div>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    For this run only — leave at 0 to use the Setup value. Setup stays unchanged.
-                  </p>
-                </div>
-
-                {/* Run navigation — prev / dots / next (graduated mockup) */}
-                {dayState.runs.length > 1 && (
-                  <div className="mt-4 rounded-xl border border-border/50 bg-card/60 px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-              {dayState.currentIndex > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => switchToRun(dayState.currentIndex - 1)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
-                  <div className="text-left min-w-0">
-                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Prev</div>
-                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex - 1])}</div>
-                  </div>
-                </button>
-              ) : (
-                <div className="w-16" />
-              )}
-            {dayState.runs.length > 1 && (() => {
-              const total = dayState.runs.length;
-              const cur = dayState.currentIndex;
-              const MAX_DOTS = 7;
-              if (total <= MAX_DOTS) {
-                return (
-                  <div className="flex items-center justify-center gap-1.5 py-1 min-w-0">
-                    {dayState.runs.map((_: any, i: any) => (
-                      <button
-                        key={i}
-                        type="button"
-                        aria-label={`Select run ${i + 1}`}
-                        onClick={() => switchToRun(i)}
-                        className={`rounded-full transition-all shrink-0 min-w-4 min-h-4 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
-                      />
-                    ))}
-                  </div>
-                );
-              }
-              const half = Math.floor(MAX_DOTS / 2);
-              let start = Math.max(0, cur - half);
-              const end = Math.min(total, start + MAX_DOTS);
-              start = Math.max(0, end - MAX_DOTS);
-              return (
-                <div className="flex items-center justify-center gap-1 py-1 min-w-0">
-                  {start > 0 && <span className="text-[9px] text-muted-foreground/50 leading-none">…</span>}
-                  {Array.from({ length: end - start }, (_, j) => start + j).map((i: number) => (
-                    <button
-                      key={i}
-                      type="button"
-                      aria-label={`Select run ${i + 1}`}
-                      onClick={() => switchToRun(i)}
-                      className={`rounded-full transition-all shrink-0 min-w-4 min-h-4 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
-                    />
-                  ))}
-                  {end < total && <span className="text-[9px] text-muted-foreground/50 leading-none">…</span>}
-                </div>
-              );
-            })()}
-              {dayState.currentIndex < dayState.runs.length - 1 ? (
-                <button
-                  type="button"
-                  onClick={() => switchToRun(dayState.currentIndex + 1)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
-                >
-                  <div className="text-right min-w-0">
-                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Next</div>
-                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex + 1])}</div>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                </button>
-              ) : (
-                <div className="w-16" />
-              )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Upcoming runs */}
-                {(() => {
-                  const upcoming = dayState.runs.slice(dayState.currentIndex + 1);
-                  if (upcoming.length === 0) return null;
-                  return (
-                    <div className="mt-4 rounded-xl border border-border/40 bg-card/60 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Upcoming Runs</p>
-                      <div className="space-y-2">
-                        {upcoming.map((r: any, i: any) => {
-                          const idx = dayState.currentIndex + 1 + i;
-                          return (
-                            <button
-                              key={r.id}
-                              type="button"
-                              onClick={() => switchToRun(idx)}
-                              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-muted/30 border border-border/40 hover:bg-muted/50 transition-colors text-left"
-                            >
-                              <span className="text-sm font-medium text-foreground truncate">{runLabel(r)}</span>
-                              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <details className="group rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden mb-4">
-                    <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
-                      <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                        <Settings className="w-3.5 h-3.5" />
-                        Line Setup
-                        {!isSupervisor && <Lock className="w-3.5 h-3.5 text-muted-foreground/50" />}
-                      </span>
-                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
-                    </summary>
-                    <div className={`border-t border-border/40 px-5 pb-5 pt-4 space-y-3${!isSupervisor ? " opacity-60 pointer-events-none" : ""}`}>
-                    <LineSetupRoleGate isSupervisor={!!isSupervisor}>
-                      {/* Dough / Crust toggle */}
-                      <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Line Type</label>
-                        <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDoughSubTab("dough");
-                              const newRuns = dayState.runs.map((r: any, i: any) => i === dayState.currentIndex ? { ...r, subTab: "dough" as const } : r);
-                              const newDs = { ...dayState, runs: newRuns };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              saveProfileSubTab(currentRun?.brand ?? "", currentRun?.flavor ?? "", "dough");
-                            }}
-                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                          >
-                            Dough
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDoughSubTab("crusts");
-                              const newRuns = dayState.runs.map((r: any, i: any) => i === dayState.currentIndex ? { ...r, subTab: "crusts" as const } : r);
-                              const newDs = { ...dayState, runs: newRuns };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              saveProfileSubTab(currentRun?.brand ?? "", currentRun?.flavor ?? "", "crusts");
-                              // Pre-fill crust-run line settings — blank-fill only,
-                              // never overwriting a value the user already changed
-                              // (see dieDefaults.ts). crustsPerCase/Stack stay 0.
-                              const fills = resolveCrustLineDefaults(form.getValues());
-                              for (const [k, val] of Object.entries(fills)) {
-                                form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
-                              }
-                            }}
-                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                          >
-                            Crust
-                          </button>
-                        </div>
-                      </div>
-                      {/* Die type selector */}
-                      <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Die Type</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {dieTypes.map((dt: any) => (
-                            <button
-                              key={dt}
-                              type="button"
-                              onClick={() => {
-                                const selecting = v.dieType !== dt;
-                                form.setValue("dieType", selecting ? dt : "", { shouldDirty: true });
-                                if (selecting) {
-                                  // Pre-fill the line settings for this die size.
-                                  // Switch-aware: fields still blank OR still holding
-                                  // another die's auto-filled defaults are replaced;
-                                  // user-typed values are never overwritten
-                                  // (see dieDefaults.ts).
-                                  const fills = resolveDieLineDefaultsOnSwitch(dt, form.getValues(), dieLineDefaultOverrides);
-                                  for (const [k, val] of Object.entries(fills)) {
-                                    form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
-                                  }
-                                }
-                              }}
-                              className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
-                                v.dieType === dt
-                                  ? "bg-primary text-primary-foreground border-primary"
-                                  : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
-                              }`}
-                            >
-                              {dt}
-                            </button>
-                          ))}
-                          {isSupervisor && (
-                            <button
-                              type="button"
-                              onClick={() => { setManageCategory("dieTypes"); setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
-                              className="px-2 py-1 rounded-md text-xs border border-dashed border-border/50 text-muted-foreground/60 hover:text-muted-foreground hover:border-border transition-colors"
-                              title="Add / remove die types"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {/* Allergen selector — color-coded, food-safety advisory */}
-                      <div>
-                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Allergen</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {allergenOptions([...customAllergens, v.allergen]).map((m: any) => {
-                            const active = normalizeAllergen(v.allergen) === m.value;
-                            return (
-                              <button
-                                key={m.value}
-                                type="button"
-                                onClick={() => form.setValue("allergen", m.value, { shouldDirty: true })}
-                                className="px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors flex items-center gap-1.5"
-                                style={active
-                                  ? { backgroundColor: m.color, color: m.textColor, borderColor: m.color }
-                                  : { borderColor: m.color, color: m.color, backgroundColor: "transparent" }}
-                              >
-                                <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: m.color }} />
-                                {m.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {allergenWarnings.length > 0 && (
-                          <div className="mt-2 flex flex-col gap-1.5">
-                            {allergenWarnings.map((w: any) => (
-                              <div
-                                key={`${w.fromId}-${w.toId}`}
-                                className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border ${
-                                  w.kind === "clean-not-advisable"
-                                    ? "bg-red-950/40 border-red-700/40 text-red-300"
-                                    : "bg-amber-950/30 border-amber-700/40 text-amber-300"
-                                }`}
-                              >
-                                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                                <span>
-                                  <span className="font-bold">{w.fromLabel} → {w.toLabel}:</span>{" "}
-                                  {w.message}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {ruleViolations.length > 0 && (
-                          <div className="mt-2 flex flex-col gap-1.5">
-                            {ruleViolations.map((rv: any) => {
-                              const cl = rv.checklist ?? [];
-                              const hasChecklist = rv.enforcement === "strict" && cl.length > 0;
-                              const cleared = hasChecklist && checklistSatisfied(rv);
-                              return (
-                                <div
-                                  key={rv.ruleId}
-                                  className={`px-2.5 py-1.5 rounded-md text-xs border ${
-                                    rv.enforcement === "strict"
-                                      ? cleared
-                                        ? "bg-green-950/40 border-green-700/40 text-green-300"
-                                        : "bg-red-950/40 border-red-700/40 text-red-300"
-                                      : "bg-amber-950/30 border-amber-700/40 text-amber-300"
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                                    <span>
-                                      <span className="font-bold">
-                                        {rv.name}
-                                        {rv.enforcement === "strict"
-                                          ? hasChecklist
-                                            ? cleared
-                                              ? " (checklist complete)"
-                                              : " (complete checklist to start)"
-                                            : " (blocks start)"
-                                          : ""}
-                                        :
-                                      </span>{" "}
-                                      {rv.message}
-                                    </span>
-                                  </div>
-                                  {hasChecklist && (
-                                    <div className="mt-1.5 ml-5 flex flex-col gap-1">
-                                      {cl.map((step: any, i: any) => {
-                                        const checked = !!checklistAcks[ackKey(rv.ruleId, i)];
-                                        return (
-                                          <label
-                                            key={i}
-                                            className="flex items-start gap-1.5 cursor-pointer"
-                                          >
-                                            <input
-                                              type="checkbox"
-                                              checked={checked}
-                                              onChange={() => toggleAck(rv.ruleId, i)}
-                                              className="mt-0.5"
-                                            />
-                                            <span className={checked ? "line-through opacity-70" : ""}>
-                                              {step}
-                                            </span>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      {doughSubTab === "crusts" ? (
-                        <NumField
-                          control={form.control}
-                          name="approxLineSpeed"
-                          label="Approximate Line Speed (ppm)"
-                          step="0.1"
-                        />
-                      ) : (
-                        <div className="grid grid-cols-2 gap-3">
-                          <NumField
-                            control={form.control}
-                            name="crustsPerCycle"
-                            label="Crusts Per Cycle"
-                            step="1"
-                          />
-                          <NumField
-                            control={form.control}
-                            name="cycleSpeed"
-                            label="Cycle Speed (cyc/min)"
-                          />
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="speedAdjustment"
-                          label="Speed Adjustment"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="freezerTime"
-                          label="Freeze tunnel time (min)"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="preTunnelMin"
-                          label="Pre-tunnel (min)"
-                          step="0.5"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="postTunnelMin"
-                          label="Post-tunnel (min)"
-                          step="0.5"
-                        />
-                      </div>
-                      {(() => {
-                        const total  = Number(v.freezerTime) || 0;
-                        const pre    = Number(v.preTunnelMin)  > 0 ? Number(v.preTunnelMin)  : PRE_POST_TUNNEL_DEFAULT_MIN;
-                        const post   = Number(v.postTunnelMin) > 0 ? Number(v.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                        const tunnel = Math.max(0, total - pre - post);
-                        if (total <= 0) return null;
-                        return (
-                          <p className="text-[11px] text-muted-foreground">
-                            Freeze tunnel set point:{" "}
-                            <span className="font-semibold text-foreground">{fmtNum(tunnel, 1)} min</span>
-                            {" "}({fmtNum(pre, 1)} pre + {fmtNum(tunnel, 1)} tunnel + {fmtNum(post, 1)} post = {fmtNum(total, 1)} total)
-                          </p>
-                        );
-                      })()}
-                      <Separator className="opacity-30" />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="pizzasPerCase"
-                          label="Pizzas Per Case"
-                          step="1"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="casesPerSkid"
-                          label="Cases Per Skid"
-                          step="1"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="casesPerLayer"
-                          label="Extra Case Buffer"
-                          step="1"
-                        />
-                        {doughSubTab === "crusts" ? (
-                          <NumField
-                            control={form.control}
-                            name="crustsPerStack"
-                            label="Crusts Per Stack"
-                            step="1"
-                          />
-                        ) : (
-                          <NumField
-                            control={form.control}
-                            name="doughballsPerTray"
-                            label="Doughballs Per Tray"
-                            step="1"
-                          />
-                        )}
-                      </div>
-                      {doughSubTab === "crusts" ? (
-                        <NumField
-                          control={form.control}
-                          name="crustsPerCase"
-                          label="Crusts Per Case"
-                          step="1"
-                        />
-                      ) : (() => {
-                        const hasRecipe = (v.doughRecipe ?? []).some((r: any) => Number(r.lbs) > 0) && Number(v.targetDoughballWeight) > 0;
-                        return hasRecipe ? null : (
-                          <NumField
-                            control={form.control}
-                            name="doughBatchYield"
-                            label="Dough Batch Yield (doughballs)"
-                            step="1"
-                          />
-                        );
-                      })()}
-                    </LineSetupRoleGate>
-                    </div>
-                </details>
-    </>
-  );
-});
-
-const LivePackagingTabContent = memo(function LivePackagingTabContent() {
-  const hx = useHomeTabCtx();
-  const {
-    autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
-    lastEndedRun, packagingManager, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
-    ve, freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
-    confirmRunSurplus, refreshFreezerSurplus,
-  } = hx;
-
-  const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, linePhases,
-    autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs, packagingDrainActive, coordinationStatus,
-    speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
-    acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
-  } = useLiveRun();
-
-  // ── Auto-tick skid/case counter for the prior run draining through the
-  // Freeze tunnel while the NEXT run is already active on the form.
-  // useAutoTrack only drives the CURRENT form run; once endRun() advances
-  // currentIndex the ended run's counter stops. This effect replays the same
-  // drain-delta logic for the "Freeze Tunnel Draining · Prior Run" panel so cases keep
-  // flowing from "in Freeze tunnel" to "cased" automatically. ───────────────
-  const priorDrainFreezerRef = useRef<{ id: string; cases: number }>({ id: "", cases: -1 });
-  useEffect(() => {
-    if (!autoTrackProgress) return;
-    const nowMs = nowTime.getTime();
-
-    const draining = packagingManager.selectDrainingRun(dayState.runs, currentRunId, nowMs);
-    if (!draining) {
-      priorDrainFreezerRef.current = { id: "", cases: -1 };
-      return;
-    }
-    const curFreezer = packagingManager.casesInDrainingFreezer(draining, nowMs);
-
-    const prev = priorDrainFreezerRef.current;
-    // First tick for this run — just baseline, don't back-fill a catch-up jump.
-    if (prev.id !== draining.run.id) {
-      priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
-      return;
-    }
-    priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
-
-    const exited = Math.max(0, prev.cases - curFreezer);
-    packagingManager.advanceDrainingRun(draining, exited);
-  }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, packagingManager]);
-
-  return (
-    <>
-                <FreezerSurplusPanel
-                  mode="packaging"
-                  ledger={freezerSurplus}
-                  loaded={freezerSurplusLoaded}
-                  busy={freezerSurplusBusy}
-                  error={freezerSurplusError}
-                  completedRun={lastEndedRun}
-                  freezerTimeMin={lastEndedRun
-                    ? Number(withTempOverrides(loadRunValues(lastEndedRun.id)).freezerTime) || 0
-                    : 0}
-                  nowMs={nowTime.getTime()}
-                  getOriginalTarget={(run) => run.id === currentRunId ? Number(v.casesNeeded) || 0 : Number(loadRunValues(run.id).casesNeeded) || 0}
-                  onConfirm={async (run, count, date) => {
-                    await confirmRunSurplus(run, count, date);
-                    await refreshFreezerSurplus();
-                  }}
-                  onAllocate={async () => {}}
-                />
-                <div className="flex flex-col">
-                {/* ─── Finishing — Freeze Tunnel Draining (just-ended run still exiting tunnel) ─── */}
-                {(() => {
-                  // Pick the most-recently-ended run (other than the active one)
-                  // whose Freeze tunnel is STILL draining AND that still has unpackaged
-                  // cases. Filter for eligibility FIRST, then take the latest, so a
-                  // newer ended-but-finished run can't hide an older still-draining one.
-                  // (The active run shows its own emptying bar elsewhere.)
-                  const nowMsT = nowTime.getTime();
-                  const draining = packagingManager.selectDrainingRun(dayState.runs, currentRunId, nowMsT);
-                  if (!draining?.run.endedAt) return null;
-                  const { run: drainingRun, values: dv } = draining;
-                  const fT = Number(dv.freezerTime) || 0;
-                  const freezerMs = fT * 60000;
-                  const remainMs = Math.max(0, drainingRun.endedAt + freezerMs - nowTime.getTime());
-                  const casesPerSkid = Number(dv.casesPerSkid) || 0;
-                  const casesNeeded = Number(dv.casesNeeded) || 0;
-                  const skids = Number(dv.skidsCompleted) || 0;
-                  const casesOnSkid = Number(dv.casesOnCurrentSkid) || 0;
-                  const casesDone = skids * casesPerSkid + casesOnSkid;
-                  const id = drainingRun.id;
-                  const name =
-                    `${drainingRun.brand ?? ""}${drainingRun.flavor ? ` – ${drainingRun.flavor}` : ""}`.trim() ||
-                    "Finished run";
-                  const maxSkids = casesPerSkid > 0 ? Math.floor(casesNeeded / casesPerSkid) : undefined;
-                  const maxCasesOnSkid = casesPerSkid > 0 ? casesPerSkid : undefined;
-                  const pct = Math.min(1 - remainMs / freezerMs, 1);
-                  const mm = Math.floor(remainMs / 60000);
-                  const ss = Math.floor((remainMs % 60000) / 1000);
-                  const skidNearlyFull =
-                    casesPerSkid > 0 && casesOnSkid > 0 &&
-                    casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
-                  return (
-                    <div className="flex mb-4">
-                      <TimelineNode icon={Zap} active />
-                      <div className="flex-1 mt-2">
-                        <div className="bg-amber-950/30 border border-amber-600/30 rounded-xl p-3 relative overflow-hidden flex flex-col gap-3">
-                          <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber-950">
-                            <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${pct * 100}%` }} />
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-0.5">Freeze Tunnel Draining · Prior Run</p>
-                              <p className="text-sm font-semibold text-amber-100 truncate">{name}</p>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-[10px] font-mono font-bold text-amber-500 mb-0.5">
-                                {fmtCountdownParts(mm, ss)} left
-                              </p>
-                              <p className="text-[10px] font-bold uppercase text-amber-200">{fmtNum(casesDone, 0)} / {fmtNum(casesNeeded, 0)} cases</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2 items-end">
-                            <PkgMiniStepper
-                              label="Skids"
-                              value={skids}
-                              max={maxSkids}
-                              onDec={() => updateDrainingRunValues(id, { skidsCompleted: Math.max(0, skids - 1) })}
-                              onInc={() => updateDrainingRunValues(id, { skidsCompleted: skids + 1 })}
-                            />
-                            <PkgMiniStepper
-                              label="Cases on skid"
-                              value={casesOnSkid}
-                              max={maxCasesOnSkid}
-                              onDec={() => updateDrainingRunValues(id, { casesOnCurrentSkid: Math.max(0, casesOnSkid - 1) })}
-                              onInc={() => updateDrainingRunValues(id, { casesOnCurrentSkid: casesOnSkid + 1 })}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.vibrate?.(15);
-                                // A prior-run drain can already have moved cases
-                                // onto the next skid. Completing the skid adds
-                                // one full skid to the total; it must not erase
-                                // those newly arrived cases by resetting the
-                                // next skid's counter.
-                                updateDrainingRunValues(id, {
-                                  skidsCompleted: skids + 1,
-                                  casesOnCurrentSkid: casesOnSkid,
-                                });
-                              }}
-                              className="w-12 h-10 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 rounded-lg flex items-center justify-center active:scale-95 transition-all shrink-0"
-                              title="Skid done — log & reset"
-                              data-testid="btn-draining-skid-done"
-                            >
-                              <CheckCircle2 className="w-5 h-5" />
-                            </button>
-                          </div>
-                          {skidNearlyFull && (
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-600/30 text-amber-400 text-xs font-semibold">
-                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                              Skid nearly full — {casesPerSkid - casesOnSkid} case{casesPerSkid - casesOnSkid !== 1 ? "s" : ""} to go
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-                {/* ─── Line stage (3-phase: filling while running, draining after pause/stop) ─── */}
-                {(() => {
-                  const freezerMin = Number(ve.freezerTime) || 0;
-                  const showFilling = (runStatus === "running" || runStatus === "paused") && freezerMin > 0;
-                  const showEmptying =
-                    freezerMin > 0 && !!lastEndedRun?.endedAt && lastEndedRun.id === currentRunId;
-                  if (!showFilling && !showEmptying) return null;
-                  const nowMs = nowTime.getTime();
-                  // Thin display of the server-adopted context model: it covers the
-                  // current run in every lifecycle state (running / paused / ended),
-                  // falling back locally inside LiveRunContext when offline/lagging.
-                  const phases = linePhases;
-                  const rows = [phases.stage1, phases.stage2, phases.stage3];
-                  const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
-                  if (!anyVisible && !showEmptying) return null;
-                  // A phase can drain only from its persisted pause / end record.
-                  // Completion math remains independent so dough and case tracking
-                  // can finish while the still-running line stays visually stable.
-                  const lifecycleDrainStartedAt = showEmptying
-                    ? lastEndedRun?.endedAt
-                    : runStatus === "paused"
-                    ? currentRun?.pausedAt
-                    : undefined;
-                  const lifecycleDraining = lifecycleDrainStartedAt != null;
-                  // Overall progress: use liveFreezerMin while loading, then the
-                  // persisted lifecycle timestamp while draining.
-                  const totalSecs = freezerMin * 60;
-                  const elapsedSecs = lifecycleDraining
-                    ? Math.min(totalSecs, Math.max(0, (nowMs - lifecycleDrainStartedAt) / 1000))
-                    : liveFreezerMin * 60;
-                  const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
-                  const drainDone = lifecycleDraining && rows.every(r => r.state === "empty");
-                  return (
-                    <div className="flex mb-4">
-                      <TimelineNode icon={Snowflake} active />
-                      <div className="flex-1 mt-2 space-y-2">
-                        <div className={`border rounded-lg p-3 ${drainDone ? "bg-emerald-950/20 border-emerald-700/30" : lifecycleDraining ? "bg-amber-950/20 border-amber-600/30" : "bg-primary/5 border-primary/20"}`}>
-                          <div className="flex justify-between items-end mb-2">
-                            <span className={`text-sm font-semibold uppercase tracking-wider ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary"}`}>
-                              {drainDone ? "Freeze Tunnel Clear" : lifecycleDraining ? "Freeze Tunnel Draining" : "Freeze Tunnel Loading"}
-                            </span>
-                            <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary/80"}`}>
-                              {drainDone ? "✓ Freeze tunnel clear" : `${fmtNum(pct * 100, 0)}%`}
-                            </span>
-                          </div>
-                          <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden mb-2">
-                            <div
-                              className={`h-full rounded-full transition-all duration-1000 ${drainDone ? "bg-emerald-500" : lifecycleDraining ? "bg-amber-500" : "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"}`}
-                              style={{ width: `${pct * 100}%` }}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            {rows.filter(r => r.state !== "empty").map((phase, i) => {
-                              const mm = Math.floor(phase.remainMs / 60000);
-                              const ss = Math.floor((phase.remainMs % 60000) / 1000);
-                              const dotCls = phase.state === "paused" ? "bg-muted-foreground" : phase.state === "active" ? "bg-emerald-500" : phase.state === "draining" ? "bg-amber-400 animate-pulse" : "bg-sky-400 animate-pulse";
-                              const textCls = phase.state === "paused" ? "text-muted-foreground" : phase.state === "active" ? "text-emerald-400" : phase.state === "draining" ? "text-amber-300" : "text-sky-300";
-                              const stateText = phase.state === "filling" ? `filling → ${fmtCountdownParts(mm, ss)}`
-                                : phase.state === "draining" ? (phase.remainMs > 0 ? `draining → ${fmtCountdownParts(mm, ss)}` : "draining")
-                                : phase.state === "resuming" ? `product arriving in ${fmtCountdownParts(mm, ss)}`
-                                : phase.state === "paused" ? "stopped"
-                                : phase.state === "active" ? "flowing" : "";
-                              return (
-                                <div key={i} className="flex items-center gap-2 text-[11px]">
-                                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotCls}`} />
-                                  <span className="text-muted-foreground font-medium">{phase.label}</span>
-                                  <span className={`font-semibold ${textCls}`}>— {stateText}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* ─── Line assembly stage ─── */}
-                <div className="flex mb-4">
-                  <TimelineNode icon={MoveDown} done />
-                  <div className="flex-1 mt-2">
-                    <div className="flex items-center justify-between bg-muted/10 border border-border/40 rounded-lg p-3">
-                      <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Line Assembly</span>
-                      <span className="text-lg font-mono font-bold tabular-nums text-foreground">
-                        {fmtNum(calc.casesOnLine, 0)}{" "}
-                        <span className="text-xs text-muted-foreground font-sans font-normal uppercase tracking-widest">on line</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ─── Active Skid Building (hero) ─── */}
-                <div className="flex">
-                  <TimelineNode icon={Boxes} last active />
-                  <div className="flex-1 mt-2">
-                    <div className="bg-card/60 border border-primary/30 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgba(255,149,0,0.08)] flex flex-col">
-                      <div className="px-4 py-3 flex items-center justify-between bg-primary/5 border-b border-primary/20">
-                        <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Active Skid Building</h3>
-                        {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
-                          <div className="flex items-center gap-2">
-                            {coordinationStatus !== "ready" && (
-                              <span
-                                role="status"
-                                aria-live="polite"
-                                className="text-[9px] font-semibold text-muted-foreground"
-                              >
-                                {coordinationStatus === "waiting" ? "Syncing automatic count…" : "Automatic count paused — waiting for sync"}
-                              </span>
-                            )}
-                            <div className={`w-2 h-2 rounded-full ${autoTrackProgress ? "bg-primary animate-pulse shadow-[0_0_8px_rgba(255,149,0,0.8)]" : "bg-muted-foreground"}`} />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const next = !autoTrackProgress;
-                                setAutoTrackProgress(next);
-                                if (next) {
-                                  autoSuppressUntilRef.current = 0;
-                                  fireAutoTrackNow("all");
-                                }
-                              }}
-                              className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                            >
-                              <Sparkles className="w-3 h-3" /> {autoTrackProgress ? "Auto" : "Manual"}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="p-5 text-center space-y-5">
-                        {(() => {
-                          const casesPerSkid = Number(v.casesPerSkid) || 0;
-                          const casesOnSkid = Number(v.casesOnCurrentSkid) || 0;
-                          const skids = Number(v.skidsCompleted) || 0;
-                          const maxSkids = casesPerSkid > 0 ? Math.floor(v.casesNeeded / casesPerSkid) : undefined;
-                          const totalSkids =
-                            casesPerSkid > 0 && Number(v.casesNeeded) > 0 ? Math.ceil(Number(v.casesNeeded) / casesPerSkid) : 0;
-                          const s = autoTrackSuggestion;
-                          const suppressed = Date.now() < autoSuppressUntilRef.current;
-                          const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                          const onManual = (
-                            nextSkids: number,
-                            nextCases: number,
-                            manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
-                          ) => {
-                            persistManualPackagingProgress(
-                              currentRunId,
-                              nextSkids,
-                              nextCases,
-                              manualOverrideUntil,
-                            );
-                          };
-                          const packagingControls = createPackagingControlAdapter({
-                            skidsCompleted: skids,
-                            casesOnCurrentSkid: casesOnSkid,
-                            casesPerSkid,
-                            applyProgress: (nextSkids, nextCases) => {
-                              onManual(nextSkids, nextCases);
-                              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                            },
-                            reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
-                            vibrate: (durationMs) => navigator.vibrate?.(durationMs),
-                          });
-                          const skidNearlyFull =
-                            casesPerSkid > 0 && casesOnSkid > 0 &&
-                            casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
-                          const skidPct = casesPerSkid > 0 ? Math.min(casesOnSkid / casesPerSkid, 1) : 0;
-                          return (
-                            <>
-                              <ManualOverrideBanner
-                                show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current)}
-                                station="Packaging"
-                                minsLeft={suppressedMinsLeft}
-                                onResume={() => {
-                                  const now = Date.now();
-                                  onManual(skids, casesOnSkid, now);
-                                  autoSuppressUntilRef.current = 0;
-                                  fireAutoTrackNow("case");
-                                }}
-                              />
-
-                              {(() => {
-                                const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
-                                 const caseAutoActive = autoTrackProgress && !!s && !suppressed &&
-                                   (runStatus === "running" || packagingDrainActive);
-                                if (!caseAutoActive || casePeriodSec <= 0) return null;
-                                const nowMs = nowTime.getTime();
-                                const secLeft = tickDueRefs.case.current > 0
-                                  ? Math.min(casePeriodSec, Math.max(0, (tickDueRefs.case.current - nowMs) / 1000))
-                                  : casePeriodSec;
-                                return (
-                                  <div className="flex items-center justify-center">
-                                    <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
-                                      Next case in{" "}
-                                      <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
-                                    </div>
-                                  </div>
-                                );
-                              })()}
-
-                              <div>
-                                <div className="flex justify-center items-end gap-3 font-mono">
-                                  <button
-                                    type="button"
-                                    onClick={packagingControls.decrementSkids}
-                                    className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
-                                    data-testid="btn-dec-skidsCompleted"
-                                  >
-                                    −
-                                  </button>
-                                  <div className="text-[5rem] leading-[1] font-black tabular-nums tracking-tighter text-foreground drop-shadow-md" data-testid="text-skidsCompleted">
-                                    {skids}
-                                    {totalSkids > 0 && (
-                                      <span className="text-[2.5rem] text-muted-foreground font-bold">/{totalSkids}</span>
-                                    )}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => packagingControls.incrementSkids(maxSkids)}
-                                    className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
-                                    data-testid="btn-inc-skidsCompleted"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mt-2">Skids Completed</p>
-                              </div>
-
-                              <div className="bg-background/50 rounded-xl p-4 border border-border/50 shadow-inner">
-                                <div className="flex justify-between items-center mb-3">
-                                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Cases on Skid</span>
-                                  <div className="font-mono text-xl font-bold tabular-nums">
-                                    <span className="text-foreground" data-testid="text-casesOnCurrentSkid">{casesOnSkid}</span>
-                                    <span className="text-muted-foreground">/{casesPerSkid > 0 ? casesPerSkid : "—"}</span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  <button
-                                    type="button"
-                                    onClick={packagingControls.decrementCases}
-                                    className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
-                                    data-testid="btn-dec-casesOnCurrentSkid"
-                                  >
-                                    −
-                                  </button>
-                                  <div className="flex-1 relative h-8 bg-muted/30 rounded-md overflow-hidden border border-border/40">
-                                    <div
-                                      className="absolute inset-y-0 left-0 bg-primary transition-all duration-300 ease-out shadow-[0_0_15px_rgba(255,149,0,0.6)]"
-                                      style={{ width: `${skidPct * 100}%` }}
-                                    />
-                                    {skidNearlyFull && (
-                                      <div className="absolute inset-0 flex items-center justify-center text-primary-foreground font-bold text-[10px] uppercase tracking-widest animate-pulse">
-                                        Nearly Full
-                                      </div>
-                                    )}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={packagingControls.incrementCases}
-                                    className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
-                                    data-testid="btn-inc-casesOnCurrentSkid"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Kept with the manual case/skid controls so phone-sized
-                                  screens explain the next speed-suggestion requirement
-                                  without making staff scroll past the Packaging card. */}
-                              <PackagingSpeedNudgeFeedback
-                                nudge={speedNudge}
-                                status={speedNudgeStatus}
-                                onAccept={() => {
-                                  if (!speedNudge) return;
-                                  const now = Date.now();
-                                  const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
-                                  form.setValue(field, speedNudge.value, { shouldDirty: true });
-                                  markRunValuesUpdated(currentRunId, now);
-                                  hx.lastLocalEditRef.current = now;
-                                  hx.schedulePush(hx.dayStateRef.current, 0);
-                                  acceptPackagingSpeedNudge(now);
-                                }}
-                                onDismiss={() => {
-                                  dismissPackagingSpeedNudge();
-                                }}
-                              />
-
-                              {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.vibrate?.(10);
-                                    onManual(s.skids, s.casesOnSkid);
-                                    form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
-                                    form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
-                                  }}
-                                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-semibold transition-colors"
-                                >
-                                  <Sparkles className="w-3.5 h-3.5" />
-                                  Apply expected — {s.skids} skids · {s.casesOnSkid} cases
-                                </button>
-                              )}
-
-                              {(runStatus === "running" || runStatus === "paused") && (
-                                <button
-                                  type="button"
-                                  onClick={packagingControls.completeSkid}
-                                  className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
-                                  data-testid="btn-skid-done"
-                                >
-                                  <CheckCircle2 className="w-7 h-7" />
-                                  Skid Done
-                                </button>
-                              )}
-
-                              <div className="space-y-2">
-                                <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
-                                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
-                                  {/* Total cases still to PUT ON SKIDS = casesNeeded − casesCompleted.
-                                      Previously used casesLeftToRun which subtracts the ~50 cases already
-                                      in the Freeze tunnel, understating what packaging still has to do. */}
-                                  {(() => {
-                                    const toPackage = Math.max(0, v.casesNeeded - calc.casesCompleted);
-                                    return (
-                                      <span className="text-2xl font-mono font-black tabular-nums text-foreground">
-                                        {casesPerSkid > 0 ? (
-                                          <>
-                                            {fmtNum(Math.floor(toPackage / casesPerSkid), 0)}
-                                            <span className="text-muted-foreground mx-1">/</span>
-                                            {fmtNum(toPackage % casesPerSkid, 0)}
-                                          </>
-                                        ) : (
-                                          fmtNum(toPackage, 0)
-                                        )}
-                                      </span>
-                                    );
-                                  })()}
-                                </div>
-                                <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
-                                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Cases Done</span>
-                                  <span className="text-2xl font-mono font-black tabular-nums text-emerald-400">{fmtNum(calc.casesCompleted, 0)}</span>
-                                </div>
-                                {calc.casesInFreezer > 0 && (
-                                  <div className="bg-sky-950/30 border border-sky-700/40 rounded-xl p-3 flex items-center justify-between">
-                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">In Freeze Tunnel / On Line</span>
-                                    <span className="text-2xl font-mono font-black tabular-nums text-sky-400">{fmtNum(calc.casesInFreezer, 0)}</span>
-                                  </div>
-                                )}
-                                {calc.extraCases > 0 && (
-                                  <div className="bg-emerald-950/30 border border-emerald-700/40 rounded-xl p-3 flex items-center justify-between">
-                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Extra Cases Beyond Target</span>
-                                    <span className="text-2xl font-mono font-black tabular-nums text-emerald-400">+{fmtNum(calc.extraCases, 0)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                </div>
-
-
-                {/* ─── Packaging Config (collapsible) ─── */}
-                <details className="group mt-6 rounded-xl border border-border/40 bg-card/40 overflow-hidden">
-                  <summary className="list-none cursor-pointer px-4 py-3 flex items-center justify-between select-none [&::-webkit-details-marker]:hidden">
-                    <div className="flex items-center gap-2">
-                      <Package className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-bold text-foreground">Packaging Config</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {(() => {
-                        const cartonedVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
-                        const isCartoned = isCartonedValue(cartonedVal);
-                        const isLabeled = cartonedVal === "labeled";
-                        const posLabel = isLabeled ? labelPositionLabel(v.labelPosition as string) : "";
-                        const badgeText = isCartoned
-                          ? "Cartoned"
-                          : isLabeled
-                            ? posLabel ? `Labeled · ${posLabel}` : "Labeled"
-                            : "N/A";
-                        return (
-                          <div className="flex gap-1.5 group-open:hidden">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
-                                isCartoned
-                                  ? "bg-primary/10 text-primary border-primary/20"
-                                  : "bg-muted text-muted-foreground border-border/60"
-                              }`}
-                            >
-                              {badgeText}
-                            </span>
-                            {isCartoned && Number(v.cartonsPerCase) > 0 && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-muted text-muted-foreground">
-                                {fmtNum(Number(v.cartonsPerCase), 0)} / case
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                    </div>
-                  </summary>
-                  <div className="px-4 pb-4 border-t border-border/20 pt-3 bg-card/60">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                      {isCartonedValue(v.cartoned as string) && (
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Cartons/Case</span>
-                          <span className="text-sm font-mono font-bold text-foreground">
-                            {Number(v.cartonsPerCase) > 0 ? fmtNum(Number(v.cartonsPerCase), 0) : "—"}
-                          </span>
-                        </div>
-                      )}
-                      {((v.cartoned as string) ?? "").trim().toLowerCase() === "labeled" && (
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Label Position</span>
-                          <span className="text-sm font-semibold text-foreground capitalize truncate">
-                            {labelPositionLabel(v.labelPosition as string) || "—"}
-                          </span>
-                        </div>
-                      )}
-                      {/* Labels-per-roll readouts — only when Labeled and a value is set. */}
-                      {((v.cartoned as string) ?? "").trim().toLowerCase() === "labeled" && (() => {
-                        const pos = ((v.labelPosition as string) ?? "").trim().toLowerCase();
-                        const single = Number(v.labelsPerRoll) || 0;
-                        const top = Number(v.topLabelsPerRoll) || 0;
-                        const bottom = Number(v.bottomLabelsPerRoll) || 0;
-                        return (
-                          <>
-                            {(pos === "top" || pos === "bottom") && single > 0 && (
-                              <div className="flex flex-col">
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Labels/Roll</span>
-                                <span className="text-sm font-mono font-bold text-foreground">{fmtNum(single, 0)}</span>
-                              </div>
-                            )}
-                            {pos === "both" && top > 0 && (
-                              <div className="flex flex-col">
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Top Labels/Roll</span>
-                                <span className="text-sm font-mono font-bold text-foreground">{fmtNum(top, 0)}</span>
-                              </div>
-                            )}
-                            {pos === "both" && bottom > 0 && (
-                              <div className="flex flex-col">
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Bottom Labels/Roll</span>
-                                <span className="text-sm font-mono font-bold text-foreground">{fmtNum(bottom, 0)}</span>
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                      {PACKAGING_FIELDS.filter((f: any) => f.name !== "cartoned").map((f: any) => {
-                        const val = ((v[f.name] as string) ?? "").trim();
-                        return (
-                          <div key={f.name} className="flex flex-col">
-                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold truncate">{f.label}</span>
-                            <span className="text-sm font-semibold text-foreground capitalize truncate" title={val}>
-                              {val || "—"}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </details>
-    </>
-  );
-});
-
-function BatchMadeRow({
-  label,
-  totalBatches,
-  made,
-  onIncrement,
-  onDecrement,
-  isLive,
-  testId,
-  sub,
-  sauceEffBarrel,
-}: {
-  label: string;
-  totalBatches: number;
-  made: number;
-  onIncrement: () => void;
-  onDecrement: () => void;
-  isLive: boolean;
-  testId?: string;
-  sub?: string;
-  sauceEffBarrel?: number;
-}) {
-  const remaining = Math.max(0, totalBatches - made);
-  const done = remaining === 0 && made > 0;
-  let valueStr: string;
-  if (sauceEffBarrel !== undefined) {
-    const bd = remaining > 0 ? sauceBarrelBreakdown(remaining, sauceEffBarrel) : null;
-    valueStr = done
-      ? "done ✓"
-      : bd
-        ? `${fmtNum(remaining, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
-        : fmtNum(remaining, 2) + " batches";
-  } else {
-    valueStr = done ? "done ✓" : fmtNum(remaining, 2) + " batches";
-  }
-  const highlight = totalBatches > 0 && !done;
-  return (
-    <div className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : done ? "text-emerald-400" : ""}`}>
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex items-start gap-2">
-        {isLive && (totalBatches > 0 || made > 0) && (
-          <div className="flex items-center gap-0.5 mt-0.5 shrink-0">
-            <button
-              type="button"
-              onClick={onDecrement}
-              className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
-              aria-label="Decrease batches made"
-            >−</button>
-            <span className="text-xs font-mono w-5 text-center tabular-nums text-muted-foreground select-none">{made}</span>
-            <button
-              type="button"
-              onClick={onIncrement}
-              className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
-              aria-label="Increase batches made"
-            >+</button>
-          </div>
-        )}
-        <div className="flex flex-col items-end gap-0.5">
-          <span
-            className={`font-mono font-semibold text-sm tabular-nums ${done ? "text-emerald-400" : highlight ? "text-primary text-base" : "text-foreground"}`}
-            data-testid={testId}
-          >
-            {valueStr}
-          </span>
-          {sub && (
-            <span className="text-xs text-muted-foreground font-normal leading-tight">{sub}</span>
-          )}
-          {made > 0 && (
-            <span className="text-xs text-muted-foreground font-normal leading-tight">{made} made so far</span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const LiveSauceTabContent = memo(function LiveSauceTabContent() {
-  const hx = useHomeTabCtx();
-  const {
-    v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
-    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection, setWriteError,
-  } = hx;
-  // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
-  // so it stops growing during a pause — no wall-clock deltas needed downstream.
-  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
-
-  // ── Barrel timer state: backed by module-level store so it survives Radix ──
-  // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
-  // initialisers read the stored value on every mount so switching away and
-  // back restores the barrel count, anchor, and alert latches rather than
-  // resetting them to zero.  All setters write back to the store immediately.
-  const [sauceMade, setSauceMadeRaw] = useState(
-    () => Math.max(0, Number(v.sauceBarrelsMade) || getSauceBarrelEntry(currentRunId).barrelsMade),
-  );
-  const [showSauceBarrelDue, setShowSauceBarrelDueRaw] = useState(
-    () => getSauceBarrelEntry(currentRunId).showBarrelDue,
-  );
-  const [showSauceQuickCheck, setShowSauceQuickCheckRaw] = useState(
-    () => getSauceBarrelEntry(currentRunId).showQuickCheck,
-  );
-  useAutomaticUpdateReloadBlocker(
-    "sauce-production-due-alert",
-    showSauceBarrelDue || showSauceQuickCheck,
-  );
-
-  // Anchor in net-production elapsed seconds when the current barrel started.
-  // 0 means "since run start".  No wall-clock timestamp involved.
-  const lastBarrelNetSecRef = useRef<number>(
-    Math.max(0, Number(v.sauceBarrelAnchorNetSec) || getSauceBarrelEntry(currentRunId).lastBarrelNetSec),
-  );
-  const sauceBarrelDueKeyRef = useRef<string>(
-    getSauceBarrelEntry(currentRunId).barrelDueKey,
-  );
-  const sauceQuickCheckKeyRef = useRef<string>(
-    getSauceBarrelEntry(currentRunId).quickCheckKey,
-  );
-
-  const applyManualSauceProgress = useCallback((
-    nextMade: number,
-    nextAnchor: number,
-    targetCorrectionGeneration?: number,
-  ) => {
-    const made = Math.max(0, Math.floor(nextMade));
-    const anchor = Math.max(0, Math.floor(nextAnchor));
-    const correctionGeneration = targetCorrectionGeneration
-      ?? Math.max(0, Number(form.getValues("sauceBarrelCorrectionGeneration")) || 0) + 1;
-    form.setValue("sauceBarrelsMade", made, { shouldDirty: true });
-    form.setValue("sauceBarrelAnchorNetSec", anchor, { shouldDirty: true });
-    form.setValue("sauceBarrelCorrectionGeneration", correctionGeneration, { shouldDirty: true });
-    mirrorSauceBarrelProgress(currentRunId, { barrelsMade: made, lastBarrelNetSec: anchor });
-    setSauceMadeRaw(made);
-    lastBarrelNetSecRef.current = anchor;
-    const now = Date.now();
-    markRunValuesUpdated(currentRunId, now);
-    lastLocalEditRef.current = now;
-    queueManualCorrection(currentRunId, {
-      sauceBarrelsMade: made, sauceBarrelAnchorNetSec: anchor,
-      sauceBarrelCorrectionGeneration: correctionGeneration,
-    });
-  }, [currentRunId, form, lastLocalEditRef, queueManualCorrection]);
-  const setShowSauceBarrelDue = useCallback(
-    (val: boolean) => {
-      getSauceBarrelEntry(currentRunId).showBarrelDue = val;
-      setShowSauceBarrelDueRaw(val);
-    },
-    [currentRunId],
-  );
-  const setShowSauceQuickCheck = useCallback(
-    (val: boolean) => {
-      getSauceBarrelEntry(currentRunId).showQuickCheck = val;
-      setShowSauceQuickCheckRaw(val);
-    },
-    [currentRunId],
-  );
-  // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
-  const {
-    prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
-  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: 580, sauceBatchSec: 1800 });
-
-  // Canonical progress comes from synchronized run values. Mirror it into the
-  // tab-surviving UI store so automatic advances remain visible across
-  // navigation, reload, run switching, and peer reconciliation.
-  useEffect(() => {
-    const made = Math.max(0, Math.floor(Number(v.sauceBarrelsMade) || 0));
-    const anchor = Math.max(0, Math.floor(Number(v.sauceBarrelAnchorNetSec) || 0));
-    mirrorSauceBarrelProgress(currentRunId, { barrelsMade: made, lastBarrelNetSec: anchor });
-    setSauceMadeRaw(made);
-    lastBarrelNetSecRef.current = anchor;
-  }, [currentRunId, v.sauceBarrelAnchorNetSec, v.sauceBarrelsMade]);
-  // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
-  useEffect(() => {
-    if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
-      if ((Number(v.sauceBarrelsMade) || 0) === 0) {
-        applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
-      }
-    }
-  }, [
-    applyManualSauceProgress,
-    elapsedBatchSec,
-    prep.prepBatchesSauce,
-    prep.prepCarriedOver,
-    runStatus,
-    v.sauceBarrelsMade,
-  ]);
-
-  // ── Sauce barrel nearly-exhausted alert ───────────────────────────────────
-  // Fire when < 15% of barrel time remains (same threshold as 15-min run alert).
-  // Latch per barrel index so re-entering the tab doesn't re-fire the same alert.
-  // Uses elapsedBatchSec (not wall-clock) so paused time is not counted.
-  // Suppressed once pressDone — the line is no longer consuming sauce.
-  useEffect(() => {
-    const depletionSec = calc.sauceDepletionSec;
-    const isActive = runStatus === "running" && !nextRunPrepActive && !calc.pressDone && depletionSec > 0;
-    if (!isActive || !currentRun?.startedAt) return;
-    const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
-    const secLeft = Math.max(0, depletionSec - barrelElapsed);
-    const pctLeft = secLeft / depletionSec;
-    if (pctLeft >= 0.15) return;
-    const key = `${currentRun.id}-${sauceMade}`;
-    if (sauceBarrelDueKeyRef.current === key) return;
-    sauceBarrelDueKeyRef.current = key;
-    getSauceBarrelEntry(currentRunId).barrelDueKey = key;
-    setShowSauceBarrelDue(true);
-    showAppNotification("🍅 Sauce barrel nearly empty", {
-      body: `${v.frontlineRecipeName?.trim() || "Sauce"} — start the next barrel soon.`,
-      icon: "/icons/icon-192.png",
-      tag: `sauce-barrel-${currentRun.id}-${sauceMade}`,
-    });
-  }, [elapsedBatchSec, runStatus, currentRun?.id, currentRun?.startedAt, calc.sauceDepletionSec, calc.pressDone, nextRunPrepActive, sauceMade, v.frontlineRecipeName]);
-
-  // Clear barrel alert as soon as the press is done — sauce consumption has stopped.
-  useEffect(() => {
-    if (calc.pressDone) setShowSauceBarrelDue(false);
-  }, [calc.pressDone]);
-
-  // ── Sauce packaging quick check (same cadence as dough batch alert) ───────
-  // Uses elapsedBatchSec (pause-aware) — does not need currentRun.startedAt.
-  // Suppressed once pressDone — the line has stopped running.
-  useEffect(() => {
-    const batchSec = calc.timePerBatchSec;
-    if (runStatus !== "running" || !currentRun?.startedAt || batchSec <= 0 || nextRunPrepActive || calc.pressDone) return;
-    const batchNum = Math.floor(elapsedBatchSec / batchSec);
-    if (batchNum < 1) return;
-    const key = `${currentRun.id}-${batchNum}`;
-    if (sauceQuickCheckKeyRef.current === key) return;
-    sauceQuickCheckKeyRef.current = key;
-    getSauceBarrelEntry(currentRunId).quickCheckKey = key;
-    setShowSauceQuickCheck(true);
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, elapsedBatchSec, nextRunPrepActive, calc.pressDone, currentRunId]);
-
-  // Clear the quick-check banner when the press is done — checks are irrelevant
-  // once the line has stopped making product.
-  useEffect(() => {
-    if (calc.pressDone) setShowSauceQuickCheck(false);
-  }, [calc.pressDone]);
-
-  const isLive = runStatus === "running" || runStatus === "paused";
-
-  return (
-    <>
-      {/* ── Sauce Prep Section (shown before production starts) ─────────────── */}
-      {runStatus === "pending" && !prep.prepCarriedOver && dayState.runs.every((r: RunMeta) => !r.startedAt) && (
-        <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
-          <div className="h-1 bg-red-400 w-full" />
-          <CardHeader className="pb-2 pt-4 px-5">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Timer className="w-4 h-4" /> Sauce Prep
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-5 pb-5">
-            {!prepActive ? (
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
-                  Press <span className="font-semibold">Start Prep</span> to begin tracking pre-production sauce batches.
-                </p>
-                <Button size="sm" className="w-fit" onClick={startPrep}>
-                  Start Prep
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">
-                    <span className="font-mono font-semibold tabular-nums">{prep.prepBatchesSauce}</span>
-                    <span className="text-muted-foreground"> of 1 batch ready</span>
-                  </span>
-                  {prep.prepBatchesSauce < 1 && (
-                    <Button size="sm" variant="outline" onClick={addPrepBatchSauce}>+1 Batch</Button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Prep elapsed:</span>
-                  <span className="font-mono font-semibold tabular-nums text-foreground">
-                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
-                  </span>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-      {calc.sauceBatches > 0 && (
-        <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
-          <div className="h-1 bg-primary w-full" />
-          <CardHeader className="pb-2 pt-4 px-5">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Droplets className="w-4 h-4" /> Sauce Batches Needed
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-5 pb-5">
-            <p className="text-xs text-muted-foreground mb-4">
-              Based on{" "}
-              <span className="font-mono text-foreground">
-                {fmtNum(Math.max(0, calc.casesLeftToRun), 0)}
-              </span>{" "}
-              cases remaining ×{" "}
-              <span className="font-mono text-foreground">
-                {v.pizzasPerCase}
-              </span>{" "}
-              pizzas/case
-            </p>
-            <BatchMadeRow
-              label={v.frontlineRecipeName?.trim() || "Sauce"}
-              totalBatches={calc.sauceBatches}
-              made={sauceMade}
-              onIncrement={() => {
-                const barrelIndex = Math.max(0, Number(v.sauceBarrelsMade) || 0) + 1;
-                const targetCorrectionGeneration =
-                  Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0) + 1;
-                // Deterministic until this action commits: retries, reloads, or
-                // duplicate taps share one marker, while a decrement advances
-                // the generation so a genuinely remade barrel gets a new one.
-                const manualEventId =
-                  `manual:${targetCorrectionGeneration}:${barrelIndex}`.slice(0, 160);
-                const sauceName = (v.frontlineRecipeName ?? "").trim();
-                const hasSauceRecipe = (v.frontlineRecipe ?? []).some((r: RecipeRow) => Number(r.lbs ?? 0) > 0);
-                const itemKey = hasSauceRecipe
-                  ? "ingredient:Sauce:batches"
-                  : sauceName
-                    ? `ingredient:${sauceName}:lbs`
-                    : "";
-                const barrelQty = hasSauceRecipe ? 1 : calc.sauceEffBarrel;
-                if (itemKey && barrelQty > 0) {
-                  const retryDelays = [0, 1_500, 5_000];
-                  const attempt = (index: number): void => {
-                    window.setTimeout(() => {
-                      void consumeSauceBarrel(
-                        currentRunId,
-                        barrelIndex,
-                        itemKey,
-                        barrelQty,
-                        manualEventId,
-                      )
-                        .then(() => {
-                          applyManualSauceProgress(
-                            barrelIndex,
-                            elapsedBatchSec,
-                            targetCorrectionGeneration,
-                          );
-                          setShowSauceBarrelDue(false);
-                        })
-                        .catch(() => {
-                          setWriteError(
-                            "Couldn't record Sauce barrel usage. Inventory was not advanced; this same barrel is retrying.",
-                          );
-                          if (index + 1 < retryDelays.length) attempt(index + 1);
-                        });
-                    }, retryDelays[index]);
-                  };
-                  attempt(0);
-                } else {
-                  applyManualSauceProgress(barrelIndex, elapsedBatchSec);
-                  setShowSauceBarrelDue(false);
-                }
-              }}
-              onDecrement={() => {
-                applyManualSauceProgress(Math.max(0, sauceMade - 1), elapsedBatchSec);
-                setShowSauceBarrelDue(false);
-              }}
-              isLive={isLive}
-              testId="output-sauce-batches"
-              sauceEffBarrel={calc.sauceEffBarrel}
-            />
-            {/* Sauce barrel countdown TickBar — suppressed during pause,
-                press-done, and next-run prep. When the barrel expires the
-                TickBar is replaced with an actionable prompt so the operator
-                knows to tap + rather than staring at a frozen 0:00. */}
-            {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && calc.sauceDepletionSec > 0 && (() => {
-              // Use pause-aware elapsedBatchSec; lastBarrelNetSecRef is also stored
-              // in net-elapsed coords so the delta is naturally pause-safe.
-              const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
-              const secLeft = Math.max(0, calc.sauceDepletionSec - barrelElapsed);
-              if (secLeft <= 0) {
-                return (
-                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-red-400 font-semibold animate-pulse">
-                    <span>🍅</span>
-                    <span>Barrel time up — tap + to start next barrel &amp; reset timer</span>
-                  </div>
-                );
-              }
-              const pctLeft = calc.sauceDepletionSec > 0 ? secLeft / calc.sauceDepletionSec : 1;
-              const color = pctLeft < 0.15 ? "text-red-400" : "text-blue-400";
-              return (
-                <TickBar
-                  label="Current barrel lasts"
-                  secLeft={secLeft}
-                  periodSec={calc.sauceDepletionSec}
-                  color={color}
-                />
-              );
-            })()}
-            {/* Sauce barrel nearly-exhausted banner */}
-            {showSauceBarrelDue && (
-              <div className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 mt-2 text-xs">
-                <span className="text-red-400 font-semibold">🍅 Start new barrel soon — current barrel nearly empty</span>
-                <button
-                  data-testid="button-dismiss-barrel-alert"
-                  aria-label="Dismiss barrel alert"
-                  className="text-muted-foreground hover:text-foreground ml-2 shrink-0"
-                  onClick={() => setShowSauceBarrelDue(false)}
-                >✕</button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-      {/* Packaging quick check — same widget as the dough tab so the sauce
-          crew can update skid/case counts without switching tabs. */}
-      {(runStatus === "running" || runStatus === "paused" || (runStatus === "ended" && !!autoTrackSuggestion)) && (() => {
-        const hasCps = v.casesPerSkid > 0;
-        const cps = hasCps ? v.casesPerSkid : 0;
-        const packedSkids = Number(v.skidsCompleted) || 0;
-        const packedCasesOnSkid = Number(v.casesOnCurrentSkid) || 0;
-        const packedTotal = packedSkids * cps + packedCasesOnSkid;
-        const skidsTotal = hasCps && v.casesNeeded > 0 ? Math.ceil(v.casesNeeded / cps) : null;
-        const s = autoTrackSuggestion;
-        const suppressed = Date.now() < autoSuppressUntilRef.current;
-        const caseAutoActive = autoTrackProgress && !!s && !suppressed &&
-          (runStatus === "running" || packagingDrainActive);
-        const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
-        const nowMs = nowTime.getTime();
-        const secLeftOf = (dueMs: number, periodSec: number) =>
-          dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
-        const expectedTotal = s ? s.expectedCases : null;
-        const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
-        const packOnPace = packGapCases <= 2;
-        const packBehindSec = packGapCases * casePeriodSec;
-        const packagingControls = createPackagingControlAdapter({
-          skidsCompleted: packedSkids,
-          casesOnCurrentSkid: packedCasesOnSkid,
-          casesPerSkid: cps,
-          applyProgress: (nextSkids, nextCases) => {
-            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
-            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-          },
-          reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
-        });
-        const setPackedTotal = (total: number) => packagingControls.setTotal(total);
-        const bumpSkids = (d: number) => {
-          if (d < 0) packagingControls.decrementSkids();
-          else if (d > 0) packagingControls.incrementSkids();
-        };
-        const bumpCases = (d: number) => {
-          if (d < 0) packagingControls.decrementCases();
-          else if (d > 0) packagingControls.incrementCases();
-        };
-        const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
-        return (
-          <div className={`mb-4 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
-              </p>
-              {hasCps && expectedTotal !== null && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                  packOnPace
-                    ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
-                    : "text-amber-400 border-amber-500/30 bg-amber-950/20"
-                }`}>
-                  {packOnPace ? "On pace" : `Behind ${packGapCases} case${packGapCases !== 1 ? "s" : ""}`}
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
-                <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
-                  <p className="text-xl font-mono font-bold text-foreground tabular-nums">
-                    {packedSkids}
-                    {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
-                  </p>
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
-                </div>
-              </div>
-              <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
-                <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
-                  <p className="text-xl font-mono font-bold text-foreground tabular-nums">
-                    {packedCasesOnSkid}
-                    {hasCps && <span className="text-xs text-muted-foreground font-normal">/{cps}</span>}
-                  </p>
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn} data-testid="btn-inc-packCases">+</button>
-                </div>
-              </div>
-              <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Next case in</p>
-                <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
-                  {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
-                </p>
-              </div>
-            </div>
-            {hasCps && expectedTotal !== null && (
-              <p className="text-[10px] text-muted-foreground mt-2">
-                {packOnPace ? (
-                  <>Packed {packedTotal} cases vs {expectedTotal} expected at line speed — packaging is keeping up.</>
-                ) : (
-                  <>
-                    Packed <span className="text-foreground font-semibold">{packedTotal}</span> cases vs{" "}
-                    <span className="text-foreground font-semibold">{expectedTotal}</span> expected at line speed —
-                    <span className="text-amber-400 font-semibold"> update packed cases or clear the packaging backlog</span>.
-                    That is {fmtMS(packBehindSec)} behind.
-                  </>
-                )}
-              </p>
-            )}
-          </div>
-        );
-      })()}
-      <ReadOnlyRecipeCard
-        title="Sauce Recipe"
-        subtitle={v.frontlineRecipeName?.trim() || undefined}
-        recipe={v.frontlineRecipe ?? []}
-        substitutions={dayState.substitutions ?? []}
-        accent="bg-red-500/70"
-      />
-    </>
-  );
-});
-
-const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
-  const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection } = hx;
-  const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
-
-  // These are canonical run values, not tab-local state: switching Frontline
-  // away, reloading, or adopting another station's progress leaves the made
-  // counter and its net-clock baseline intact.
-  const setManualAppProgress = useCallback((slot: "app1" | "app2" | "app3" | "app4", made: number) => {
-    const madeField = `${slot}BatchesMade` as keyof FormValues;
-    const anchorField = `${slot}BatchAnchorNetSec` as keyof FormValues;
-    const generationField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
-    form.setValue(madeField, Math.max(0, Math.floor(made)) as never, { shouldDirty: true });
-    form.setValue(anchorField, Math.max(0, elapsedBatchSec) as never, { shouldDirty: true });
-    const correctionGeneration = Math.max(0, Number(form.getValues(generationField)) || 0) + 1;
-    form.setValue(
-      generationField,
-      correctionGeneration as never,
-      { shouldDirty: true },
-    );
-    // The shared one-minute correction fence means a due automatic tick cannot
-    // overwrite this new baseline or replay the elapsed interval on resume.
-    autoSuppressUntilRef.current = Date.now() + 60_000;
-    const now = Date.now();
-    markRunValuesUpdated(currentRunId, now);
-    lastLocalEditRef.current = now;
-    queueManualCorrection(currentRunId, {
-      [madeField]: Math.max(0, Math.floor(made)),
-      [anchorField]: Math.max(0, elapsedBatchSec),
-      [generationField]: correctionGeneration,
-    });
-  }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
-
-  const isLive = runStatus === "running" || runStatus === "paused";
-  const frontlineRows = deriveFrontlineNeedRows(v, {
-    ...calc,
-    sauceLbs: Math.max(0, calc.casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase)
-      * v.sauceOzPerPizza / 16 + 30,
-  });
-
-  return (
-    <>
-                <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
-                  <div className="h-1 bg-primary w-full" />
-                  <CardHeader className="pb-2 pt-4 px-5">
-                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <Boxes className="w-4 h-4" /> Batches Needed
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-5 pb-5">
-                    <p className="text-xs text-muted-foreground mb-4">
-                      Based on{" "}
-                      <span className="font-mono text-foreground">
-                        {fmtNum(Math.max(0, calc.casesLeftToRun), 0)}
-                      </span>{" "}
-                      cases ×{" "}
-                      <span className="font-mono text-foreground">
-                        {v.pizzasPerCase}
-                      </span>{" "}
-                      pizzas/case
-                    </p>
-                    {(() => {
-                      return frontlineRows.map((row) => {
-                        const testId = `output-${row.key}-batches`;
-                        if (row.batchProgressField) {
-                          const slot = row.station as "app1" | "app2" | "app3" | "app4";
-                          const made = Math.max(0, Number(v[row.batchProgressField]) || 0);
-                          return (
-                            <BatchMadeRow
-                              key={row.key}
-                              label={row.label}
-                              totalBatches={row.amount}
-                              made={made}
-                              onIncrement={() => setManualAppProgress(slot, made + 1)}
-                              onDecrement={() => setManualAppProgress(slot, made - 1)}
-                              isLive={isLive}
-                              testId={testId}
-                              sub={row.recipeName}
-                            />
-                          );
-                        }
-                        const bd = row.station === "sauce" && row.unit === "batches"
-                          ? sauceBarrelBreakdown(row.amount, calc.sauceEffBarrel)
-                          : null;
-                        return (
-                          <StatRow
-                            key={row.key}
-                            label={row.label}
-                            value={bd
-                              ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
-                              : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`}
-                            testId={testId}
-                            highlight={row.amount > 0}
-                            sub={row.recipeName}
-                          />
-                        );
-                      });
-                    })()}
-                  </CardContent>
-                </Card>
-                {[
-                  { type: v.app1Type, recipe: v.app1CheeseRecipe, name: v.app1CheeseRecipeName },
-                  { type: v.app2Type, recipe: v.app2CheeseRecipe, name: v.app2CheeseRecipeName },
-                  { type: v.app3Type, recipe: v.app3CheeseRecipe, name: v.app3CheeseRecipeName },
-                  { type: v.app4Type, recipe: v.app4CheeseRecipe, name: v.app4CheeseRecipeName },
-                ].map((app: any, i: any) => {
-                  const t = (app.type ?? "").trim();
-                  if (!t) return null;
-                  const lower = t.toLowerCase();
-                  const isMix = lower.includes("mix");
-                  if (lower !== "cheese" && !isMix) return null;
-                  const rows = applyRecipeSubstitutions(
-                    app.recipe ?? [],
-                    dayState.substitutions ?? [],
-                  ).rows.filter(
-                    (r: any) => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
-                  );
-                  if (rows.length === 0) return null;
-                  return (
-                    <ReadOnlyRecipeCard
-                      key={i}
-                      title={`${t} Recipe`}
-                      subtitle={app.name?.trim() || undefined}
-                      recipe={app.recipe ?? []}
-                      substitutions={dayState.substitutions ?? []}
-                      accent={isMix ? "bg-emerald-500/70" : "bg-amber-500/70"}
-                    />
-                  );
-                })}
-    </>
-  );
-});
-
-/**
- * Always-mounted inner component (rendered directly inside LiveRunProvider).
- * Detects the late-run depletion handoff — when the current run's press is done
- * and an unstarted dough run follows — and resets prepPhase exactly once per
- * run so the crew can track next-run batches starting from zero.
- *
- * Lives here (not in LiveDoughTabContent) so the reset fires regardless of
- * which tab is currently visible. The idempotency guard is
- * `dayState.prepPhase.prepHandoffFromRunId === currentRunId`, stored durably in
- * dayState so it survives component remounts and tab switches.
- */
-function LiveRunHandoffGuard() {
-  const { nextRunPrepActive } = useLiveRun();
-  const { currentRunId, dayState, dayStateRef, setDayState, schedulePush } =
-    useHomeTabCtx();
-  useEffect(() => {
-    if (!nextRunPrepActive) return;
-    if (dayState.prepPhase?.prepHandoffFromRunId === currentRunId) return;
-    // First time nextRunPrepActive for this run: reset prep so the crew can log
-    // next-run batches from zero with prepCarriedOver: false (so startRun will
-    // carry them into the next run's batchesReady).
-    const newPrepPhase = {
-      prepStartedAt: Date.now(),
-      prepBatchesDough: 0,
-      prepBatchesSauce: 0,
-      prepCarriedOver: false,
-      prepHandoffFromRunId: currentRunId,
-    };
-    const newDs = { ...dayStateRef.current!, prepPhase: newPrepPhase };
-    saveDayState(newDs, { stampMeta: false });
-    setDayState(newDs);
-    schedulePush(newDs, 0);
-  }, [
-    nextRunPrepActive,
-    currentRunId,
-    dayState.prepPhase?.prepHandoffFromRunId,
-    dayStateRef,
-    setDayState,
-    schedulePush,
-  ]);
-  return null;
-}
-
-const LiveDoughTabContent = memo(function LiveDoughTabContent() {
-  const hx = useHomeTabCtx();
-  const {
-    autoSuppressUntilRef, currentRunId, dayState, dayStateRef, doughSubTab,
-    form, isSupervisor, persistManualPackagingProgress, queueManualCorrection, runStatus, runToTime,
-    schedulePush, setDayState, setRunToTime, v,
-  } = hx;
-
-  const {
-    calc, nowTime, elapsedBatchSec,
-    showBatchDue, setShowBatchDue,
-    autoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs, doughAutoSuppressUntilRef,
-    isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
-    nextRunPrepActive, packagingDrainActive, detectPackagingSpeedDrift,
-  } = useLiveRun();
-
-  // ── Shift prep phase (pre-production batch tracking) ─────────────────────
-  const doughPrepBatchSec = Math.max(30,
-    (Number(v.mixerLowSec) || 330) + (Number(v.mixerHighSec) || 180) + (Number(v.hopperSec) || 70),
-  );
-  const {
-    prep, prepActive, elapsedSec: prepElapsedSec, doughSecLeft, doughBatchNum, startPrep, addPrepBatchDough,
-  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: doughPrepBatchSec, sauceBatchSec: 1800 });
-  const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
-  useAutomaticUpdateReloadBlocker(
-    "dough-production-due-alert",
-    showBatchDue || showPrepBatchDue,
-  );
-  const prevDoughBatchNumRef = useRef(0);
-  useEffect(() => {
-    if (prepActive && doughBatchNum > 0 && doughBatchNum > prevDoughBatchNumRef.current) setShowPrepBatchDue(true);
-    prevDoughBatchNumRef.current = doughBatchNum;
-  }, [doughBatchNum, prepActive]);
-  useEffect(() => { if (runStatus !== "pending") setShowPrepBatchDue(false); }, [runStatus]);
-
-  // Next-run prep handoff reset is handled by LiveRunHandoffGuard (always
-  // mounted inside LiveRunProvider) so it fires regardless of which tab is open.
-
-  return (
-    <>
-      {/* ── Shift Prep Section (shown before production starts) ─────────────────── */}
-      {runStatus === "pending" && !prep.prepCarriedOver && doughSubTab === "dough" && dayState.runs.every((r: RunMeta) => !r.startedAt) && (
-        <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
-          <div className="h-1 bg-amber-500 w-full" />
-          <CardHeader className="pb-2 pt-4 px-5">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-              <Timer className="w-4 h-4" /> Shift Prep
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-5 pb-5">
-            {!prepActive ? (
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
-                  Press <span className="font-semibold">Start Prep</span> to begin tracking pre-production dough batches.
-                </p>
-                <Button size="sm" className="w-fit" onClick={startPrep}>
-                  Start Prep
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Prep elapsed:</span>
-                  <span className="font-mono font-semibold tabular-nums text-foreground">
-                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
-                  </span>
-                </div>
-                {showPrepBatchDue && (
-                  <div className="flex items-center justify-between gap-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs">
-                    <span className="text-amber-600 font-semibold">⚠ Prep batch ready — mark +1 when mixed.</span>
-                    <button className="text-muted-foreground hover:text-foreground ml-2" onClick={() => setShowPrepBatchDue(false)}>✕</button>
-                  </div>
-                )}
-                <TickBar label="Next batch due" secLeft={doughSecLeft} periodSec={doughPrepBatchSec} color="text-amber-500" />
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-sm">
-                    <span className="font-mono font-semibold tabular-nums">{prep.prepBatchesDough}</span>
-                    <span className="text-muted-foreground"> {prep.prepBatchesDough === 1 ? "batch" : "batches"} ready</span>
-                  </span>
-                  <Button size="sm" variant="outline" onClick={addPrepBatchDough}>+1 Batch</Button>
-                </div>
-                {(() => {
-                  const prodTime = getProductionStartTime();
-                  if (!prodTime) return null;
-                  const [h, m] = prodTime.split(":").map(Number);
-                  const target = new Date(nowTime.getTime());
-                  target.setHours(h, m, 0, 0);
-                  const msLeft = target.getTime() - nowTime.getTime();
-                  if (msLeft <= 0) return null;
-                  const minLeft = Math.round(msLeft / 60000);
-                  return <p className="text-xs text-muted-foreground mt-1">Production starts in <span className="font-semibold">{minLeft}m</span></p>;
-                })()}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-                {/* Batch pipeline + measured machine times (dough runs only) */}
-                {doughSubTab === "dough" && (() => {
-                  const safeLow = Math.max(0, Number(v.mixerLowSec) || 0);
-                  const safeHigh = Math.max(0, Number(v.mixerHighSec) || 0);
-                  const safeHopper = Math.max(0, Number(v.hopperSec) || 0);
-                  const spinTotalSec = safeLow + safeHigh;
-                  const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, {
-                    spinSec: spinTotalSec,
-                    hopperSec: safeHopper,
-                  });
-                  const lineBatchSec = calc.ppm > 0 && calc.perBatch > 0 ? (calc.perBatch / calc.ppm) * 60 : 0;
-                  const measured = spinTotalSec > 0 && lineBatchSec > 0;
-                  const supplySec = Math.max(spinTotalSec, safeHopper);
-                  const keepUpMargin = lineBatchSec - supplySec;
-                  const keepsUp = keepUpMargin >= 0;
-                  const running = runStatus === "running" && autoTrackProgress;
-                  const nowMs = nowTime.getTime();
-                  // The mixer spin countdown anchors to auto-track's "+1 batch"
-                  // tick — when times are measured, that tick fires every
-                  // spin-total, so display and counter always agree.
-                  const batchProdDue = tickDueRefs.batchProd.current;
-                  const spinLeft = running && batchProdDue > 0
-                    ? Math.min(timing.batchProductionMs / 1000, Math.max(0, (batchProdDue - nowMs) / 1000))
-                    : null;
-                  const spinElapsed = spinLeft !== null ? Math.max(0, spinTotalSec - spinLeft) : null;
-                  const onLowStage = spinElapsed !== null && spinElapsed < safeLow;
-                  const stageLeft = spinLeft === null || spinElapsed === null
-                    ? null
-                    : onLowStage ? safeLow - spinElapsed : spinLeft;
-                  const hopperProdDue = tickDueRefs.hopperProd.current;
-                  const hopperLeft = running && timing.hopperMs > 0 && hopperProdDue > 0
-                    ? Math.min(timing.hopperMs / 1000, Math.max(0, (hopperProdDue - nowMs) / 1000))
-                    : null;
-                   const suppressedNow = Date.now() < doughAutoSuppressUntilRef.current;
-                   const suppressedMinsLeftNow = suppressedNow ? Math.ceil((doughAutoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                  return (
-                    <>
-                      <ManualOverrideBanner
-                         show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, doughAutoSuppressUntilRef.current)}
-                        station="Dough"
-                        minsLeft={suppressedMinsLeftNow}
-                         onResume={() => { doughAutoSuppressUntilRef.current = 0; fireAutoTrackNow("dough"); }}
-                      />
-                      <div className="rounded-lg border border-border/50 bg-card/60 px-4 py-3 mb-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                              Batch Pipeline · 3 max
-                            </p>
-                            {running && !isDoughTimerPaused && (
-                              <button
-                                type="button"
-                                 onClick={() => pauseDoughTimers()}
-                                className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-amber-400 transition-colors"
-                                title="Pause dough timers"
-                                data-testid="btn-pause-dough-timers"
-                              >
-                                <Pause className="w-2.5 h-2.5" />
-                                Pause
-                              </button>
-                            )}
-                          </div>
-                          {isDoughTimerPaused && (
-                            <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-card/60 border border-amber-500/20 border-l-4 border-l-amber-500 text-[10px] mb-2" data-testid="dough-timers-paused-banner">
-                              <span className="text-amber-400 font-semibold flex items-center gap-1">
-                                <PauseCircle className="w-3 h-3 shrink-0" />
-                                Timers paused
-                              </span>
-                              <button
-                                type="button"
-                                onClick={resumeDoughTimers}
-                                className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0"
-                                data-testid="btn-resume-dough-timers"
-                              >
-                                Resume timers
-                              </button>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
-                              <p className="text-xs font-semibold text-foreground mt-1">Waiting</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">spins when mixer frees</p>
-                            </div>
-                            <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
-                              <p className="text-[10px] uppercase tracking-wider text-primary">2 · Spinning</p>
-                              <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
-                                {isDoughTimerPaused ? "—:—" : spinLeft !== null ? fmtMS(spinLeft) : "—:—"}
-                              </p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">
-                                {isDoughTimerPaused
-                                  ? "timers paused"
-                                  : spinTotalSec <= 0
-                                    ? "enter mixer times below"
-                                    : spinLeft === null
-                                      ? "counts while running"
-                                      : onLowStage
-                                        ? `low speed · ${fmtMS(stageLeft ?? 0)} to high`
-                                        : `high speed · ${fmtMS(stageLeft ?? 0)} left`}
-                              </p>
-                            </div>
-                            <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
-                              <p className="text-[10px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
-                              <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">
-                                {isDoughTimerPaused ? "—:—" : hopperLeft !== null ? fmtMS(hopperLeft) : "—:—"}
-                              </p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">
-                                {isDoughTimerPaused
-                                  ? "timers paused"
-                                  : safeHopper > 0 ? "until batch is all balls" : "enter hopper time below"}
-                              </p>
-                            </div>
-                          </div>
-                          {measured ? (
-                            <>
-                              <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold ${keepsUp ? "text-emerald-400" : "text-amber-400"}`}>
-                                <CheckCircle2 className="w-3 h-3 shrink-0" />
-                                {keepsUp
-                                  ? `Keeping up: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(keepUpMargin)} spare)`
-                                  : `Falling behind: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(-keepUpMargin)} short)`}
-                              </div>
-                              <p className="text-[10px] text-muted-foreground mt-1">
-                                Start prepping the next batch every{" "}
-                                <span className="font-mono text-foreground">{fmtMS(supplySec)}</span> — set by the{" "}
-                                {spinTotalSec >= safeHopper ? "mixer (low + high)" : "hopper"}.
-                              </p>
-                            </>
-                          ) : (
-                            <p className="text-[10px] text-muted-foreground mt-2">
-                              Time your mixer and hopper once, enter the seconds below, and this card shows live spin/hopper
-                              countdowns plus whether the mixer keeps up with the line.
-                            </p>
-                          )}
-                        </div>
-                      <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 mb-3">
-                        <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
-                            <Timer className="w-2.5 h-2.5" /> Machine Times
-                          </p>
-                          <p className="text-[10px] text-muted-foreground font-mono truncate">
-                            {spinTotalSec > 0 || safeHopper > 0
-                              ? `spin ${fmtMS(spinTotalSec)} + hopper ${fmtMS(safeHopper)}`
-                              : "time your mixer & hopper for live timers"}
-                          </p>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <SecondsField control={form.control} name="mixerLowSec" label="Mixer low (sec)" />
-                          <SecondsField control={form.control} name="mixerHighSec" label="Mixer high (sec)" />
-                          <SecondsField control={form.control} name="hopperSec" label="Hopper (sec)" />
-                        </div>
-                      </div>
-                    </>
-                  );
-                })()}
-                {/* What You Need Now — above the steppers, matching the
-                    approved mockup's order */}
-                <DoughRoleGate isSupervisor={!!isSupervisor}>
-                {/* ── Crust run ── */}
-                {doughSubTab === "crusts" && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-                    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-                      <div className="h-1 bg-sky-500 w-full" />
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          What You Need Now
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-muted/20 rounded-lg p-3 text-center">
-                            <p className="text-3xl font-mono font-bold text-sky-400 tabular-nums" data-testid="output-cases-to-open">{fmtNum(calc.casesLeftToOpen, 0)}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">Cases to open</p>
-                          </div>
-                          <div className="bg-muted/20 rounded-lg p-3 text-center">
-                            <p className="text-3xl font-mono font-bold tabular-nums" data-testid="output-stacks-needed">{fmtNum(calc.stacksNeededTotal, 0)}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">Stacks to stage</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-
-                {/* ── Dough run ── */}
-                {doughSubTab === "dough" && (
-                  <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-                  <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
-                    <div className="h-1 bg-primary w-full" />
-                    <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        What You Need Now
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        {(() => {
-                          const traysOnLine = v.traysOnLine ?? 0;
-                          const batchesReady = v.batchesReady ?? 0;
-                          const hasDoughOnHand = traysOnLine > 0 || batchesReady > 0;
-                          const doughOnHandPizzas = traysOnLine * calc.perTray + batchesReady * calc.perBatch;
-                          const onHandBatches = calc.perBatch > 0 ? doughOnHandPizzas / calc.perBatch : 0;
-                          const onHandTrays = calc.perTray > 0 ? doughOnHandPizzas / calc.perTray : 0;
-                          const totalBatches = calc.batchesNeeded + onHandBatches;
-                          const totalTrays = calc.traysNeeded + onHandTrays;
-                          return (
-                            <>
-                              <div className="bg-muted/20 rounded-lg p-3 text-center">
-                                <p className="text-3xl font-mono font-bold text-primary tabular-nums" data-testid="output-batches-needed">{fmtNum(calc.batchesNeeded, 2)}</p>
-                                <p className="text-xs text-muted-foreground mt-0.5">Batches still to mix</p>
-                                {hasDoughOnHand && (
-                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{fmtNum(totalBatches, 2)} total − {fmtNum(onHandBatches, 2)} on hand</p>
-                                )}
-                              </div>
-                              <div className="bg-muted/20 rounded-lg p-3 text-center">
-                                <p className="text-3xl font-mono font-bold tabular-nums" data-testid="output-trays-needed">{fmtNum(calc.traysNeeded, 0)}</p>
-                                <p className="text-xs text-muted-foreground mt-0.5">Trays still needed</p>
-                                {hasDoughOnHand && (
-                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{fmtNum(totalTrays, 0)} total − {fmtNum(onHandTrays, 0)} on hand</p>
-                                )}
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
-                      {v.targetDoughballWeight > 0 && (
-                        <p className="text-xs text-muted-foreground mt-3">
-                          Target ball weight:{" "}
-                          <span data-testid="text-target-ball-weight" className="font-mono font-semibold text-foreground">
-                            {v.targetDoughballWeight % 1 === 0
-                              ? v.targetDoughballWeight.toString()
-                              : v.targetDoughballWeight.toFixed(2)}{" "}oz
-                          </span>
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-                  </>
-                )}
-                </DoughRoleGate>
-                {/* Supply progress steppers (moved from Current Progress) */}
-                <div className="mb-4">
-                  {(() => {
-                    const s = autoTrackSuggestion;
-                    const { trays: suggestedTrays, batches: suggestedBatches } =
-                      suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
-                    const timing = getAutoTrackTiming(
-                      calc.ppm,
-                      v.pizzasPerCase,
-                      calc.perTray,
-                      calc.perBatch,
-                      {
-                        spinSec: Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0),
-                        hopperSec: Math.max(0, Number(v.hopperSec) || 0),
-                      },
-                    );
-                    const onManual = (values: Record<string, number>) => {
-                      const now = Date.now();
-                      if (timing.trayMs > 0) {
-                        doughAutoSuppressUntilRef.current = now + timing.trayMs;
-                        pauseDoughTimers(timing.trayMs);
-                      } else {
-                        // No valid tray cadence means the dough hook cannot
-                        // tick either, so clear any stale timed pause rather
-                        // than inventing a fixed fallback interval.
-                        doughAutoSuppressUntilRef.current = 0;
-                        resumeDoughTimers();
-                      }
-                      markRunValuesUpdated(currentRunId, now);
-                      queueManualCorrection(currentRunId, values);
-                    };
-                    // Stop auto-track TickBars once the press is done — no more
-                    // batches are needed for this run at that point.
-                    const suppressed = Date.now() < doughAutoSuppressUntilRef.current;
-                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
-                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
-                    // ── Live countdowns to each auto counter's next tick ──
-                    const nowMs = nowTime.getTime();
-                    const secLeftOf = (dueMs: number, periodSec: number) =>
-                      dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
-                    const trayPeriodSec = timing.trayMs / 1000;
-                    const trayProductionSec = timing.trayProductionMs / 1000;
-                    const drainQuarterSec = timing.batchConsumptionMs / 1000;
-                    const spinSec = timing.batchProductionMs / 1000;
-                    return (
-                      <>
-                        <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
-                          <div>
-                            <StepperField
-                              control={form.control}
-                              name="traysOnLine"
-                              label={trayAutoActive
-                                ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
-                                : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
-                              suggestion={!trayAutoActive ? suggestedTrays : null}
-                              onSuggest={() => { const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }); }}
-                              onManualChange={(next) => onManual({ traysOnLine: next })}
-                            />
-                            {doughSubTab !== "crusts" && (
-                              <div className="mt-1.5 space-y-1" data-testid="tray-section-capacity-guide">
-                                <p className="text-[10px] text-muted-foreground">
-                                  Physical guide: {DOUGH_TRAY_SECTION_COUNT} sections × {DOUGH_TRAY_SECTION_CAPACITY} trays
-                                  {" "}({DOUGH_TRAY_ADVISORY_TOTAL} total). This aggregate count is not capped.
-                                </p>
-                                {v.traysOnLine > DOUGH_TRAY_ADVISORY_TOTAL && (
-                                  <p
-                                    className="text-[11px] text-amber-400 font-semibold flex items-start gap-1"
-                                    role="status"
-                                    data-testid="tray-section-capacity-warning"
-                                  >
-                                    <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" aria-hidden="true" />
-                                    Above the three-section guide — confirm tray placement; auto-track will keep the full count.
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                            {doughSubTab !== "crusts" && (trayAutoActive && trayPeriodSec > 0 ? (
-                              <>
-                                <TickBar
-                                  label="Line eats 1 tray in"
-                                  secLeft={secLeftOf(tickDueRefs.tray.current, trayPeriodSec)}
-                                  periodSec={trayPeriodSec}
-                                  color="text-orange-400"
-                                />
-                                {calc.traysNeeded > 0 && (
-                                  <TickBar
-                                    label="Press adds 1 tray in"
-                                    secLeft={secLeftOf(tickDueRefs.trayProd.current, trayProductionSec)}
-                                    periodSec={trayProductionSec}
-                                    color="text-emerald-400"
-                                  />
-                                )}
-                              </>
-                            ) : (
-                              <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
-                                <Pause className="w-2.5 h-2.5" /> Timers paused
-                              </p>
-                            ))}
-                          </div>
-                          {doughSubTab !== "crusts" && (
-                            <div>
-                              <StepperField
-                                control={form.control}
-                                name="batchesReady"
-                                label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
-                                max={3}
-                                suggestion={!batchAutoActive ? suggestedBatches : null}
-                              onSuggest={() => { const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }); }}
-                              onManualChange={(next) => onManual({ batchesReady: next })}
-                              />
-                              {v.batchesReady >= 3 && (
-                                <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
-                                  <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
-                                </p>
-                              )}
-                              {batchAutoActive && drainQuarterSec > 0 ? (
-                                <>
-                                  <TickBar
-                                    label="Line uses ¼ batch in"
-                                    secLeft={secLeftOf(tickDueRefs.batch.current, drainQuarterSec)}
-                                    periodSec={drainQuarterSec}
-                                    color="text-orange-400"
-                                  />
-                                  {calc.batchesNeeded > 0 && spinSec > 0 && (
-                                    <TickBar
-                                      label="Mixer finishes +1 in"
-                                      secLeft={secLeftOf(tickDueRefs.batchProd.current, spinSec)}
-                                      periodSec={spinSec}
-                                      color="text-emerald-400"
-                                    />
-                                  )}
-                                </>
-                              ) : (
-                                <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
-                                  <Pause className="w-2.5 h-2.5" /> Timers paused
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Packaging quick check — skids/cases pace without a tab
-                            switch. Crust mode (and missing cases-per-skid) keeps
-                            the plain steppers. */}
-                        {doughSubTab !== "crusts" ? (() => {
-                          const hasCps = v.casesPerSkid > 0;
-                          const cps = hasCps ? v.casesPerSkid : 0;
-                          const packedSkids = Number(v.skidsCompleted) || 0;
-                          const packedCasesOnSkid = Number(v.casesOnCurrentSkid) || 0;
-                          const packedTotal = packedSkids * cps + packedCasesOnSkid;
-                          const skidsTotal = hasCps && v.casesNeeded > 0 ? Math.ceil(v.casesNeeded / cps) : null;
-                          const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
-                          const caseAutoActive = autoTrackProgress && !!s && !suppressed &&
-                            (runStatus === "running" || runStatus === "ended" || packagingDrainActive);
-                          const expectedTotal = s ? s.expectedCases : null;
-                          const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
-                          const packOnPace = packGapCases <= 2;
-                          const packBehindSec = packGapCases * casePeriodSec;
-                          const packagingControls = createPackagingControlAdapter({
-                            skidsCompleted: packedSkids,
-                            casesOnCurrentSkid: packedCasesOnSkid,
-                            casesPerSkid: cps,
-                            applyProgress: (nextSkids, nextCases) => {
-                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
-                              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                            },
-                            reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
-                          });
-                          // No upper cap: manual counts can exceed the planned
-                          // need (run may over-produce). Auto-track still stops
-                          // at casesNeeded on its own.
-                          const setPackedTotal = (total: number) => packagingControls.setTotal(total);
-                          // Without a cases-per-skid setting the two counters
-                          // can't be combined into one total — bump each field
-                          // directly instead (same as the old plain steppers).
-                          const bumpSkids = (d: number) => {
-                            if (d < 0) packagingControls.decrementSkids();
-                            else if (d > 0) packagingControls.incrementSkids();
-                          };
-                          const bumpCases = (d: number) => {
-                            if (d < 0) packagingControls.decrementCases();
-                            else if (d > 0) packagingControls.incrementCases();
-                          };
-                          const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
-                          return (
-                            <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
-                              <div className="flex items-center justify-between mb-2">
-                                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
-                                </p>
-                                {hasCps && expectedTotal !== null && (
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                                    packOnPace
-                                      ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
-                                      : "text-amber-400 border-amber-500/30 bg-amber-950/20"
-                                  }`}>
-                                    {packOnPace ? "On pace" : `Behind ${packGapCases} case${packGapCases !== 1 ? "s" : ""}`}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
-                                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
-                                    <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-skids">
-                                      {packedSkids}
-                                      {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
-                                    </p>
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
-                                  </div>
-                                </div>
-                                <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
-                                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
-                                    <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-cases">
-                                      {packedCasesOnSkid}
-                                      {hasCps && <span className="text-xs text-muted-foreground font-normal">/{cps}</span>}
-                                    </p>
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn} data-testid="btn-inc-packCases">+</button>
-                                  </div>
-                                </div>
-                                <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
-                                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Next case in</p>
-                                  <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
-                                    {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
-                                  </p>
-                                </div>
-                              </div>
-                              {hasCps && expectedTotal !== null && (
-                                <p className="text-[10px] text-muted-foreground mt-2">
-                                  {packOnPace ? (
-                                    <>Packed {packedTotal} cases vs {expectedTotal} expected at line speed — packaging is keeping up.</>
-                                  ) : (
-                                    <>
-                                      Packed <span className="text-foreground font-semibold">{packedTotal}</span> cases vs{" "}
-                                      <span className="text-foreground font-semibold">{expectedTotal}</span> expected at line speed —
-                                      <span className="text-amber-400 font-semibold"> update packed cases or clear the packaging backlog</span>.
-                                      That is {fmtMS(packBehindSec)} of production not boxed yet; dough keeps feeding the line either way.
-                                    </>
-                                  )}
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })() : (
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          <StepperField
-                            control={form.control}
-                            name="skidsCompleted"
-                            label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
-                            suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                            onSuggest={() => { persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={(nextSkids) => { persistManualPackagingProgress(currentRunId, nextSkids, Number(v.casesOnCurrentSkid) || 0); }}
-                          />
-                          <StepperField
-                            control={form.control}
-                            name="casesOnCurrentSkid"
-                            label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
-                            max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
-                            suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                            onSuggest={() => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={(nextCases) => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, nextCases); }}
-                          />
-                        </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-
-
-                {/* Next-run prep handoff card — visible once this run's press is done */}
-                {doughSubTab === "dough" && nextRunPrepActive && (() => {
-                  const nextRunMeta = dayState.runs[dayState.currentIndex + 1];
-                  const nextRunName = nextRunMeta
-                    ? [nextRunMeta.brand, nextRunMeta.flavor].filter(Boolean).join(" – ") || `Run ${dayState.currentIndex + 2}`
-                    : "";
-                  return (
-                    <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-950/30 overflow-hidden">
-                      <div className="px-4 py-3 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <ArrowRight className="w-5 h-5 shrink-0 text-emerald-400" />
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-emerald-400">Prepping for next run</p>
-                            {nextRunName && (
-                              <p className="text-xs text-muted-foreground mt-0.5 truncate">{nextRunName}</p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-4 pb-3 flex items-center justify-between gap-3">
-                        <div className="flex flex-col gap-0.5">
-                          <p className="text-xs text-muted-foreground">Dough batches ready for next run</p>
-                          <p className="text-2xl font-mono font-black tabular-nums text-foreground">
-                            {prep.prepBatchesDough}
-                          </p>
-                        </div>
-                        <Button size="sm" variant="outline" onClick={addPrepBatchDough} className="shrink-0 border-emerald-500/40 text-emerald-400 hover:bg-emerald-950/50">
-                          +1 Batch
-                        </Button>
-                      </div>
-                      <div className="border-t border-emerald-500/20 px-4 py-2">
-                        <TickBar label="Next batch due" secLeft={doughSecLeft} periodSec={doughPrepBatchSec} color="text-emerald-400" />
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Next batch due — merged countdown + start-next-batch card (graduated mockup) */}
-                {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && (() => {
-                  const spinSecCard = getAutoTrackTiming(
-                    calc.ppm,
-                    v.pizzasPerCase,
-                    calc.perTray,
-                    calc.perBatch,
-                    {
-                      spinSec: (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)),
-                      hopperSec: Math.max(0, Number(v.hopperSec) || 0),
-                    },
-                  ).batchProductionMs / 1000;
-                  const dueMs = tickDueRefs.batchProd.current;
-                  const secLeft = spinSecCard > 0 && dueMs > 0
-                    ? Math.min(spinSecCard, Math.max(0, (dueMs - nowTime.getTime()) / 1000))
-                    : null;
-                  return (
-                    <div className={`mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/60"}`}>
-                      <div className="px-4 py-3 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
-                          <div className="min-w-0">
-                            <p className={`text-sm font-bold ${showBatchDue ? "text-orange-400" : "text-foreground"}`}>
-                              {showBatchDue ? "Dough station — start next batch now" : "Dough station — next batch due"}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {showBatchDue ? `Time per batch: ${fmtTime(spinSecCard)}` : "Countdown to the next mixer batch at current pace"}
-                            </p>
-                          </div>
-                        </div>
-                        <span className={`text-xl font-black font-mono tabular-nums shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} data-testid="text-next-batch-countdown">
-                          {secLeft !== null ? fmtMS(secLeft) : "—:—"}
-                        </span>
-                      </div>
-                      {showBatchDue && (
-                        <button
-                          type="button"
-                          data-testid="button-start-next-batch"
-                          onClick={() => setShowBatchDue(false)}
-                          className="w-full bg-amber-600 hover:bg-amber-500 text-black font-black text-sm py-3 flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <Play className="w-4 h-4 fill-current" />
-                          START NEXT BATCH
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
-                {/* Run to Time card — available to all roles */}
-                {doughSubTab === "dough" && (() => {
-                  const target = new Date(nowTime);
-                  const [hrs, mins] = runToTime.split(":").map(Number);
-                  target.setHours(hrs, mins, 0, 0);
-                  if (target <= nowTime) target.setDate(target.getDate() + 1);
-                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
-                  // Measured mixer time (low + high) beats the line-speed guess
-                  // for min/batch when the operator has timed the machines.
-                  const measuredSpinSec = Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0);
-                  const timePerBatchMin = measuredSpinSec > 0 ? measuredSpinSec / 60 : calc.timePerBatchSec / 60;
-                  const onHandBatches = v.batchesReady ?? 0;
-                  const onHandTrays = v.traysOnLine ?? 0;
-                  const hasOnHand = onHandBatches > 0 || onHandTrays > 0;
-                  // Total doughballs the line will consume in the available window
-                  const totalDoughballsNeeded = calc.ppm > 0 ? calc.ppm * minutesAvailable : 0;
-                  // Combine ALL on-hand dough into a single doughball count
-                  const doughOnHand = onHandBatches * calc.perBatch + onHandTrays * calc.perTray;
-                  // Net doughballs still needed after deducting everything on hand
-                  const doughStillNeeded = Math.max(0, totalDoughballsNeeded - doughOnHand);
-                  // Batches to mix — allow partial so the decimal shows a partial batch
-                  const batchesStillToMix = calc.perBatch > 0 ? doughStillNeeded / calc.perBatch : 0;
-                  // Trays those remaining batches will produce
-                  const traysFromBatches = calc.perTray > 0 ? (batchesStillToMix * calc.perBatch) / calc.perTray : 0;
-                  // Total cases the line will run in this window
-                  const casesInWindow = v.pizzasPerCase > 0 ? Math.floor(totalDoughballsNeeded / v.pizzasPerCase) : 0;
-                  const to12hr = (hhmm: string) => {
-                    const [h, m] = hhmm.split(":").map(Number);
-                    const ampm = h >= 12 ? "PM" : "AM";
-                    const h12 = h % 12 || 12;
-                    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
-                  };
-                  const nowLabel = to12hr(
-                    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
-                  );
-                  return (
-                    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mt-0">
-                      <div className="h-1 bg-amber-500 w-full" />
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                          <Clock className="w-3.5 h-3.5" />
-                          Run to Time
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4">
-                        <div className="flex items-center gap-3 mb-3">
-                          <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
-                          <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
-                          <input
-                            type="time"
-                            value={runToTime}
-                            onChange={(e: any) => {
-                              const t = e.target.value;
-                              setRunToTime(t);
-                              const newDs = { ...dayStateRef.current, runToTime: t };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              schedulePush(newDs, 0);
-                            }}
-                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          />
-                          <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(timePerBatchMin, 1)} min/batch</span>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                          <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-amber-400">
-                              {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
-                            </p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-primary">{fmtNum(batchesStillToMix, 2)}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Batches to mix</p>
-                          </div>
-                          {calc.perBatch > 0 && calc.perTray > 0 && (
-                            <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-emerald-400">{Math.ceil(traysFromBatches)}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">Trays to make</p>
-                            </div>
-                          )}
-                          {v.pizzasPerCase > 0 && (
-                            <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-sky-400">{casesInWindow}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">Cases in window</p>
-                            </div>
-                          )}
-                        </div>
-                        {hasOnHand && (
-                          <p className="text-[10px] text-muted-foreground mt-2">
-                            {[
-                              onHandBatches > 0 && `${onHandBatches} batch${onHandBatches !== 1 ? "es" : ""} ready`,
-                              onHandTrays > 0 && `${onHandTrays} tray${onHandTrays !== 1 ? "s" : ""} on line`,
-                            ].filter(Boolean).join(" · ")} already on hand — subtracted from totals
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-
-                {/* Run to Time card — crust mode */}
-                {doughSubTab === "crusts" && (() => {
-                  const target = new Date(nowTime);
-                  const [hrs, mins] = runToTime.split(":").map(Number);
-                  target.setHours(hrs, mins, 0, 0);
-                  if (target <= nowTime) target.setDate(target.getDate() + 1);
-                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
-                  const pizzasByTime = calc.ppm * minutesAvailable;
-                  const casesToOpenByTime = v.crustsPerCase > 0 ? Math.ceil(pizzasByTime / v.crustsPerCase) : 0;
-                  const stacksByTime = calc.perTray > 0 ? Math.ceil(pizzasByTime / calc.perTray) : 0;
-                  const stacksAlreadyOpen = v.traysOnLine ?? 0;
-                  const moreStacksNeeded = Math.max(0, stacksByTime - stacksAlreadyOpen);
-                  const moreCasesNeeded = v.crustsPerCase > 0 && v.crustsPerStack > 0
-                    ? Math.max(0, casesToOpenByTime - Math.floor(stacksAlreadyOpen * v.crustsPerStack / v.crustsPerCase))
-                    : casesToOpenByTime;
-                  const hasAlreadyOpen = stacksAlreadyOpen > 0;
-                  const to12hr = (hhmm: string) => {
-                    const [h, m] = hhmm.split(":").map(Number);
-                    const ampm = h >= 12 ? "PM" : "AM";
-                    const h12 = h % 12 || 12;
-                    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
-                  };
-                  const nowLabel = to12hr(
-                    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
-                  );
-                  return (
-                    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mt-0">
-                      <div className="h-1 bg-sky-500 w-full" />
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                          <Clock className="w-3.5 h-3.5" />
-                          Run to Time
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4">
-                        <div className="flex items-center gap-3 mb-3">
-                          <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
-                          <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
-                          <input
-                            type="time"
-                            value={runToTime}
-                            onChange={(e: any) => {
-                              const t = e.target.value;
-                              setRunToTime(t);
-                              const newDs = { ...dayStateRef.current, runToTime: t };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              schedulePush(newDs, 0);
-                            }}
-                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                          <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-amber-400">
-                              {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
-                            </p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-sky-400">{casesToOpenByTime}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {hasAlreadyOpen ? "Cases total" : "Cases to open"}
-                            </p>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-primary">{stacksByTime}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {hasAlreadyOpen ? "Stacks total" : "Stacks to stage"}
-                            </p>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-emerald-400">{moreStacksNeeded}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">More stacks needed</p>
-                          </div>
-                        </div>
-                        {hasAlreadyOpen && (
-                          <p className="text-[10px] text-muted-foreground mt-2">
-                            {stacksAlreadyOpen} stack{stacksAlreadyOpen !== 1 ? "s" : ""} already open — subtracted from totals
-                            {moreCasesNeeded > 0 && ` · open ${moreCasesNeeded} more case${moreCasesNeeded !== 1 ? "s" : ""}`}
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-
-                {/* Extra Info — trays/skid, trays/batch, batches/skid (graduated mockup) */}
-                {doughSubTab === "dough" && (
-                  <div className="mt-4 rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden">
-                    <div className="bg-muted/30 px-4 py-2.5 border-b border-border/40">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Extra Info</p>
-                    </div>
-                    <div className="grid grid-cols-3 divide-x divide-border/40">
-                      <div className="p-3 text-center">
-                        <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-trays-per-skid">{fmtNum(calc.traysPerSkid, 2)}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Trays / Skid</p>
-                      </div>
-                      <div className="p-3 text-center">
-                        <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-trays-per-batch">{fmtNum(calc.traysPerBatch, 2)}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Trays / Batch</p>
-                      </div>
-                      <div className="p-3 text-center">
-                        <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-batches-per-skid">{fmtNum(calc.batchesPerSkid, 2)}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Batches / Skid</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <RecipeSubstitutionBadge
-                  substitutions={dayState.substitutions ?? []}
-                  recipes={[v.doughRecipe, v.frontlineRecipe, v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe]}
-                  typeValues={[v.app1Type, v.app2Type, v.app3Type, v.app4Type, v.pep1Type, v.pep2Type]}
-                />
-                {doughSubTab === "dough" && (
-                <ReadOnlyRecipeCard
-                  title="Dough Recipe"
-                  subtitle={v.doughRecipeName?.trim() || undefined}
-                  recipe={v.doughRecipe ?? []}
-                  substitutions={dayState.substitutions ?? []}
-                  accent="bg-orange-500/70"
-                  scalable
-                />
-                )}
-    </>
-  );
-});
-
-const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
-  const hx = useHomeTabCtx();
-  const {
-    addDoughIngredient, addDoughRecipeName, addFrontlineIngredient, addFrontlineRecipeName,
-    addIngredientType, addPepType, appendCheese1, appendCheese2,
-    appendCheese3, appendCheese4, appendDough, appendFrontline,
-    applyLearnedBatchLbs, canManageInventory, cheese1Fields, cheese2Fields, commitBatchWeightField,
-    cheese3Fields, cheese4Fields, cheeseNameBrandTags, cheeseNamesForRun, dayState,
-    currentRun, doughFields, doughPoolDrift, doughRecipeNameOptions,
-    doughVariantPick, form, frontlineFields, frontlineRecipeNameOptions,
-    ingredientTypeOptions, isSupervisor, mixNameBrandTags, pep1ShowB,
-    pep2ShowB, pepTypes, promoteFormRecipeToShared, promotingRecipeKind,
-    removeCheese1, removeCheese2, removeCheese3, removeCheese4,
-    removeDough, removeDoughIngredient, removeDoughRecipeName, removeFrontline,
-    removeFrontlineIngredient, removeFrontlineRecipeName, removeIngredientType, removePepType,
-    replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
-    replaceDough, replaceFrontline, saucePoolDrift, sauceWeightsOpen,
-    serverCheeseByName, serverCheeseRowsByName, serverDoughRowsByName, serverDoughTrayByName,
-    serverDoughVariantsByName, serverDoughWeightByName, serverMixNames, serverMixRowsByName,
-    serverSauceRowsByName, setDoughVariantPick, setPep1ShowB, setPep2ShowB,
-    setSauceWeightsOpen, unifiedIngredientUniverse, v,
-  } = hx;
-
-  const { calc } = useLiveRun();
-  return (
-    <>
-                <SetupRecipesRoleGate isSupervisor={!!isSupervisor}>
-                <div className="space-y-5">
-                  <DoughRecipeCard
-                    batchesNeeded={calc.batchesNeeded}
-                    fields={doughFields}
-                    recipe={v.doughRecipe ?? []}
-                    register={form.register}
-                    targetWeight={Number(v.targetDoughballWeight ?? 0)}
-                    doughBatchYield={Number(v.doughBatchYield)}
-                    ingredientOptions={unifiedIngredientUniverse}
-                    onAddIngredient={addDoughIngredient}
-                    onRemoveIngredient={removeDoughIngredient}
-                    onSetIngredient={(idx: any, val: any) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                    onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
-                    onRemove={removeDough}
-                    onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
-                    recipeName={v.doughRecipeName ?? ""}
-                    recipeNameOptions={doughRecipeNameOptions}
-                    onAddRecipeName={addDoughRecipeName}
-                    onRemoveRecipeName={removeDoughRecipeName}
-                    onRecipeNameChange={val => {
-                      form.setValue("doughRecipeName", val, { shouldDirty: true });
-                      // Any recipe change invalidates a pending variant prompt —
-                      // it is re-armed below only if the NEW pick is ambiguous.
-                      setDoughVariantPick(null);
-                      if (val.trim()) {
-                        const key = val.trim().toLowerCase();
-                        const poolRows = serverDoughRowsByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.rows;
-                        if (poolRows) {
-                          // Clone — RHF mutates rows in place, and sharing references
-                          // with the pool map would corrupt the drift comparison.
-                          const rows = poolRows.map((row: any) => ({ ...row }));
-                          form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows);
-                        }
-                        // Weight/per-tray are per-flavor (one dough family, many
-                        // flavor specs) — the pool value only fills a blank field,
-                        // never overwrites the flavor's own value. The family
-                        // recipe's VARIANT list wins over the recipe-level value:
-                        // auto-match by die size (or the only variant), else fall
-                        // back and offer a manual variant pick below.
-                        const variants = serverDoughVariantsByName.get(key) ?? [];
-                        const matched = matchDoughballVariant(variants, { dieType: String(form.getValues("dieType") ?? "") });
-                        const ballOz = matched?.weightOz ?? serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
-                        const weightBlank = !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0);
-                        if (ballOz > 0 && weightBlank) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
-                        const perTray = matched?.perTray ?? serverDoughTrayByName.get(key) ?? 0;
-                        if (perTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
-                        // Manual backup: several variants, none auto-matched and
-                        // the weight was blank — let the operator pick which
-                        // variant this run uses.
-                        if (!matched && variants.length > 1 && weightBlank) {
-                          setDoughVariantPick({ recipeName: val.trim(), variants });
-                        }
-                      }
-                    }}
-                  />
-                  {doughPoolDrift && (
-                    <div className="flex flex-wrap items-center gap-2 -mt-3 px-1 text-xs text-amber-500" data-testid="dough-pool-drift">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span><span className="font-semibold">"{doughPoolDrift.name}"</span> — edited for this run only.</span>
-                      {canManageInventory && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-6 px-2 text-[11px]"
-                          disabled={promotingRecipeKind !== null}
-                          onClick={() => promoteFormRecipeToShared("dough")}
-                          data-testid="button-promote-dough-recipe"
-                        >
-                          {promotingRecipeKind === "dough" ? "Updating…" : "Update shared recipe"}
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  {doughVariantPick && (
-                    <div className="flex flex-col gap-1.5 -mt-3 px-1" data-testid="dough-variant-pick">
-                      <div className="flex items-center gap-2 text-xs text-amber-500">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                        <span><span className="font-semibold">"{doughVariantPick.recipeName}"</span> — pick this run's doughball variant:</span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {doughVariantPick.variants.length > 5 ? (
-                          <select
-                            className="h-8 w-full sm:max-w-xs px-2 rounded bg-muted/40 border border-amber-500/40 text-xs outline-none focus:border-primary/60"
-                            defaultValue=""
-                            data-testid="select-dough-variant"
-                            onChange={e => {
-                              const variant = doughVariantPick.variants.find((x: any) => x.label === e.target.value);
-                              if (!variant) return;
-                              // Blank-fill only — same invariant as the auto path.
-                              if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
-                              if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
-                              setDoughVariantPick(null);
-                            }}
-                          >
-                            <option value="" disabled>Pick a variant…</option>
-                            {doughVariantPick.variants.map((variant: any) => (
-                              <option key={variant.label} value={variant.label}>
-                                {variant.label}
-                                {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
-                                {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          doughVariantPick.variants.map((variant: any) => (
-                            <Button
-                              key={variant.label}
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 px-2 text-[11px]"
-                              data-testid={`button-dough-variant-${variant.label}`}
-                              onClick={() => {
-                                // Blank-fill only — same invariant as the auto path.
-                                if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
-                                if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
-                                setDoughVariantPick(null);
-                              }}
-                            >
-                              {variant.label}
-                              {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
-                              {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
-                            </Button>
-                          ))
-                        )}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-[11px] text-muted-foreground"
-                          onClick={() => setDoughVariantPick(null)}
-                          data-testid="button-dough-variant-dismiss"
-                        >
-                          Not now
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  <Card className="bg-card/60 border-border/50 shadow-md">
-                    <button
-                      type="button"
-                      onClick={() => setSauceWeightsOpen((o: any) => !o)}
-                      className="w-full text-left"
-                    >
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                          Sauce & Applicator Weights
-                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${sauceWeightsOpen ? "rotate-180" : ""}`} />
-                        </CardTitle>
-                      </CardHeader>
-                    </button>
-                    {sauceWeightsOpen && <CardContent className="px-5 pb-5 space-y-4">
-                      <TypeDropdown
-                        label="Sauce"
-                        value={v.frontlineRecipeName}
-                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; const rows = poolRows?.map((row: any) => ({ ...row })); if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } if (!(rows ?? []).some((r: any) => Number(r.lbs) > 0)) { applyLearnedBatchLbs(val, "sauceBarrelLbs"); } } }}
-                        options={frontlineRecipeNameOptions}
-                        onAddOption={addFrontlineRecipeName}
-                        onRemoveOption={removeFrontlineRecipeName}
-                        allowClear
-                      />
-                      {v.frontlineRecipeName.trim() && (() => {
-                        const hasRecipe = (v.frontlineRecipe ?? []).some((r: any) => Number(r.lbs) > 0);
-                        return (
-                          <div className={hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField
-                              control={form.control}
-                              name="sauceOzPerPizza"
-                              label="Oz Per Pizza"
-                            />
-                            {!hasRecipe && (
-                              <NumField
-                                control={form.control}
-                                name="sauceBarrelLbs"
-                                label="Barrel Weight (lbs)"
-                                onCommit={(lbs) => commitBatchWeightField(v.frontlineRecipeName, lbs)}
-                              />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      {v.frontlineRecipeName.trim() && (
-                        <FrontlineRecipeCard
-                          embedded
-                          fields={frontlineFields}
-                          recipe={v.frontlineRecipe ?? []}
-                          register={form.register}
-                          ingredientOptions={unifiedIngredientUniverse}
-                          onAddIngredient={addFrontlineIngredient}
-                          onRemoveIngredient={removeFrontlineIngredient}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
-                          onRemove={removeFrontline}
-                          recipeName={v.frontlineRecipeName ?? ""}
-                          recipeNameOptions={frontlineRecipeNameOptions}
-                          onAddRecipeName={addFrontlineRecipeName}
-                          onRemoveRecipeName={removeFrontlineRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("frontlineRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()];
-                              const rows = poolRows?.map((row: any) => ({ ...row }));
-                              if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
-                            }
-                          }}
-                        />
-                      )}
-                      {saucePoolDrift && (
-                        <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-amber-500" data-testid="sauce-pool-drift">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span><span className="font-semibold">"{saucePoolDrift.name}"</span> — edited for this run only.</span>
-                          {canManageInventory && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[11px]"
-                              disabled={promotingRecipeKind !== null}
-                              onClick={() => promoteFormRecipeToShared("sauce")}
-                              data-testid="button-promote-sauce-recipe"
-                            >
-                              {promotingRecipeKind === "sauce" ? "Updating…" : "Update shared recipe"}
-                            </Button>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="border-t border-border/60" aria-hidden="true" />
-                      <TypeDropdown
-                        label="Applicator 1"
-                        value={v.app1Type}
-                        onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app1BatchLbs"); } }}
-                        options={ingredientTypeOptions}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
-                        allowClear
-                      />
-                      {v.app1Type.trim() && (() => {
-                        const isMix = v.app1Type.trim().toLowerCase().includes("mix");
-                        const hasRecipe = !isMix && (v.app1CheeseRecipe ?? []).some((r: any) => Number(r.lbs) > 0);
-                        return (
-                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField control={form.control} name="app1OzPerPizza" label="Oz Per Pizza" />
-                            {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app1BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app1Type, lbs)} />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <PerRunMixSlotBadge
-                        appType={v.app1Type}
-                        rows={v.app1CheeseRecipe ?? []}
-                        ozPerPizza={Number(v.app1OzPerPizza) || 0}
-                        onResolveByRowSum={(newOz) => form.setValue("app1OzPerPizza", newOz, { shouldDirty: true })}
-                        onResolveByTotal={(scaledRows) => { form.setValue("app1CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese1(scaledRows as any); }}
-                      />
-                      {v.app1Type.trim().toLowerCase() === "cheese" && (
-                        <CheesePickCard
-                          embedded
-                          label={v.app1Type || "Applicator 1"}
-                          batches={calc.app1Batches}
-                          ozPerPizza={v.app1OzPerPizza}
-                          recipe={v.app1CheeseRecipe ?? []}
-                          substitutions={dayState.substitutions ?? []}
-                          recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
-                          optionLabels={cheeseNameBrandTags}
-                          recipeMissing={(v.app1CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app1CheeseRecipeName ?? "").trim().toLowerCase())}
-                          shredderSetting={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
-                          cellulose={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
-                          poolComponents={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.components}
-                          onRecipeNameChange={val => {
-                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
-                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
-                            const copy = (rows ?? []).map((r: any) => ({ ...r }));
-                            form.setValue("app1CheeseRecipe", copy, { shouldDirty: true });
-                            replaceCheese1(copy);
-                          }}
-                        />
-                      )}
-                      {v.app1Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app1Type || "Applicator 1"}
-                          totalRunLbs={calc.app1Lbs}
-                          fields={cheese1Fields}
-                          recipe={v.app1CheeseRecipe ?? []}
-                          fieldPrefix="app1CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese1}
-                          recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={serverMixNames}
-                          recipeNameLabels={mixNameBrandTags}
-                          onRecipeNameChange={val => {
-                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
-                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map((r: any) => ({ ...r })); form.setValue("app1CheeseRecipe", rows, { shouldDirty: true }); replaceCheese1(rows); }
-                          }}
-                        />
-                      )}
-
-                      <div className="border-t border-border/60" aria-hidden="true" />
-                      <TypeDropdown
-                        label="Applicator 2"
-                        value={v.app2Type}
-                        onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app2BatchLbs"); } }}
-                        options={ingredientTypeOptions}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
-                        allowClear
-                      />
-                      {v.app2Type.trim() && (() => {
-                        const isMix = v.app2Type.trim().toLowerCase().includes("mix");
-                        const hasRecipe = !isMix && (v.app2CheeseRecipe ?? []).some((r: any) => Number(r.lbs) > 0);
-                        return (
-                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField control={form.control} name="app2OzPerPizza" label="Oz Per Pizza" />
-                            {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app2BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app2Type, lbs)} />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <PerRunMixSlotBadge
-                        appType={v.app2Type}
-                        rows={v.app2CheeseRecipe ?? []}
-                        ozPerPizza={Number(v.app2OzPerPizza) || 0}
-                        onResolveByRowSum={(newOz) => form.setValue("app2OzPerPizza", newOz, { shouldDirty: true })}
-                        onResolveByTotal={(scaledRows) => { form.setValue("app2CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese2(scaledRows as any); }}
-                      />
-                      {v.app2Type.trim().toLowerCase() === "cheese" && (
-                        <CheesePickCard
-                          embedded
-                          label={v.app2Type || "Applicator 2"}
-                          batches={calc.app2Batches}
-                          ozPerPizza={v.app2OzPerPizza}
-                          recipe={v.app2CheeseRecipe ?? []}
-                          substitutions={dayState.substitutions ?? []}
-                          recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
-                          optionLabels={cheeseNameBrandTags}
-                          recipeMissing={(v.app2CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app2CheeseRecipeName ?? "").trim().toLowerCase())}
-                          shredderSetting={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
-                          cellulose={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
-                          poolComponents={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.components}
-                          onRecipeNameChange={val => {
-                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
-                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
-                            const copy = (rows ?? []).map((r: any) => ({ ...r }));
-                            form.setValue("app2CheeseRecipe", copy, { shouldDirty: true });
-                            replaceCheese2(copy);
-                          }}
-                        />
-                      )}
-                      {v.app2Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app2Type || "Applicator 2"}
-                          totalRunLbs={calc.app2Lbs}
-                          fields={cheese2Fields}
-                          recipe={v.app2CheeseRecipe ?? []}
-                          fieldPrefix="app2CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese2}
-                          recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={serverMixNames}
-                          recipeNameLabels={mixNameBrandTags}
-                          onRecipeNameChange={val => {
-                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
-                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map((r: any) => ({ ...r })); form.setValue("app2CheeseRecipe", rows, { shouldDirty: true }); replaceCheese2(rows); }
-                          }}
-                        />
-                      )}
-
-                      <div className="border-t border-border/60" aria-hidden="true" />
-                      <TypeDropdown
-                        label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
-                        value={v.pep1Type}
-                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep1BatchLbs"); } if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); } }}
-                        options={pepTypes}
-                        onAddOption={addPepType}
-                        onRemoveOption={removePepType}
-                        allowClear
-                      />
-                      <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={v.pep1Combined === true}
-                          onChange={e => form.setValue("pep1Combined", e.target.checked, { shouldDirty: true })}
-                          className="accent-primary"
-                        />
-                        <span>Run this pep through both applicators 1 &amp; 2 (doubles stick buffer)</span>
-                      </label>
-                      {(v.pep1Type ?? "").trim() && (
-                        <>
-                          <NumField
-                            control={form.control}
-                            name="pep1Sticks"
-                            label="Number of Sticks"
-                          />
-                          {DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? (
-                            <NumField
-                              control={form.control}
-                              name="pep1OzPerPizza"
-                              label="Oz Per Pizza"
-                            />
-                          ) : (
-                            <div className="grid grid-cols-2 gap-3">
-                              <NumField
-                                control={form.control}
-                                name="pep1OzPerPizza"
-                                label="Oz Per Pizza"
-                              />
-                              <NumField
-                                control={form.control}
-                                name="pep1BatchLbs"
-                                label="Batch Weight (lbs)"
-                                onCommit={(lbs) => commitBatchWeightField(v.pep1Type, lbs)}
-                              />
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {/* Optional additional pep type on applicator 1 */}
-                      {(pep1ShowB || (v.pep1TypeB ?? "").trim()) ? (
-                        <div className="rounded-md border border-border/50 p-3 space-y-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-semibold text-muted-foreground">Additional Pep Type (Applicator 1)</span>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
-                              onClick={() => { setPep1ShowB(false); form.setValue("pep1TypeB", "", { shouldDirty: true }); form.setValue("pep1SticksB", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizzaB", 0, { shouldDirty: true }); form.setValue("pep1BatchLbsB", 0, { shouldDirty: true }); }}
-                              aria-label="Remove additional pep type"
-                            >×</button>
-                          </div>
-                          <TypeDropdown
-                            label="Pep Type"
-                            value={v.pep1TypeB ?? ""}
-                            onChange={val => { form.setValue("pep1TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbsB", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep1BatchLbsB"); } if (!val) { form.setValue("pep1SticksB", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizzaB", 0, { shouldDirty: true }); } }}
-                            options={pepTypes}
-                            onAddOption={addPepType}
-                            onRemoveOption={removePepType}
-                            allowClear
-                          />
-                          {(v.pep1TypeB ?? "").trim() && (
-                            <>
-                              <NumField control={form.control} name="pep1SticksB" label="Number of Sticks" />
-                              {DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? (
-                                <NumField control={form.control} name="pep1OzPerPizzaB" label="Oz Per Pizza" />
-                              ) : (
-                                <div className="grid grid-cols-2 gap-3">
-                                  <NumField control={form.control} name="pep1OzPerPizzaB" label="Oz Per Pizza" />
-                                  <NumField control={form.control} name="pep1BatchLbsB" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.pep1TypeB ?? "", lbs)} />
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-sm text-primary hover:underline self-start"
-                          onClick={() => setPep1ShowB(true)}
-                        >+ Add pep type</button>
-                      )}
-
-                      {v.pep1Combined !== true && (
-                        <>
-                          <div className="border-t border-border/60" aria-hidden="true" />
-                          <TypeDropdown
-                            label="Pep Applicator 2"
-                            value={v.pep2Type}
-                            onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep2BatchLbs"); } if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); } }}
-                            options={pepTypes}
-                            onAddOption={addPepType}
-                            onRemoveOption={removePepType}
-                            allowClear
-                          />
-                          {(v.pep2Type ?? "").trim() && (
-                            <>
-                              <NumField
-                                control={form.control}
-                                name="pep2Sticks"
-                                label="Number of Sticks"
-                              />
-                              {DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? (
-                                <NumField
-                                  control={form.control}
-                                  name="pep2OzPerPizza"
-                                  label="Oz Per Pizza"
-                                />
-                              ) : (
-                                <div className="grid grid-cols-2 gap-3">
-                                  <NumField
-                                    control={form.control}
-                                    name="pep2OzPerPizza"
-                                    label="Oz Per Pizza"
-                                  />
-                                  <NumField
-                                    control={form.control}
-                                    name="pep2BatchLbs"
-                                    label="Batch Weight (lbs)"
-                                    onCommit={(lbs) => commitBatchWeightField(v.pep2Type, lbs)}
-                                  />
-                                </div>
-                              )}
-                            </>
-                          )}
-
-                          {/* Optional additional pep type on applicator 2 */}
-                          {(pep2ShowB || (v.pep2TypeB ?? "").trim()) ? (
-                            <div className="rounded-md border border-border/50 p-3 space-y-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-semibold text-muted-foreground">Additional Pep Type (Applicator 2)</span>
-                                <button
-                                  type="button"
-                                  className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
-                                  onClick={() => { setPep2ShowB(false); form.setValue("pep2TypeB", "", { shouldDirty: true }); form.setValue("pep2SticksB", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizzaB", 0, { shouldDirty: true }); form.setValue("pep2BatchLbsB", 0, { shouldDirty: true }); }}
-                                  aria-label="Remove additional pep type"
-                                >×</button>
-                              </div>
-                              <TypeDropdown
-                                label="Pep Type"
-                                value={v.pep2TypeB ?? ""}
-                                onChange={val => { form.setValue("pep2TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbsB", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep2BatchLbsB"); } if (!val) { form.setValue("pep2SticksB", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizzaB", 0, { shouldDirty: true }); } }}
-                                options={pepTypes}
-                                onAddOption={addPepType}
-                                onRemoveOption={removePepType}
-                                allowClear
-                              />
-                              {(v.pep2TypeB ?? "").trim() && (
-                                <>
-                                  <NumField control={form.control} name="pep2SticksB" label="Number of Sticks" />
-                                  {DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? (
-                                    <NumField control={form.control} name="pep2OzPerPizzaB" label="Oz Per Pizza" />
-                                  ) : (
-                                    <div className="grid grid-cols-2 gap-3">
-                                      <NumField control={form.control} name="pep2OzPerPizzaB" label="Oz Per Pizza" />
-                                      <NumField control={form.control} name="pep2BatchLbsB" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.pep2TypeB ?? "", lbs)} />
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              className="text-sm text-primary hover:underline self-start"
-                              onClick={() => setPep2ShowB(true)}
-                            >+ Add pep type</button>
-                          )}
-                        </>
-                      )}
-
-                      <div className="border-t border-border/60" aria-hidden="true" />
-                      <TypeDropdown
-                        label="Applicator 3"
-                        value={v.app3Type}
-                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app3BatchLbs"); } }}
-                        options={ingredientTypeOptions}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
-                        allowClear
-                      />
-                      {v.app3Type.trim() && (() => {
-                        const isMix = v.app3Type.trim().toLowerCase().includes("mix");
-                        const hasRecipe = !isMix && (v.app3CheeseRecipe ?? []).some((r: any) => Number(r.lbs) > 0);
-                        return (
-                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
-                            {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app3Type, lbs)} />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <PerRunMixSlotBadge
-                        appType={v.app3Type}
-                        rows={v.app3CheeseRecipe ?? []}
-                        ozPerPizza={Number(v.app3OzPerPizza) || 0}
-                        onResolveByRowSum={(newOz) => form.setValue("app3OzPerPizza", newOz, { shouldDirty: true })}
-                        onResolveByTotal={(scaledRows) => { form.setValue("app3CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese3(scaledRows as any); }}
-                      />
-                      {v.app3Type.trim().toLowerCase() === "cheese" && (
-                        <CheesePickCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          batches={calc.app3Batches}
-                          ozPerPizza={v.app3OzPerPizza}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          substitutions={dayState.substitutions ?? []}
-                          recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
-                          optionLabels={cheeseNameBrandTags}
-                          recipeMissing={(v.app3CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app3CheeseRecipeName ?? "").trim().toLowerCase())}
-                          shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
-                          cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
-                          poolComponents={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.components}
-                          onRecipeNameChange={val => {
-                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
-                            const copy = (rows ?? []).map((r: any) => ({ ...r }));
-                            form.setValue("app3CheeseRecipe", copy, { shouldDirty: true });
-                            replaceCheese3(copy);
-                          }}
-                        />
-                      )}
-                      {v.app3Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          totalRunLbs={calc.app3Lbs}
-                          fields={cheese3Fields}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          fieldPrefix="app3CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese3}
-                          recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={serverMixNames}
-                          recipeNameLabels={mixNameBrandTags}
-                          onRecipeNameChange={val => {
-                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map((r: any) => ({ ...r })); form.setValue("app3CheeseRecipe", rows, { shouldDirty: true }); replaceCheese3(rows); }
-                          }}
-                        />
-                      )}
-
-                      <div className="border-t border-border/60" aria-hidden="true" />
-                      <TypeDropdown
-                        label="Applicator 4"
-                        value={v.app4Type}
-                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app4BatchLbs"); } }}
-                        options={ingredientTypeOptions}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
-                        allowClear
-                      />
-                      {v.app4Type.trim() && (() => {
-                        const isMix = v.app4Type.trim().toLowerCase().includes("mix");
-                        const hasRecipe = !isMix && (v.app4CheeseRecipe ?? []).some((r: any) => Number(r.lbs) > 0);
-                        return (
-                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
-                            {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" onCommit={(lbs) => commitBatchWeightField(v.app4Type, lbs)} />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <PerRunMixSlotBadge
-                        appType={v.app4Type}
-                        rows={v.app4CheeseRecipe ?? []}
-                        ozPerPizza={Number(v.app4OzPerPizza) || 0}
-                        onResolveByRowSum={(newOz) => form.setValue("app4OzPerPizza", newOz, { shouldDirty: true })}
-                        onResolveByTotal={(scaledRows) => { form.setValue("app4CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese4(scaledRows as any); }}
-                      />
-                      {v.app4Type.trim().toLowerCase() === "cheese" && (
-                        <CheesePickCard
-                          embedded
-                          label={v.app4Type || "Applicator 4"}
-                          batches={calc.app4Batches}
-                          ozPerPizza={v.app4OzPerPizza}
-                          recipe={v.app4CheeseRecipe ?? []}
-                          substitutions={dayState.substitutions ?? []}
-                          recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
-                          optionLabels={cheeseNameBrandTags}
-                          recipeMissing={(v.app4CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app4CheeseRecipeName ?? "").trim().toLowerCase())}
-                          shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
-                          cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
-                          poolComponents={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.components}
-                          onRecipeNameChange={val => {
-                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
-                            const copy = (rows ?? []).map((r: any) => ({ ...r }));
-                            form.setValue("app4CheeseRecipe", copy, { shouldDirty: true });
-                            replaceCheese4(copy);
-                          }}
-                        />
-                      )}
-                      {v.app4Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app4Type || "Applicator 4"}
-                          totalRunLbs={calc.app4Lbs}
-                          fields={cheese4Fields}
-                          recipe={v.app4CheeseRecipe ?? []}
-                          fieldPrefix="app4CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese4}
-                          recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={serverMixNames}
-                          recipeNameLabels={mixNameBrandTags}
-                          onRecipeNameChange={val => {
-                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map((r: any) => ({ ...r })); form.setValue("app4CheeseRecipe", rows, { shouldDirty: true }); replaceCheese4(rows); }
-                          }}
-                        />
-                      )}
-                    </CardContent>}
-                  </Card>
-                </div>
-                </SetupRecipesRoleGate>
-    </>
-  );
-});
-
-const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
-  const hx = useHomeTabCtx();
-  const {
-    activeStopId, confirmDeleteStopId, currentRun, dayState,
-    deleteStop, endStop, runStatus, setConfirmDeleteStopId,
-    setEditingStop, setManualStopEnd, setManualStopNotes, setManualStopReason,
-    setManualStopStart, setManualStopType, setShowManualStopDialog, setShowStopDialog,
-    setStopNotes, setStopReason,
-  } = hx;
-
-  const { nowTime } = useLiveRun();
-  return (
-    <>
-                {/* ── Stoppage Log ──
-                    Shows the WHOLE day's events across ALL runs (grouped per
-                    run), not just the current run — otherwise a pause logged on
-                    a run that has since ended silently disappears from this
-                    screen and it looks like nothing was recorded. */}
-                {currentRun && (() => {
-                  const runGroups = dayState.runs
-                    .map((r: any, i: any) => ({ run: r, idx: i, stops: r.stoppages ?? [] }))
-                    .filter((g: any) => g.stops.length > 0);
-                  const allStops = runGroups.flatMap((g: any) => g.stops);
-                  const hasActiveRun = !!currentRun.startedAt && !currentRun.endedAt;
-                  if (allStops.length === 0 && !hasActiveRun) return null;
-                  const stopOnlyMs = allStops.filter((s: any) => s.endedAt && s.type !== "pause").reduce((acc: any, s: any) => acc + (s.endedAt! - s.startedAt), 0);
-                  const noReasonCount = allStops.filter((s: any) => !s.reason.trim()).length;
-                  return (
-                    <div
-                      data-testid="stoppage-log"
-                      className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden"
-                    >
-                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
-                        <div className="flex items-center gap-2">
-                          <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
-                          <span className="text-sm font-semibold">Stoppage Log</span>
-                          {allStops.length > 0 && <span className="text-xs text-muted-foreground">{allStops.length} event{allStops.length !== 1 ? "s" : ""}</span>}
-                          {noReasonCount > 0 && (
-                            <span className="text-xs font-semibold text-amber-400 animate-pulse">{noReasonCount} need reason</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {stopOnlyMs > 0 && (
-                            <span className="text-xs text-orange-400 font-semibold">
-                              {fmtTime(stopOnlyMs / 1000)} down
-                            </span>
-                          )}
-                          {activeStopId && (runStatus === "running" || runStatus === "paused") && (
-                            <button
-                              type="button"
-                              onClick={endStop}
-                              className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
-                            >
-                              <CircleDot className="w-3 h-3" /> End Stop
-                            </button>
-                          )}
-                          {!activeStopId && (
-                            <button
-                              type="button"
-                              onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
-                            >
-                              <Plus className="w-3 h-3" /> Log Stop
-                            </button>
-                          )}
-                          {hasActiveRun && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const now = new Date();
-                                const pad = (n: number) => String(n).padStart(2, "0");
-                                const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-                                setManualStopType("stop");
-                                setManualStopReason("");
-                                setManualStopNotes("");
-                                setManualStopStart(local);
-                                setManualStopEnd("");
-                                setShowManualStopDialog(true);
-                              }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border/60 text-muted-foreground hover:bg-muted/50 text-xs font-semibold transition-colors"
-                              title="Add a past event you couldn't log at the time"
-                            >
-                              <CalendarPlus className="w-3 h-3" /> Add Past
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {allStops.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">No events recorded yet. Pauses and stops are logged automatically.</p>
-                      ) : (
-                        <div>
-                          {runGroups.map((group: any) => (
-                          <div key={group.run.id}>
-                          <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/30 border-y border-border/20">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
-                              {(`${group.run.brand ?? ""}${group.run.flavor ? ` – ${group.run.flavor}` : ""}`.trim()) || `Run ${group.idx + 1}`}
-                            </span>
-                            {group.idx === dayState.currentIndex && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wider text-primary shrink-0">Current</span>
-                            )}
-                          </div>
-                          <div className="divide-y divide-border/20">
-                          {[...group.stops].reverse().map((stop: any) => {
-                            const isPause = stop.type === "pause";
-                            const isManual = stop.type === "manual";
-                            const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
-                            const isActive = !stop.endedAt;
-                            const noReason = !stop.reason.trim();
-                            const rowBackground = isActive && !isPause
-                              ? "bg-orange-100/70 dark:bg-orange-950/20"
-                              : !isActive && isManual
-                                ? "bg-violet-50/70 dark:bg-transparent"
-                                : !isActive && !isPause
-                                  ? "bg-orange-50/70 dark:bg-transparent"
-                                  : isActive
-                                    ? "bg-blue-100/70 dark:bg-blue-950/20"
-                                    : "";
-                            return (
-                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${rowBackground}`}>
-                                <div className="mt-0.5 shrink-0">
-                                  {isPause
-                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400"}`} />
-                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-800 dark:text-orange-400 animate-pulse" : "text-orange-800 dark:text-orange-400"}`} />
-                                  }
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400" : isManual ? "text-violet-700 dark:text-violet-300" : "text-orange-800 dark:text-orange-400/70"}`}>
-                                      {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
-                                    </span>
-                                    {noReason ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingStop({ ...stop })}
-                                        className="text-xs italic text-amber-400 hover:text-amber-300 transition-colors"
-                                      >
-                                        No reason — tap to add
-                                      </button>
-                                    ) : (
-                                      <span className="text-xs font-medium">{stop.reason}</span>
-                                    )}
-                                    {stop.notes && <span className="text-xs text-muted-foreground">— {stop.notes}</span>}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
-                                  </div>
-                                </div>
-                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"}`}>
-                                  {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingStop({ ...stop })}
-                                  className="text-muted-foreground/40 hover:text-foreground transition-colors shrink-0 mt-0.5"
-                                  title="Edit"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                                {confirmDeleteStopId === stop.id ? (
-                                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => { deleteStop(stop.id); setConfirmDeleteStopId(null); }}
-                                      className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/80 hover:bg-destructive text-white font-semibold transition-colors"
-                                    >Del</button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setConfirmDeleteStopId(null)}
-                                      className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground font-semibold transition-colors"
-                                    >No</button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteStopId(stop.id)}
-                                    className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0 mt-0.5"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                          </div>
-                          </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-    </>
-  );
-});
-
-const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
-  const hx = useHomeTabCtx();
-  const {
-    copiedSummary, currentRun, dayState, expandedHistoryDay,
-    exportCSV, exportExcel, exportHistoryCSV, exportQuickBooks,
-    histBenchmarkPpm, history, isSupervisor, printSummary,
-    runSummaryStatsById, runValuesById,
-    setActiveTab, setCopiedSummary, setDayState, setExpandedHistoryDay,
-    switchToRun, updateRunMeta, v,
-  } = hx;
-
-  const { isManager } = useMe();
-  const { calc, liveFreezerMin } = useLiveRun();
-  const pendingHistoryUploads = pendingCompletedHistoryCount();
-  const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
-  useAutomaticUpdateReloadBlocker(
-    "ingredient-detail-dialog",
-    Boolean(ingredientDetailRunId),
-  );
-  return (
-    <>
-                {/* Shift notes */}
-                <div className="mb-4">
-                  <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>
-                  <textarea
-                    value={dayState.shiftNotes ?? ""}
-                    onChange={e => {
-                      const updated = { ...dayState, shiftNotes: e.target.value };
-                      setDayState(updated);
-                      saveDayState(updated);
-                    }}
-                    onFocus={e => e.target.select()}
-                    placeholder="Handoff notes, issues, observations for this shift…"
-                    rows={3}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-sm resize-none outline-none focus:border-primary/60 placeholder:text-muted-foreground/40"
-                  />
-                </div>
-                {/* ── Today's Shift Totals + Benchmark ── */}
-                {(() => {
-                  const todayFinished = dayState.runs.filter((r: any) => r.startedAt && r.endedAt);
-                  if (todayFinished.length === 0 && histBenchmarkPpm === null) return null;
-                  const todayTotalCases = todayFinished.reduce((acc: any, r: any) => {
-                    const vals = loadRunValues(r.id);
-                    return acc + (r.actualCases ?? computeSummaryStats(vals).totalCases);
-                  }, 0);
-                  const todayNetSec = todayFinished.reduce((acc: any, r: any) => {
-                    const gross = (r.endedAt! - r.startedAt!) / 1000;
-                    const dt = (r.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                    return acc + Math.max(0, gross - dt);
-                  }, 0);
-                  const todayDowntimeSec = todayFinished.reduce((acc: any, r: any) => {
-                    return acc + (r.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                  }, 0);
-                  const todayTotalPizzas = todayFinished.reduce((acc: any, r: any) => {
-                    const vals = loadRunValues(r.id);
-                    const cases = r.actualCases ?? computeSummaryStats(vals).totalCases;
-                    return acc + cases * (vals.pizzasPerCase ?? 0);
-                  }, 0);
-                  const todayPpm = todayNetSec > 0 && todayTotalPizzas > 0 ? Math.round(todayTotalPizzas / (todayNetSec / 60)) : null;
-                  const benchDiff = todayPpm !== null && histBenchmarkPpm !== null ? todayPpm - histBenchmarkPpm : null;
-                  return (
-                    <div className="mb-5 rounded-xl border border-border/50 bg-card/60 overflow-hidden">
-                      <div className="px-5 py-3 border-b border-border/30 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-primary shrink-0" />
-                        <span className="text-sm font-bold">Today's Shift</span>
-                        {todayFinished.length > 0 && <span className="text-xs text-muted-foreground">{todayFinished.length} run{todayFinished.length !== 1 ? "s" : ""} finished</span>}
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border/30">
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Cases Made</div>
-                          <div className="text-2xl font-black tabular-nums">{todayTotalCases > 0 ? fmtComma(todayTotalCases) : "—"}</div>
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Net Run Time</div>
-                          <div className="text-2xl font-black tabular-nums">{todayNetSec > 0 ? fmtTime(todayNetSec) : "—"}</div>
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Downtime</div>
-                          <div className={`text-2xl font-black tabular-nums ${todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"}`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's PPM</div>
-                          <div className={`text-2xl font-black tabular-nums ${benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {todayPpm !== null ? todayPpm : "—"}
-                          </div>
-                          {histBenchmarkPpm !== null && (
-                            <div className="text-[10px] text-muted-foreground mt-0.5">
-                              avg {histBenchmarkPpm} PPM
-                              {benchDiff !== null && (
-                                <span className={`ml-1 font-semibold ${benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                  {benchDiff >= 0 ? `▲ +${benchDiff}` : `▼ ${benchDiff}`}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {histBenchmarkPpm !== null && todayPpm === null && (
-                        <div className="px-5 py-3 border-t border-border/20 text-xs text-muted-foreground">
-                          Historical average: <span className="font-bold text-foreground">{histBenchmarkPpm} PPM</span> across {history.reduce((a: any, d: any) => a + d.runs.filter((r: any) => r.startedAt && r.endedAt).length, 0)} finished runs
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-
-                {(() => {
-                  const finishedRuns = dayState.runs.filter((r: any) => !!r.endedAt);
-                  const upcomingRuns = dayState.runs.filter((r: any, i: any) => !r.endedAt && i !== dayState.currentIndex);
-
-                  function SummaryCard({ run, isCurrent, readOnly, runVals, onShowDetail }: { run: RunMeta; isCurrent?: boolean; readOnly?: boolean; runVals?: FormValues; onShowDetail: () => void }) {
-                    const vals = runVals ?? runValuesById.get(run.id) ?? DEFAULT_VALUES;
-                    const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
-                    const isFinished = !!run.endedAt;
-                    const actualDurationSec = run.startedAt && run.endedAt
-                      ? (run.endedAt - run.startedAt) / 1000
-                      : null;
-
-
-                    // ── Dough batch count (same formula as aggregateNeedRows) ──
-                    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc: number, r: { lbs?: string | number }) => acc + Number(r.lbs ?? 0), 0);
-                    const effDoughYield = dRecipeLbs > 0 && vals.targetDoughballWeight > 0
-                      ? (dRecipeLbs * 16) / vals.targetDoughballWeight
-                      : vals.doughBatchYield;
-                    const doughBatches = effDoughYield > 0 && vals.targetDoughballWeight > 0
-                      ? Math.ceil(s.totalPizzas / effDoughYield)
-                      : 0;
-                    const doughName = (vals.doughRecipeName ?? "").trim() || "Dough";
-
-                    const summaryFrontlineRows = deriveFrontlineNeedRows(vals, s);
-                    const frontlineItems: { label: string; value: string }[] = [];
-                    // Dough row first
-                    if (doughBatches > 0) {
-                      frontlineItems.push({ label: `Dough — ${doughName}`, value: `${fmtNum(doughBatches, 2)} batches` });
-                    }
-                    for (const row of summaryFrontlineRows) {
-                      if (row.station === "sauce" && row.unit === "batches") {
-                        const bd = sauceBarrelBreakdown(row.amount, s.sauceEffBarrel);
-                        frontlineItems.push({
-                          label: row.label,
-                          value: bd
-                            ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels`
-                            : `${fmtNum(row.amount, 2)} batches`,
-                        });
-                      } else {
-                        frontlineItems.push({
-                          label: row.label,
-                          value: `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`,
-                        });
-                      }
-                    }
-
-                    // ── Packaging for the detail modal ──
-
-
-                    const canEdit = !readOnly && (isSupervisor || isCurrent);
-                    const caseDelta = run.actualCases != null ? run.actualCases - s.totalCases : null;
-
-                    return (
-
-                      <Card
-                        data-testid={`run-summary-${run.id}`}
-                        className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"}`}
-                        onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
-                      >
-                        <CardHeader className="pb-2 pt-4 px-5">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 flex-wrap">
-                          <CardTitle className="text-base font-semibold break-words min-w-0">{runLabel(run)}</CardTitle>
-                          {vals.dieType && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-muted/50 border border-border/50 text-muted-foreground">
-                              {vals.dieType}
-                            </span>
-                          )}
-                        </div>
-                            <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${isCurrent ? "bg-primary/20 text-primary" : isFinished ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                              {isCurrent ? "Current" : isFinished ? "Finished" : "Upcoming"}
-                            </span>
-                          </div>
-                          {(run.startedAt || run.endedAt) && (
-                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-1">
-                              {run.startedAt && <span>{fmtClock(run.startedAt)}</span>}
-                              {run.startedAt && run.endedAt && <ChevronRight className="w-3 h-3 shrink-0" />}
-                              {run.endedAt && <span>{fmtClock(run.endedAt)}</span>}
-                              {run.startedAt && run.endedAt && (
-                                <span className="text-muted-foreground/50 ml-1">· {fmtTime((run.endedAt - run.startedAt) / 1000)}</span>
-                              )}
-                              {run.startedAt && !run.endedAt && (
-                                <span className="text-primary/60 font-medium">→ running</span>
-                              )}
-                            </div>
-                          )}
-                        </CardHeader>
-                        <CardContent className="px-5 pb-4 space-y-3" onClick={e => e.stopPropagation()}>
-                          {/* Time & cases row */}
-                          <div className="grid grid-cols-3 gap-2 text-center">
-                            <div className="bg-background/40 rounded-lg py-2 px-1">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Planned</div>
-                              <div className="text-lg font-bold tabular-nums">{fmtComma(s.totalCases)}</div>
-                              <div className="text-[10px] text-muted-foreground">cases</div>
-                            </div>
-                            <div className="bg-background/40 rounded-lg py-2 px-1">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Pizzas</div>
-                              <div className="text-lg font-bold tabular-nums">{fmtComma(s.totalPizzas)}</div>
-                              <div className="text-[10px] text-muted-foreground">&nbsp;</div>
-                            </div>
-                            <div className="bg-background/40 rounded-lg py-2 px-1">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                                {isFinished ? "Duration" : isCurrent ? "Time Left" : "Est. Time"}
-                              </div>
-                              <div className="text-lg font-bold">
-                                {isFinished && actualDurationSec !== null
-                                  ? fmtTime(actualDurationSec)
-                                  : isCurrent
-                                    ? fmtTime(calc.totalTimeSec)
-                                    : fmtTime(s.estimatedTimeSec)}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">&nbsp;</div>
-                            </div>
-                          </div>
-
-                          {/* Waste tracking — actual cases + waste lbs (finished or supervisor) */}
-                          {(isFinished || isSupervisor) && !readOnly && (
-                            <div className="grid grid-cols-2 gap-2 pt-1">
-                              <div>
-                                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold block mb-1">Actual Cases</label>
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    type="number" min="0" step="1"
-                                    value={run.actualCases ?? ""}
-                                    placeholder={String(s.totalCases)}
-                                    disabled={!canEdit}
-                                    onChange={e => updateRunMeta(run.id, { actualCases: e.target.value === "" ? undefined : Number(e.target.value) })}
-                                    onFocus={e => e.target.select()}
-                                    className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
-                                  />
-                                  {caseDelta !== null && (
-                                    <span className={`text-xs font-semibold tabular-nums shrink-0 ${caseDelta >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
-                                      {caseDelta >= 0 ? `+${caseDelta}` : caseDelta}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold block mb-1">Waste (lbs)</label>
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    type="number" min="0" step="0.1"
-                                    value={run.wasteLbs ?? ""}
-                                    placeholder="0"
-                                    disabled={!canEdit}
-                                    onChange={e => updateRunMeta(run.id, { wasteLbs: e.target.value === "" ? undefined : Number(e.target.value) })}
-                                    onFocus={e => e.target.select()}
-                                    className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
-                                  />
-                                  {(run.wasteLbs ?? 0) > 0 && (
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                  )}
-                                </div>
-                                {run.wasteLbs != null && run.wasteLbs > 0 && (run.actualCases ?? s.totalCases) > 0 && (
-                                  <p className="text-[10px] text-muted-foreground/60 mt-0.5 tabular-nums">
-                                    {fmtNum(run.wasteLbs / (run.actualCases ?? s.totalCases), 2)} lbs/case
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          {/* Read-only waste display for history */}
-                          {readOnly && (run.actualCases != null || run.wasteLbs != null) && (
-                            <div className="flex gap-4 text-xs">
-                              {run.actualCases != null && <span className="text-muted-foreground">Actual: <span className="text-foreground font-semibold tabular-nums">{fmtComma(run.actualCases)} cases</span></span>}
-                              {run.wasteLbs != null && run.wasteLbs > 0 && <span className="text-amber-400/80">Waste: <span className="font-semibold tabular-nums">{fmtNum(run.wasteLbs, 1)} lbs</span></span>}
-                            </div>
-                          )}
-
-                          {/* Expected cases by now — only for running current run */}
-                          {isCurrent && run.startedAt && !run.endedAt && (() => {
-                            const ev = withTempOverrides(vals);
-                            const ppm = computeEffectiveLineSpeed({
-                              mode: run.subTab === "crusts" ? "crusts" : "dough",
-                              approxLineSpeed: ev.approxLineSpeed,
-                              crustsPerCycle: ev.crustsPerCycle,
-                              cycleSpeed: ev.cycleSpeed,
-                              speedAdjustment: ev.speedAdjustment,
-                            });
-                            const expectedCases = ppm > 0 && ev.pizzasPerCase > 0
-                              ? Math.floor(ppm * liveFreezerMin / ev.pizzasPerCase)
-                              : 0;
-                            return (
-                              <div className="flex items-center justify-between bg-primary/10 border border-primary/25 rounded-lg px-4 py-2">
-                                <span className="text-xs text-primary/80 font-medium">Expected cases by now</span>
-                                <span className="text-xl font-bold text-primary tabular-nums">{fmtComma(expectedCases)}</span>
-                              </div>
-                            );
-                          })()}
-                          {/* Actual vs expected duration — only for finished runs */}
-                          {isFinished && actualDurationSec !== null && s.estimatedTimeSec > 0 && (() => {
-                            const diffSec = actualDurationSec - s.estimatedTimeSec;
-                            const ahead = diffSec < 0;
-                            const absDiff = Math.abs(diffSec);
-                            return (
-                              <div className={`flex items-center justify-between rounded-lg px-4 py-2 border ${ahead ? "bg-emerald-950/30 border-emerald-700/30" : "bg-amber-950/30 border-amber-700/30"}`}>
-                                <div className="space-y-0.5">
-                                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Time Comparison</div>
-                                  <div className="flex gap-3 text-xs">
-                                    <span className="text-muted-foreground">Actual: <span className="text-foreground font-medium">{fmtTime(actualDurationSec)}</span></span>
-                                    <span className="text-muted-foreground">Expected: <span className="text-foreground font-medium">{fmtTime(s.estimatedTimeSec)}</span></span>
-                                  </div>
-                                </div>
-                                <div className={`text-right text-sm font-bold ${ahead ? "text-emerald-400" : "text-amber-400"}`}>
-                                  {ahead ? `−${fmtTime(absDiff)}` : `+${fmtTime(absDiff)}`}
-                                  <div className="text-[10px] font-normal">{ahead ? "ahead" : "over"}</div>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                          {/* Start / end times for started runs */}
-                          {run.startedAt && (
-                            <div className="flex gap-3 text-xs text-muted-foreground">
-                              <span>Started: <span className="text-foreground font-medium">{fmtClock(run.startedAt)}</span></span>
-                              {run.endedAt && <span>Ended: <span className="text-foreground font-medium">{fmtClock(run.endedAt)}</span></span>}
-                            </div>
-                          )}
-                          {/* Frontline totals */}
-                          {frontlineItems.length > 0 && (
-                            <div className="pt-1 border-t border-border/30">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Frontline Totals</div>
-                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                                {frontlineItems.map((item: any) => (
-                                  <div key={item.label} className="flex justify-between text-xs py-0.5">
-                                    <span className="text-muted-foreground truncate mr-2">{item.label}</span>
-                                    <span className="font-medium tabular-nums shrink-0">{item.value}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {/* Notes / shift log */}
-                          <div className="pt-1 border-t border-border/30">
-                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1 mb-1.5">
-                              <FileText className="w-3 h-3" /> Notes
-                            </label>
-                            {canEdit ? (
-                              <NotesTextarea
-                                initialValue={run.notes ?? ""}
-                                onCommit={text => updateRunMeta(run.id, { notes: text })}
-                                className="w-full px-2 py-1.5 rounded bg-muted/40 border border-border/40 text-sm outline-none focus:border-primary/60 resize-none placeholder:text-muted-foreground/50"
-                              />
-                            ) : (
-                              <p className="text-sm text-muted-foreground italic min-h-[2rem]">
-                                {run.notes || "—"}
-                              </p>
-                            )}
-                          </div>
-                          {/* Ingredient Detail button */}
-                          <div className="pt-2 border-t border-border/30 flex justify-end" onClick={e => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              onClick={() => onShowDetail()}
-                              className="text-xs text-primary/80 hover:text-primary underline underline-offset-2 font-medium"
-                            >
-                              Ingredient Detail
-                            </button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  }
-
-                  // ── Day Totals ──────────────────────────────────────────
-                  const allRunStats = dayState.runs.map((run: any) =>
-                    runSummaryStatsById.get(run.id) ??
-                    computeSummaryStats(runValuesById.get(run.id) ?? DEFAULT_VALUES),
-                  );
-                  const dayTotalCases = allRunStats.reduce((sum: any, s: any) => sum + s.totalCases, 0);
-                  const dayTotalPizzas = allRunStats.reduce((sum: any, s: any) => sum + s.totalPizzas, 0);
-                  const dayActualCases = dayState.runs.reduce((sum: any, r: any) => sum + (r.actualCases ?? 0), 0);
-
-                  // ── Shopping List ─────────────────────────────────────────
-                  // Aggregate ingredient quantities across all runs for today
-                  type ShopItem = { name: string; totalQty: number; unit: string };
-                  const shopMap = new Map<string, ShopItem>();
-                  function shopAdd(name: string, qty: number, unit: string) {
-                    if (!name || qty <= 0) return;
-                    const key = `${name}__${unit}`;
-                    const existing = shopMap.get(key);
-                    if (existing) existing.totalQty += qty;
-                    else shopMap.set(key, { name, totalQty: qty, unit });
-                  }
-                  for (const run of dayState.runs) {
-                    const vals = runValuesById.get(run.id) ?? DEFAULT_VALUES;
-                    const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
-                    // Dough batches needed (calc inline from vals, same logic as Ingredient Needs)
-                    const totalPizzas = s.totalPizzas;
-                    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc: number, r: { lbs: number }) => acc + Number(r.lbs ?? 0), 0);
-                    const effYield = dRecipeLbs > 0 && vals.targetDoughballWeight > 0
-                      ? (dRecipeLbs * 16) / vals.targetDoughballWeight
-                      : vals.doughBatchYield;
-                    const doughBatches = effYield > 0 ? Math.ceil(totalPizzas / effYield) : 0;
-                    // Sauce
-                    if (s.sauceBatches > 0) shopAdd("Sauce", s.sauceBatches, "barrels");
-                    // Dough ingredients
-                    for (const row of (vals.doughRecipe ?? [])) {
-                      if (row.ingredient && row.lbs > 0 && doughBatches > 0) {
-                        shopAdd(row.ingredient, row.lbs * doughBatches, "lbs");
-                      }
-                    }
-                    // Per-applicator cheese/mix recipe
-                    const allRecipes = [
-                      ...(vals.app1CheeseRecipe ?? []),
-                      ...(vals.app2CheeseRecipe ?? []),
-                      ...(vals.app3CheeseRecipe ?? []),
-                      ...(vals.app4CheeseRecipe ?? []),
-                    ];
-                    for (const row of allRecipes) {
-                      if (row.ingredient && row.lbs > 0) shopAdd(row.ingredient, row.lbs, "lbs");
-                    }
-                    // Pep
-                    if (s.pep1Type && s.pep1Lbs > 0) shopAdd(`Pep — ${s.pep1Type}`, s.pep1Lbs, "lbs");
-                    if (s.pep1TypeB && s.pep1LbsB > 0) shopAdd(`Pep — ${s.pep1TypeB}`, s.pep1LbsB, "lbs");
-                    if (s.pep2Type && s.pep2Lbs > 0) shopAdd(`Pep — ${s.pep2Type}`, s.pep2Lbs, "lbs");
-                    if (s.pep2TypeB && s.pep2LbsB > 0) shopAdd(`Pep — ${s.pep2TypeB}`, s.pep2LbsB, "lbs");
-                  }
-                  const shopList = [...shopMap.values()].sort((a: any, b: any) => a.name.localeCompare(b.name));
-
-                  return (
-                    <div className="space-y-6">
-                      {/* Export buttons */}
-                      <div className="flex gap-2 justify-end print:hidden flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const lines: string[] = [`Production Run Summary — ${todayStr()}`, ""];
-                            for (const run of dayState.runs) {
-                              const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
-                              const s = computeSummaryStats(vals);
-                              lines.push(`${runLabel(run)} — ${fmtComma(s.totalCases)} cases / ${fmtComma(s.totalPizzas)} pizzas`);
-                              if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
-                              if (s.sauceBatches > 0) {
-                                const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                                lines.push(bd
-                                  ? `  Sauce: ${fmtNum(s.sauceBatches, 2)} batches (${bd.batchesPerBarrel}/barrel) → ${bd.totalBarrels} barrels`
-                                  : `  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
-                              }
-                              if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
-                              if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
-                              if (s.pep1TypeB && s.pep1LbsB > 0) lines.push(`  Pep: ${fmtNum(s.pep1LbsB, 1)} lbs`);
-                              if (s.pep2Type && s.pep2Lbs > 0) lines.push(`  Pep: ${fmtNum(s.pep2Lbs, 1)} lbs`);
-                              if (s.pep2TypeB && s.pep2LbsB > 0) lines.push(`  Pep: ${fmtNum(s.pep2LbsB, 1)} lbs`);
-                              if (run.notes) lines.push(`  Notes: ${run.notes}`);
-                              lines.push("");
-                            }
-                            if (dayState.shiftNotes?.trim()) {
-                              lines.push(`Shift Notes: ${dayState.shiftNotes.trim()}`);
-                            }
-                            const text = lines.join("\n");
-                            const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
-                            if (nav.share) {
-                              nav.share({ title: "Run Summary", text }).catch(() => {});
-                            } else {
-                              navigator.clipboard?.writeText(text).then(() => {
-                                setCopiedSummary(true);
-                                setTimeout(() => setCopiedSummary(false), 2000);
-                              }).catch(() => {});
-                            }
-                          }}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedSummary
-                            ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> <span className="text-emerald-400">Copied!</span></>
-                            : <><Share2 className="w-3.5 h-3.5" /> Share</>
-                          }
-                        </button>
-                        <button
-                          type="button"
-                          onClick={printSummary}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Printer className="w-3.5 h-3.5" /> Print
-                        </button>
-                        <button
-                          type="button"
-                          onClick={exportCSV}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Export CSV
-                        </button>
-                        <button
-                          type="button"
-                          onClick={exportExcel}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={exportQuickBooks}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Download className="w-3.5 h-3.5" /> QuickBooks
-                        </button>
-                      </div>
-
-                      {/* Day Totals banner */}
-                      {dayState.runs.length > 1 && (
-                        <div className="rounded-xl border border-primary/20 bg-primary/5 px-5 py-4">
-                          <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-primary">
-                            <FileText className="w-4 h-4" />
-                            Day Totals — {dayState.runs.length} runs
-                          </div>
-                          <div className="grid grid-cols-3 gap-4">
-                            <div className="flex flex-col items-center">
-                              <span className="text-2xl font-bold tabular-nums">{fmtComma(dayTotalCases)}</span>
-                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Cases (est.)</span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                              <span className="text-2xl font-bold tabular-nums">{fmtComma(dayTotalPizzas)}</span>
-                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Pizzas</span>
-                            </div>
-                            <div className="flex flex-col items-center">
-                              <span className={`text-2xl font-bold tabular-nums ${dayActualCases > 0 ? (dayActualCases >= dayTotalCases ? "text-emerald-400" : "text-amber-400") : "text-muted-foreground"}`}>
-                                {dayActualCases > 0 ? fmtComma(dayActualCases) : "—"}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Cases (actual)</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Shift efficiency stats */}
-                      {(() => {
-                        const runs = dayState.runs;
-                        const productiveMs = runs.reduce((sum: any, r: any) => sum + (r.startedAt && r.endedAt ? r.endedAt - r.startedAt : 0), 0);
-                        const gapMs = runs.reduce((sum: any, r: any, i: any) => {
-                          if (i === 0) return sum;
-                          const prev = runs[i - 1];
-                          return sum + (prev.endedAt && r.startedAt ? r.startedAt - prev.endedAt : 0);
-                        }, 0);
-                        const totalMs = productiveMs + gapMs;
-                        if (productiveMs === 0) return null;
-                        const utilPct = totalMs > 0 ? Math.round(productiveMs / totalMs * 100) : 100;
-                        return (
-                          <div className="rounded-xl border border-border/40 bg-card/40 px-5 py-4">
-                            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-muted-foreground">
-                              <TrendingUp className="w-4 h-4" />
-                              Shift Efficiency
-                            </div>
-                            <div className="grid grid-cols-3 gap-3 text-center">
-                              <div>
-                                <div className="text-lg font-bold tabular-nums text-emerald-400">{fmtElapsed(productiveMs)}</div>
-                                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Productive</div>
-                              </div>
-                              <div>
-                                <div className="text-lg font-bold tabular-nums text-amber-400/80">{gapMs > 0 ? fmtElapsed(gapMs) : "—"}</div>
-                                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Gap / Down</div>
-                              </div>
-                              <div>
-                                <div className={`text-lg font-bold tabular-nums ${utilPct >= 80 ? "text-emerald-400" : utilPct >= 60 ? "text-amber-400" : "text-red-400"}`}>{utilPct}%</div>
-                                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Utilization</div>
-                              </div>
-                            </div>
-                            <div className="mt-3 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                              <div className={`h-full rounded-full transition-all duration-500 ${utilPct >= 80 ? "bg-emerald-500" : utilPct >= 60 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${utilPct}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Shopping List */}
-                      {shopList.length > 0 && (
-                        <div className="rounded-xl border border-border/40 bg-card/40 px-5 py-4">
-                          <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-muted-foreground">
-                            <AlertTriangle className="w-4 h-4" />
-                            Ingredient Totals (all runs today)
-                          </div>
-                          <div className="space-y-1.5">
-                            {shopList.map((item: any) => (
-                              <div key={`${item.name}__${item.unit}`} className="flex justify-between text-sm">
-                                <span className="text-foreground/80">{item.name}</span>
-                                <span className="font-semibold tabular-nums">{fmtNum(item.totalQty, 1)} {item.unit}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* All runs in order with gap connectors */}
-                      {dayState.runs.map((run: any, idx: any) => {
-                        const isCurrentRun = idx === dayState.currentIndex;
-                        const prevRun = idx > 0 ? dayState.runs[idx - 1] : null;
-                        const isUpcoming = !run.endedAt && !isCurrentRun;
-
-                        // Gap connector between this run and the previous one
-                        const gapMs = prevRun?.endedAt && run.startedAt
-                          ? run.startedAt - prevRun.endedAt
-                          : null;
-                        const gapType = run.gapType ?? "switchover";
-                        const BREAK_THRESHOLD_MS = 30 * 60 * 1000;
-                        const displayMs = gapType === "switchover"
-                          ? gapMs
-                          : gapMs !== null ? Math.max(0, gapMs - BREAK_THRESHOLD_MS) : null;
-
-                        return (
-                          <div key={run.id} className="space-y-2">
-                            {/* Gap connector — only between two runs where the previous ended */}
-                            {prevRun && (
-                              <div className="flex items-center gap-3 px-2 py-1">
-                                <div className="flex flex-col items-center gap-0.5 shrink-0">
-                                  <div className="w-px h-3 bg-border/50" />
-                                  <div className="w-1.5 h-1.5 rounded-full bg-border/50" />
-                                  <div className="w-px h-3 bg-border/50" />
-                                </div>
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  {/* Type toggle */}
-                                  <div className="flex rounded-md border border-border/40 overflow-hidden shrink-0 text-[10px] font-semibold">
-                                    <button
-                                      type="button"
-                                      onClick={() => updateRunMeta(run.id, { gapType: "switchover" })}
-                                      className={`px-2 py-1 transition-colors ${gapType === "switchover" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-muted/40"}`}
-                                    >Switchover</button>
-                                    <button
-                                      type="button"
-                                      onClick={() => updateRunMeta(run.id, { gapType: "break" })}
-                                      className={`px-2 py-1 border-l border-border/40 transition-colors ${gapType === "break" ? "bg-amber-500/20 text-amber-400" : "text-muted-foreground hover:bg-muted/40"}`}
-                                    >Break</button>
-                                  </div>
-                                  {/* Gap time */}
-                                  {gapMs !== null ? (
-                                    <span className="text-xs text-muted-foreground tabular-nums">
-                                      {gapType === "switchover" ? (
-                                        <span>{fmtElapsed(gapMs)}</span>
-                                      ) : displayMs! > 0 ? (
-                                        <span className="text-amber-400">+{fmtElapsed(displayMs!)} <span className="text-muted-foreground">over 30 min</span></span>
-                                      ) : (
-                                        <span className="text-emerald-400/70">within 30 min</span>
-                                      )}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-muted-foreground/50 italic">gap unknown</span>
-                                  )}
-                                  {/* Gap note */}
-                                  <div className="flex items-center gap-1 ml-auto shrink-0">
-                                    <MessageSquare className="w-3 h-3 text-muted-foreground/40 shrink-0" />
-                                    <input
-                                      type="text"
-                                      value={run.gapNote ?? ""}
-                                      onChange={e => updateRunMeta(run.id, { gapNote: e.target.value || undefined })}
-                                      placeholder="note…"
-                                      className="w-24 text-[10px] bg-transparent border-b border-border/30 focus:border-primary/50 outline-none text-muted-foreground placeholder:text-muted-foreground/30 py-0.5 transition-colors"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            {/* Run card */}
-                            {isCurrentRun
-                              ? <SummaryCard run={run} isCurrent onShowDetail={() => setIngredientDetailRunId(run.id)} />
-                              : <SummaryCard run={run} readOnly={isUpcoming ? false : undefined} onShowDetail={() => setIngredientDetailRunId(run.id)} />
-                            }
-                          </div>
-                        );
-                      })}
-                      {/* History — blank/unnamed placeholder runs (off-day
-                          sign-ins) are filtered out, and days with nothing
-                          meaningful are hidden entirely. */}
-                      {(() => {
-                        const displayHistory = filterMeaningfulHistory(history);
-                        return displayHistory.length > 0 && (
-                        <div className="space-y-3 pt-2 border-t border-border/30">
-                          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-                            <History className="w-4 h-4" />
-                            History ({displayHistory.length} {displayHistory.length === 1 ? "day" : "days"})
-                            {pendingHistoryUploads > 0 && (
-                              <span className="text-xs font-normal text-amber-600">
-                                {Math.min(pendingHistoryUploads, 99)}{pendingHistoryUploads > 99 ? "+" : ""} pending offline upload{pendingHistoryUploads === 1 ? "" : "s"}
-                              </span>
-                            )}
-                          </div>
-                          {displayHistory.map((day: any) => {
-                            const finishedRuns = day.runs.filter((r: any) => r.endedAt && r.startedAt);
-                            const totalHistCases = finishedRuns.reduce((acc: any, r: any) => {
-                              const vals = day.runValues[r.id] ?? DEFAULT_VALUES;
-                              return acc + (r.actualCases ?? computeSummaryStats(vals as FormValues).totalCases);
-                            }, 0);
-                            const totalHistNetSec = finishedRuns.reduce((acc: any, r: any) => {
-                              const gross = (r.endedAt! - r.startedAt!) / 1000;
-                              const dt = (r.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                              return acc + Math.max(0, gross - dt);
-                            }, 0);
-                            const totalHistPizzas = finishedRuns.reduce((acc: any, r: any) => {
-                              const vals = day.runValues[r.id] ?? DEFAULT_VALUES;
-                              const cases = r.actualCases ?? computeSummaryStats(vals as FormValues).totalCases;
-                              return acc + cases * ((vals as FormValues).pizzasPerCase ?? 0);
-                            }, 0);
-                            const histPpm = totalHistNetSec > 0 && totalHistPizzas > 0 ? Math.round(totalHistPizzas / (totalHistNetSec / 60)) : 0;
-                            return (
-                            <div key={day.date} className="rounded-lg border border-border/30 bg-card/30 overflow-hidden">
-                              <button
-                                type="button"
-                                className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-accent/20 transition-colors"
-                                onClick={() => setExpandedHistoryDay(expandedHistoryDay === day.date ? null : day.date)}
-                              >
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-semibold">{day.date}</span>
-                                  <span className="text-xs text-muted-foreground">{day.runs.length} run{day.runs.length !== 1 ? "s" : ""} · {finishedRuns.length} finished</span>
-                                  {totalHistCases > 0 && <span className="text-xs font-semibold text-foreground/70">{fmtComma(totalHistCases)} cases</span>}
-                                  {histPpm > 0 && <span className="text-xs font-semibold text-primary/70">{histPpm} PPM</span>}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={e => { e.stopPropagation(); exportHistoryCSV(day); }}
-                                    className="text-[10px] flex items-center gap-1 px-2 py-0.5 rounded border border-border/40 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                                  >
-                                    <Download className="w-3 h-3" /> CSV
-                                  </button>
-                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expandedHistoryDay === day.date ? "rotate-180" : ""}`} />
-                                </div>
-                              </button>
-                              {expandedHistoryDay === day.date && (
-                                <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
-                                  {day.runs.map((run: any) => (
-                                    <div key={run.id} className="space-y-2">
-                                      <SummaryCard
-                                        run={run}
-                                        readOnly
-                                        runVals={day.runValues[run.id] as FormValues | undefined}
-                                        onShowDetail={() => setIngredientDetailRunId(run.id)}
-                                      />
-                                      <ApplicatorEvidenceReview
-                                        day={day}
-                                        run={run}
-                                        values={(day.runValues?.[run.id] ?? DEFAULT_VALUES) as FormValues}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                          })}
-                        </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })()}
-    {/* Ingredient Detail dialog — state lives here to survive parent re-renders */}
-    {(() => {
-      if (!ingredientDetailRunId) return null;
-      // Find the run's values from today or history
-      let detailRun: RunMeta | undefined;
-      let detailVals: FormValues | undefined;
-      const todayRun = dayState.runs.find((r: any) => r.id === ingredientDetailRunId);
-      if (todayRun) {
-        detailRun = todayRun;
-        detailVals = todayRun.id === currentRun.id ? v : loadRunValues(todayRun.id);
-      } else {
-        for (const day of history) {
-          if (day.runValues?.[ingredientDetailRunId]) {
-            const hr = (day.runs as RunMeta[]).find((r: RunMeta) => r.id === ingredientDetailRunId);
-            if (hr) { detailRun = hr; detailVals = day.runValues[ingredientDetailRunId] as FormValues; }
-            break;
-          }
-        }
-      }
-      if (!detailRun || !detailVals) return null;
-      // Ingredient Detail must use the same effective recipe as today's
-      // consumption math. Apply the day-state overlay directly here instead
-      // of relying on the module-level mirror effect: opening the dialog in
-      // the same render as a substitution change must not show stale rows.
-      // Historical runs are intentionally left untouched by today's overlay.
-      const dv = withTodaySubstitutions(
-        detailVals,
-        Boolean(todayRun),
-        dayState.substitutions,
-      );
-      const ds = computeSummaryStatsShared(dv, DEFAULT_PEP_TYPES);
-      const ddrLbs = (dv.doughRecipe ?? []).reduce((acc: number, r: any) => acc + Number(r.lbs ?? 0), 0);
-      const effYld = ddrLbs > 0 && dv.targetDoughballWeight > 0
-        ? (ddrLbs * 16) / dv.targetDoughballWeight : dv.doughBatchYield;
-      const dBatches = effYld > 0 && dv.targetDoughballWeight > 0 ? Math.ceil(ds.totalPizzas / effYld) : 0;
-      const dName = (dv.doughRecipeName ?? "").trim() || "Dough";
-      const pkgRows = aggregatePackagingNeeds([dv]);
-      return (
-        <Dialog open={!!ingredientDetailRunId} onOpenChange={open => { if (!open) setIngredientDetailRunId(null); }}>
-          <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Ingredient Detail — {runLabel(detailRun)}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 text-sm">
-              {dBatches > 0 && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Dough</div>
-                  <div className="flex justify-between py-0.5 font-medium">
-                    <span>{dName}</span>
-                    <span className="tabular-nums text-muted-foreground">{fmtNum(dBatches, 2)} batches</span>
-                  </div>
-                  {(dv.doughRecipe ?? []).filter((r: any) => (r.ingredient ?? "").trim() && Number(r.lbs ?? 0) > 0).map((r: any, i: number) => (
-                    <div key={i} className="flex justify-between py-0.5 pl-3 text-muted-foreground">
-                      <span>{r.ingredient}</span>
-                      <span className="tabular-nums">{fmtNum(Number(r.lbs) * dBatches, 1)} lbs</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {ds.sauceBatches > 0 && (() => {
-                const sNm = (dv.frontlineRecipeName ?? "").trim() || "Sauce";
-                const sRows = (dv.frontlineRecipe ?? []).filter((r: any) => (r.ingredient ?? "").trim() && Number(r.lbs ?? 0) > 0);
-                return (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Sauce</div>
-                    <div className="flex justify-between py-0.5 font-medium">
-                      <span>{sNm}</span>
-                      <span className="tabular-nums text-muted-foreground">{fmtNum(ds.sauceBatches, 2)} batches</span>
-                    </div>
-                    {sRows.map((r: any, i: number) => (
-                      <div key={i} className="flex justify-between py-0.5 pl-3 text-muted-foreground">
-                        <span>{r.ingredient}</span>
-                          <span className="tabular-nums">{fmtNum(Number(r.lbs) * ds.sauceBatches, 1)} lbs</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-              {(() => {
-                type AppBlock = {
-                  key: string;
-                  label: string;
-                  value: string;
-                  recipeName?: string;
-                  ingredientRows?: { ingredient: string; lbs: number }[];
-                };
-                const appBlocks: AppBlock[] = [];
-                const addAppBlock = (
-                  type: string, lbs: number, batches: number, prefix: string,
-                  recipeName?: string, recipe?: readonly any[]
-                ) => {
-                  if (!type) return;
-                  const lower = type.trim().toLowerCase();
-                  const isMix = lower.includes("mix");
-                  const isCheese = lower.includes("cheese");
-                  const blendName = (recipeName ?? "").trim();
-                  if (isMix && lbs > 0) {
-                    // Mix recipe rows store oz/pizza per component (despite the field name "lbs").
-                    // rowTotal = (componentOzPerPizza / sumOzPerPizza) * totalRunLbs — mirrors MixRecipeCard.
-                    const recipeRows = (recipe ?? []).filter((r: any) => (r.ingredient ?? "").trim() && Number(r.lbs ?? 0) > 0);
-                    const sumOz = recipeRows.reduce((acc: number, r: any) => acc + Number(r.lbs), 0);
-                    const ingRows = recipeRows.map((r: any) => ({
-                      ingredient: (r.ingredient as string).trim(),
-                      lbs: sumOz > 0 ? (Number(r.lbs) / sumOz) * lbs : 0,
-                    })).filter((r: any) => r.lbs > 0);
-                    appBlocks.push({
-                      key: `${prefix}__${type}`,
-                      label: `${prefix} — ${type}`,
-                      value: fmtNum(lbs, 1) + " lbs",
-                      recipeName: blendName || undefined,
-                      ingredientRows: ingRows.length > 0 ? ingRows : undefined,
-                    });
-                  } else if (isCheese && batches > 0) {
-                    // Use computeCheesePull so fractional batches get the same
-                    // Math.max(1, batches) floor that the Cheese Blend card applies.
-                    const pull = computeCheesePull(recipe as any, batches);
-                    const ingRows = pull.rows
-                      .filter((r: any) => (r.ingredient ?? "").trim() && r.lbs > 0)
-                      .map((r: any) => ({ ingredient: (r.ingredient as string).trim(), lbs: r.lbs }));
-                    appBlocks.push({
-                      key: `${prefix}__${type}`,
-                      label: `${prefix} — ${type}`,
-                      value: fmtNum(batches, 2) + " batches",
-                      recipeName: blendName || undefined,
-                      ingredientRows: ingRows.length > 0 ? ingRows : undefined,
-                    });
-                  } else if (!isMix && !isCheese && batches > 0) {
-                    appBlocks.push({ key: `${prefix}__${type}`, label: `${prefix} — ${type}`, value: fmtNum(batches, 2) + " batches" });
-                  }
-                };
-                addAppBlock(ds.app1Type, ds.app1Lbs, ds.app1Batches, "App 1", dv.app1CheeseRecipeName, dv.app1CheeseRecipe);
-                addAppBlock(ds.app2Type, ds.app2Lbs, ds.app2Batches, "App 2", dv.app2CheeseRecipeName, dv.app2CheeseRecipe);
-                const pepCL = dv.pep1Combined === true ? "1 & 2" : "1";
-                if (ds.pep1Type && ds.pep1Lbs > 0) appBlocks.push({ key: `pep1__${ds.pep1Type}`, label: `Pep ${pepCL} — ${ds.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1Type) ? fmtNum(ds.pep1Lbs, 2) + " lbs" : fmtNum(ds.pep1Batches, 2) + " batches" });
-                if (ds.pep1TypeB && ds.pep1LbsB > 0) appBlocks.push({ key: `pep1b__${ds.pep1TypeB}`, label: `Pep ${pepCL} — ${ds.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1TypeB) ? fmtNum(ds.pep1LbsB, 2) + " lbs" : fmtNum(ds.pep1BatchesB, 2) + " batches" });
-                if (dv.pep1Combined !== true && ds.pep2Type && ds.pep2Lbs > 0) appBlocks.push({ key: `pep2__${ds.pep2Type}`, label: `Pep 2 — ${ds.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2Type) ? fmtNum(ds.pep2Lbs, 2) + " lbs" : fmtNum(ds.pep2Batches, 2) + " batches" });
-                if (dv.pep1Combined !== true && ds.pep2TypeB && ds.pep2LbsB > 0) appBlocks.push({ key: `pep2b__${ds.pep2TypeB}`, label: `Pep 2 — ${ds.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2TypeB) ? fmtNum(ds.pep2LbsB, 2) + " lbs" : fmtNum(ds.pep2BatchesB, 2) + " batches" });
-                addAppBlock(ds.app3Type, ds.app3Lbs, ds.app3Batches, "App 3", dv.app3CheeseRecipeName, dv.app3CheeseRecipe);
-                addAppBlock(ds.app4Type, ds.app4Lbs, ds.app4Batches, "App 4", dv.app4CheeseRecipeName, dv.app4CheeseRecipe);
-                if (appBlocks.length === 0) return null;
-                return (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Applicators</div>
-                    {appBlocks.map((b) => (
-                      <div key={b.key} className="mb-1">
-                        <div className="flex justify-between py-0.5">
-                          <span className="text-muted-foreground">{b.label}</span>
-                          <span className="tabular-nums font-medium">{b.value}</span>
-                        </div>
-                        {b.recipeName && (
-                          <div className="pl-3 text-xs text-foreground/70 font-medium py-0.5">{b.recipeName}</div>
-                        )}
-                        {b.ingredientRows && b.ingredientRows.map((r, i) => (
-                          <div key={i} className="flex justify-between py-0.5 pl-5 text-muted-foreground">
-                            <span>{r.ingredient}</span>
-                            <span className="tabular-nums">{fmtNum(r.lbs, 1)} lbs</span>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-              {pkgRows.length > 0 && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Packaging</div>
-                  {pkgRows.map((r, i) => (
-                    <div key={i} className="flex justify-between py-0.5">
-                      <span className="text-muted-foreground">{r.label}</span>
-                      <span className="tabular-nums font-medium">{r.value} <span className="text-muted-foreground font-normal">{r.sub}</span></span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      );
-    })()}
-    </>
-  );
-});

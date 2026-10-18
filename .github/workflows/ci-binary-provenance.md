@@ -34,6 +34,12 @@ registry tag cannot change the runner environment between workflow runs:
 | ----- | --------------------- |
 | `postgres:16` | `sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94` |
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` |
+| `ollama/ollama` (0.34.4) | `sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551` |
+
+The `local-ai-smoke` workflow runs the Ollama model server from the
+digest-pinned `ollama/ollama` image above and pulls the model *inside* that
+container. It intentionally performs no `curl`/`tar` binary or archive download,
+so it does not require a GitHub artifact-attestation gate.
 
 ## Audit scope
 
@@ -44,29 +50,13 @@ downloads. The repository check is intentionally conservative and will fail a
 future workflow that introduces a recognizable binary/archive download without
 the required attestation gate.
 
-## Published container image evidence
+## Container builds are test-only
 
-The trusted `docker-publish` job in `ci.yml` publishes exactly three images:
-the API runtime, API migration, and web images. Each image is labeled with
-`org.opencontainers.image.revision=${{ github.sha }}` and the Buildx output
-digest is checked after publication by pulling the immutable
-`image@sha256:digest` reference. The check requires both the pulled
-`RepoDigest` and the revision label to match the current `github.sha`.
-
-The check writes only image names, immutable digests, the expected/observed
-revision, and bounded pass/fail fields to
-`release-evidence-container-images.txt`. The file is retained as
-`release-evidence-container-images-${{ github.run_id }}` for 14 days; registry
-credentials are never written to the report.
-
-Production image promotion is a separate manual workflow protected by the
-`production` environment. The operator supplies the trusted publisher run ID,
-reviewed revision, and publisher artifact digest. The workflow verifies that
-the source run was a successful push of `main` through `ci.yml`, downloads only
-that run-scoped artifact, compares GitHub's artifact digest, and validates all
-three image records before producing a handoff. It also requires the exact
-publisher job to have succeeded and hashes the downloaded archive bytes before
-extracting its single bounded evidence file. The handoff contains only
-`repository@sha256:digest` references for the API, migration, and web images.
+The required `Docker image` job in `ci.yml` builds the API runtime, API
+migration, and web targets with `push: false`. It is a build check only: it does
+not log in to a registry, publish an image, create a production-image handoff,
+or prove which build is live. GitHub Actions has no production deployment or
+promotion authority for the active application; the Replit deployment is the
+only authorized current production publisher.
 It does not deploy, rebuild, accept tags, or receive registry/deployment
 credentials.

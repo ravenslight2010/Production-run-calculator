@@ -95,6 +95,13 @@ const FACTORY_KV_SERVER_ONLY_KEYS: ReadonlySet<string> = new Set([
   PRODUCTION_START_TIME_KEY,
 ]);
 
+const FACTORY_RECIPE_NAME_KEYS: ReadonlySet<string> = new Set([
+  DOUGH_RECIPE_NAMES_KEY,
+  FRONTLINE_RECIPE_NAMES_KEY,
+  CHEESE_RECIPE_NAMES_KEY,
+  MIX_RECIPE_NAMES_KEY,
+]);
+
 // ── Stamp tracking ───────────────────────────────────────────────────────────
 // For each cached key we store the server's updatedAt (ms) alongside it in
 // localStorage.  On hydrate: local stamp > server → schedule write-through;
@@ -377,10 +384,30 @@ export function hydrateFromServer(data: FactoryDataMap): void {
     } else if (serverTs > localIntentTs) {
       // Server is newer — overwrite local.
       if (pending.found) discardQueuedWrite(key, pending.g);
-      try {
-        localStorage.setItem(key, JSON.stringify(entry.value));
+      const retainLocalRecipeNames =
+        FACTORY_RECIPE_NAME_KEYS.has(key)
+        && Array.isArray(entry.value)
+        && entry.value.length === 0
+        && (() => {
+          try {
+            const local = JSON.parse(localStorage.getItem(key) ?? "null");
+            return Array.isArray(local) && local.some((name) => typeof name === "string" && name.trim());
+          } catch {
+            return false;
+          }
+        })();
+      if (retainLocalRecipeNames) {
+        // A blank server directory can be an incomplete bootstrap while a
+        // device still has usable legacy picker names. Keep those names
+        // rather than making setup unusable; a non-empty server directory
+        // remains authoritative as before.
         setLocalStamp(key, serverTs);
-      } catch {}
+      } else {
+        try {
+          localStorage.setItem(key, JSON.stringify(entry.value));
+          setLocalStamp(key, serverTs);
+        } catch {}
+      }
     }
     // Equal stamps: no-op (already in sync).
   }

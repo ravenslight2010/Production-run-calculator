@@ -1,0 +1,175 @@
+{
+  "revision": "1111ac3e56d146c85f82696aab9a8d6d0a633976",
+  "sourceLibraryRevision": "1111ac3e56d146c85f82696aab9a8d6d0a633976",
+  "mode": "standard",
+  "results": [
+    {
+      "label": "audit protection publish configuration",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 580
+    },
+    {
+      "label": "operational report signing-key rotation preflight",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 3149
+    },
+    {
+      "label": "blocking release security audit (high severity; registry required)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 784
+    },
+    {
+      "label": "source-library reconciliation verifier fixture tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 7755
+    },
+    {
+      "label": "shell lint inventory",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 500
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 29841
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1707
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 29040
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 66316
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 12395
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 10161
+    },
+    {
+      "label": "TypeScript 7 advisory comparison",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 36044
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1525
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 40182
+    },
+    {
+      "label": "Render image smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 223222
+    },
+    {
+      "label": "API unit tests (release shard 1/7)",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 5827
+    },
+    {
+      "label": "production rules tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 7723
+    },
+    {
+      "label": "inventory math tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2401
+    },
+    {
+      "label": "spec reconcile tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1089
+    },
+    {
+      "label": "spec import tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 3277
+    },
+    {
+      "label": "scheduled recipe check tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1058
+    },
+    {
+      "label": "spec export tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2626
+    },
+    {
+      "label": "corpus tests",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 10857
+    }
+  ],
+  "timing": {
+    "totalElapsedMs": 398289,
+    "stages": [
+      {
+        "stage": "prerequisites",
+        "elapsedMs": 30643
+      },
+      {
+        "stage": "shared-output",
+        "elapsedMs": 1710
+      },
+      {
+        "stage": "consumer-typechecks",
+        "elapsedMs": 66325
+      },
+      {
+        "stage": "typescript-7-advisory",
+        "elapsedMs": 36047
+      },
+      {
+        "stage": "clean-start",
+        "elapsedMs": 40184
+      },
+      {
+        "stage": "container-smoke",
+        "elapsedMs": 223380
+      }
+    ]
+  },
+  "updatedAt": "2026-10-02T03:17:07.396Z"
+}

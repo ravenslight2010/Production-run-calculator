@@ -1,5 +1,14 @@
 import type { OperationalProjection } from "@workspace/live-calc";
+import {
+  applySyncDeltaData,
+  canonicalSyncValue,
+  isSyncRecord,
+  isValidSyncSnapshotId,
+} from "@workspace/sync-contract";
 import type { SyncPayload } from "./types";
+import { SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
+
+export { isValidSyncSnapshotId };
 
 export interface SyncWriteResponseBody<T> {
   data?: T;
@@ -9,10 +18,50 @@ export interface SyncWriteResponseBody<T> {
   snapshotId?: string;
   partialFallback?: boolean;
   operationalProjection?: OperationalProjection | null;
+  serverTime?: number;
+}
+
+export type PartialSyncEnvelope = {
+  syncVersion?: unknown;
+  completeness?: unknown;
+  baseSnapshotId?: unknown;
+  snapshotId?: unknown;
+  resultingSnapshotId?: unknown;
+  data?: unknown;
+};
+
+export type SyncWriteFieldCheck = {
+  checkName: "sync-acknowledgment";
+  outcome: "success" | "failure";
+  metrics?: { failureCode: number };
+};
+
+/**
+ * Classifies only terminal outcomes of a local sync write. Other sync
+ * diagnostics (stream, peer fallback, and foreground recovery) deliberately
+ * stay outside this field check.
+ */
+export function syncWriteFieldCheck(input: {
+  ok: boolean;
+  status: number;
+  stale?: boolean;
+  retriesExhausted?: boolean;
+}): SyncWriteFieldCheck | undefined {
+  if (input.stale || input.retriesExhausted || input.status === 401 || input.status === 403) {
+    const failureCode = input.stale ? SYNC_ACK_FAILURE_CODES.staleOrResetWrite
+      : input.status === 401 || input.status === 403 ? SYNC_ACK_FAILURE_CODES.authenticationRejected
+        : SYNC_ACK_FAILURE_CODES.retriesExhausted;
+    return { checkName: "sync-acknowledgment", outcome: "failure", metrics: { failureCode } };
+  }
+  if (input.ok) {
+    return { checkName: "sync-acknowledgment", outcome: "success" };
+  }
+  return undefined;
 }
 
 interface ConsumeSyncWriteResponseOptions<T> {
   applyCanonical?: (data: T) => void | Promise<void>;
+  onServerTime?: (serverTime: number) => void;
   onStale?: (body: SyncWriteResponseBody<T>) => void | Promise<void>;
   shouldConsume?: () => boolean;
 }
@@ -20,58 +69,84 @@ interface ConsumeSyncWriteResponseOptions<T> {
 export async function consumeSyncWriteResponse<T>(
   response: Response,
   options: ConsumeSyncWriteResponseOptions<T> = {},
-): Promise<{ body: SyncWriteResponseBody<T> | null; stale: boolean }> {
+): Promise<{
+  body: SyncWriteResponseBody<T> | null;
+  stale: boolean;
+  malformed: boolean;
+  recoverableConflict: boolean;
+}> {
   const parsed = await response.clone().json().catch(() => null);
   const body =
     parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as SyncWriteResponseBody<T>
       : null;
   if (options.shouldConsume && !options.shouldConsume()) {
-    return { body, stale: false };
+    return { body, stale: false, malformed: false, recoverableConflict: false };
   }
+  const hasData = body !== null && Object.prototype.hasOwnProperty.call(body, "data");
+  const recoverableConflict = isRecoverableStaleBaseFallback(response.status, body);
+  const validEnvelope = body !== null && (
+    body.stale === true
+      || isUnchangedSyncResponse(body)
+      || hasData
+  );
+  const malformed = response.ok && !validEnvelope;
   const stale = body?.stale === true;
 
-  if (stale) {
+  if (!malformed && typeof body?.serverTime === "number" && Number.isFinite(body.serverTime)) {
+    options.onServerTime?.(body.serverTime);
+  }
+  if (malformed) {
+    // A successful transport with no sync envelope is not an acknowledgment.
+    // Callers keep their retry/fence state until a canonical response arrives.
+  } else if (stale) {
     await options.onStale?.(body);
-  } else if (response.ok && body?.data !== undefined) {
+  } else if (
+    (response.ok || recoverableConflict)
+    && body?.data !== undefined
+    && body.data !== null
+  ) {
     await options.applyCanonical?.(body.data);
   }
 
-  return { body, stale };
+  return { body, stale, malformed, recoverableConflict };
 }
 
-/** Snapshot identities are server-produced SHA-256 digests. */
-export function isValidSyncSnapshotId(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+/** The only non-2xx sync write that carries canonical rebase data is this legacy-upgrade 409. */
+export function isRecoverableStaleBaseFallback(
+  status: number,
+  body: SyncWriteResponseBody<unknown> | null,
+): boolean {
+  if (
+    status !== 409
+    || body?.partialFallback !== true
+    || !isValidSyncSnapshotId(body.snapshotId)
+    || !isSyncRecord(body.data)
+  ) return false;
+  return body.data.completeness !== "partial"
+    && isSyncRecord(body.data.dayState)
+    && Array.isArray(body.data.dayState.runs)
+    && isSyncRecord(body.data.runValues);
 }
 
-function canonicalSyncValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalSyncValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => [key, canonicalSyncValue(child)]),
-    );
-  }
-  return value;
+/** Removes server-owned read models that are transported beside, but not hashed into, the canonical document. */
+export function persistedSyncPayload(payload: SyncPayload): SyncPayload {
+  const {
+    operationalProjection: _operationalProjection,
+    serverTime: _serverTime,
+    canonicalRevision: _canonicalRevision,
+    resetEpoch: _resetEpoch,
+    rollover: _rollover,
+    ...persisted
+  } = payload;
+  return persisted as SyncPayload;
 }
 
 export async function syncPayloadSnapshotId(
   payload: SyncPayload,
   options: { stripReadModel?: boolean } = {},
 ): Promise<string> {
-  const snapshotDocument = options.stripReadModel
-    ? (() => {
-        const {
-          operationalProjection: _operationalProjection,
-          serverTime: _serverTime,
-          canonicalRevision: _canonicalRevision,
-          ...persisted
-        } = payload;
-        return persisted;
-      })()
-    : payload;
+  const snapshotDocument = options.stripReadModel ? persistedSyncPayload(payload) : payload;
   const encoded = new TextEncoder().encode(JSON.stringify(canonicalSyncValue(snapshotDocument)));
   const digest = await crypto.subtle.digest("SHA-256", encoded);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -84,6 +159,54 @@ export async function syncPayloadMatchesSnapshot(
 ): Promise<boolean> {
   if (!isValidSyncSnapshotId(snapshotId)) return false;
   return await syncPayloadSnapshotId(payload, options) === snapshotId;
+}
+
+/**
+ * Applies the deliberately narrow peer delta wire format.  A delta is never
+ * merged into whatever happens to be in React state: its base must be the
+ * exact canonical snapshot most recently adopted from the server.
+ */
+export async function reconstructPartialSyncPayload(
+  base: SyncPayload | null | undefined,
+  baseSnapshotId: unknown,
+  envelope: PartialSyncEnvelope,
+): Promise<SyncPayload | null> {
+  if (!base || envelope.syncVersion !== 1 || envelope.completeness !== "partial") return null;
+  if (!isValidSyncSnapshotId(baseSnapshotId) || envelope.baseSnapshotId !== baseSnapshotId) return null;
+  if (!isValidSyncSnapshotId(envelope.snapshotId) || !isSyncRecord(envelope.data)) return null;
+  if (
+    envelope.resultingSnapshotId !== undefined
+    && (
+      !isValidSyncSnapshotId(envelope.resultingSnapshotId)
+      || envelope.resultingSnapshotId !== envelope.snapshotId
+    )
+  ) return null;
+  if (!await syncPayloadMatchesSnapshot(base, baseSnapshotId)) return null;
+  const merged = applySyncDeltaData(
+    base as unknown as Record<string, unknown>,
+    envelope.data,
+  );
+  if (!merged) return null;
+  delete merged.completeness;
+  delete merged.baseSnapshotId;
+  delete merged.resultingSnapshotId;
+  merged.syncVersion = 1;
+  merged.completeness = "complete";
+  return await syncPayloadMatchesSnapshot(merged as SyncPayload, envelope.snapshotId)
+    ? merged as SyncPayload
+    : null;
+}
+
+export function mergeSparseServerRunMap(
+  current: Record<string, unknown>,
+  sparse: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current };
+  for (const [runId, value] of Object.entries(sparse)) {
+    if (value === null) delete merged[runId];
+    else merged[runId] = value;
+  }
+  return merged;
 }
 
 export async function readCurrentRecoveryJson(
@@ -136,4 +259,11 @@ export function isUnchangedSyncResponse(body: SyncWriteResponseBody<unknown> | n
   return body?.unchanged === true
     && body.data === undefined
     && isValidSyncSnapshotId(body.snapshotId);
+}
+
+/** A stale-base fallback is authoritative recovery data, not an acknowledgement of the attempted write. */
+export function shouldReplaySyncWrite(
+  body: SyncWriteResponseBody<unknown> | null | undefined,
+): boolean {
+  return body?.partialFallback === true;
 }

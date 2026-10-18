@@ -1,16 +1,15 @@
 /**
  * Sauce barrel timer — pure-calculation tests.
  *
- * Covers the formulas used by both the web LiveSauceTabContent and the mobile
- * sauce.tsx to drive barrel countdown, the nearly-exhausted alert, and the
- * packaging quick check. All logic under test is pure math — no React, no DOM.
+ * Covers the pause-aware Sauce barrel countdown used by the live stations.
+ * All logic under test is pure math — no React, no DOM. Automatic staged
+ * supply and claim cadence are covered by the shared live-calc and auto-track
+ * suites; this file intentionally has no legacy alert contracts.
  *
  * Scenarios:
  *   1. sauceDepletionSec formula — basic, edge cases (0-valued inputs)
  *   2. netElapsedSec (pause-aware) — freeze during pause, resume after pause
  *   3. Barrel elapsed calculation — derived from netElapsedSec and barrel anchor
- *   4. Nearly-exhausted alert suppression — pressDone clears / prevents the alert
- *   5. Quick check cadence — fires on timePerBatchSec interval, stops at pressDone
  */
 
 import { describe, it, expect } from "vitest";
@@ -65,35 +64,6 @@ function barrelElapsed(netElapsed: number, lastBarrelNetSec: number): number {
   return Math.max(0, netElapsed - lastBarrelNetSec);
 }
 
-/**
- * True when the nearly-exhausted alert should fire (< 15% left, not pressDone).
- */
-function shouldFireBarrelAlert(
-  barrelElapsedSec: number,
-  depletionSec: number,
-  pressDone: boolean,
-): boolean {
-  if (pressDone || depletionSec <= 0) return false;
-  const secLeft = Math.max(0, depletionSec - barrelElapsedSec);
-  return secLeft / depletionSec < 0.15;
-}
-
-/**
- * True when the packaging quick check should fire (netElapsed crossed a
- * new batch interval boundary and pressDone is false).
- */
-function shouldFireQuickCheck(
-  netElapsedSec: number,
-  timePerBatchSec: number,
-  pressDone: boolean,
-  prevBatchNum: number,
-): { fire: boolean; newBatchNum: number } {
-  if (pressDone || timePerBatchSec <= 0) return { fire: false, newBatchNum: prevBatchNum };
-  const batchNum = Math.floor(netElapsedSec / timePerBatchSec);
-  const fire = batchNum > 0 && batchNum !== prevBatchNum;
-  return { fire, newBatchNum: batchNum };
-}
-
 // ── Shared fixture ────────────────────────────────────────────────────────────
 const T0 = 1_700_000_000_000;           // arbitrary epoch for run start
 const BARREL_LBS = 30;                  // 30 lb barrel
@@ -133,7 +103,6 @@ describe("sauceDepletionSec formula", () => {
     expect(big).toBeCloseTo(base * 2, 6);
   });
 });
-
 // ── 2. netElapsedSec — pause/resume behaviour ─────────────────────────────────
 describe("netElapsedSec — pause-aware elapsed time", () => {
   it("equals gross elapsed when no stoppages", () => {
@@ -203,110 +172,5 @@ describe("barrel elapsed — pause-aware barrel countdown", () => {
 
     // 5 s later: new barrel has been running for 5 s
     expect(barrelElapsed(netNow + 5, newAnchor)).toBe(5);
-  });
-});
-
-// ── 4. Nearly-exhausted alert — pressDone suppression ─────────────────────────
-describe("barrel alert suppression — pressDone", () => {
-  const DEP = EXPECTED_DEPLETION_SEC; // ~32 s
-
-  it("does NOT fire when barrel is mostly full (> 85% time remaining)", () => {
-    const elapsed = DEP * 0.05; // 5% consumed
-    expect(shouldFireBarrelAlert(elapsed, DEP, false)).toBe(false);
-  });
-
-  it("fires when < 15% of barrel time remains", () => {
-    const elapsed = DEP * 0.87; // 87% consumed → 13% left
-    expect(shouldFireBarrelAlert(elapsed, DEP, false)).toBe(true);
-  });
-
-  it("does NOT fire at exactly 15% remaining (boundary is strict <)", () => {
-    const elapsed = DEP * 0.85; // exactly 15% left
-    expect(shouldFireBarrelAlert(elapsed, DEP, false)).toBe(false);
-  });
-
-  it("does NOT fire when pressDone is true even if barrel is nearly empty", () => {
-    const elapsed = DEP * 0.95; // 5% left — would fire without pressDone
-    expect(shouldFireBarrelAlert(elapsed, DEP, /* pressDone */ true)).toBe(false);
-  });
-
-  it("does NOT fire when depletion is 0 (sauce not configured)", () => {
-    expect(shouldFireBarrelAlert(100, 0, false)).toBe(false);
-  });
-
-  it("pressDone gate stays closed even for the first barrel (t=0)", () => {
-    // Edge: entire barrel consumed in one tick (elapsed > dep)
-    expect(shouldFireBarrelAlert(DEP + 1, DEP, /* pressDone */ true)).toBe(false);
-  });
-
-  it("fires for each subsequent barrel after consume-reset", () => {
-    // Barrel 0: consumed, anchor reset to netElapsed=20s
-    const anchor = 20;
-    // 5% of next barrel consumed — should NOT fire yet
-    const earlyElapsed = DEP * 0.05;
-    expect(shouldFireBarrelAlert(barrelElapsed(anchor + earlyElapsed, anchor), DEP, false)).toBe(false);
-    // 90% of next barrel consumed — should fire
-    const lateElapsed = DEP * 0.92;
-    expect(shouldFireBarrelAlert(barrelElapsed(anchor + lateElapsed, anchor), DEP, false)).toBe(true);
-  });
-});
-
-// ── 5. Quick check cadence — pause-aware, stopped at pressDone ───────────────
-describe("quick check cadence", () => {
-  const BATCH_SEC = 60; // one check every 60 net-seconds
-
-  it("does NOT fire before first full batch interval", () => {
-    const { fire } = shouldFireQuickCheck(30, BATCH_SEC, false, 0);
-    expect(fire).toBe(false);
-  });
-
-  it("fires after first full batch interval", () => {
-    const { fire, newBatchNum } = shouldFireQuickCheck(61, BATCH_SEC, false, 0);
-    expect(fire).toBe(true);
-    expect(newBatchNum).toBe(1);
-  });
-
-  it("does NOT re-fire within the same interval (latch check)", () => {
-    // batchNum is still 1 at 90 s; prevBatchNum already 1 from first fire
-    const { fire } = shouldFireQuickCheck(90, BATCH_SEC, false, 1);
-    expect(fire).toBe(false);
-  });
-
-  it("fires again when the next batch boundary is crossed", () => {
-    const { fire, newBatchNum } = shouldFireQuickCheck(121, BATCH_SEC, false, 1);
-    expect(fire).toBe(true);
-    expect(newBatchNum).toBe(2);
-  });
-
-  it("does NOT fire after pressDone even at a new batch boundary", () => {
-    const { fire } = shouldFireQuickCheck(61, BATCH_SEC, /* pressDone */ true, 0);
-    expect(fire).toBe(false);
-  });
-
-  it("is pause-aware: does not cross a boundary during a pause", () => {
-    // Run started at T0. Paused after 30 s net elapsed. 60 s wall clock later:
-    const pauseStart = T0 + 30000;
-    const stoppages: Stoppage[] = [{ startedAt: pauseStart }];
-
-    // 90 s wall clock — but net elapsed is still 30 s (below 60 s threshold)
-    const net = mobileNetElapsedSec(T0, pauseStart + 60000, stoppages);
-    expect(net).toBeCloseTo(30, 6); // frozen at 30
-
-    const { fire } = shouldFireQuickCheck(net, BATCH_SEC, false, 0);
-    expect(fire).toBe(false); // no fire because net < 60
-  });
-
-  it("fires after resuming from pause once the net boundary is crossed", () => {
-    const pauseStart = T0 + 30000;
-    const pauseEnd   = T0 + 90000; // 60-s pause
-    const stoppages: Stoppage[] = [{ startedAt: pauseStart, endedAt: pauseEnd }];
-
-    // 40 s after resume: net = 30 + 40 = 70 s → crosses the 60-s boundary
-    const net = mobileNetElapsedSec(T0, pauseEnd + 40000, stoppages);
-    expect(net).toBeCloseTo(70, 6);
-
-    const { fire, newBatchNum } = shouldFireQuickCheck(net, BATCH_SEC, false, 0);
-    expect(fire).toBe(true);
-    expect(newBatchNum).toBe(1);
   });
 });

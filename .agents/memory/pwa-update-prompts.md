@@ -14,3 +14,9 @@ Keep Vite PWA's `registerType: "prompt"` and never let update detection itself r
 **Why:** A cached iOS bundle can still evaluate the legacy free `Notification` global even though current code safely probes `window.Notification`. Broad error matching or automatic recovery could interrupt unrelated active production work.
 
 **How to apply:** Keep this recovery opt-in and exact-message scoped. Embed a non-empty, deployment-specific web build ID in every web incident so stale-client reports can be distinguished from a current-code regression.
+
+**Pre-Home stale-asset recovery:** When a lazy Home chunk fails before Home can publish its normal blockers, automatic recovery may use a trusted pre-Home safety check. Require an authenticated complete snapshot for the current client day and a matching current-day local snapshot to show no active run; unknown, malformed, or unavailable state stays unsafe. Recheck after the safe-idle interval before beginning worker recovery. This supplements the existing gate and does not shorten or relax its inactivity policy.
+
+**Why:** The old shell can encounter its stale Home failure before the Home effect reports any safety state. Treating that missing report as safe would be unsafe; treating it as permanently unsafe prevents the intended recovery. A narrowly scoped proof from both persisted and authoritative current-day state resolves that gap without making recovery available during active work.
+
+**How to apply:** Keep the pre-Home proof limited to state that can exist before Home mounts, fail closed on uncertainty, and retain the existing Home blockers and idle timing as the normal policy.

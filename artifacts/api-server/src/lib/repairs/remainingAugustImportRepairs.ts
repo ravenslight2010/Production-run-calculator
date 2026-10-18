@@ -78,7 +78,10 @@ const num = (value: unknown): number => {
 const zeroComponents = (components: unknown) => !Array.isArray(components) || components.every((component) => {
   if (!component || typeof component !== "object") return true;
   const row = component as Record<string, unknown>;
-  return num(row.lbs) <= 0 && num(row.ozPerPizza) <= 0 && num(row.perPizza) <= 0;
+  return num(row.lbs) <= 0 &&
+    num(row.ozPerPizza) <= 0 &&
+    num(row.perPizza) <= 0 &&
+    num(row.amount) <= 0;
 });
 export const workbookImportStubPurgeRepair = definition(
   WORKBOOK_IMPORT_STUB_PURGE_REPAIR_ID, "Unreferenced zero-value rows whose IDs exactly match workbook-generated IDs.",

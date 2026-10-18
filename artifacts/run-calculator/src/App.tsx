@@ -22,7 +22,7 @@ import { useAuth } from "@/useAuth";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
-import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
+import { SignInPage, SignUpPage, InvitationPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
@@ -34,9 +34,12 @@ import { WEB_BUILD_ID } from "./buildIdentity";
 import { installBrowserFailureCapture } from "./browserIncidentCapture";
 import {
   getAutomaticUpdateReloadSafety,
+  reportAutomaticUpdateReloadSafety,
+  scheduleSafeIdleAutomaticRecovery,
   startUpdateReloadIdleTracking,
   subscribeAutomaticUpdateReloadSafety,
 } from "./updateReloadSafety";
+import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 
 const queryClient = new QueryClient();
 registerMasterDataQueryClient(queryClient);
@@ -67,9 +70,11 @@ const LazyHome = lazy(() => {
 function AppLoadingSurface({
   error,
   onRetry,
+  message,
 }: {
   error?: string;
   onRetry?: () => void;
+  message?: string;
 }) {
   return (
     <main
@@ -91,7 +96,7 @@ function AppLoadingSurface({
           {error ? "Unable to open Run Calculator" : "Opening Run Calculator"}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          {error ?? "Confirming your staff session…"}
+          {error ?? message ?? "Confirming your staff session…"}
         </p>
         {error && onRetry ? (
           <button
@@ -112,6 +117,7 @@ function AppLoadingSurface({
 // sign-in CTA for everyone else (no auto-redirect into the sign-in form).
 function HomeGate() {
   const {
+    me,
     isAuthenticated,
     isLoading,
     startupError,
@@ -158,9 +164,36 @@ function HomeGate() {
       clearWarmupFailure?.();
     };
   }, [isAuthenticated, toast, updateAndReload]);
+
+  const [preHomeSafetyUserId, setPreHomeSafetyUserId] = useState<string | null>(null);
+  const userId = isAuthenticated ? me?.userId ?? null : null;
+
+  useEffect(() => {
+    if (!userId) {
+      reportAutomaticUpdateReloadSafety(false);
+      setPreHomeSafetyUserId(null);
+      return;
+    }
+    let current = true;
+    setPreHomeSafetyUserId(null);
+    reportAutomaticUpdateReloadSafety(false);
+    void checkPreHomeReloadSafety().then((safe) => {
+      if (!current) return;
+      reportAutomaticUpdateReloadSafety(safe);
+      setPreHomeSafetyUserId(userId);
+    });
+    return () => {
+      current = false;
+      reportAutomaticUpdateReloadSafety(false);
+    };
+  }, [userId]);
+
   if (isLoading) return <AppLoadingSurface />;
   if (startupError) {
     return <AppLoadingSurface error={startupError} onRetry={retryStartup} />;
+  }
+  if (isAuthenticated && userId && preHomeSafetyUserId !== userId) {
+    return <AppLoadingSurface message="Checking current production state…" />;
   }
   return isAuthenticated ? (
     <MasterDataPolling>
@@ -178,6 +211,7 @@ function AppRoutes() {
         <Route path="/" component={HomeGate} />
         <Route path="/sign-in" component={SignInPage} />
         <Route path="/sign-up" component={SignUpPage} />
+        <Route path="/accept-invitation" component={InvitationPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route component={NotFound} />
       </Switch>
@@ -187,7 +221,11 @@ function AppRoutes() {
 }
 
 type AppUpdateContextValue = {
-  updateAndReload: () => Promise<void>;
+  updateAndReload: (canReload?: () => boolean) => Promise<void>;
+  scheduleSafeIdleRecovery: (
+    safeAtFailure: boolean,
+    recover: (canReload: () => boolean) => void | Promise<void>,
+  ) => () => void;
 };
 
 const AppUpdateContext = createContext<AppUpdateContextValue | null>(null);
@@ -284,28 +322,54 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
     [updateServiceWorker],
   );
   const handleUpdateAndReload = useCallback(
-    () => {
+    (canReload: () => boolean = () => true) => {
       emitFieldCheckSignal("pwa-update-handoff", "success");
       return updateAndReload(
         registrationRef.current,
         activateWaitingWorker,
         () => window.location.reload(),
+        canReload,
       );
     },
     [activateWaitingWorker],
   );
+  const scheduleSafeIdleRecovery = useCallback(
+    (
+      safeAtFailure: boolean,
+      recover: (canReload: () => boolean) => void | Promise<void>,
+    ) =>
+      scheduleSafeIdleAutomaticRecovery((canReload) => {
+        if (automaticReloadStartedRef.current) return;
+        automaticReloadStartedRef.current = true;
+        void Promise.resolve(recover(canReload)).finally(() => {
+          automaticReloadStartedRef.current = false;
+        });
+      }, safeAtFailure),
+    [],
+  );
   const handleAutomaticUpdateAndReload = useCallback(
     (generation: number) => {
       emitFieldCheckSignal("pwa-update-handoff", "success");
-      return updateAndReload(
-        registrationRef.current,
-        activateWaitingWorker,
-        () => window.location.reload(),
-        () =>
-          automaticReloadGenerationRef.current === generation
-          && getAutomaticUpdateReloadSafety()
-          && updateIdleRef.current,
-      );
+      const canReload = () =>
+        automaticReloadGenerationRef.current === generation
+        && getAutomaticUpdateReloadSafety()
+        && updateIdleRef.current;
+      if (!canReload()) return Promise.resolve();
+
+      // This path only runs after the app has already observed an installed
+      // update. Do not perform another update() discovery pass here: some
+      // browsers keep that promise pending while the waiting worker is being
+      // activated, which strands safe-idle handoffs. Activate the known
+      // waiting worker directly, or reload when the browser has already
+      // promoted it to active.
+      const registration = registrationRef.current;
+      if (registration?.waiting) {
+        return activateWaitingWorker(false, canReload).catch(() => {
+          if (canReload()) window.location.reload();
+        });
+      }
+      if (canReload()) window.location.reload();
+      return Promise.resolve();
     },
     [activateWaitingWorker],
   );
@@ -377,7 +441,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   ]);
 
   return (
-    <AppUpdateContext.Provider value={{ updateAndReload: handleUpdateAndReload }}>
+    <AppUpdateContext.Provider value={{
+      updateAndReload: handleUpdateAndReload,
+      scheduleSafeIdleRecovery,
+    }}>
       {children}
     </AppUpdateContext.Provider>
   );
@@ -386,21 +453,29 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
 function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
   const updateContext = useContext(AppUpdateContext);
   return (
-    <ErrorBoundary onUpdateAndReload={updateContext?.updateAndReload}>
+    <ErrorBoundary
+      onUpdateAndReload={updateContext?.updateAndReload}
+      scheduleSafeIdleRecovery={updateContext?.scheduleSafeIdleRecovery}
+    >
       {children}
     </ErrorBoundary>
   );
 }
 
 function App() {
-  useEffect(() => installBrowserFailureCapture(), []);
+  const isStationDisplay =
+    new URLSearchParams(window.location.search).get("screen") !== null;
+  useEffect(() => {
+    if (isStationDisplay) return;
+    return installBrowserFailureCapture();
+  }, [isStationDisplay]);
   return (
     <WouterRouter base={basePath}>
       <QueryClientProvider client={queryClient}>
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
-            <FieldVerificationObserver appBuild={WEB_BUILD_ID} />
+            {!isStationDisplay && <FieldVerificationObserver appBuild={WEB_BUILD_ID} />}
             <AppRoutes />
           </AuthProvider>
           </ErrorBoundaryWithRecovery>

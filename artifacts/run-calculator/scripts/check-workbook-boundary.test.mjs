@@ -58,6 +58,11 @@ function validManifest() {
         isDynamicEntry: true,
         modules: ["/repo/src/components/CheeseImportDialog.tsx"],
       },
+      "assets/heic2any.js": {
+        name: "heic2any",
+        isDynamicEntry: true,
+        modules: ["/repo/node_modules/.pnpm/heic2any@0.0.4/node_modules/heic2any/dist/heic2any.js"],
+      },
     },
   };
 }
@@ -71,7 +76,7 @@ test("rejects a workbook orchestrator in the opening static graph", () => {
   manifest.chunks["assets/home.js"].imports.push("assets/specImport.js");
   assert.throws(
     () => checkWorkbookBoundary(manifest),
-    /Workbook feature modules re-entered the opening application graph/,
+    /Deferred feature modules re-entered the opening application graph/,
   );
 });
 
@@ -80,7 +85,16 @@ test("rejects an import dialog in the opening static graph", () => {
   manifest.chunks["assets/home.js"].imports.push("assets/ExcelImportDialog.js");
   assert.throws(
     () => checkWorkbookBoundary(manifest),
-    /Workbook feature modules re-entered the opening application graph/,
+    /Deferred feature modules re-entered the opening application graph/,
+  );
+});
+
+test("rejects image conversion code in the opening static graph", () => {
+  const manifest = validManifest();
+  manifest.chunks["assets/home.js"].imports.push("assets/heic2any.js");
+  assert.throws(
+    () => checkWorkbookBoundary(manifest),
+    /Deferred feature modules re-entered the opening application graph/,
   );
 });
 
@@ -89,7 +103,7 @@ test("checks Home even when the router loads it as a dynamic entry", () => {
   manifest.chunks["assets/home.js"].modules.push("/repo/src/specImport.ts");
   assert.throws(
     () => checkWorkbookBoundary(manifest),
-    /Workbook feature modules re-entered the opening application graph/,
+    /Deferred feature modules re-entered the opening application graph/,
   );
 });
 

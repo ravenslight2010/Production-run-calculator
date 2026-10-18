@@ -20,6 +20,12 @@ export function reportBrowserFailure(
   error: unknown,
   extra: Partial<ReportIncidentBody> = {},
 ): Promise<IncidentDiagnosis | undefined> {
+  if (
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("screen") !== null
+  ) {
+    return Promise.resolve(undefined);
+  }
   const now = Date.now();
   if (now - windowStartedAt >= DEDUPE_WINDOW_MS) {
     windowStartedAt = now;

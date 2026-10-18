@@ -98,6 +98,7 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
       casesPerSkid: 20,
     },
     isCrust: false,
+    automaticDoughTracking: false,
     nextRunLabels: [],
     prefs: undefined,
     ...overrides,
@@ -363,6 +364,55 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
       rerender(makeParams(T0 + 1_000, {
         currentRun: run,
         calc: { ...makeParams(T0).calc, pressDone: true },
+      }));
+    });
+
+    expect(result.current.showBatchDue).toBe(false);
+  });
+
+  it("suppresses batch reminders while automatic dough tracking is active", () => {
+    const notifCtor = injectNotificationStub("granted");
+    const { result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, { automaticDoughTracking: true }),
+    });
+
+    expect(result.current.showBatchDue).toBe(false);
+    expect(vibrateMock).not.toHaveBeenCalled();
+    expect(notifCtor).not.toHaveBeenCalled();
+  });
+
+  it("clears a visible manual reminder when automatic dough tracking is enabled", () => {
+    const run = makeRun();
+    const { rerender, result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, { currentRun: run, automaticDoughTracking: false }),
+    });
+    expect(result.current.showBatchDue).toBe(true);
+
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        automaticDoughTracking: true,
+      }));
+    });
+
+    expect(result.current.showBatchDue).toBe(false);
+  });
+
+  it("does not resurrect a dismissed boundary after switching auto tracking off", () => {
+    const run = makeRun();
+    const { rerender, result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, { currentRun: run, automaticDoughTracking: false }),
+    });
+    act(() => result.current.setShowBatchDue(false));
+
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        automaticDoughTracking: true,
+      }));
+      rerender(makeParams(T0 + 2_000, {
+        currentRun: run,
+        automaticDoughTracking: false,
       }));
     });
 

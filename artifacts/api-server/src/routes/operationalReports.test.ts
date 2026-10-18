@@ -22,12 +22,17 @@ describe("operational report input contract", () => {
       RELEASE_REVISION: "a".repeat(40),
       REPLIT_GIT_COMMIT: "b".repeat(40),
       GIT_COMMIT: "c".repeat(40),
+      REPLIT_DEPLOYMENT_ID: "publish-2026-10-02",
       npm_package_version: "1.2.3",
       NODE_ENV: "production",
     })).toEqual({
       version: "1.2.3",
       revision: "a".repeat(40),
       environment: "production",
+      deploymentId: "publish-2026-10-02",
+      deployedRevision: "a".repeat(40),
+      identityStatus: "reported-unverified",
+      identitySource: "runtime-environment",
     });
   });
 
@@ -36,6 +41,36 @@ describe("operational report input contract", () => {
       RELEASE_REVISION: "unknown",
       REPLIT_GIT_COMMIT: "b".repeat(40),
     }).revision).toBe("unknown");
+    expect(operationalReleaseEvidence({
+      RELEASE_REVISION: "unknown",
+      REPLIT_GIT_COMMIT: "b".repeat(40),
+      REPLIT_DEPLOYMENT_ID: "deployment-1",
+    })).toMatchObject({
+      deployedRevision: null,
+      identityStatus: "incomplete",
+      identitySource: "runtime-environment",
+    });
+  });
+
+  it("reports missing and malformed deployment identity without inventing values", () => {
+    expect(operationalReleaseEvidence({
+      NODE_ENV: "production",
+    })).toMatchObject({
+      deploymentId: null,
+      deployedRevision: null,
+      identityStatus: "unavailable",
+      identitySource: "unavailable",
+    });
+
+    expect(operationalReleaseEvidence({
+      RELEASE_REVISION: "d".repeat(40),
+      REPLIT_DEPLOYMENT_ID: "invalid deployment id",
+    })).toMatchObject({
+      deploymentId: null,
+      deployedRevision: "d".repeat(40),
+      identityStatus: "incomplete",
+      identitySource: "runtime-environment",
+    });
   });
 
   it("accepts a valid day report", () => {

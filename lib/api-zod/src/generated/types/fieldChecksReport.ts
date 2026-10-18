@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FieldChecksReportOverallStatus } from './fieldChecksReportOverallStatus';
+import type { FieldChecksReportPopulation } from './fieldChecksReportPopulation';
 import type { FieldChecksReportScope } from './fieldChecksReportScope';
 import type { FieldCheckSummary } from './fieldCheckSummary';
 
 export interface FieldChecksReport {
+  population: FieldChecksReportPopulation;
   version: string;
   scope: FieldChecksReportScope;
   generatedAt: Date;

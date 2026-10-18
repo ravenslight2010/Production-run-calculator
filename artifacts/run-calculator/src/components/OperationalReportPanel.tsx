@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, BarChart2, CheckCircle2, Download, FileSpreadsheet, Lock, Loader2, Printer, RefreshCw, Share2, ShieldAlert } from "lucide-react";
-import * as XLSX from "xlsx";
 import { aggregateDaySummary, type OperationalReport } from "@workspace/day-summary";
 import type { SummaryInput } from "../aiSummary";
 import {
+  downloadOperationalReportWorkbook,
   operationalReportText,
   operationalReportCsv,
-  operationalReportWorkbook,
   reportFilename,
   shareOperationalReport,
 } from "../reportShare";
@@ -377,7 +376,11 @@ export default function OperationalReportPanel({
       return;
     }
     if (kind === "xlsx") {
-      XLSX.writeFile(operationalReportWorkbook(report), reportFilename(report, "xlsx"));
+      try {
+        await downloadOperationalReportWorkbook(report, reportFilename(report, "xlsx"));
+      } catch {
+        setStatus("Could not generate the XLSX report. Check your connection and try again.");
+      }
       return;
     }
     const blob = new Blob(

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import webpush from "web-push";
-import { runBackgroundOperation } from "./backgroundOperations";
-import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
+import {
+  createBackgroundOperationBackoff,
+  runBackgroundOperation,
+} from "./backgroundOperations";
+import { and, asc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
   dailySyncTable, scheduledAlertRecordsTable,
@@ -11,13 +14,20 @@ import { logger } from "./logger";
 import type { Scope } from "./requestScope";
 import { getUserCapabilities } from "./roles";
 import { computeAutoTrackElapsedMs } from "@workspace/live-calc";
-import { enqueueServerJob, registerServerJob } from "./serverJobs";
+import {
+  enqueueServerJob,
+  markScheduledEvaluationQueueSampleUnavailable,
+  registerServerJob,
+  sampleScheduledEvaluationQueue,
+  SCHEDULED_EVALUATION_CANONICAL_ACTOR,
+  SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS,
+  type ScheduledEvaluationQueueTransition,
+} from "./serverJobs";
 
 export const WEB_PUSH_KINDS = ["fifteenMin", "batchDue", "warehouseStaging", "runComplete", "freezerEmpty"] as const;
 export type WebPushKind = (typeof WEB_PUSH_KINDS)[number];
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_ENDPOINT = 2048;
-const SCHEDULED_EVALUATION_ACTOR = "system:scheduled-alert-scheduler";
 const DEFAULT_ALERT_INTERVAL_MS = 60_000;
 
 export function vapidPublicKey(): string | null {
@@ -85,7 +95,7 @@ export function alertCandidates(data: unknown, date: string, nowMs = Date.now())
   const calc = result.calc;
   if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) out.push({ id: `${prefix}:fifteen-min`, kind: "fifteenMin" });
   if (calc.adjustedTimeSec <= 0 && nowMs - started >= 60_000) out.push({ id: `${prefix}:run-complete`, kind: "runComplete" });
-  if (!calc.pressDone && calc.timePerBatchSec > 0) {
+  if (run.autoTrackDisabled === true && !calc.pressDone && calc.timePerBatchSec > 0) {
     // Shared auto-track timing excludes pauses/closed stoppages and therefore
     // keeps a batch boundary from becoming due while the line is stopped.
     const elapsed = computeAutoTrackElapsedMs({ startedAt: started, pausedAt: paused || undefined, nowMs, stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined });
@@ -384,29 +394,32 @@ function quietHours(nowMs: number): boolean {
   return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
-export function scheduledEvaluationIdempotencyKey(date: string, nowMs: number, bucketMs = DEFAULT_ALERT_INTERVAL_MS): string {
+export function scheduledEvaluationIdempotencyKey(scope: Scope, nowMs: number, bucketMs = DEFAULT_ALERT_INTERVAL_MS): string {
   const bucket = Math.floor(nowMs / bucketMs) * bucketMs;
-  return `scheduled-evaluation:${date}:${bucket}`;
+  return `scheduled-evaluation:${scope}:${bucket}`;
 }
 
 /**
- * Enqueues one durable workload per canonical scope/date/time bucket. The
- * server_jobs unique key elects the insert winner across API instances; actual
- * evaluation is performed only by the shared bounded ServerJobWorker.
+ * Enqueues one durable workload per canonical scope/time bucket. A single job
+ * evaluates that scope's dates individually, so local-day boundaries and
+ * date-specific alert state remain intact without one queue entry per date.
  */
 export async function enqueueScheduledWebPushAlerts(
   nowMs = Date.now(),
   bucketMs = DEFAULT_ALERT_INTERVAL_MS,
 ): Promise<{ examined: number; enqueued: number }> {
-  const rows = await db.select({ scope: dailySyncTable.scope, date: dailySyncTable.date }).from(dailySyncTable);
+  const rows = await db.select({ scope: dailySyncTable.scope })
+    .from(dailySyncTable)
+    .groupBy(dailySyncTable.scope);
   let enqueued = 0;
   for (const row of rows) {
+    const scope = row.scope as Scope;
     const result = await enqueueServerJob({
-      scope: row.scope as Scope,
-      actorId: SCHEDULED_EVALUATION_ACTOR,
+      scope,
+      actorId: SCHEDULED_EVALUATION_CANONICAL_ACTOR,
       type: "scheduled-evaluation",
-      idempotencyKey: scheduledEvaluationIdempotencyKey(row.date, nowMs, bucketMs),
-      input: { date: row.date, scheduledFor: nowMs },
+      idempotencyKey: scheduledEvaluationIdempotencyKey(scope, nowMs, bucketMs),
+      input: { scheduledFor: nowMs },
     });
     if (result.created) enqueued++;
   }
@@ -419,61 +432,151 @@ registerServerJob("scheduled-evaluation", {
   timeoutMs: 60_000,
   handler: async (context) => {
     const input = context.job.input as { date?: unknown; scheduledFor?: unknown };
-    if (typeof input?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)
-      || typeof input.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
-      throw new Error("scheduled-evaluation requires a date and scheduledFor timestamp");
+    if ((input?.date !== undefined
+      && (typeof input.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)))
+      || typeof input?.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
+      throw new Error("scheduled-evaluation requires scheduledFor and an optional date");
     }
-    const date = input.date;
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(10, "Evaluating scheduled production alerts");
-    // Evaluate at execution time rather than the enqueue timestamp so a queued
-    // job cannot emit an alert before its canonical milestone is actually due.
-    const result = await context.commit(() => runWebPushAlerts(Date.now(), {
-      scope: context.job.scope as Scope,
-      date,
-      signal: context.signal,
-    }));
+    const scope = context.job.scope as Scope;
+    const dates = typeof input.date === "string"
+      ? [{ date: input.date }]
+      : await db.select({ date: dailySyncTable.date })
+        .from(dailySyncTable)
+        .where(eq(dailySyncTable.scope, scope))
+        .orderBy(asc(dailySyncTable.date));
+    let examined = 0;
+    let candidates = 0;
+    // Keep each date's alert effects in its own commit. Besides preserving the
+    // former transaction size, logical alert claims make retries safe if a
+    // later date fails after earlier dates have completed.
+    for (const row of dates) {
+      if (await context.isCancellationRequested()) throw new Error("Cancelled");
+      const result = await context.commit(() => runWebPushAlerts(Date.now(), {
+        scope,
+        date: row.date,
+        signal: context.signal,
+      }));
+      examined += result.examined;
+      candidates += result.candidates;
+    }
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(100, "Scheduled production alerts evaluated");
-    return result;
+    return { examined, candidates };
   },
 });
 
 export type WebPushAlertScheduler = { stop(): void };
 
+function logScheduledEvaluationQueueTransitions(
+  transition: ScheduledEvaluationQueueTransition,
+): void {
+  const { diagnostics } = transition;
+  const safeCounts = {
+    queued: diagnostics.queued,
+    running: diagnostics.running,
+    terminalLastWindow: diagnostics.terminalLastWindow,
+    duplicateTimeBucketGroups: diagnostics.duplicateTimeBucketGroups,
+    duplicateGroupsTruncated: diagnostics.duplicateGroupsTruncated,
+    sampleAvailability: diagnostics.sampleAvailability,
+    sampleCount: diagnostics.sampleCount,
+    windowMs: diagnostics.windowMs,
+  };
+  if (transition.started.length) {
+    logger.warn({
+      event: "scheduled_evaluation_queue_monitor",
+      outcome: "warning",
+      warningCodes: transition.started,
+      safeCounts,
+    }, "Scheduled evaluation queue warning started");
+  }
+  if (transition.cleared.length) {
+    logger.info({
+      event: "scheduled_evaluation_queue_monitor",
+      outcome: "recovered",
+      warningCodes: transition.cleared,
+      safeCounts,
+    }, "Scheduled evaluation queue warning cleared");
+  }
+}
+
 export function startWebPushAlertScheduler(options: {
   now?: () => number;
   enqueue?: typeof enqueueScheduledWebPushAlerts;
+  sampleQueue?: () => Promise<ScheduledEvaluationQueueTransition>;
 } = {}): WebPushAlertScheduler {
   const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
   const now = options.now ?? Date.now;
   const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
+  const sampleQueue = options.sampleQueue ?? sampleScheduledEvaluationQueue;
+  const backoff = createBackgroundOperationBackoff();
   let stopped = false;
   let scheduling = false;
+  let monitoring = false;
+  let monitorUnavailable = false;
+  const sample = () => {
+    if (stopped || monitoring) return;
+    monitoring = true;
+    void sampleQueue()
+      .then((transition) => {
+        if (monitorUnavailable) {
+          logger.info({
+            event: "scheduled_evaluation_queue_monitor",
+            outcome: "monitor_recovered",
+          }, "Scheduled evaluation queue monitor recovered");
+          monitorUnavailable = false;
+        }
+        logScheduledEvaluationQueueTransitions(transition);
+      })
+      .catch(() => {
+        markScheduledEvaluationQueueSampleUnavailable();
+        if (!monitorUnavailable) {
+          logger.warn({
+            event: "scheduled_evaluation_queue_monitor",
+            outcome: "sample_unavailable",
+          }, "Scheduled evaluation queue monitor sample unavailable");
+          monitorUnavailable = true;
+        }
+      })
+      .finally(() => { monitoring = false; });
+  };
   const execute = () => {
     if (stopped || scheduling) return;
+    const currentTime = now();
+    if (!backoff.isReady(currentTime)) return;
     scheduling = true;
     // Freeze the bucket input across the retry. A partial first insert near a
     // bucket boundary must converge on the same idempotency keys.
-    const scheduledAt = now();
+    const scheduledAt = currentTime;
     void runBackgroundOperation(
       "web-push-schedule",
       () => enqueue(scheduledAt, interval),
     )
-      .catch(() => logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed"))
+      .then(() => backoff.recordSuccess())
+      .catch(() => {
+        backoff.recordFailure(now());
+        logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed");
+      })
       .finally(() => { scheduling = false; });
   };
   // Enqueue promptly after startup and recurringly without a foreground
   // browser. This timer is only a producer, never a second execution loop.
   const first = setTimeout(execute, 0);
+  const firstSample = setTimeout(sample, 0);
   first.unref();
+  firstSample.unref();
   const timer = setInterval(execute, interval);
+  const sampleTimer = setInterval(sample, SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS);
   timer.unref();
+  sampleTimer.unref();
   return {
     stop() {
       stopped = true;
       clearTimeout(first);
+      clearTimeout(firstSample);
       clearInterval(timer);
+      clearInterval(sampleTimer);
     },
   };
 }

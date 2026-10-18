@@ -38,8 +38,9 @@ export async function getUserById(id: string): Promise<User | undefined> {
 export async function updateUserPassword(
   id: string,
   newPassword: string,
+  executor: Pick<typeof db, "update"> = db,
 ): Promise<void> {
-  await db
+  await executor
     .update(usersTable)
     .set({ passwordHash: hashPassword(newPassword), passwordChangedAt: new Date() })
     .where(eq(usersTable.id, id));
@@ -50,13 +51,14 @@ export async function updateUserPassword(
 export async function createUser(
   username: string,
   password: string,
+  executor: Pick<typeof db, "select" | "insert"> = db,
 ): Promise<{ ok: true; user: User } | { ok: false; reason: "taken" }> {
   const handle = normalizeUsername(username);
-  const existing = await findUserByUsername(handle);
+  const [existing] = await executor.select().from(usersTable).where(sql`lower(${usersTable.username}) = lower(${handle})`);
   if (existing) return { ok: false, reason: "taken" };
 
   try {
-    const [row] = await db
+    const [row] = await executor
       .insert(usersTable)
       .values({ id: newUserId(), username: handle, passwordHash: hashPassword(password) })
       .returning();

@@ -229,9 +229,9 @@ describe("freeze tunnel and warehouse freezer domain isolation", () => {
         batchesReady: store.batchesReady,
       },
       form,
-      onPackagingProgressAutoAdvance: (skidsCompleted, casesOnCurrentSkid) => (
+      onPackagingProgressAutoAdvance: (runId, skidsCompleted, casesOnCurrentSkid) => (
         recordAutomaticPackagingProgress({
-          runId: RUN_ID,
+          runId,
           skidsCompleted,
           casesOnCurrentSkid,
           now: nowMs,
@@ -337,8 +337,14 @@ describe("freeze tunnel and warehouse freezer domain isolation", () => {
 
   it("keeps Home drain and freezer action handlers on opposite state boundaries", () => {
     const homeSource = readSource("pages/home.tsx");
+    const packagingStationSource = readSource(
+      "components/live-stations/LivePackagingTabContent.tsx",
+    );
     const packagingManagerSource = readSource("packagingManager.ts");
-    const drainEffect = findEffectSource(homeSource, "priorDrainFreezerRef");
+    const drainEffect = findEffectSource(
+      packagingStationSource,
+      "priorDrainFreezerRef",
+    );
     const updateDrainingRun = findFunctionSource(packagingManagerSource, "updateDrainingRun");
     const confirmSurplus = findFunctionSource(homeSource, "confirmRunSurplus");
     const replaceSurplus = findFunctionSource(homeSource, "replaceRunSurplus");

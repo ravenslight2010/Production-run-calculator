@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "kind": "sse-capacity-observation",
+  "capturedAtUtc": "2026-10-11T13:57:46Z",
+  "environment": "production",
+  "captureMethod": [
+    "Replit deployment metadata",
+    "Sanitized allowlist-only projection of deployment database_capacity_sample logs since 2026-10-10T20:30:00Z",
+    "Read-only numeric query against the Replit-managed production database replica"
+  ],
+  "deployment": {
+    "active": true,
+    "reportedType": "autoscale",
+    "buildSuccessful": true,
+    "ownerReportedConfiguredMaximumMachines": 3,
+    "configuredMaximumSource": "Owner-reported Publishing machine configuration",
+    "currentOrPeakApiProcesses": "unknown",
+    "apiProcessPerMachineBasis": "The configured run command execs one Node API process; no runtime process-count metric was available.",
+    "deploymentId": "not exposed",
+    "servingProcessRevision": "not exposed by deployment metadata",
+    "capacitySamplesSource": {
+      "appBuildId": "app-build:0dbf667a-2f19-4742-ac03-cc761afd2fa6",
+      "sourceFingerprintSha256": "dfc24955f61d21ba10aee9f93df42d3e92a1c3ddd708f6ad45761ad2ff57a543"
+    }
+  },
+  "capacityObservation": {
+    "captureWindowUtc": [
+      "2026-10-10T20:35:03.163Z",
+      "2026-10-11T04:58:48.162Z"
+    ],
+    "sampleCount": 101,
+    "primaryObservedSamples": 35,
+    "unavailableSamples": 66,
+    "unavailableSampleFailureReasons": {
+      "status": "not recorded by this historical sampler build",
+      "classification": "unspecified",
+      "note": "Failure-stage reason codes were added after this capture; these records cannot be retrospectively classified."
+    },
+    "postgresMaxConnections": 450,
+    "knownReservedSlots": 4,
+    "clientBackendsRange": [
+      6,
+      13
+    ],
+    "perProcessPoolMax": 10,
+    "sampledPoolTotalRange": [
+      3,
+      10
+    ],
+    "sampledPoolWaitingRange": [
+      0,
+      16
+    ],
+    "samplesWithPoolWaiters": 12,
+    "estimatedOrdinarySlotsRemainingOnSuccessfulPrimarySamples": [
+      433,
+      440
+    ],
+    "autoscaleCurrentProcesses": null,
+    "autoscaleMaximumProcesses": 3,
+    "providerReservedSlots": "unknown",
+    "peakNonApiClientCount": "unknown",
+    "representsPeakHeadroom": false,
+    "rawLogsRetained": false
+  },
+  "productionReadReplicaSnapshot": {
+    "capturedAtUtc": "2026-10-11T13:57:46Z",
+    "isReplica": true,
+    "maxConnections": 450,
+    "superuserReservedSlots": 4,
+    "roleReservedSlots": 0,
+    "clientBackends": 3,
+    "limitation": "A single read-replica snapshot is not a primary or peak measurement."
+  },
+  "budgetAssessment": {
+    "poolConnectionsPerApiProcessUpperBound": 10,
+    "configuredMaximumMachines": 3,
+    "apiPoolConnectionUpperBoundAtConfiguredMaximum": 30,
+    "ordinarySlotsAfterKnownPostgresReservations": 446,
+    "theoreticalSlotsRemainingAfterApiPoolUpperBound": 416,
+    "requiredBound": "API pool connections + peak non-API clients + any tighter provider connection limit must fit within ordinary database slots",
+    "safeBudgetProven": false,
+    "reason": "The configured ceiling permits at most 3 machines, and the one-process-per-machine run command plus pool maximum imply an API-pool bound of 30. However, current/peak serving processes, representative peak non-API clients, and any tighter provider limit are unknown; 66 of 101 capacity queries were unavailable, and pool waiters reached 16. The partial sample and one replica snapshot do not prove safe representative peak headroom."
+  },
+  "sanitization": {
+    "rawLogsRetained": false,
+    "productionUrlRetained": false,
+    "databaseNamesRolesOrHostsRetained": false,
+    "queriesPayloadsOrOperationalRecordsRetained": false,
+    "credentialsOrPersonalDataRetained": false
+  },
+  "conclusion": {
+    "productionConnectionBudget": "NOT_VERIFIED",
+    "livePeerSseSupported": false,
+    "deploymentSettingsChanged": false
+  }
+}

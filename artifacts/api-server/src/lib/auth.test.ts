@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 const SECRET = "test-secret-for-auth-unit";
 process.env.AUTH_TOKEN_SECRET = SECRET;
 
-import { signToken, verifyToken } from "./auth";
+import { signLegacyTokenForTests, signToken, verifyToken } from "./auth";
 
 function b64url(input: Buffer | string): string {
   return Buffer.from(input)
@@ -78,5 +78,20 @@ describe("verifyToken", () => {
   it("rejects a malformed token", () => {
     expect(verifyToken("not-a-token")).toBeNull();
     expect(verifyToken("")).toBeNull();
+  });
+});
+
+describe("signLegacyTokenForTests", () => {
+  it("refuses to mint a session-revocation-bypassing legacy token in production", () => {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      expect(() => signLegacyTokenForTests("user-1")).toThrow(
+        "signLegacyTokenForTests is test-only",
+      );
+    } finally {
+      if (original === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original;
+    }
   });
 });

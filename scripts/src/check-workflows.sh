@@ -13,7 +13,106 @@ department_navigation_workflow="$workflow_dir/department-navigation.yml"
 release_concurrency_calibration_workflow="$workflow_dir/release-concurrency-calibration.yml"
 stable_branch_protection_workflow="$workflow_dir/stable-branch-protection.yml"
 workflow_lint_workflow="$workflow_dir/workflow-lint.yml"
-promotion_workflow="$workflow_dir/promote-production.yml"
+project_workflow_config="$workspace_root/.replit"
+
+check_project_workflow_topology() {
+  if [[ ! -f "$project_workflow_config" ]]; then
+    echo "Workflow configuration check failed: $project_workflow_config is missing." >&2
+    return 1
+  fi
+
+  if ! awk '
+    BEGIN {
+      section = ""
+      workflow_name = ""
+      in_task = 0
+      run_button_count = 0
+      project_workflow_count = 0
+      project_task_count = 0
+      project_task_run_count = 0
+      project_target_count = 0
+      workflow_names["release:standard"] = 0
+      workflow_names["release:full"] = 0
+      workflow_names["test"] = 0
+      workflow_names["test:client"] = 0
+      workflow_names["typecheck"] = 0
+      workflow_names["security:prod"] = 0
+      workflow_names["check:clean-start"] = 0
+      workflow_names["evidence:release"] = 0
+      workflow_names["browser-full-159"] = 0
+    }
+    $0 == "[workflows]" {
+      section = "settings"
+      in_task = 0
+      next
+    }
+    $0 == "[[workflows.workflow]]" {
+      section = "workflow"
+      workflow_name = ""
+      in_task = 0
+      next
+    }
+    $0 == "[[workflows.workflow.tasks]]" {
+      if (section == "workflow" && workflow_name == "Project") {
+        project_task_count++
+      }
+      in_task = 1
+      next
+    }
+    $0 ~ /^\[/ {
+      section = "other"
+      in_task = 0
+      next
+    }
+    section == "settings" &&
+      $0 ~ /^[[:space:]]*runButton[[:space:]]*=/ {
+      if ($0 ~ /^[[:space:]]*runButton[[:space:]]*=[[:space:]]*"Project"[[:space:]]*$/) {
+        run_button_count++
+      }
+      next
+    }
+    section == "workflow" && !in_task &&
+      $0 ~ /^[[:space:]]*name[[:space:]]*=/ {
+      workflow_name = $0
+      sub(/^[[:space:]]*name[[:space:]]*=[[:space:]]*"/, "", workflow_name)
+      sub(/"[[:space:]]*$/, "", workflow_name)
+      if (workflow_name == "Project") {
+        project_workflow_count++
+      } else if (workflow_name in workflow_names) {
+        workflow_names[workflow_name]++
+      }
+      next
+    }
+    section == "workflow" && in_task && workflow_name == "Project" {
+      if ($0 ~ /^[[:space:]]*task[[:space:]]*=[[:space:]]*"workflow\.run"[[:space:]]*$/) {
+        project_task_run_count++
+      }
+      if ($0 ~ /^[[:space:]]*args[[:space:]]*=[[:space:]]*"release:standard"[[:space:]]*$/) {
+        project_target_count++
+      }
+    }
+    END {
+      failed = run_button_count != 1 ||
+        project_workflow_count != 1 ||
+        project_task_count != 1 ||
+        project_task_run_count != 1 ||
+        project_target_count != 1
+      for (name in workflow_names) {
+        if (workflow_names[name] != 1) failed = 1
+      }
+      exit failed
+    }
+  ' "$project_workflow_config"; then
+    cat >&2 <<'EOF'
+Workflow configuration check failed: the Project run button must launch only
+release:standard. Keep release:full and focused validation workflows available
+as separate runs.
+EOF
+    return 1
+  fi
+}
+
+check_project_workflow_topology
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -23,6 +122,63 @@ if (( ${#workflow_files[@]} == 0 )); then
   echo "Workflow lint failed: no GitHub Actions workflow files were found in $workflow_dir." >&2
   exit 1
 fi
+
+check_github_publication_boundary() {
+  local failures=0
+  local workflow_path
+  local workflow_name
+
+  for workflow_path in "${workflow_files[@]}"; do
+    workflow_name="${workflow_path##*/}"
+
+    if [[ "$workflow_name" =~ (deploy|promot) ||
+      "$workflow_name" =~ (production|prod).*(handoff)|(handoff).*(production|prod) ]]; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub deploy/promotion workflows are not authorized." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]*name:[[:space:]].*(deploy|promot)|^[[:space:]]*name:[[:space:]].*(production|prod).*(handoff)|^[[:space:]]*name:[[:space:]].*handoff.*(production|prod)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub workflow/job names must not claim deploy or promotion authority." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+environment:[[:space:]]*["'\'']?(production|prod)(["'\'']|[[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub workflows must not target a production environment." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+packages:[[:space:]]*write([[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub package publishing is not authorized." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+(deployments|id-token):[[:space:]]*write([[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub deployment-token write authority is not authorized." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+-[[:space:]]+uses:[^#]*(deploy|promot)|^[[:space:]]+push:[[:space:]]*true([[:space:]]|$)|--push|(^|[[:space:]])docker[[:space:]]+(buildx[[:space:]]+build[[:space:]][^#]*--push|push)([[:space:]]|$)|(^|[[:space:]])(crane[[:space:]]+push|oras[[:space:]]+push|skopeo[[:space:]]+copy)([[:space:]]|$)|(^|[[:space:]])replit[[:space:]]+(app[[:space:]]+)?(deploy|publish)([[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub workflows may build test images but must not deploy apps or push images to a registry." >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  if (( failures > 0 )); then
+    cat >&2 <<'EOF'
+GitHub production publication boundary failed. GitHub Actions is limited to
+source validation and test evidence: it must not publish packages or images,
+deploy apps, or declare production promotion authority.
+EOF
+    return 1
+  fi
+}
+
+check_github_publication_boundary
 
 local_actionlint_version=""
 local_actionlint_state="missing"
@@ -335,7 +491,6 @@ check_workflow_timeouts \
   "Release concurrency calibration" "$release_concurrency_calibration_workflow"
 check_workflow_timeouts "Stable branch protection" "$stable_branch_protection_workflow"
 check_workflow_timeouts "Workflow lint" "$workflow_lint_workflow"
-check_workflow_timeouts "Production promotion" "$promotion_workflow"
 
 check_immutable_workflow_dependencies() {
   local workflow_path="$1"

@@ -1,0 +1,18 @@
+{
+  "verifier": "report-key-rotation-preflight",
+  "environment": "disposable-ci",
+  "revision": "63cfd77eef883cba583636e6fc4c72fa37cc24a6",
+  "status": "pass",
+  "canRotate": true,
+  "activeKeyId": "release-2026-09",
+  "storedKeyIds": [],
+  "missingKeyIds": [],
+  "scan": {
+    "limit": 100,
+    "checkedDistinctKeyIds": 0,
+    "truncated": false,
+    "complete": true
+  },
+  "failure": null,
+  "remediation": null
+}

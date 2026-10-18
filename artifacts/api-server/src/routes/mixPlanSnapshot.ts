@@ -103,7 +103,6 @@ router.get("/inventory/mix-plan-snapshot", async (req: Request, res: Response) =
       for (const run of runs) {
         if (!run?.id || !run.brand) continue;
         const rawVals = runValues[run.id];
-        if (!rawVals || typeof rawVals !== "object") continue;
         if (row.date === today) {
           // Today's live runs (mirror the web tab: brand set, not ended).
           if (run.endedAt) continue;
@@ -111,11 +110,15 @@ router.get("/inventory/mix-plan-snapshot", async (req: Request, res: Response) =
             date: row.date,
             brand: run.brand,
             flavor: run.flavor ?? "",
-            values: rawVals,
+            // A newly created run can have no persisted runValues entry yet.
+            // The web form still represents that branded run with its default
+            // values, so an absent entry must not make the server drop its mix.
+            values: rawVals && typeof rawVals === "object" ? rawVals : {},
           });
         } else {
           // Future scheduled runs resolve via the brand profile pool, same as
           // the web valsToMixRun path (profile + casesNeeded + dieType overlay).
+          if (!rawVals || typeof rawVals !== "object") continue;
           const profile = profileValuesFor(profileCache, String(run.brand ?? ""), String(run.flavor ?? ""));
           const values: Record<string, unknown> = {
             ...(profile ?? {}),

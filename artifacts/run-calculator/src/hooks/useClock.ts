@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useVisibilityAwareInterval } from "./useVisibilityAwareInterval";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -18,46 +19,13 @@ export const PENDING_CLOCK_MS = 10_000;
  */
 export function useClock(runStatus: RunStatus, wakeAcknowledgement = 0): Date {
   const [nowTime, setNowTime] = useState(() => new Date());
+  const delay = (runStatus === "running" || runStatus === "paused") ? 1_000 : PENDING_CLOCK_MS;
 
   useEffect(() => {
     if (wakeAcknowledgement > 0) setNowTime(new Date());
-    const delay = (runStatus === "running" || runStatus === "paused") ? 1_000 : PENDING_CLOCK_MS;
-    let id: ReturnType<typeof setInterval> | null = null;
+  }, [wakeAcknowledgement]);
 
-    const start = () => {
-      if (id) clearInterval(id);
-      id = document.hidden ? null : setInterval(() => setNowTime(new Date()), delay);
-    };
-
-    const onVisibility = () => {
-      if (document.hidden) {
-        if (id) { clearInterval(id); id = null; }
-      } else {
-        setNowTime(new Date()); // snap clock forward immediately on tab focus
-        start();
-      }
-    };
-
-    const onFocus = () => {
-      // Fallback for devices where visibilitychange doesn't fire reliably on
-      // screen wake or app-switch (e.g. some Android tablets). Mirrors the
-      // "tab became visible" branch of onVisibility so the clock is never
-      // left frozen after a screen lock/unlock cycle.
-      if (!document.hidden) {
-        setNowTime(new Date());
-        start();
-      }
-    };
-
-    start();
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      if (id) clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [runStatus, wakeAcknowledgement]);
+  useVisibilityAwareInterval(() => setNowTime(new Date()), delay, true, runStatus);
 
   return nowTime;
 }

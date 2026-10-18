@@ -44,16 +44,15 @@ const EMPTY_KNOWN = {
   cheeseRecipes: [] as string[],
 };
 
-/** A legit tiny spec workbook (real text → passes the grid sanity check). */
+/** Partial workbook: its plural "Pizza Specs" sheet title is the parse cue. */
 function goodBuffer(): ArrayBuffer {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     wb,
     XLSX.utils.aoa_to_sheet([
-      ["Brand", "Flavor", "Cases"],
       [BRAND, "Cheese", "120"],
     ]),
-    "Specs",
+    "Pizza Specs",
   );
   return XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }

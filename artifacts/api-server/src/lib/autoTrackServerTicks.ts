@@ -2,10 +2,20 @@ import { randomUUID } from "node:crypto";
 import {
   computeAutoTrackElapsedMs,
   computeAutoTrackSchedule,
+  applicatorStockFields,
+  applicatorStockRegisterForChannel,
+  capApplicatorStock,
+  computeApplicatorStockCapacityLbs,
+  computeApplicatorStockRateLbsPerSecond,
+  computeSauceStockStepSeconds,
+  depleteSauceStock,
   computeAutoTrackSuggestion,
+  computeLinePhases,
+  computePackagingDrainElapsedSec,
   computeServerCalc,
   createWallClockBookkeeping,
   getAutoTrackTiming,
+  lineHasPackagingDrain,
   rearmWallClockTimers,
   tickWallClock,
   type AutoTrackSchedule,
@@ -14,7 +24,13 @@ import {
 } from "@workspace/live-calc";
 import type { AutoTrackClaim, AutoTrackMutation } from "./autoTrackCoordination";
 
-const NET_CHANNELS = ["sauce-barrel", "app1-batch", "app2-batch", "app3-batch", "app4-batch"] as const;
+const NET_CHANNELS = [
+  "sauce-barrel",
+  "sauce-stock",
+  "app1-batch", "app2-batch", "app3-batch", "app4-batch",
+  "app1-stock", "app2-stock", "app3-stock", "app4-stock",
+  "pep1-stock", "pep1b-stock", "pep2-stock", "pep2b-stock",
+] as const;
 export const WALL_CLOCK_REPLAY_CAP_MS = 6 * 60 * 60 * 1000;
 
 type Payload = {
@@ -32,6 +48,57 @@ type Payload = {
   doughTimerControls?: Record<string, { generation?: string; pausedAt?: number; resumeAt?: number; updatedAt?: number }>;
 };
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const DEFAULT_OUTER_STAGE_MIN = 2.5;
+
+function pausedPackagingDrain(
+  run: Record<string, unknown>,
+  values: Record<string, unknown>,
+  nowMs: number,
+): { active: boolean; elapsedSec: number } {
+  const pausedAt = number(run.pausedAt);
+  if (pausedAt <= 0) return { active: false, elapsedSec: 0 };
+  const stoppages = Array.isArray(run.stoppages)
+    ? run.stoppages as Array<Record<string, unknown>>
+    : [];
+  const openPause = stoppages
+    .filter((entry) => entry.type === "pause" && number(entry.endedAt) <= 0)
+    .reduce<Record<string, unknown> | undefined>(
+      (latest, entry) => !latest || number(entry.startedAt) > number(latest.startedAt)
+        ? entry
+        : latest,
+      undefined,
+    );
+  // Legacy/missing pause policy remains fail-safe: the tunnel is stopped.
+  const pauseStopsTunnel = openPause?.stopTunnel !== false;
+  const elapsedBatchSec = computeAutoTrackElapsedMs({
+    startedAt: number(run.startedAt),
+    pausedAt,
+    nowMs,
+    stoppages: stoppages as never,
+  }) / 1000;
+  const args = {
+    elapsedBatchSec,
+    pausedAt,
+    lastResumeWallMs: 0,
+    lastPauseStartWallMs: 0,
+    pauseStopsTunnel,
+    lastPauseStopsTunnel: true,
+    runStatus: "paused",
+    preTunnelMin: number(values.preTunnelMin) > 0
+      ? number(values.preTunnelMin)
+      : DEFAULT_OUTER_STAGE_MIN,
+    postTunnelMin: number(values.postTunnelMin) > 0
+      ? number(values.postTunnelMin)
+      : DEFAULT_OUTER_STAGE_MIN,
+    freezerTime: number(values.freezerTime),
+    nowMs,
+  } as const;
+  return {
+    active: lineHasPackagingDrain(computeLinePhases(args)),
+    elapsedSec: computePackagingDrainElapsedSec(args),
+  };
+}
+
 function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anchorFrom: number, anchorTo: number, correctionGeneration: number): AutoTrackMutation[] {
   return [
     { field: (prefix === "sauceBarrel" ? "sauceBarrelsMade" : `${prefix}esMade`) as AutoTrackMutation["field"], from: madeFrom, to: madeTo },
@@ -43,8 +110,8 @@ function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anc
 function schedule(
   payload: Payload,
   nowMs: number,
-  options: { allowEndedDrain?: boolean } = {},
-): { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null {
+  options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean } = {},
+): { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null {
   const result = computeServerCalc(payload as never, [], nowMs);
   const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
   if (!result || !run || typeof run.id !== "string") return null;
@@ -60,10 +127,12 @@ function schedule(
     && endedAt > 0
     && number(values.freezerTime) > 0
     && nowMs < endedAt + number(values.freezerTime) * 60_000;
+  const pausedDrainActive = options.allowPausedPackagingDrain === true
+    && pausedPackagingDrain(run, values, nowMs).active;
   const lifecycleStamp = Math.max(startedAt, number(run.metaUpdatedAt));
   if (
     startedAt <= 0
-    || number(run.pausedAt) > 0
+    || (number(run.pausedAt) > 0 && !pausedDrainActive)
     || (endedAt > 0 && !endedDrainActive)
     || lifecycleStamp <= 0
     || nowMs - lifecycleStamp > WALL_CLOCK_REPLAY_CAP_MS
@@ -81,20 +150,95 @@ function schedule(
       )?.serverSequences as never,
     }),
     values,
+    ppm: result.calc.ppm,
   };
 }
 
 /** Builds due sauce/applicator claims entirely from canonical stored state. */
-export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): AutoTrackClaim[] {
+export function buildNetSecondServerClaims(
+  raw: unknown,
+  nowMs = Date.now(),
+  eventIdNamespace?: string,
+): AutoTrackClaim[] {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  let built: { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null;
+  let built: { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null;
   try { built = schedule(payload, nowMs); } catch { return []; }
   if (!built) return [];
-  const { schedule: plan, values } = built;
+  const { schedule: plan, values, ppm } = built;
   const baseUpdatedAt = number(payload.runValuesUpdatedAt?.[plan.runId]);
   const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
   return plan.entries.flatMap((entry) => {
     if (!(NET_CHANNELS as readonly string[]).includes(entry.channel) || !entry.dueNow) return [];
+    if (entry.channel === "sauce-stock") {
+      const onHand = number(values.sauceStockBarrels);
+      const anchor = number(values.sauceStockAnchorNetSec);
+      const correctionGeneration = Math.max(0, number(values.sauceStockCorrectionGeneration));
+      const calc = computeServerCalc(payload as never, [], nowMs)?.calc;
+      const cadence = computeSauceStockStepSeconds(
+        values.sauceOzPerPizza,
+        ppm,
+        Number(calc?.sauceEffBarrel) || 0,
+      );
+      const prior = coordination?.["sauce-stock"];
+      const initialize = values.sauceStockInitialized !== true;
+      if (!initialize && (onHand <= 0 || onHand > 2 || cadence <= 0)) return [];
+      const mutationAnchor = initialize ? 0 : anchor;
+      const dueAt = entry.dueAt;
+      const nextDueAt = entry.nextDueAt > dueAt
+        ? entry.nextDueAt
+        : dueAt + Math.max(cadence, 1);
+      return [{
+        version: 1,
+        runId: plan.runId,
+        channel: "sauce-stock",
+        generation: plan.generation,
+        sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+        eventId: eventIdNamespace
+          ? `srv:sauce-stock:${eventIdNamespace}`
+          : `srv:sauce-stock:${randomUUID()}`,
+        dueAt,
+        nextDueAt,
+        baseUpdatedAt,
+        correctionGeneration,
+        mutations: [
+          { field: "sauceStockBarrels", from: onHand, to: initialize ? 2 : depleteSauceStock(onHand) },
+          { field: "sauceStockAnchorNetSec", from: mutationAnchor, to: dueAt },
+          { field: "sauceStockCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
+        ],
+      } as AutoTrackClaim];
+    }
+    const register = applicatorStockRegisterForChannel(entry.channel);
+    if (register) {
+      const fields = applicatorStockFields(register);
+      const onHand = number(values[fields.stock]);
+      const capacity = computeApplicatorStockCapacityLbs(values, register);
+      const anchor = number(values[fields.anchor]);
+      const correctionGeneration = Math.max(0, number(values[fields.correctionGeneration]));
+      const cadence = Math.max(0, entry.dueAt - anchor);
+      const ozField = register.endsWith("b")
+        ? `${register.slice(0, -1)}OzPerPizzaB`
+        : `${register}OzPerPizza`;
+      const nextOnHand = capApplicatorStock(
+        onHand - cadence * computeApplicatorStockRateLbsPerSecond(values[ozField], ppm),
+        capacity,
+      );
+      const prior = coordination?.[entry.channel];
+      return [{
+        version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
+        sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+        eventId: eventIdNamespace
+          ? `srv:${entry.channel}:${eventIdNamespace}`
+          : `srv:${entry.channel}:${randomUUID()}`,
+        dueAt: entry.dueAt,
+        nextDueAt: entry.nextDueAt > entry.dueAt ? entry.nextDueAt : entry.dueAt + cadence,
+        baseUpdatedAt, correctionGeneration,
+        mutations: [
+          { field: fields.stock, from: onHand, to: nextOnHand },
+          { field: fields.anchor, from: anchor, to: entry.dueAt },
+          { field: fields.correctionGeneration, from: correctionGeneration, to: correctionGeneration },
+        ],
+      } as AutoTrackClaim];
+    }
     const slot = entry.channel === "sauce-barrel" ? "" : entry.channel.slice(0, 4);
     const madeField = entry.channel === "sauce-barrel" ? "sauceBarrelsMade" : `${slot}BatchesMade`;
     const anchorField = entry.channel === "sauce-barrel" ? "sauceBarrelAnchorNetSec" : `${slot}BatchAnchorNetSec`;
@@ -109,7 +253,10 @@ export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): Au
     return [{
       version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
       sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
-      eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
+      eventId: eventIdNamespace
+        ? `srv:${entry.channel}:${eventIdNamespace}`
+        : `srv:${entry.channel}:${randomUUID()}`,
+      dueAt: entry.dueAt,
       nextDueAt: claimNextDueAt, baseUpdatedAt, correctionGeneration, mutations,
     } as AutoTrackClaim];
   });
@@ -123,17 +270,30 @@ export type ServerWallClockBookkeeping = WallClockBookkeeping & {
   serverSequences: Partial<Record<WallClockChannel, number>>;
   appliedDoughControlUpdatedAt?: number;
 };
-export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
+export function buildWallClockServerClaims(
+  raw: unknown,
+  nowMs = Date.now(),
+  eventIdNamespace?: string,
+): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  const built = schedule(payload, nowMs, { allowEndedDrain: true });
+  const built = schedule(payload, nowMs, {
+    allowEndedDrain: true,
+    allowPausedPackagingDrain: true,
+  });
   const run = payload.dayState?.runs?.[payload.dayState?.currentIndex ?? 0];
-  if (!built || !run || number(run.startedAt) <= 0 || number(run.pausedAt) > 0) return null;
+  if (!built || !run || number(run.startedAt) <= 0) return null;
   const { schedule: plan, values } = built;
   const endedAt = number(run.endedAt);
   const drainActive = endedAt > 0
     && number(values.freezerTime) > 0
     && nowMs < endedAt + number(values.freezerTime) * 60_000;
-  const runStatus = drainActive ? "ended" : "running";
+  const pausedDrain = pausedPackagingDrain(run, values, nowMs);
+  const packagingDrainActive = pausedDrain.active;
+  const runStatus = drainActive
+    ? "ended"
+    : packagingDrainActive
+      ? "paused"
+      : "running";
   const old = payload.autoTrackServerState?.wallClockBookkeeping?.[plan.runId] ?? {};
   const calc = computeServerCalc(payload as never, [], nowMs)!.calc;
   const timing = getAutoTrackTiming(calc.ppm, number(values.pizzasPerCase), calc.perTray, calc.perBatch, {
@@ -189,23 +349,36 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined,
   }) / 1000;
   const suggestion = computeAutoTrackSuggestion({
-    runStatus, drainActive, packagingDrainActive: false, packagingDrainElapsedSec: 0,
+    runStatus, drainActive, packagingDrainActive,
+    packagingDrainElapsedSec: pausedDrain.elapsedSec,
     ppm: calc.ppm, casesPerSkid: number(values.casesPerSkid), pizzasPerCase: number(values.pizzasPerCase),
     casesNeeded: number(values.casesNeeded), freezerTime: number(values.freezerTime), elapsedBatchSec: elapsedSec,
   });
-  // Pre-engine records persisted only the six due refs. When adopting one of
-  // those overdue arms, preserve its already-authorized single case beat while
-  // establishing the engine's incremental baseline; subsequent beats use the
-  // normal elapsed/freezer calculation exclusively.
+  if (
+    hasPersistedBookkeeping
+    && old.lifecycleGeneration !== plan.generation
+    && packagingDrainActive
+  ) {
+    // A pause starts a distinct, zero-based physical output clock. Baseline it
+    // at the transition and wait one full case cadence so pre-pause time cannot
+    // be replayed as paused Packaging output after reconnect or restart.
+    bookkeeping.lastExpectedCases = suggestion?.expectedCasesRaw ?? -1;
+  }
+  // Pre-engine records persisted only the six due refs. An overdue legacy arm
+  // may preserve a case beat only when the freezer-aware suggestion already
+  // authorizes the next case; an expired timer alone is not output evidence.
   const legacyCaseArm = old.lifecycleGeneration === plan.generation
     && typeof old.caseNextDueMs === "number"
     && !Object.prototype.hasOwnProperty.call(old, "lastExpectedCases")
     && old.caseNextDueMs <= nowMs;
-  const legacyExpected = number(values.skidsCompleted) * number(values.casesPerSkid)
-    + number(values.casesOnCurrentSkid) + 1;
-  const expectedCasesRaw = legacyCaseArm
-    ? Math.max(suggestion?.expectedCasesRaw ?? 0, legacyExpected)
-    : suggestion?.expectedCasesRaw ?? 0;
+  const suggestionExpectedCasesRaw = suggestion?.expectedCasesRaw ?? 0;
+  const currentCases = number(values.skidsCompleted) * number(values.casesPerSkid)
+    + number(values.casesOnCurrentSkid);
+  const legacyExpected = currentCases + 1;
+  const legacyCaseAlreadyAuthorized = suggestionExpectedCasesRaw >= legacyExpected;
+  const expectedCasesRaw = legacyCaseArm && legacyCaseAlreadyAuthorized
+    ? Math.max(suggestionExpectedCasesRaw, legacyExpected)
+    : suggestionExpectedCasesRaw;
   const expectedCases = number(values.casesNeeded) > 0
     ? Math.min(number(values.casesNeeded), expectedCasesRaw)
     : expectedCasesRaw;
@@ -232,7 +405,7 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     bookkeeping = rearmWallClockTimers(bookkeeping, nowMs, timing);
   }
   const tick = tickWallClock({
-    bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive: false,
+    bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive,
     packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
     calc: { ppm: calc.ppm, perTray: calc.perTray, perBatch: calc.perBatch, pressDone: calc.pressDone, casesInFreezer: calc.casesInFreezer, traysNeeded: calc.traysNeeded, batchesNeeded: calc.batchesNeeded },
     v: { pizzasPerCase: number(values.pizzasPerCase), casesPerSkid: number(values.casesPerSkid), casesNeeded: number(values.casesNeeded), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
@@ -252,7 +425,7 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
         // through the normal row lock regardless of whether the browser or
         // server owned the running generation. Competing browser/server claims
         // for the ended generation cannot both be accepted.
-        return drainActive && event.channel === "case";
+        return (drainActive || packagingDrainActive) && event.channel === "case";
       }
       const ownedSequence = number(serverSequences[event.channel]);
       return ownedSequence === 0 || ownedSequence === number(state.sequence);
@@ -261,7 +434,9 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
       version: 1, runId: plan.runId, channel: event.channel, generation: plan.generation,
       sequence: coordination?.[event.channel]?.generation === plan.generation
         ? number(coordination[event.channel]?.sequence) + 1 : 1,
-      eventId: `srv:wc:${event.channel}:${randomUUID()}`,
+      eventId: eventIdNamespace
+        ? `srv:wc:${event.channel}:${eventIdNamespace}`
+        : `srv:wc:${event.channel}:${randomUUID()}`,
       dueAt: event.dueAt, nextDueAt: event.nextDueAt, baseUpdatedAt: number(payload.runValuesUpdatedAt?.[plan.runId]),
       ...(event.channel === "case" ? { correctionGeneration: number(payload.packagingProgress?.[plan.runId]?.correctionGeneration) } : {}),
       mutations: event.mutations as AutoTrackMutation[],

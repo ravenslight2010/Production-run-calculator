@@ -24,18 +24,24 @@ const SNAPSHOT_PACKAGE_PATTERN =
   /^\s{6}'(@typescript\/typescript-[^']+)':\s+([^ \r\n]+)\s*$/gmu;
 
 function lockfileSection(lockfile: string, section: string): string {
-  const start = lockfile.indexOf(`${section}:\n`);
+  // pnpm 12 records its pinned binary in a separate env document. The
+  // project's dependency graph is always the last document.
+  const documents = [...lockfile.matchAll(/^---\s*$/gmu)];
+  const projectLockfile = documents.length > 0
+    ? lockfile.slice(documents.at(-1)!.index)
+    : lockfile;
+  const start = projectLockfile.indexOf(`${section}:\n`);
   if (start < 0) {
     throw new Error(`pnpm-lock.yaml is missing the ${section} section.`);
   }
-  const nextSection = lockfile
+  const nextSection = projectLockfile
     .slice(start + section.length + 2)
     .search(/\n(?:packages|snapshots):\n/u);
   const end =
     nextSection < 0
       ? -1
       : start + section.length + 2 + nextSection + 1;
-  return lockfile.slice(start, end < 0 ? lockfile.length : end);
+  return projectLockfile.slice(start, end < 0 ? projectLockfile.length : end);
 }
 
 export function typescript7NativePackagesFromLockfile(

@@ -21,6 +21,7 @@ import { useClock } from "../hooks/useClock";
 import { useNotifications } from "../hooks/useNotifications";
 import {
   useAutoTrack,
+  type AutoTrackWakeRebaseReason,
   type AutoTrackEventClaim,
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
@@ -34,6 +35,7 @@ import { calcRef } from "../liveRunCalc";
 import {
   computeLinePhases,
   computePackagingDrainElapsedSec,
+  computeEndedRunElapsedSec,
   lineHasPackagingDrain,
   type LinePhases,
 } from "../linePhases";
@@ -56,6 +58,7 @@ import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
 import type { OperationalProjection } from "@workspace/live-calc";
+import type { ScreenSyncStatus } from "../screenSyncState";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -66,6 +69,7 @@ export type { Calc } from "@workspace/live-calc";
 export interface LiveRunContextValue {
   nowTime: Date;
   calc: Calc;
+  screenSyncStatus: ScreenSyncStatus;
   liveFreezerMin: number;
   elapsedBatchSec: number;
   /** Day-state-owned line-phase model; server-adopted when confirmed, local fallback. */
@@ -85,6 +89,7 @@ export interface LiveRunContextValue {
   autoSuppressUntilRef: React.MutableRefObject<number>;
   doughAutoSuppressUntilRef: React.MutableRefObject<number>;
   fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
+  retryFailedAutomaticClaim: () => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
   coordinationStatus: ReturnType<typeof useAutoTrack>["coordinationStatus"];
   speedNudge: PackagingSpeedNudge | null;
@@ -138,14 +143,23 @@ export interface LiveRunProviderProps {
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
   onPackagingProgressAutoAdvance?: (
+    runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ) => boolean;
   autoTrackBlocked?: boolean;
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
-  autoTrackRebaseAfterBlock?: boolean;
+  autoTrackWakeRebaseReason?: AutoTrackWakeRebaseReason | null;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  onAutomaticClaimFailure?: (
+    claim: AutoTrackEventClaim,
+    kind?: "transient" | "permanent",
+  ) => void;
+  onAutomaticClaimSuccess?: (
+    claim: AutoTrackEventClaim,
+    outcome: AutoTrackEventResult["outcome"],
+  ) => void;
   onAutoTrackProgressChange?: (enabled: boolean) => void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
@@ -153,6 +167,7 @@ export interface LiveRunProviderProps {
   serverClockOffsetMs?: number;
   operationalOnline?: boolean;
   operationalSyncConnected?: boolean;
+  screenSyncStatus?: ScreenSyncStatus;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -184,9 +199,11 @@ export function LiveRunProvider({
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
-  autoTrackRebaseAfterBlock = false,
+  autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutomaticClaimFailure,
+  onAutomaticClaimSuccess,
   onAutoTrackProgressChange,
   operationalSnapshotReceipt = null,
   operationalServerCalc = null,
@@ -194,6 +211,7 @@ export function LiveRunProvider({
   serverClockOffsetMs = 0,
   operationalOnline = true,
   operationalSyncConnected = false,
+  screenSyncStatus = "reconnecting",
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus, autoTrackWakeAcknowledgement);
   // A selected pending run must never inherit Packaging, Sauce, or Frontline
@@ -280,9 +298,19 @@ export function LiveRunProvider({
     [currentRun?.stoppages],
   );
 
-  const localElapsedBatchSec = currentRun?.startedAt
-    ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
-    : 0;
+  const localElapsedBatchSec = currentRun?.endedAt
+    ? computeEndedRunElapsedSec({
+        startedAt: currentRun.startedAt,
+        endedAt: currentRun.endedAt,
+        stoppages: currentRun.stoppages?.map((stoppage) => ({
+          type: stoppage.type ?? "",
+          startedAt: stoppage.startedAt,
+          endedAt: stoppage.endedAt,
+        })),
+      })
+    : currentRun?.startedAt
+      ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
+      : 0;
   const elapsedBatchSec = confirmedProjection
     ? confirmedProjection.effectiveElapsedSec + (
         confirmedProjection.facts.runStatus === "running"
@@ -358,16 +386,22 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const pausedOccupancyConfirmed =
+    runStatus === "paused" && confirmedProjection?.facts.runStatus === "paused";
   const operationalCalc =
     confirmedProjection?.calc
       ? {
           // The server frame remains authoritative for production counters,
-          // but occupancy is a time-relative display value. Rebase both
-          // windows onto the current clock so a wake/reload can drain stale
-          // freezer contents without waiting for another server frame.
+          // but running/draining occupancy is time-relative. A paused run's
+          // occupancy is fixed at its pause point: the confirmed server frame
+          // must not be replaced with a stale local pre-wake calculation.
           ...confirmedProjection.calc,
-          casesOnLine: calc.casesOnLine,
-          casesInFreezer: calc.casesInFreezer,
+          casesOnLine: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesOnLine
+            : calc.casesOnLine,
+          casesInFreezer: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesInFreezer
+            : calc.casesInFreezer,
         }
       : (adoptServerCalc
         ? operationalServerCalc
@@ -444,20 +478,6 @@ export function LiveRunProvider({
     !nextRun.startedAt &&
     (nextRun.subTab ?? "dough") !== "crusts";
 
-  // ── Notifications ────────────────────────────────────────────────────────
-  const { showBatchDue, setShowBatchDue, showPaceAlert, setShowPaceAlert, paceAlertMsg } = useNotifications({
-    runStatus,
-    nowTime,
-    currentRun,
-    calc,
-    sauceBarrelElapsedSec,
-    v: ve,
-    isCrust: doughSubTab === "crusts",
-    nextRunLabels: upcomingRunLabels,
-    prefs,
-    alertDate: dayState.date,
-  });
-
   // ── Stall detection ───────────────────────────────────────────────────────
   const stallCheck = useMemo(
     () =>
@@ -497,7 +517,7 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress: setLocalAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
+  const { autoTrackProgress, setAutoTrackProgress: setLocalAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers, coordinationStatus } =
     useAutoTrack({
       runId: currentRunId,
       runGeneration: String(currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0),
@@ -520,9 +540,11 @@ export function LiveRunProvider({
       onPackagingProgressAutoAdvance,
       autoTrackBlocked,
       autoTrackBlockedRef,
-      autoTrackRebaseAfterBlock,
+      autoTrackWakeRebaseReason,
       autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
+      onAutomaticClaimFailure,
+      onAutomaticClaimSuccess,
       authoritativeServerAutoTrack: true,
       autoTrackProgressEnabled: currentRun?.autoTrackDisabled !== true,
       nextRunPrepActive,
@@ -535,6 +557,23 @@ export function LiveRunProvider({
     },
     [autoTrackProgress, onAutoTrackProgressChange, setLocalAutoTrackProgress],
   );
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  // Automatic dough tracking owns batch progress. Pass its live toggle state
+  // into the reminder hook so enabling it clears any manual prompt immediately.
+  const { showBatchDue, setShowBatchDue, showPaceAlert, setShowPaceAlert, paceAlertMsg } = useNotifications({
+    runStatus,
+    nowTime,
+    currentRun,
+    calc,
+    sauceBarrelElapsedSec,
+    v: ve,
+    isCrust: doughSubTab === "crusts",
+    automaticDoughTracking: autoTrackProgress,
+    nextRunLabels: upcomingRunLabels,
+    prefs,
+    alertDate: dayState.date,
+  });
 
   // Packaging speed feedback is shared by the Packaging tab and the quick
   // check cards on Dough/Sauce. Keep the lifecycle in this always-mounted
@@ -664,12 +703,12 @@ export function LiveRunProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, screenSyncStatus, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptPackagingSpeedNudge: acceptSharedPackagingSpeedNudge,
@@ -683,12 +722,12 @@ export function LiveRunProvider({
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
+      nowTime, operationalCalc, screenSyncStatus, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
-      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      autoTrackSuggestion, autoSuppressUntilRef, doughAutoSuppressUntilRef, fireAutoTrackNow, retryFailedAutomaticClaim, tickDueRefs,
       coordinationStatus,
       speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
       acceptSharedPackagingSpeedNudge, dismissSharedPackagingSpeedNudge,

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "useUnknownInCatchVariables": true,
+    "paths": {
+      "@workspace/api-zod": ["../../lib/api-zod/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/routes/**/*.ts", "src/types/web-push.d.ts"],
+  "references": []
+}

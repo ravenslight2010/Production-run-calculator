@@ -113,7 +113,7 @@ const GOOD_REPLY = JSON.stringify({
 // A response cut off mid-string, like the truncation seen from the real model.
 const TRUNCATED_REPLY = '{"profiles":[{"brand":"Lo';
 
-async function postParse(): Promise<Response> {
+async function postParse(extraBody: Record<string, unknown> = {}): Promise<Response> {
   return fetch(`${baseUrl}/ai/parse-spec-sheet`, {
     method: "POST",
     headers: {
@@ -123,11 +123,18 @@ async function postParse(): Promise<Response> {
     },
     body: JSON.stringify({
       workbookText: "Brand\tFlavor\tSize\nLowes\tPepperoni\t7in\n",
+      ...extraBody,
     }),
   });
 }
 
 describe("POST /ai/parse-spec-sheet retry on malformed model output", () => {
+  it("rejects unrelated or sensitive fields before calling the provider", async () => {
+    const res = await postParse({ logs: ["do not share"], facilitySnapshot: { recipes: [] } });
+    expect(res.status).toBe(400);
+    expect(mock.parseCalls).toBe(0);
+  });
+
   it("retries once after a truncated reply and returns the good second parse", async () => {
     mock.queue = [TRUNCATED_REPLY, GOOD_REPLY];
     const res = await postParse();

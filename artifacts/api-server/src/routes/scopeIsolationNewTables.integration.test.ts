@@ -16,7 +16,7 @@ import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // Mock AI provider so routes that import it don't 502.
 vi.mock("@workspace/integrations-openai-ai-server", () => {
@@ -155,7 +155,7 @@ beforeEach(async () => {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function authHeader(userId: string) {
-  return { authorization: `Bearer ${signToken(userId)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(userId)}` };
 }
 
 async function putKv(userId: string, key: string, value: unknown): Promise<Response> {

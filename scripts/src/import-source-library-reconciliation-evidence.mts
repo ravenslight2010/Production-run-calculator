@@ -5,18 +5,23 @@ import { fileURLToPath } from "node:url";
 import { validateSourceLibraryReconciliationEvidence } from "./release-check.mts";
 import {
   assertBoundedSourceLibraryReconciliationEvidence,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  loadSourceLibraryPoolExceptionApproval,
+  resolveSourceLibraryRevision,
 } from "./verify-source-library-reconciliation.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 
 export type SourceLibraryEvidenceImportOptions = {
-  input: string;
+  input?: string;
+  inputBytes?: Uint8Array;
   output: string;
   report: string;
   healId: string;
   fromDate: string;
-  revision: string;
+  revision?: string;
+  deploymentHandoffPath?: string;
   now?: Date;
 };
 
@@ -48,7 +53,12 @@ async function readInput(input: string): Promise<Buffer> {
 export async function importSourceLibraryReconciliationEvidence(
   options: SourceLibraryEvidenceImportOptions,
 ): Promise<void> {
-  const input = path.resolve(process.cwd(), options.input);
+  if ((options.input === undefined) === (options.inputBytes === undefined)) {
+    throw new Error("Provide exactly one source-library evidence input.");
+  }
+  const input = options.input === undefined
+    ? undefined
+    : path.resolve(process.cwd(), options.input);
   const output = path.resolve(process.cwd(), options.output);
   const report = path.resolve(process.cwd(), options.report);
   const { healId, fromDate } = options;
@@ -62,17 +72,23 @@ export async function importSourceLibraryReconciliationEvidence(
   if (healDate !== undefined && healDate !== fromDate) {
     throw new Error("--from-date must match the dated heal identity.");
   }
-  const revision = options.revision.trim();
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error(
-      "Invalid --revision; pass the exact deployed 40-character Git commit SHA.",
-    );
-  }
+  const revision = resolveSourceLibraryRevision(
+    "release",
+    options.revision,
+    options.deploymentHandoffPath,
+    options.now,
+  );
 
   const [evidenceBytes, reportBytes] = await Promise.all([
-    readInput(options.input === "-" ? "-" : input),
+    options.inputBytes === undefined
+      ? readInput(options.input === "-" ? "-" : input!)
+      : Promise.resolve(Buffer.from(options.inputBytes)),
     readFile(report),
   ]);
+  const poolExceptionApproval = loadSourceLibraryPoolExceptionApproval(
+    path.resolve(ROOT, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+    reportBytes,
+  );
   let parsedEvidence: unknown;
   try {
     parsedEvidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
@@ -88,6 +104,7 @@ export async function importSourceLibraryReconciliationEvidence(
     expectedHealId: healId,
     expectedFromDate: fromDate,
     expectedReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
+    expectedPoolExceptionsSha256: poolExceptionApproval.sha256,
     maxAgeMs: MAX_AGE_MS,
     now: options.now,
   });
@@ -102,15 +119,31 @@ export async function importSourceLibraryReconciliationEvidence(
 }
 
 async function main(): Promise<void> {
+  const optionalArgument = (
+    name: string,
+    fallback?: string,
+  ): string | undefined => {
+    const index = process.argv.indexOf(name);
+    if (index < 0) return fallback;
+    const value = process.argv[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`Missing value for ${name}`);
+    }
+    return value;
+  };
   await importSourceLibraryReconciliationEvidence({
     input: argument("--input"),
     output: argument("--output"),
     report: argument("--report"),
     healId: argument("--heal-id"),
     fromDate: argument("--from-date"),
-    revision: argument(
+    revision: optionalArgument(
       "--revision",
       process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION,
+    ),
+    deploymentHandoffPath: optionalArgument(
+      "--deployment-handoff",
+      process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF,
     ),
   });
 }

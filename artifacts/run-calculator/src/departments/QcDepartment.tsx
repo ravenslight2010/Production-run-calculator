@@ -3,10 +3,11 @@ import { DepartmentBoundary } from "./DepartmentBoundary";
 import { lazy, Suspense } from "react";
 import ErrorBoundary from "../components/ErrorBoundary";
 import type { DayIn } from "@workspace/downtime-trends";
+import type { QcWorkflowTabProps } from "../components/QcWorkflowTab";
 
 const LazyIncidentsTab = lazy(() => import("../components/IncidentsTab"));
 const LazyDowntimeTrendsTab = lazy(() => import("../components/DowntimeTrendsTab"));
-const LazyQualityHistoryTab = lazy(() => import("../components/QualityHistoryTab"));
+const LazyQcWorkflowTab = lazy(() => import("../components/QcWorkflowTab"));
 
 function QcTabFallback() {
   return (
@@ -48,11 +49,11 @@ export function QcDowntimeSurface({ days }: { days: DayIn[] }) {
   );
 }
 
-export function QcQualitySurface() {
+export function QcQualitySurface(props: QcWorkflowTabProps) {
   return (
     <QcDepartment>
       <DeferredQcSurface>
-        <LazyQualityHistoryTab />
+        <LazyQcWorkflowTab {...props} />
       </DeferredQcSurface>
     </QcDepartment>
   );

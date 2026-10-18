@@ -175,9 +175,9 @@ describe("canonicalize ignores conflicting aliases", () => {
 
   it("still applies a clean (non-conflicting) alias", () => {
     const aliases: SpecImportAlias[] = [
-      { kind: "flavor", externalName: "Buffalo Chicken", canonicalName: "BBQ Chicken", context: null },
+      { kind: "flavor", externalName: "Buffalo Chicken", canonicalName: "BBQ Chicken", context: "Aldo's" },
     ];
-    const res = canonicalize("Buffalo Chicken", ["BBQ Chicken"], aliases, "flavor");
+    const res = canonicalize("Buffalo Chicken", ["BBQ Chicken"], aliases, "flavor", "Aldo's");
     expect(res.source).toBe("alias");
     expect(res.value).toBe("BBQ Chicken");
   });

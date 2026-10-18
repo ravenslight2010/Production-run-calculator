@@ -6,6 +6,7 @@ import { correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@work
 import { isModifierDropNamePair } from "@workspace/spec-import";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { safeAiErrorMetadata } from "../lib/aiDataBoundary";
 
 const router: IRouter = Router();
 
@@ -44,7 +45,7 @@ router.get("/ai-corrections", requireCapability("use-ai-tools"), async (req: Req
     const corrections = await listAll();
     res.json({ corrections });
   } catch (err) {
-    req.log.error({ err }, "failed to list ai corrections");
+    req.log.error(safeAiErrorMetadata(err), "failed to list ai corrections");
     res.status(500).json({ error: "Failed to list ai corrections" });
   }
 });
@@ -76,7 +77,7 @@ router.delete(
       const corrections = await listAll();
       res.json({ corrections });
     } catch (err) {
-      req.log.error({ err }, "failed to delete ai correction");
+      req.log.error(safeAiErrorMetadata(err), "failed to delete ai correction");
       res.status(500).json({ error: "Failed to delete ai correction" });
     }
   },
@@ -184,7 +185,13 @@ router.post(
       const corrections = await listAll();
       res.json({ corrections });
     } catch (err) {
-      req.log.error({ err }, "failed to save ai corrections");
+      req.log.error(
+        {
+          ...safeAiErrorMetadata(err),
+          correctionCount: Math.min(incoming.length, MAX_BATCH),
+        },
+        "failed to save ai corrections",
+      );
       res.status(500).json({ error: "Failed to save ai corrections" });
     }
   },

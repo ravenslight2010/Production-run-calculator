@@ -10,7 +10,7 @@ import {
 export type ForegroundRecoveryResponseResult =
   | { accepted: true; kind: "unchanged"; snapshotId: string }
   | { accepted: true; kind: "canonical"; snapshotId: string; payload: SyncPayload }
-  | { accepted: false; reason: "obsolete" };
+  | { accepted: false; reason: "obsolete" | "reset" };
 
 interface ConsumeForegroundRecoveryResponseOptions {
   response: Response;
@@ -20,8 +20,11 @@ interface ConsumeForegroundRecoveryResponseOptions {
   adoptUnchanged: (body: {
     snapshotId: string;
     canonicalRevision?: number;
+    operationalProjection?: SyncPayload["operationalProjection"];
+    serverTime?: number;
   }) => void | Promise<void>;
   adoptCanonical: (payload: SyncPayload, snapshotId: string) => void | Promise<void>;
+  adoptReset: (body: { resetEpoch: number; rollover: boolean }) => boolean | Promise<boolean>;
 }
 
 /**
@@ -36,6 +39,7 @@ export async function consumeForegroundRecoveryResponse({
   isCurrent,
   adoptUnchanged,
   adoptCanonical,
+  adoptReset,
 }: ConsumeForegroundRecoveryResponseOptions): Promise<ForegroundRecoveryResponseResult> {
   if (!isCurrent()) return { accepted: false, reason: "obsolete" };
   if (!response.ok) throw new Error(`foreground sync GET failed: ${response.status}`);
@@ -46,7 +50,20 @@ export async function consumeForegroundRecoveryResponse({
     unchanged?: boolean;
     snapshotId?: string;
     canonicalRevision?: number;
+    operationalProjection?: SyncPayload["operationalProjection"];
+    serverTime?: number;
+    resetEpoch?: number;
+    rollover?: boolean;
   } | null;
+
+  const recoveryBody = body && typeof body === "object"
+    ? body as Record<string, unknown>
+    : null;
+  const resetEpoch = recoveryBody?.resetEpoch;
+  const rollover = recoveryBody?.rollover;
+  if (!Number.isSafeInteger(resetEpoch) || (resetEpoch as number) < 0 || typeof rollover !== "boolean") {
+    throw new Error("foreground sync GET returned malformed reset state");
+  }
 
   if (body && typeof body === "object" && "unchanged" in body && body.unchanged === true) {
     if (!isUnchangedSyncResponse(body)) {
@@ -60,7 +77,16 @@ export async function consumeForegroundRecoveryResponse({
       throw new Error("foreground sync GET unchanged identity does not match its request");
     }
     if (!isCurrent()) return { accepted: false, reason: "obsolete" };
-    await adoptUnchanged({ snapshotId, canonicalRevision: body.canonicalRevision });
+    if (await adoptReset({ resetEpoch: resetEpoch as number, rollover })) {
+      return { accepted: false, reason: "reset" };
+    }
+    if (!isCurrent()) return { accepted: false, reason: "obsolete" };
+    await adoptUnchanged({
+      snapshotId,
+      canonicalRevision: body.canonicalRevision,
+      operationalProjection: body.operationalProjection,
+      serverTime: body.serverTime,
+    });
     return { accepted: true, kind: "unchanged", snapshotId };
   }
 
@@ -74,6 +100,10 @@ export async function consumeForegroundRecoveryResponse({
   }
   if (!await syncPayloadMatchesSnapshot(body, snapshotId, { stripReadModel: true })) {
     throw new Error("foreground sync GET snapshot does not match its canonical payload");
+  }
+  if (!isCurrent()) return { accepted: false, reason: "obsolete" };
+  if (await adoptReset({ resetEpoch: resetEpoch as number, rollover })) {
+    return { accepted: false, reason: "reset" };
   }
   if (!isCurrent()) return { accepted: false, reason: "obsolete" };
   await adoptCanonical(body, snapshotId);

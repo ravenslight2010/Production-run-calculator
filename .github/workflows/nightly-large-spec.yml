@@ -121,6 +121,10 @@ jobs:
       # Point the harness at the locally started API server.
       API_BASE: http://localhost:5000/api
       NODE_ENV: production
+      # Verification build only; publishing stays on the Replit path, so use a
+      # development build identity rather than the committed publish record
+      # pinned to its own source tree.
+      BUILD_IDENTITY_MODE: development
 
     steps:
       - name: Checkout

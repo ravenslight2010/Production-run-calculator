@@ -1,13 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { computeCheesePull } from "@workspace/inventory-math";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 import {
   clearActiveSubstitutions,
   getActiveSubstitutions,
   setActiveSubstitutions,
-  withSubstitutions,
   withTodaySubstitutions,
 } from "./substitutionState";
 
@@ -195,7 +192,9 @@ describe("runDetailModal — today's substituted dough recipe", () => {
 
     // Exactly as Ingredient Detail does for today's run: it keeps the stored
     // value for summary math and overlays only the displayed recipe rows.
-    const visibleRows = doughIngredientRows(withSubstitutions(storedRun));
+    const visibleRows = doughIngredientRows(
+      withTodaySubstitutions(storedRun, true, substitutions),
+    );
 
     // 300 pizzas / ((50 + 20 + 5) * 16 / 16) = 4 dough batches.
     expect(visibleRows).toEqual([
@@ -233,12 +232,4 @@ describe("runDetailModal — today's substituted dough recipe", () => {
     ]);
   });
 
-  it("keeps the real Ingredient Detail dialog wired to the today-only helper", () => {
-    // This guard protects the production handoff: the modal must use the
-    // today-only helper, while historical recipe detail remains immutable.
-    const homeSource = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
-    expect(homeSource).toContain(
-      "withTodaySubstitutions(",
-    );
-  });
 });

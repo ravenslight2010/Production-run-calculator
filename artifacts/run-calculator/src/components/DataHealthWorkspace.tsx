@@ -225,6 +225,72 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
                 </span>
               </div>
               <p className="text-muted-foreground">{syncHealthQuery.data.nextAction}</p>
+              <div data-testid="legacy-sync-readiness" className="rounded border border-border bg-background/60 px-2 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">Legacy tablet cutoff readiness</span>
+                  <span className={`font-semibold uppercase ${
+                    syncHealthQuery.data.legacySyncReadiness.status === "ready"
+                      || syncHealthQuery.data.legacySyncReadiness.status === "rejection-enabled"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-amber-600 dark:text-amber-400"
+                  }`}>
+                    {syncHealthQuery.data.legacySyncReadiness.status.replaceAll("-", " ")}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-muted-foreground">
+                  Compatibility mode: <span className="font-medium text-foreground">
+                    {syncHealthQuery.data.legacySyncReadiness.compatibilityMode === "reject"
+                      ? "reject legacy writes"
+                      : "accept legacy writes"}
+                  </span>. Accepted legacy writes observed:{" "}
+                  <span className="font-medium text-foreground">
+                    {syncHealthQuery.data.legacySyncReadiness.acceptedLegacyWrites}
+                  </span>.
+                </p>
+                <p className="mt-0.5">
+                  Rejection should only be enabled after a complete{" "}
+                  {Math.round(syncHealthQuery.data.legacySyncReadiness.windowMs / 3_600_000)}-hour window
+                  has zero accepted legacy writes.
+                </p>
+                {!syncHealthQuery.data.legacySyncReadiness.fullWindowObserved
+                  && syncHealthQuery.data.legacySyncReadiness.compatibilityMode === "accept" && (
+                    <p className="mt-0.5 text-amber-600 dark:text-amber-400">
+                      This server has not observed the full readiness window yet; the current zero is not cutoff proof.
+                    </p>
+                  )}
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  Window: {new Date(syncHealthQuery.data.legacySyncReadiness.observedFrom).toLocaleString()} to{" "}
+                  {new Date(syncHealthQuery.data.legacySyncReadiness.observedUntil).toLocaleString()}.
+                  Evidence expires {new Date(syncHealthQuery.data.legacySyncReadiness.expiresAt).toLocaleString()}.
+                </p>
+              </div>
+              <div data-testid="sync-peer-frames" className="rounded border border-border bg-background/60 px-2 py-2">
+                <div className="font-medium">Peer update frames</div>
+                <div className="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-3">
+                  <p>
+                    Exact-snapshot updates skipped:{" "}
+                    <span className="font-medium text-foreground">
+                      {syncHealthQuery.data.syncPeerFrames.exactSnapshotSkipped}
+                    </span>
+                  </p>
+                  <p>
+                    Partial frames sent:{" "}
+                    <span className="font-medium text-foreground">
+                      {syncHealthQuery.data.syncPeerFrames.partialSent}
+                    </span>
+                  </p>
+                  <p>
+                    Complete frames sent:{" "}
+                    <span className="font-medium text-foreground">
+                      {syncHealthQuery.data.syncPeerFrames.completeSent}
+                    </span>
+                  </p>
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Current telemetry window: {Math.round(syncHealthQuery.data.syncPeerFrames.windowMs / 1_000)} seconds.
+                  Counts reset when the server reports its capacity telemetry window.
+                </p>
+              </div>
               <div className="space-y-1">
                 {syncHealthQuery.data.checks.map((check) => (
                   <div key={check.name} className="rounded border border-border bg-background/60 px-2 py-1.5">

@@ -3,6 +3,9 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import runsRouter from "./runs";
 import profileDataHealthRouter from "./profileDataHealth";
+import sourceLibraryReconciliationCaptureRouter, {
+  publicSourceLibraryReconciliationCaptureRouter,
+} from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
@@ -20,7 +23,7 @@ import {
 } from "../middlewares/requireCapability";
 import { noStoreMiddleware } from "../lib/cacheControl";
 import { startupGate } from "../lib/startupGate";
-import type { Capability } from "../lib/roles";
+import { CAPABILITIES, type Capability } from "../lib/roles";
 // Domain handlers register against the generic lifecycle without making that
 // lifecycle import its workloads (which would create an initialization cycle).
 import "../lib/serverJobWorkloads";
@@ -51,6 +54,10 @@ export const directAuthorizationCoverageRouters = [
     authOnlyRoutes: ["GET /runs"],
   },
   { name: "profile data health", router: profileDataHealthRouter },
+  {
+    name: "source-library reconciliation capture",
+    router: sourceLibraryReconciliationCaptureRouter,
+  },
   { name: "master data health", router: masterDataHealthRouter },
   {
     name: "run templates",
@@ -114,11 +121,19 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
+    "/freezer-surplus/adjustments",
     "/inventory/count-observations/:id", "/inventory/count-observations",
     "/inventory/quality-checks",
   ]),
+  ...reads(["record-qc"], "all", "scoped", [
+    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity",
+  ]),
+  ...reads(["manage-qc"], "all", "scoped", ["/qc/history.csv"]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
-    "/import-history",
+    "/import-history", "/import-operations/:operationId",
+  ]),
+  ...reads(["manage-profiles"], "all", "live-only", [
+    "/import-operations/distillation-evidence",
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["review-incidents"], "all", "scoped", [
@@ -129,13 +144,16 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/reports/operational/finalized/proof-key-health",
     "/reports/operational/finalized/:id", "/reports/operational/finalized/:id/export",
   ]),
-  ...reads(["manage-staff"], "all", "live-only", ["/roles", "/users"]),
+  ...reads(["manage-staff"], "all", "live-only", [
+    "/roles", "/users", "/signup-code/status", "/staff-invitations",
+  ]),
   ...reads(["approve-password-resets"], "all", "live-only", ["/password-reset-requests"]),
   ...reads(["manage-profiles"], "all", "scoped", [
     "/master-data/health", "/master-data/health/history",
   ]),
   ...reads(["manage-staff"], "all", "live-only", [
-    "/audit-logs/profile-name-link-cleanup", "/audit-logs",
+    "/audit-logs/profile-name-link-cleanup", "/audit-logs", "/audit-logs/export.csv",
+    "/audit-logs/export.pdf",
   ]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-corrections"]),
@@ -161,6 +179,7 @@ router.use(noStoreMiddleware);
 // Public lifecycle order is contractual: probes, readiness gate, then auth.
 router.use(healthRouter);
 router.use(startupGate);
+router.use(publicSourceLibraryReconciliationCaptureRouter);
 router.use(authRouter);
 
 // All capability families are authenticated. Family-owned capability checks
@@ -199,6 +218,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("public", "live-only", "denied", undefined, [
     "POST /auth/sign-up", "POST /auth/sign-in", "POST /auth/sign-out",
     "POST /auth/forgot-password", "POST /auth/reset-password",
+    "POST /auth/accept-invitation",
   ]),
   ...writes("per-user", "per-user", "allowed", undefined, [
     // Password changes update only the authenticated caller's account row.
@@ -214,7 +234,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /completed-history", "POST /field-checks/observations",
     "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
-    "POST /run-suggestions/follow-up", "POST /sync/operational-intents",
+    "POST /run-suggestions/follow-up", "POST /sync/operational-intents", "POST /sync/manual-section",
     "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
     "POST /cycle-count-schedules/:id/mark-counted",
     "POST /operations-insights/spec-reconciliation", "POST /ai/spec-reconcile",
@@ -236,6 +256,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /die-line-defaults", "DELETE /die-line-defaults", "POST /die-types", "POST /die-types/delete",
     "POST /dough-recipes", "DELETE /dough-recipes", "POST /ingredients", "DELETE /ingredients", "POST /ingredients/merge",
     "POST /freezer-pull-items", "DELETE /freezer-pull-items", "POST /freezer-surplus", "PUT /freezer-surplus/allocations/:runId",
+    "POST /freezer-surplus/lots/:lotId/adjustments",
     "POST /ingredient-batch-weights", "POST /mixes", "DELETE /mixes", "POST /photo-aliases",
     "POST /premix-sheets", "DELETE /premix-sheets/:id", "POST /cheese-sheets", "DELETE /cheese-sheets/:id",
     "POST /sauce-recipes", "DELETE /sauce-recipes", "PATCH /inventory/items/:id/production-link",
@@ -246,6 +267,18 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "PATCH /inventory/locations/:id", "DELETE /inventory/locations/:id", "POST /inventory/transfer",
     "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
     "POST /mix-surplus", "PUT /mix-surplus/allocations/:runDate", "DELETE /mix-surplus/lots/:id",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-allergens", [
+    "PUT /ingredients/:id/allergen-mapping",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "record-qc", [
+    "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
+    "POST /qc/component-checks",
+    "POST /qc/cleaning-records", "POST /qc/cleaning-records/:eventId/verification",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
+    "POST /qc/targets", "POST /qc/run-signoffs",
+    "POST /qc/events/:eventId/corrections", "POST /qc/events/:eventId/redactions",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
@@ -265,7 +298,20 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("manager-only", "live-only", "denied", "manage-staff", [
     "POST /roles", "PUT /roles/:name", "DELETE /roles/:name", "PUT /users/:userId/role",
     "PUT /users/:userId/password", "DELETE /users/:userId",
+    "PATCH /users/:userId/status", "POST /users/:userId/revoke-sessions",
+    "POST /staff-invitations", "DELETE /staff-invitations/:id",
+    "PATCH /signup-code/status", "POST /signup-code/rotate",
   ]),
+  {
+    method: "POST",
+    path: "/profile-data/source-library-reconciliation/capture",
+    ownership: "manager-only",
+    capabilities: ["manage-staff"],
+    capabilityMatch: "all",
+    managerRole: true,
+    scope: "live-only",
+    sandbox: "denied",
+  },
   ...writes("capability-gated", "live-only", "denied", "approve-password-resets", [
     "POST /password-reset-requests/:id/approve", "POST /password-reset-requests/:id/decline",
   ]),
@@ -276,6 +322,14 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   {
     method: "POST", path: "/import-history", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/:operationId/apply", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/:operationId/undo", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
@@ -301,13 +355,21 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "manage-staff", ["PUT /supervisor-pin"]),
   {
     method: "POST", path: "/server-jobs", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
-    capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+    capabilities: CAPABILITIES, capabilityMatch: "any",
   },
   {
     method: "POST", path: "/server-jobs/:id/cancel", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
-    capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+    capabilities: CAPABILITIES, capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/server-jobs/scheduled-evaluation-cleanup/plans",
+    ownership: "manager-only", scope: "live-only", sandbox: "denied",
+    capabilities: ["manage-staff"], capabilityMatch: "all", managerRole: true,
+  },
+  {
+    method: "POST", path: "/server-jobs/scheduled-evaluation-cleanup/plans/:planId/apply",
+    ownership: "manager-only", scope: "live-only", sandbox: "denied",
+    capabilities: ["manage-staff"], capabilityMatch: "all", managerRole: true,
   },
 ];
 
@@ -347,15 +409,24 @@ export function validateMutationAuthorizationInventory(
           throw new Error(`${owned.name} write ${method} ${paths.join(", ")} is missing from mutationAuthorizationInventory`);
         }
         const required = layer.route.stack
-          .map(({ handle }, index) => ({ capabilities: getRequiredCapabilities(handle), index }))
-          .filter((item): item is { capabilities: readonly Capability[]; index: number } => !!item.capabilities);
+          .map(({ handle }, index) => ({
+            capabilities: getRequiredCapabilities(handle),
+            match: getCapabilityMatch(handle),
+            index,
+          }))
+          .filter((item): item is {
+            capabilities: readonly Capability[];
+            match: "all" | "any" | undefined;
+            index: number;
+          } => !!item.capabilities);
         const liveScopeIndex = layer.route.stack.findIndex(({ handle }) => isRequireLiveScope(handle));
         const managerRoleIndex = layer.route.stack.findIndex(({ handle }) => isRequireManagerRole(handle));
         const matches = entries.some((entry) => {
           const expected = entry.capabilities ?? [];
           const capabilityMatches = required.length === (expected.length ? 1 : 0) &&
-            (expected.length === 0 || required.some(({ capabilities, index }) =>
+            (expected.length === 0 || required.some(({ capabilities, match, index }) =>
               index < layer.route!.stack.length - 1 &&
+              match === (entry.capabilityMatch ?? "all") &&
               capabilities.length === expected.length &&
               expected.every((capability) => capabilities.includes(capability)),
             ));

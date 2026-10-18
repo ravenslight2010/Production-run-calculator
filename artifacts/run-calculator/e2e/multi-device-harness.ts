@@ -13,6 +13,8 @@ export type DeviceDefinition = {
   viewport: { width: number; height: number };
   isMobile?: boolean;
   deviceScaleFactor?: number;
+  initialPath?: string;
+  readyTestId?: string;
 };
 
 export type SyncPayload = {
@@ -74,6 +76,9 @@ export class MultiDeviceSession {
     browser: Browser,
     authenticate: (page: Page) => Promise<void>,
     devices: DeviceDefinition[] = DEFAULT_DEVICES,
+    options: {
+      beforeNavigate?: (page: Page, device: DeviceName) => void | Promise<void>;
+    } = {},
   ): Promise<MultiDeviceSession> {
     if (devices.length !== 2) {
       throw new Error(`multi-device fixture requires exactly two devices, got ${devices.length}`);
@@ -110,8 +115,10 @@ export class MultiDeviceSession {
       contexts[definition.name] = context;
       pages[definition.name] = page;
       session.installDiagnostics(definition.name, page);
-      await page.goto("/", { waitUntil: "domcontentloaded" });
-      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await options.beforeNavigate?.(page, definition.name);
+      await page.goto(definition.initialPath ?? "/", { waitUntil: "domcontentloaded" });
+      await page.getByTestId(definition.readyTestId ?? "tab-run")
+        .waitFor({ state: "attached", timeout: 25_000 });
       session.mark(definition.name, "ready");
     }
 

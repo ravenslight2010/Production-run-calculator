@@ -229,7 +229,11 @@ describe("getUserSecurityState — DB-error fallback (guards against fail-open b
       // Without a cached entry the function must fall back to the safe-open
       // default so a transient DB blip never logs out a legitimate user who has
       // never been seen before.
-      expect(result).toStrictEqual({ exists: true, passwordChangedAtMs: 0 });
+      expect(result).toStrictEqual({
+        exists: true,
+        passwordChangedAtMs: 0,
+        sessionRevokedAtMs: 0,
+      });
     } finally {
       spy.mockRestore();
     }

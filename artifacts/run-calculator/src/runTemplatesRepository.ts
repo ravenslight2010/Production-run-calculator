@@ -79,8 +79,15 @@ function nextRevision(): number { return Math.max(Date.now(), newestRevision() +
 
 /** Turns the old array-only cache into records and queues it exactly once. */
 export function migrateLegacyRunTemplates(): void {
-  if (typeof localStorage === "undefined" || localStorage.getItem(migrationKey())) return;
-  const claimedScope = localStorage.getItem(LEGACY_CLAIM_KEY);
+  let claimedScope: string | null;
+  try {
+    if (typeof localStorage === "undefined" || localStorage.getItem(migrationKey())) return;
+    claimedScope = localStorage.getItem(LEGACY_CLAIM_KEY);
+  } catch {
+    // Browser storage is only a local cache; leave the migration for a later
+    // startup rather than preventing Home from opening in privacy-restricted mode.
+    return;
+  }
   const scopedRaw = readJson<unknown[]>(snapshotKey(), []);
   const raw = scopedRaw.length > 0
     ? scopedRaw

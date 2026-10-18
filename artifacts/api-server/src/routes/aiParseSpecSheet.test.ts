@@ -349,6 +349,14 @@ describe("buildParseSpecSheetPrompt numeric accuracy", () => {
   });
 });
 
+describe("buildParseSpecSheetPrompt runtime-coercion guard", () => {
+  it("does not inject NaN into the production system prompt", () => {
+    const { system } = buildParseSpecSheetPrompt(input({ workbookText: "" }));
+    expect(system).not.toContain("NaN");
+    expect(system).toContain("Likewise, when a spec sheet NAMES a specific dough or crust");
+  });
+});
+
 // Regression guard: the same topping/blend can run on TWO applicator stations
 // at DIFFERENT per-pizza weights. Without this instruction the model tends to
 // dedupe same-named applicators into one entry (or reuse one weight for both)

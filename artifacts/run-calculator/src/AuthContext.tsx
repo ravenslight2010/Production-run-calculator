@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changePasswordRequest,
@@ -12,7 +12,9 @@ import {
   signInRequest,
   signOutRequest,
   signUpRequest,
+  acceptStaffInvitation,
   InventoryApiError,
+  type AuthSessionReason,
   type StaffMember,
 } from "./inventoryShared";
 import { AuthContext } from "./useAuth";
@@ -66,6 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const authEpochRef = useRef(0);
   const freshSessionRef = useRef(false);
+  const [sessionEndedReason, setSessionEndedReason] =
+    useState<AuthSessionReason | null>(null);
 
   const advanceAuthEpoch = useCallback(() => {
     const next = authEpochRef.current + 1;
@@ -96,12 +100,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           userId: user.userId,
           scope: user.sandbox ? "sandbox" : "live",
         });
+        setSessionEndedReason(null);
         return user;
       } catch (err) {
         if (requestEpoch !== authEpochRef.current) {
           return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
         }
-        if (err instanceof InventoryApiError && err.status === 401) return null;
+        if (err instanceof InventoryApiError && err.status === 401) {
+          // A cold start with no cached identity is ordinary signed-out state.
+          // Only retain a reason when an authenticated identity was being
+          // revalidated, so the sign-in screen can explain the transition.
+          if (qc.getQueryData<StaffMember | null>(["me"])) {
+            setSessionEndedReason((previous) =>
+              err.authSessionReason ?? previous ?? "session_expired",
+            );
+          }
+          return null;
+        }
         throw err;
       }
     },
@@ -171,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const transitionEpoch = advanceAuthEpoch();
       const { user } = await signInRequest(username, password);
       if (transitionEpoch !== authEpochRef.current) return;
+      setSessionEndedReason(null);
       freshSessionRef.current = true;
       await resetCacheTo(user);
     },
@@ -182,6 +198,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const transitionEpoch = advanceAuthEpoch();
       const { user } = await signUpRequest(username, password, accessCode);
       if (transitionEpoch !== authEpochRef.current) return;
+      setSessionEndedReason(null);
+      freshSessionRef.current = true;
+      await resetCacheTo(user);
+    },
+    [advanceAuthEpoch, resetCacheTo],
+  );
+  const acceptInvitation = useCallback(
+    async (invitation: string, username: string, password: string) => {
+      const transitionEpoch = advanceAuthEpoch();
+      const { user } = await acceptStaffInvitation(invitation, username, password);
+      if (transitionEpoch !== authEpochRef.current) return;
+      setSessionEndedReason(null);
       freshSessionRef.current = true;
       await resetCacheTo(user);
     },
@@ -194,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const transitionEpoch = advanceAuthEpoch();
     const { user } = await signInRequest("test", "test");
     if (transitionEpoch !== authEpochRef.current) return;
+    setSessionEndedReason(null);
     freshSessionRef.current = true;
     await resetCacheTo(user);
   }, [advanceAuthEpoch, resetCacheTo]);
@@ -201,6 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     const transitionEpoch = advanceAuthEpoch();
     freshSessionRef.current = false;
+    setSessionEndedReason(null);
     try {
       await signOutRequest();
     } finally {
@@ -215,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const forceSignedOut = useCallback(() => {
     advanceAuthEpoch();
     freshSessionRef.current = false;
+    setSessionEndedReason(null);
     resetMasterDataTransportCache();
     setProfileCacheIdentity(null);
     qc.setQueryData(["me"], null);
@@ -241,11 +272,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // can't re-enter this handler (no loop).
   useEffect(() => {
     setAuthRequestEpoch(authEpochRef.current);
-    setUnauthorizedHandler((requestEpoch) => {
+    setUnauthorizedHandler((requestEpoch, reason) => {
       // Ignore 401s from requests that started before the latest auth
       // transition. A current-epoch 401 still re-probes /me and can sign the
       // user out when the server session has genuinely expired.
       if (requestEpoch !== authEpochRef.current) return;
+      setSessionEndedReason(reason ?? "session_expired");
       void qc.invalidateQueries({ queryKey: ["me"] });
     });
     return () => setUnauthorizedHandler(null);
@@ -260,6 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const transitionEpoch = advanceAuthEpoch();
       const { user } = await changePasswordRequest(currentPassword, newPassword);
       if (transitionEpoch !== authEpochRef.current) return;
+      setSessionEndedReason(null);
       await resetCacheTo(user);
     },
     [advanceAuthEpoch, resetCacheTo],
@@ -328,9 +361,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: me !== null,
         isLoading,
         startupError,
+        sessionEndedReason,
         retryStartup,
         signIn,
         signUp,
+        acceptInvitation,
         signInAsTest,
         signOut,
         forceSignedOut,

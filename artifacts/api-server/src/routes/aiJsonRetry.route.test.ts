@@ -27,6 +27,7 @@ const mock = vi.hoisted(() => ({
   shouldThrow: false as boolean,
   shouldThrow429: false as boolean,
   mainCalls: 0,
+  responseModel: undefined as string | undefined,
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => {
@@ -47,7 +48,10 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
               throw err;
             }
             const content = mock.queue.length > 0 ? mock.queue.shift() : "{}";
-            return { choices: [{ message: { content } }] };
+            return {
+              choices: [{ message: { content } }],
+              ...(mock.responseModel ? { model: mock.responseModel } : {}),
+            };
           },
         },
       },
@@ -97,6 +101,7 @@ beforeEach(async () => {
   mock.shouldThrow = false;
   mock.shouldThrow429 = false;
   mock.mainCalls = 0;
+  mock.responseModel = undefined;
   userCounter += 1;
   // Exercise the 429 retry path without a real 20-second backoff sleep.
   prevBackoff = setAiRateLimitBackoffMsForTests(0);
@@ -196,6 +201,42 @@ describe("bounded retry on malformed model output (first malformed, second good)
     const body = (await res.json()) as { matches: Array<{ brand: string }> };
     expect(body.matches).toHaveLength(1);
     expect(body.matches[0].brand).toBe("Lowes");
+    expect(mock.mainCalls).toBe(2);
+  });
+
+  it("does not cache a fallback-served match-import result under the primary model", async () => {
+    const good = JSON.stringify({
+      brandMatches: [{ candidate: "Unknown Brand", match: "Lowes" }],
+      flavorMatches: [],
+    });
+    mock.queue = [good, good];
+    mock.responseModel = "gpt-5.4";
+    const body = {
+      brands: ["Lowes"],
+      brandFlavors: { Lowes: ["Pepperoni"] },
+      unmatchedBrands: ["Unknown Brand"],
+      unmatchedFlavors: [],
+    };
+
+    expect((await post("/ai/match-import", body)).status).toBe(200);
+    expect((await post("/ai/match-import", body)).status).toBe(200);
+    expect(mock.mainCalls).toBe(2);
+  });
+
+  it("does not cache a fallback-served match-premix result under the primary model", async () => {
+    const good = JSON.stringify({
+      matches: [{ name: "Lowes Mystery Mix", brand: "Lowes", flavor: "Pepperoni" }],
+    });
+    mock.queue = [good, good];
+    mock.responseModel = "gpt-5.4";
+    const body = {
+      brands: ["Lowes"],
+      brandFlavors: { Lowes: ["Pepperoni"] },
+      unmatchedNames: ["Lowes Mystery Mix"],
+    };
+
+    expect((await post("/ai/match-premix", body)).status).toBe(200);
+    expect((await post("/ai/match-premix", body)).status).toBe(200);
     expect(mock.mainCalls).toBe(2);
   });
 });

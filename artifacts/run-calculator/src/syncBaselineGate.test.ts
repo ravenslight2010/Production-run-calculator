@@ -127,6 +127,41 @@ describe("SSE sync baseline gate", () => {
     expect(coordinationSource).toContain("syncBaselineGateRef.current.completeInitialSnapshot()");
   });
 
+  it("keeps all first-login entry states behind the server-owned baseline", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+
+    // A stale prior-day cache is represented in memory by the untouched
+    // automatic seed; a populated server frame must replace it even if its
+    // reset marker is newer on the device.
+    const seeded = { id: "seed", brand: "", flavor: "", seeded: true };
+    expect(shouldAtomicallyAdoptFirstSnapshot({
+      initialSnapshot: true,
+      localRuns: [seeded],
+      hasLocalUserEdit: false,
+    })).toBe(true);
+    expect(shouldAcceptSyncDaySnapshot({
+      remoteDate: "2030-06-01",
+      localDate: "2030-06-01",
+      remoteResetAt: 1000,
+      localResetAt: 2000,
+      initialSnapshot: true,
+    })).toBe(true);
+
+    // A clean reinstall and an intentional administrative empty baseline both
+    // use the same atomic adoption path, but neither may be replaced by a
+    // locally manufactured rollover state before the frame arrives.
+    expect(shouldAtomicallyAdoptFirstSnapshot({
+      initialSnapshot: true,
+      localRuns: [seeded],
+      hasLocalUserEdit: false,
+    })).toBe(true);
+    expect(source).toContain("const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;");
+    expect(source).toContain("applyRolloverEpoch(msg.resetEpoch)");
+    expect(source).toContain("applyResetWipe(msg.resetEpoch)");
+    expect(source).not.toContain("checkDateRollover");
+    expect(source).not.toContain("/api/sync/${newDate}");
+  });
+
   it("routes bounded configuration invalidations through canonical sources and recovers all families at a baseline", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
     expect(source).toContain('family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away"');
@@ -206,8 +241,74 @@ describe("SSE sync baseline gate", () => {
     expect(source).toMatch(
       /pushTimerRef\.current = setTimeout\(\(\) => \{\s*if \(document\.hidden\) \{\s*foregroundPushPendingRef\.current = true;/,
     );
+    expect(source).toContain("foregroundSyncBarrierRef.current");
+    expect(source).toContain("const payload = buildSyncPayload(dayStateRef.current);");
     expect(source).toContain("syncMeta: { queuedAt: timing.queuedAtEpoch }");
     expect(source).toContain("X-Sync-Response-Bytes");
+  });
+
+  it("keeps station displays read-only at sync, autosave, and background-write boundaries", () => {
+    const home = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+    const lifecycle = readFileSync(
+      resolve(process.cwd(), "src/hooks/useHomeFormLifecycle.ts"),
+      "utf8",
+    );
+    const liveContext = readFileSync(
+      resolve(process.cwd(), "src/contexts/LiveRunContext.tsx"),
+      "utf8",
+    );
+    const schedulePush = home.slice(
+      home.indexOf("function schedulePush("),
+      home.indexOf("function retryLatestSync():"),
+    );
+    const doFetch = home.slice(
+      home.indexOf("function doFetch("),
+      home.indexOf("function schedulePush("),
+    );
+    const baseline = home.slice(
+      home.indexOf("onInitialBaseline: (shouldPush) =>"),
+      home.indexOf("onClose: () =>", home.indexOf("onInitialBaseline: (shouldPush) =>")),
+    );
+    const handoff = home.slice(
+      home.indexOf("function LiveRunHandoffGuard()"),
+      home.indexOf("return null;", home.indexOf("function LiveRunHandoffGuard()")),
+    );
+    const outbox = home.slice(
+      home.indexOf("// The normal snapshot sync remains a recovery path"),
+      home.indexOf("// Cursor recovery complements"),
+    );
+    const dayStart = home.slice(
+      home.indexOf("// ── Feature B+E7: Day-start inventory consumption"),
+      home.indexOf("// ── Factory KV: startup fetch"),
+    );
+    const factory = home.slice(
+      home.indexOf("// ── Factory KV: startup fetch"),
+      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+    );
+    const profileReconcile = home.slice(
+      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+      home.indexOf("// Dough pause/resume is immediate"),
+    );
+    const canonicalPush = home.slice(
+      home.indexOf("async function pushTodayCanonical("),
+      home.indexOf("function schedulePush("),
+    );
+
+    expect(schedulePush).toContain("if (screenMode !== null) return;");
+    expect(doFetch).toContain("if (screenMode !== null) return;");
+    expect(baseline).toContain("if (screenMode !== null)");
+    expect(baseline).toContain("return;");
+    expect(handoff).toContain("if (screenMode !== null || !nextRunPrepActive) return;");
+    expect(lifecycle).toContain("readOnly = false");
+    expect(lifecycle).toContain("if (readOnly) return;");
+    expect(liveContext).toContain("disabled: screenMode !== null");
+    expect(outbox).toContain("if (screenMode !== null) return;");
+    expect(dayStart).toContain("if (screenMode !== null) return;");
+    expect(factory).toContain("if (screenMode !== null) return;");
+    expect(factory).toContain("if (screenMode === null) void flushFactoryQueue();");
+    expect(factory).toContain("if (screenMode === null) void runFactoryKvMigration(data);");
+    expect(profileReconcile).toContain("if (screenMode !== null) return;");
+    expect(canonicalPush).toContain("if (screenMode !== null) throw new Error");
   });
 
   it("omits unchanged history from hot pushes and records it only after acknowledgement", () => {

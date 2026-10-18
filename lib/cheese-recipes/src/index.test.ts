@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeCheeseRecipe,
+  normalizeCheeseRecipeCustomerMetadata,
   normalizeCheeseRecipes,
   normalizeCheeseComponent,
   cheeseRecipeTotalLbs,
@@ -32,6 +33,7 @@ function make(over: Partial<CheeseRecipe> = {}): CheeseRecipe {
     notes: over.notes ?? "",
     components: over.components ?? [],
     enabled: over.enabled ?? true,
+    ...(over.updatedAt !== undefined ? { updatedAt: over.updatedAt } : {}),
   };
 }
 
@@ -55,6 +57,17 @@ describe("normalizeCheeseComponent", () => {
 });
 
 describe("normalizeCheeseRecipe", () => {
+  it("normalizes customer metadata to the blank-safe representation", () => {
+    expect(normalizeCheeseRecipeCustomerMetadata({
+      brand: " Bobo ",
+      flavors: ["All Varieties", " Pepperoni ", "pepperoni", null],
+    })).toEqual({ brand: "Bobo", flavors: ["Pepperoni"] });
+    expect(normalizeCheeseRecipeCustomerMetadata({
+      brand: null,
+      flavors: ["Stray"],
+    })).toEqual({ brand: "", flavors: [] });
+  });
+
   it("requires a name, defaults enabled true, de-dups flavors case-insensitively", () => {
     const r = normalizeCheeseRecipe({
       id: "x",
@@ -424,6 +437,39 @@ describe("addCheeseRecipesIfAbsentByName", () => {
 });
 
 describe("mergeCheeseRecipes", () => {
+  it("retains the baseline revision for an unstamped workbook update", () => {
+    const revision = "2026-10-08T12:00:00.000Z";
+    const [merged] = mergeCheeseRecipes(
+      [make({ id: "a", updatedAt: revision })],
+      [make({ id: "a", name: "Imported" })],
+    );
+    expect(merged.updatedAt).toBe(revision);
+    expect(merged.name).toBe("Imported");
+  });
+
+  it("does not upgrade an explicitly stale revision or stamp a new recipe", () => {
+    const stale = "2026-10-07T12:00:00.000Z";
+    const merged = mergeCheeseRecipes(
+      [make({ id: "a", updatedAt: "2026-10-08T12:00:00.000Z" })],
+      [make({ id: "a", updatedAt: stale }), make({ id: "new" })],
+    );
+    expect(merged[0].updatedAt).toBe(stale);
+    expect(merged[1].updatedAt).toBeUndefined();
+  });
+
+  it("retains revisions through spec name matching without upgrading stale candidates", () => {
+    const revision = "2026-10-08T12:00:00.000Z";
+    const existing = make({ id: "a", name: "Blend", updatedAt: revision });
+    const candidate = make({
+      id: "parsed", name: "Blend", components: [{ ingredient: "Mozzarella", lbs: 50 }],
+    });
+    expect(addCheeseRecipesIfAbsentByName([existing], [candidate]).merged[0].updatedAt)
+      .toBe(revision);
+    const stale = "2026-10-07T12:00:00.000Z";
+    expect(addCheeseRecipesIfAbsentByName([existing], [{ ...candidate, updatedAt: stale }])
+      .merged[0].updatedAt).toBe(stale);
+  });
+
   it("replaces by id and appends new, preserving order", () => {
     const merged = mergeCheeseRecipes(
       [make({ id: "a", name: "old" }), make({ id: "b" })],
@@ -492,6 +538,16 @@ describe("repointCheeseRecipesForBrandMerge", () => {
       expect(renameCheeseRecipesBrand(recipes, "   ", "Beta")).toEqual([]);
       expect(renameCheeseRecipesBrand(recipes, "Alpha", "Alpha")).toEqual([]);
     });
+
+    it("skips malformed brand values while renaming valid rows", () => {
+      const recipes = [
+        make({ id: "valid", brand: "Alpha" }),
+        make({ id: "malformed", brand: null as unknown as string }),
+      ];
+      expect(renameCheeseRecipesBrand(recipes, "Alpha", "Beta")).toEqual([
+        { ...recipes[0], brand: "Beta" },
+      ]);
+    });
   });
 
   describe("flavor merge re-pointing", () => {
@@ -548,6 +604,16 @@ describe("cheeseRecipeMatchesQuery", () => {
     expect(cheeseRecipeMatchesQuery(r, "pepp")).toBe(true);
     expect(cheeseRecipeMatchesQuery(r, "zzz")).toBe(false);
   });
+
+  it("ignores malformed brand and flavor values", () => {
+    const malformed = make({
+      brand: null as unknown as string,
+      flavors: [null, { label: "bad" }] as unknown as string[],
+    });
+    expect(() => cheeseRecipeMatchesQuery(malformed, "whole")).not.toThrow();
+    expect(cheeseRecipeMatchesQuery(malformed, "whole")).toBe(true);
+    expect(cheeseRecipeMatchesQuery(malformed, "missing")).toBe(false);
+  });
 });
 
 describe("groupCheeseRecipesByBrand", () => {
@@ -561,6 +627,16 @@ describe("groupCheeseRecipesByBrand", () => {
     expect(groups.map((g) => g.brand)).toEqual(["Alpha", "Zeta", ""]);
     expect(groups[0].recipes.map((r) => r.name)).toEqual(["A1", "A2"]);
     expect(groups[0].shredderSetting).toBe("5");
+  });
+
+  it("puts malformed brands in the no-brand group without affecting valid groups", () => {
+    const groups = groupCheeseRecipesByBrand([
+      make({ id: "valid", name: "Valid", brand: "Alpha" }),
+      make({ id: "malformed", name: "Legacy", brand: { bad: true } as unknown as string }),
+    ]);
+    expect(groups.map((g) => g.brand)).toEqual(["Alpha", ""]);
+    expect(groups[0].recipes.map((r) => r.name)).toEqual(["Valid"]);
+    expect(groups[1].recipes.map((r) => r.name)).toEqual(["Legacy"]);
   });
 });
 

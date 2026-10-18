@@ -6,5 +6,43 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../lib/ai-evaluation"
+    },
+    {
+      "path": "../lib/cheese-import"
+    },
+    {
+      "path": "../lib/db"
+    },
+    {
+      "path": "../lib/distill-dataset"
+    },
+    {
+      "path": "../lib/integrations-openai-ai-server"
+    },
+    {
+      "path": "../lib/name-match"
+    },
+    {
+      "path": "../lib/named-recipes"
+    },
+    {
+      "path": "../lib/premix-import"
+    },
+    {
+      "path": "../lib/shipping-import"
+    },
+    {
+      "path": "../lib/spec-export"
+    },
+    {
+      "path": "../lib/spec-import"
+    },
+    {
+      "path": "../lib/spec-reconcile"
+    }
+  ]
 }

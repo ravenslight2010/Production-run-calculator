@@ -10,18 +10,38 @@
 // a confusing blank body. The picking logic is guarded by
 // cheesePick.parity.test.ts, but the actual rendered warning was only covered by
 // typecheck. This test renders the REAL `CheesePickCard` component (exported from
-// pages/home.tsx — the same component the Setup screen and run applicators use)
+// pages/home.tsx — the same component the Setup screen uses)
 // across the three states the task cares about, so an inverted condition or a
 // warning hidden behind another branch fails loudly instead of silently
 // dead-ending staff.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { CheesePickCard, ReadOnlyRecipeCard } from "./pages/home";
+import { CheesePickCard } from "./components/RecipeCards";
+import { ReadOnlyRecipeCard } from "./components/live-stations/stationShared";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const noop = () => {};
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "matchMedia",
+    (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }),
+  );
+});
 
 describe("CheesePickCard — missing-cheese warning render", () => {
   it("shows the amber 'No matching cheese recipe found' warning when the picked name is not in the pool", () => {

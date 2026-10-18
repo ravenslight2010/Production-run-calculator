@@ -1,0 +1,59 @@
+name: Dependabot evidence refresh
+
+# Dependabot lockfile bumps change the pinned pnpm-lock SHA-256 recorded in the
+# checked-in corpus evidence (lib/corpus-harness/snapshots/evaluation-manifest.json
+# and the benchmark JSON pins). Without a refresh those PRs fail the evidence
+# gates for reasons unrelated to the dependency change itself (this blocked
+# #73/#75/#77).
+#
+# This workflow runs only on dependabot-authored pull requests, regenerates the
+# corpus evidence snapshots against the PR's lockfile, and commits the result
+# back to the PR branch so the evidence pins self-heal.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-evidence-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-evidence:
+    name: Regenerate corpus evidence pins
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # workflow-contract: write-exception
+      # The job commits refreshed evidence pins back to the dependabot PR
+      # branch; that self-heal is the entire purpose of this workflow.
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6
+        with:
+          node-version: "24"
+      - name: Enable pnpm
+        run: corepack prepare pnpm@12.8.1 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate corpus evidence snapshots
+        run: pnpm --filter @workspace/corpus-harness run snapshots
+      - name: Commit refreshed evidence pins
+        run: |
+          if git diff --quiet; then
+            echo "Evidence pins already current; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(evidence): rebind corpus pins to dependabot lockfile"
+          git push

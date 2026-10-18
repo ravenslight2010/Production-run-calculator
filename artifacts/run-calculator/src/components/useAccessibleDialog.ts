@@ -71,7 +71,7 @@ export function useAccessibleDialogStack() {
     let activeDialog: HTMLElement | null = null;
     let previouslyFocused: HTMLElement | null = null;
 
-    const visibleDialog = () =>
+    const topVisibleDialog = () =>
       Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'))
         .filter((element) => element.offsetWidth > 0 || element.offsetHeight > 0)
         .at(-1) ?? null;
@@ -79,15 +79,20 @@ export function useAccessibleDialogStack() {
       Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
         .filter((element) => element.offsetWidth > 0 || element.offsetHeight > 0);
     const sync = () => {
-      const next = visibleDialog();
+      const top = topVisibleDialog();
+      // Radix dialogs own their focus trap and Escape dismissal. Do not let
+      // this legacy-overlay manager override those behaviors in nested flows.
+      if (top?.hasAttribute("data-state")) return;
+      const next = top;
       if (next === activeDialog) return;
       previouslyFocused = document.activeElement as HTMLElement | null;
       activeDialog = next;
       if (activeDialog) (focusable(activeDialog)[0] ?? activeDialog).focus();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      const dialog = visibleDialog();
+      const dialog = topVisibleDialog();
       if (!dialog) return;
+      if (dialog.hasAttribute("data-state")) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dialog.querySelector<HTMLElement>('[aria-label^="Close"]')?.click();
