@@ -797,10 +797,13 @@ function localClient(): OpenAI {
 function isTransportError(err: unknown): boolean {
   // A caller cancellation must never trigger a cross-provider retry.
   if (err instanceof GeminiRequestCancelledError) return false;
+  // Connection-level failures (refused / DNS / socket hang-up) carry no HTTP
+  // status at all — they are transport by definition.
+  if (err instanceof OpenAI.APIConnectionError) return true;
   // 4xx (validation / auth / schema) are deterministic — never fall back.
   if (err instanceof OpenAI.APIError) return err.status >= 500;
-  // Connection refused / DNS / socket hang-up surface as plain TypeError or
-  // fetch errors in the SDK, not APIError. Treat timeouts as transport too.
+  // Other fetch-level failures surface as plain TypeError in the SDK, not
+  // APIError. Treat timeouts as transport too.
   return err instanceof GeminiRequestTimeoutError
     || err instanceof TypeError;
 }
@@ -921,6 +924,10 @@ async function createLocalWithMetrics(
     observeMetrics({
       durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
       outcome,
+      // The local path has no model chain: it always serves rung 0 directly.
+      modelRung: 0,
+      requestResult: outcome === "success" ? "primary_success" : "attempt_failed",
+      fallbackTrigger: null,
       retryCount: 0,
       ...usageMetrics(),
     });
@@ -999,7 +1006,10 @@ async function create(
       if (!fallbackToGemini() || !isTransportError(err)) throw err;
     }
   }
-  return createGeminiChain(params, options);
+  if (params.stream) {
+    return createGeminiChain({ ...params, stream: true }, options);
+  }
+  return createGeminiChain({ ...params, stream: false }, options);
 }
 
 export function resetGeminiResilienceForTests(): void {

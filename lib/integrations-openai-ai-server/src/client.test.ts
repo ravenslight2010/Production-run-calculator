@@ -17,6 +17,7 @@ vi.mock("@google/genai", () => ({
       sdk.constructor(options);
     }
   },
+  ThinkingLevel: { LOW: "LOW" },
 }));
 
 import {

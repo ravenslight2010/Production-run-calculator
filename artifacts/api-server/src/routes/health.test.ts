@@ -101,11 +101,6 @@ afterAll(async () => {
     if (previous === undefined) delete process.env[key];
     else process.env[key] = previous;
   }
-  if (previousGoogleKey === undefined) {
-    delete process.env.GOOGLE_API_KEY;
-  } else {
-    process.env.GOOGLE_API_KEY = previousGoogleKey;
-  }
 });
 
 beforeEach(async () => {
@@ -189,11 +184,11 @@ describe("GET /readyz optional AI capability", () => {
       expectedAiStatus: "not_configured",
     },
     {
-      name: "only a proposed local endpoint",
+      name: "a local AI endpoint",
       env: { LOCAL_AI_BASE_URL: "http://127.0.0.1:11434/v1" },
       expectedStatus: 200,
-      expectedDependency: "warning",
-      expectedAiStatus: "not_configured",
+      expectedDependency: "ok",
+      expectedAiStatus: "configured",
     },
     {
       name: "no AI credential",
@@ -541,18 +536,20 @@ describe("readiness AI provider dependency", () => {
     expect(body.checks.dependencies).toBe("ok");
   });
 
-  it("flags a missing AI provider as degraded", async () => {
+  it("reports a missing AI provider as a non-blocking readiness warning", async () => {
     delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.GOOGLE_API_KEY;
+    delete process.env.LOCAL_AI_BASE_URL;
 
     const response = await fetch(`${baseUrl}/readyz`);
     const body = (await response.json()) as {
       checks: Record<string, string>;
     };
 
-    expect(response.status).toBe(503);
-    expect(body.checks.dependencies).toBe("error");
+    // AI is optional for core API traffic: absence is a warning, not an error.
+    expect(response.status).toBe(200);
+    expect(body.checks.dependencies).toBe("warning");
   });
 });
 
