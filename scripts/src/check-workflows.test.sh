@@ -642,7 +642,7 @@ test_schema_safe_rollback_ci_contract() {
   assert_contains "$job_block" "        if: always()"
   assert_contains "$job_block" "            cat rollback-rehearsal-report.md >> \"\$GITHUB_STEP_SUMMARY\""
   assert_contains "$job_block" \
-    "        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4"
+    "        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
   assert_contains "$job_block" \
     "          name: schema-safe-rollback-rehearsal-\${{ github.run_id }}"
   assert_contains "$job_block" "          path: rollback-rehearsal-report.md"
@@ -689,7 +689,7 @@ test_stable_branch_protection_workflow_contract() {
   upload_block=$(stable_branch_protection_step_block "Retain protection check output")
   assert_contains "$upload_block" "if: always()"
   assert_contains "$upload_block" \
-    "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4"
+    "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
   assert_contains "$upload_block" \
     "name: stable-branch-protection-check-\${{ github.run_id }}"
   assert_contains "$upload_block" \
@@ -879,7 +879,7 @@ test_rejects_unscoped_workflow_artifact() {
 jobs:
   unsafe-artifact:
     steps:
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shared-artifact
 EOF
