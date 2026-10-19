@@ -57,8 +57,9 @@ describe("factory data durable write queue", () => {
     }));
     expect(localStorage.getItem(QUEUE_KEY)).toBe("[]");
     expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
-      "api:/api/factory-data:503",
-      "api:/api/factory-data:200",
+      "api:other:503",
+      "api-request-failure:other:transport_failure",
+      "api:other:200",
     ]);
   });
 
@@ -70,7 +71,7 @@ describe("factory data durable write queue", () => {
     await expect(fetchFactoryData()).rejects.toBe(failure);
 
     expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
-      "api-failure:/api/factory-data:network",
+      "api-request-failure:other:transport_failure",
     ]);
   });
 
