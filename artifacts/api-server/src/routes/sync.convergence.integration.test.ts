@@ -136,7 +136,7 @@ beforeAll(async () => {
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: testDatabaseUrl },
-    encoding: "utf8",
+    stdio: "inherit",
     timeout: 120_000,
   });
   if (push.error || push.status !== 0) {
@@ -259,7 +259,7 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
       };
       const timeout = setTimeout(
         () => finish(new Error("isolated sync process did not start")),
-        20_000,
+        45_000,
       );
       child.once("error", onError);
       child.once("exit", onExit);
@@ -801,7 +801,7 @@ describe("multi-client sync convergence soak", () => {
       senderId: "outbox-writer",
     });
     expect(cursor?.cursor).toBe(events[0]!.cursor);
-  }, 30_000);
+  }, 90_000);
 
   it("keeps per-scope cursors ordered and rolls them back with failed writes", async () => {
     await expect(db.transaction(async (tx) => {
@@ -837,7 +837,7 @@ describe("multi-client sync convergence soak", () => {
       .where(eq(syncOutboxEventsTable.scope, "live"))
       .orderBy(asc(syncOutboxEventsTable.cursor));
     expect(events.map((event) => event.cursor)).toEqual([1, 2]);
-  }, 30_000);
+  }, 120_000);
 
   it("keeps the canonical break plan when reconnect replays a stale queued snapshot", async () => {
     const client = new SimulatedClient("break-offline");

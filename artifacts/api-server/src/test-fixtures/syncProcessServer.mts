@@ -1,6 +1,10 @@
 import express from "express";
-import router from "../routes/index";
-import { stopSyncOutboxFanout } from "../routes/sync";
+import syncRouter, { stopSyncOutboxFanout } from "../routes/sync";
+import { requireAuth } from "../middlewares/requireAuth";
+import { startupGate } from "../lib/startupGate";
+import { noStoreMiddleware } from "../lib/cacheControl";
+import doughRecipesRouter from "../routes/doughRecipes";
+import healthRouter from "../routes/health";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -15,7 +19,15 @@ app.use((req, _res, next) => {
   };
   next();
 });
-app.use("/api", router);
+// Match the parent soak's minimal API composition. The convergence case also
+// writes one dough recipe to verify master-data outbox fanout, so mount that
+// route alongside /sync without importing the rest of the API.
+app.use("/api", noStoreMiddleware);
+app.use("/api", startupGate);
+app.use("/api", healthRouter);
+app.use("/api", requireAuth);
+app.use("/api", syncRouter);
+app.use("/api", doughRecipesRouter);
 
 const server = app.listen(0, "127.0.0.1", () => {
   const address = server.address();

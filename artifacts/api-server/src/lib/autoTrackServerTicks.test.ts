@@ -31,6 +31,17 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("server auto-track claim builders", () => {
+  it("surfaces calculation failures so the server tick runner can record and retry them", () => {
+    const failure = new Error("canonical calculation failed");
+    const invalidPayload = new Proxy({}, {
+      get() {
+        throw failure;
+      },
+    });
+
+    expect(() => buildNetSecondServerClaims(invalidPayload, NOW)).toThrow(failure);
+  });
+
   it("honors the canonical per-run manual mode switch", () => {
     const source = payload();
     (source.dayState!.runs![0] as Record<string, unknown>).autoTrackDisabled = true;

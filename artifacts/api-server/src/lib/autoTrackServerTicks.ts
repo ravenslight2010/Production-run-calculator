@@ -161,8 +161,7 @@ export function buildNetSecondServerClaims(
   eventIdNamespace?: string,
 ): AutoTrackClaim[] {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  let built: { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null;
-  try { built = schedule(payload, nowMs); } catch { return []; }
+  const built = schedule(payload, nowMs);
   if (!built) return [];
   const { schedule: plan, values, ppm } = built;
   const baseUpdatedAt = number(payload.runValuesUpdatedAt?.[plan.runId]);
