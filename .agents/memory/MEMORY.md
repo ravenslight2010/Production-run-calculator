@@ -75,6 +75,7 @@
 - [Correcting-import cleanup](correcting-import-alias-cleanup.md) — corrections remove bad aliases when safe and learn the reverse.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
 - [Sync safety](sync-snapshot-identity.md) + [write fences](complete-sync-snapshot-fencing.md) + [offline intents](offline-operational-intents.md) — stable hashes/fences; non-OK is never ack.
+- [Sync and auto-tracking priority](sync-autotracking-priority.md) — prioritize sync reliability; align recovery/lifecycle across trackers without flattening station-specific production math.
 - [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
 - [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve units and fail closed on unsupported layouts.
 - [Apply-source retention](apply-source-evidence-retention.md) — formula and cached-result text stays review-only; do not send formula-cell results with Apply evidence.
