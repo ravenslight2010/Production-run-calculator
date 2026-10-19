@@ -8927,7 +8927,7 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
 
 export const SubmitManualSectionEditResponse = zod.object({
   "ok": zod.boolean(),
-  "outcome": zod.enum(['accepted', 'conflicted']),
+  "outcome": zod.enum(['accepted']),
   "duplicate": zod.boolean(),
   "canonicalRevision": zod.int().min(submitManualSectionEditResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitManualSectionEditResponseServerTimeMin),

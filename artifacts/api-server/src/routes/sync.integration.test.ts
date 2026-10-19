@@ -886,6 +886,43 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
   });
 
+  it.each([
+    ["invalid section", { ...edit("error-invalid-section"), section: "unknown" }, 400, "invalid_edit", undefined],
+    ["invalid submitted values", { ...edit("error-invalid-values"), values: { skidsCompleted: 7654321 } }, 400, "invalid_values", "7654321"],
+    ["incomplete baseline", { ...edit("error-invalid-baseline"), baseValues: { skidsCompleted: 1 } }, 400, "invalid_baseline", undefined],
+    ["changed reset epoch", { ...edit("error-reset"), resetEpoch: 1 }, 409, "reset_changed", undefined],
+    ["changed run generation", { ...edit("error-run"), observedGeneration: "manual-run:2" }, 409, "run_changed", undefined],
+    ["stale section baseline", {
+      ...edit("error-section"),
+      values: { skidsCompleted: 876543 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 2 },
+    }, 409, "section_changed", "876543"],
+  ] as const)("returns a safe %s rejection without submitted values", async (_label, body, status, code, marker) => {
+    const response = await request(body as Record<string, unknown>);
+    const responseText = await response.text();
+    const payload = JSON.parse(responseText) as Record<string, unknown>;
+    expect(response.status).toBe(status);
+    expect(payload).toEqual({ error: "Manual section edit was rejected", code });
+    expect(payload).not.toHaveProperty("data");
+    expect(payload).not.toHaveProperty("values");
+    if (marker) expect(responseText).not.toContain(marker);
+  });
+
+  it("does not change canonical values when a section baseline is stale", async () => {
+    const response = await request({
+      ...edit("stale-section-state"),
+      values: { skidsCompleted: 876543 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 2 },
+    });
+    expect(response.status).toBe(409);
+    const [stored] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect((stored.data as any).runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 2,
+    });
+  });
+
   it("same-section concurrent race has one winner and one 409", async () => {
     const [a, b] = await Promise.all([request(edit("race-a")), request(edit("race-b"))]);
     expect([a.status, b.status].sort()).toEqual([200, 409]);
@@ -943,6 +980,7 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     await seedStockRun();
     const response = await request(stockEdit("stock-over-cap", 100.01));
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_values" });
     const [stored] = await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
     expect((stored.data as any).runValues["stock-run"].app1StockLbs).toBe(40);
@@ -1068,7 +1106,6 @@ describe("POST /sync/manual-section — section ownership contract", () => {
   it("same accepted id conflicts after reset epoch bump", async () => {
     const body = edit("post-reset-retry");
     const accepted = await request(body);
-    const acceptedPayload = await accepted.json() as { data: unknown };
     expect(accepted.status).toBe(200);
     await db.update(dailySyncTable).set({
       data: { dayState: { date: DATE, runs: [{ id: "manual-run", startedAt: 1, metaUpdatedAt: 1 }] }, runValues: { "manual-run": { skidsCompleted: 88, casesOnCurrentSkid: 77 } } },
@@ -1076,10 +1113,16 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     await db.update(dataResetTable).set({ epoch: 9 }).where(eq(dataResetTable.scope, "live"));
     const retry = await request(body);
     expect(retry.status).toBe(409);
-    const payload = await retry.json() as { data?: unknown; outcome?: string };
-    expect(payload.outcome).toBe("conflicted");
-    expect((payload.data as any).runValues["manual-run"].skidsCompleted).toBe(88);
-    expect(payload.data).not.toEqual(acceptedPayload.data);
+    expect(await retry.json()).toEqual({
+      error: "Manual section edit was rejected",
+      code: "reset_changed",
+    });
+    const [stored] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect((stored.data as any).runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 88,
+      casesOnCurrentSkid: 77,
+    });
   });
 
   it("rejects stale reset epochs and incomplete baselines", async () => {

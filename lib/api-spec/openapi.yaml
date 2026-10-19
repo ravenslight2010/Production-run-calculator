@@ -5710,12 +5710,15 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ManualSectionEditResponse" }
         "400":
-          description: Invalid section, field, identity, or baseline shape
-        "409":
-          description: Another canonical section baseline won the race
+          description: Invalid section edit, value, or baseline shape
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ManualSectionEditResponse" }
+              schema: { $ref: "#/components/schemas/ManualSectionEditError" }
+        "409":
+          description: Section reset, run identity, or baseline changed before the edit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualSectionEditError" }
 
   /sync/operational-intents:
     post:
@@ -6614,12 +6617,22 @@ components:
       required: [ok, outcome, duplicate, canonicalRevision, serverTime, data, snapshotId]
       properties:
         ok: { type: boolean }
-        outcome: { type: string, enum: [accepted, conflicted] }
+        outcome: { type: string, enum: [accepted] }
         duplicate: { type: boolean }
         canonicalRevision: { type: integer, minimum: 0 }
         serverTime: { type: integer, minimum: 0 }
         data: { $ref: "#/components/schemas/SyncPayload" }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+    ManualSectionEditError:
+      type: object
+      description: Safe rejection only; never includes submitted values or canonical recipe data.
+      required: [error, code]
+      properties:
+        error: { type: string, maxLength: 64 }
+        code:
+          type: string
+          enum: [invalid_edit, invalid_values, invalid_baseline, reset_changed, run_changed, section_changed]
+      additionalProperties: false
     OperationalIntentResponse:
       type: object
       required: [ok, outcome, duplicate, cursor, canonicalRevision, serverTime, data, snapshotId]

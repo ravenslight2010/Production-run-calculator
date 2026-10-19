@@ -1,9 +1,14 @@
 /** Durable, per-command browser work queue for operational commands. */
 import { todayStr } from "./utils";
 import { getStoredResetEpoch } from "./adapters/browserResetPersistence";
-import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
-import { clearManualSectionLocks, restoreManualSectionValues, setManualSectionConflict } from "./manualSectionLocks";
-import { emitManualSectionError } from "./manualSectionErrors";
+import {
+  isManualSectionRejectionCode,
+  MANUAL_SECTION_FIELDS,
+  manualSectionForField,
+  type ManualSectionRejectionCode,
+} from "@workspace/sync-contract";
+import { clearManualSectionLocks, restoreManualSectionValues } from "./manualSectionLocks";
+import { emitManualSectionError, manualSectionRejectionMessage } from "./manualSectionErrors";
 
 export const OPERATIONAL_INTENT_OUTBOX_EVENT = "run-calculator:operational-intent-outbox";
 const KEY = "run-calculator:operational-intent-outbox:v1";
@@ -35,8 +40,8 @@ export type PendingManualSection = {
   id: string; runId: string; section: string; date: string; resetEpoch: number;
   values: Record<string, number>; baseValues: Record<string, number>;
   observedGeneration: string; baseRevision?: number; owner?: string;
-  deliveryState?: "retry-exhausted" | "auth-required";
-  failure?: "authentication" | "permission";
+  deliveryState?: "retry-exhausted" | "auth-required" | "rejected";
+  failure?: "authentication" | "permission" | ManualSectionRejectionCode;
 };
 type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
 const storageHealth = {
@@ -410,7 +415,8 @@ async function submitManualSectionNow(input: {
       if (!key?.startsWith(ownerPrefix) || key.endsWith(`:${id}`)) continue;
       try {
         const prior = JSON.parse(localStorage.getItem(key) ?? "null");
-        if (prior?.deliveryState === "retry-exhausted" && prior.runId === input.runId && prior.section === input.section && prior.id !== id) {
+        if (["retry-exhausted", "rejected"].includes(prior?.deliveryState)
+          && prior.runId === input.runId && prior.section === input.section && prior.id !== id) {
           localStorage.removeItem(key);
         }
       } catch {}
@@ -441,11 +447,10 @@ async function submitManualSectionNow(input: {
       }),
     });
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    let body: { data?: unknown; outcome?: string; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
+    let body: { data?: unknown; outcome?: string; code?: unknown; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
     try { body = await response.json(); } catch {}
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    const canonicalConflict = response.status === 409 && body.outcome === "conflicted";
-    if ((response.ok || canonicalConflict) && body.data) {
+    if (response.ok && body.data) {
       if (capturedOwner !== activeOwner) return "identity-mismatch";
       const canonicalServerTime = Number.isFinite(body.serverTime) ? body.serverTime : undefined;
       const canonicalValues = (body.data as any)?.runValues?.[input.runId] ?? {};
@@ -466,19 +471,9 @@ async function submitManualSectionNow(input: {
         ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
       };
       if (adoptCanonical) {
-        await adoptCanonical(body.data, intent, body.outcome === "conflicted" ? "conflicted" : "accepted");
+        await adoptCanonical(body.data, intent, "accepted");
       }
       if (capturedOwner !== activeOwner) return "identity-mismatch";
-    }
-    if (canonicalConflict) {
-      if (capturedOwner !== activeOwner) return "identity-mismatch";
-      const retryKey = manualRetryKey(capturedOwner, id);
-      const retry = manualRetryTimers.get(retryKey); if (retry) clearTimeout(retry);
-      manualRetryTimers.delete(retryKey);
-      setManualSectionConflict(input.runId, input.section as any);
-      if (capturedOwner !== activeOwner) return "identity-mismatch";
-      localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`);
-      return "conflicted";
     }
     if (response.ok) {
       const retryKey = manualRetryKey(capturedOwner, id);
@@ -489,16 +484,24 @@ async function submitManualSectionNow(input: {
       return "accepted";
     }
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    if (response.status === 400 || response.status === 422) {
-      // Invalid commands cannot become valid through a retry. Remove the
-      // pending fence, but surface a durable error so the caller can restore
-      // the optimistic values and ask the user to correct the input.
-      localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`);
+    if (response.status === 400 || response.status === 409 || response.status === 422) {
+      // Keep rejected values fenced from ordinary snapshot sync until a new
+      // correction replaces this terminal record. Do not adopt server data or
+      // overwrite the form: operators need their attempted entry to correct.
+      const code: ManualSectionRejectionCode | undefined =
+        isManualSectionRejectionCode(body.code) ? body.code : undefined;
+      localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify({
+        ...pendingRecord,
+        deliveryState: "rejected",
+        ...(code ? { failure: code } : {}),
+      }));
       emitManualSectionError({
-        runId: input.runId, section: input.section, failure: "validation",
-        message: "This correction was rejected as invalid. Review the values and try again.",
+        runId: input.runId,
+        section: input.section,
+        ...(code ? { failure: code } : {}),
+        message: manualSectionRejectionMessage(code),
       });
-      return "validation-rejected";
+      return response.status === 409 ? "conflicted" : "validation-rejected";
     }
     if (response.status === 401 || response.status === 403) {
       // Keep the exact command durable and fenced, but do not retry it while
@@ -663,7 +666,29 @@ export async function retryPendingManualSections(): Promise<void> {
     noteStorageFailure("unavailable");
     return;
   }
-  for (const item of pending) if (item?.id && !["retry-exhausted", "auth-required"].includes(item.deliveryState)) await submitManualSection(item as any);
+  for (const item of pending) if (item?.id && !["retry-exhausted", "auth-required", "rejected"].includes(item.deliveryState)) await submitManualSection(item as any);
+}
+/** Re-surface terminal server rejections after the page has reloaded. */
+export function reportRejectedManualSectionErrors(): void {
+  if (typeof localStorage === "undefined" || !activeOwner) return;
+  const ownerPrefix = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`;
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(ownerPrefix)) continue;
+    try {
+      const record = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
+      if (!record || record.deliveryState !== "rejected") continue;
+      const code = isManualSectionRejectionCode(record.failure) ? record.failure : undefined;
+      emitManualSectionError({
+        runId: record.runId,
+        section: record.section,
+        ...(code ? { failure: code } : {}),
+        message: manualSectionRejectionMessage(code),
+      });
+    } catch {
+      noteStorageFailure("corrupt");
+    }
+  }
 }
 /** Explicitly retries a manual section after the user restores auth/access. */
 export async function retryPendingManualSection(id: string): Promise<boolean> {
@@ -671,7 +696,7 @@ export async function retryPendingManualSection(id: string): Promise<boolean> {
   try {
     const key = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:${id}`;
     const item = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
-    if (!item || item.id !== id || item.owner !== activeOwner || item.deliveryState === "retry-exhausted") return false;
+    if (!item || item.id !== id || item.owner !== activeOwner || ["retry-exhausted", "rejected"].includes(item.deliveryState ?? "")) return false;
     const result = await submitManualSection({ ...item, deliveryState: undefined, failure: undefined } as any);
     return result === "accepted" || result === "conflicted";
   } catch {

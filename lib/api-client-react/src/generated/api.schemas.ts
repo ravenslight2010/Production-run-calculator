@@ -1607,7 +1607,6 @@ export type ManualSectionEditResponseOutcome = typeof ManualSectionEditResponseO
 
 export const ManualSectionEditResponseOutcome = {
   accepted: 'accepted',
-  conflicted: 'conflicted',
 } as const;
 
 export interface ManualSectionEditResponse {
@@ -1621,6 +1620,27 @@ export interface ManualSectionEditResponse {
   data: SyncPayload;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId: string;
+}
+
+export type ManualSectionEditErrorCode = typeof ManualSectionEditErrorCode[keyof typeof ManualSectionEditErrorCode];
+
+
+export const ManualSectionEditErrorCode = {
+  invalid_edit: 'invalid_edit',
+  invalid_values: 'invalid_values',
+  invalid_baseline: 'invalid_baseline',
+  reset_changed: 'reset_changed',
+  run_changed: 'run_changed',
+  section_changed: 'section_changed',
+} as const;
+
+/**
+ * Safe rejection only; never includes submitted values or canonical recipe data.
+ */
+export interface ManualSectionEditError {
+  /** @maxLength 64 */
+  error: string;
+  code: ManualSectionEditErrorCode;
 }
 
 export type OperationalIntentResponseOutcome = typeof OperationalIntentResponseOutcome[keyof typeof OperationalIntentResponseOutcome];

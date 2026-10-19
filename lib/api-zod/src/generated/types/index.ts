@@ -353,6 +353,8 @@ export * from './manualSauceEditValues';
 export * from './manualSauceStockEdit';
 export * from './manualSauceStockEditBaseValues';
 export * from './manualSauceStockEditValues';
+export * from './manualSectionEditError';
+export * from './manualSectionEditErrorCode';
 export * from './manualSectionEditRequest';
 export * from './manualSectionEditRequestBase';
 export * from './manualSectionEditRequestBaseValues';

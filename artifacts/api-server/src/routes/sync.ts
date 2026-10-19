@@ -130,6 +130,7 @@ import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
 import {
   MANUAL_SECTION_FIELDS,
   isManualSection,
+  type ManualSectionRejectionCode,
   isSyncRecord,
   type ManualSection,
 } from "@workspace/sync-contract";
@@ -1814,6 +1815,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 // Atomic, section-scoped correction. The daily row is the serialization point;
 // the operational ledger makes retries return the original canonical answer.
 router.post("/sync/manual-section", async (req: Request, res: Response): Promise<void> => {
+  const reject = (status: 400 | 409, code: ManualSectionRejectionCode) => {
+    res.status(status).json({ error: "Manual section edit was rejected", code });
+  };
   let requestAborted = false;
   req.once("aborted", () => { requestAborted = true; });
   req.once("close", () => { if (req.aborted) requestAborted = true; });
@@ -1839,26 +1843,26 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     || !Number.isSafeInteger(resetEpoch) || (resetEpoch as number) < 0
     || typeof observedGeneration !== "string" || observedGeneration.length < 1 || observedGeneration.length > 160
     || typeof deviceId !== "string" || !/^[A-Za-z0-9:_-]{1,160}$/.test(deviceId)) {
-    res.status(400).json({ error: "Invalid manual section edit" }); return;
+    reject(400, "invalid_edit"); return;
   }
   const allowed = new Set<string>(MANUAL_SECTION_FIELDS[section as ManualSection]);
   const entries = Object.entries(values as Record<string, unknown>);
   const baseValues = body?.baseValues;
   if (!baseValues || typeof baseValues !== "object" || Array.isArray(baseValues)) {
-    res.status(400).json({ error: "Section baseline is required" }); return;
+    reject(400, "invalid_baseline"); return;
   }
   if (!entries.length || entries.some(([key, value]) =>
     !allowed.has(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000)) {
-    res.status(400).json({ error: "Values do not match the requested section" }); return;
+    reject(400, "invalid_values"); return;
   }
   if (Object.entries(baseValues as Record<string, unknown>).some(([key, value]) =>
     !allowed.has(key) || (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000)))) {
-    res.status(400).json({ error: "Section baseline does not match the requested section" }); return;
+    reject(400, "invalid_baseline"); return;
   }
   if (MANUAL_SECTION_FIELDS[section as ManualSection].some((field) =>
     !Object.prototype.hasOwnProperty.call(baseValues, field)
     || typeof (baseValues as Record<string, unknown>)[field] !== "number")) {
-    res.status(400).json({ error: "Complete section baseline is required" }); return;
+    reject(400, "invalid_baseline"); return;
   }
   const ownerId = String(deviceId ?? req.userId ?? "unknown");
   await recordSyncOutboxEvent({
@@ -1874,7 +1878,14 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     logger.error({ event: "sync_outbox_write", kind: "manual-section" }, "Manual-section notice could not be retained");
   });
   broadcastManualSectionEvent("acquired", runId as string, section as ManualSection, ownerId, scope, date);
-  let result: { status: number; data: Record<string, any>; revision: number; duplicate: boolean; serverTime: number };
+  let result: {
+    status: 200 | 400 | 409;
+    data: Record<string, any>;
+    revision: number;
+    duplicate: boolean;
+    serverTime: number;
+    rejectionCode?: ManualSectionRejectionCode;
+  };
   try {
     result = await db.transaction(async (tx) => {
     const serverTime = Date.now();
@@ -1887,7 +1898,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     const currentRevision = existing?.canonicalRevision ?? 0;
     const current = (existing?.data ?? emptySyncData(date)) as Record<string, any>;
     if ((reset?.epoch ?? 0) !== resetEpoch) {
-      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "reset_changed" };
     }
     const [seen] = await tx.select().from(operationalIntentLedgerTable)
       .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, date),
@@ -1895,7 +1906,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     if (seen) return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
     const run = (current.dayState?.runs as Array<Record<string, any>> | undefined)?.find((candidate) => candidate.id === runId);
     if (!run || `${runId}:${String(run.metaUpdatedAt ?? run.startedAt ?? 0)}` !== observedGeneration) {
-      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "run_changed" };
     }
     const currentValues = current.runValues?.[runId] ?? {};
     const stockRegisters = section === "app1" || section === "app2" || section === "app3" || section === "app4"
@@ -1911,7 +1922,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       if (!hasStockField) continue;
       if (![fields.stock, fields.anchor, fields.correctionGeneration]
         .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       const onHand = Number((values as Record<string, unknown>)[fields.stock]);
       const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
@@ -1939,7 +1950,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         || !Number.isSafeInteger(correctionGeneration)
         || correctionGeneration !== previousGeneration + 1
       ) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       stockUpdates.push({ register, stock: onHand, anchor, generation: correctionGeneration });
     }
@@ -1950,7 +1961,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       Object.prototype.hasOwnProperty.call(values, field));
     if (hasSauceStockUpdate) {
       if (!sauceStockFields.every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       const onHand = Number((values as Record<string, unknown>).sauceStockBarrels);
       const anchor = Number((values as Record<string, unknown>).sauceStockAnchorNetSec);
@@ -1976,13 +1987,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         || !Number.isSafeInteger(correctionGeneration)
         || correctionGeneration !== previousGeneration + 1
       ) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
     }
     for (const key of allowed) {
       const expected = (baseValues as Record<string, unknown>)[key];
       if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
-        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
       }
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
@@ -2059,6 +2070,10 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     broadcastManualSectionEvent("released", runId as string, section as ManualSection, ownerId, scope, date);
   }
   if (requestAborted) return;
+  if (result.status !== 200) {
+    reject(result.status, result.rejectionCode ?? "invalid_edit");
+    return;
+  }
   res.status(result.status).json({
     ok: result.status === 200,
     outcome: result.status === 200 ? "accepted" : "conflicted",

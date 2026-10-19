@@ -152,6 +152,7 @@ import type {
   ListQualityChecksParams,
   ManagerActionItemUpdate,
   ManagerActionQueue,
+  ManualSectionEditError,
   ManualSectionEditRequest,
   ManualSectionEditResponse,
   ManualSectionLockEvent,
@@ -21533,7 +21534,7 @@ return customFetch<ManualSectionEditResponse>(getSubmitManualSectionEditUrl(para
 
 export const getSubmitManualSectionEditMutationKey = () => ['submitManualSectionEdit'] as const;
 
-export const getSubmitManualSectionEditMutationOptions = <TError = ErrorType<void | ManualSectionEditResponse>,
+export const getSubmitManualSectionEditMutationOptions = <TError = ErrorType<ManualSectionEditError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext> => {
 
@@ -21562,13 +21563,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SubmitManualSectionEditMutationResult = NonNullable<Awaited<ReturnType<typeof submitManualSectionEdit>>>
     export type SubmitManualSectionEditMutationBody = BodyType<ManualSectionEditRequest>
-    export type SubmitManualSectionEditMutationError = ErrorType<void | ManualSectionEditResponse>
+    export type SubmitManualSectionEditMutationError = ErrorType<ManualSectionEditError>
     export type SubmitManualSectionEditMutationVariables = {data: BodyType<ManualSectionEditRequest>;params?: SubmitManualSectionEditParams}
 
     /**
  * @summary Apply one atomic run-and-section correction
  */
-export const useSubmitManualSectionEdit = <TError = ErrorType<void | ManualSectionEditResponse>,
+export const useSubmitManualSectionEdit = <TError = ErrorType<ManualSectionEditError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof submitManualSectionEdit>>,
