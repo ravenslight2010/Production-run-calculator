@@ -1,4 +1,4 @@
-import { jsonb, pgTable, serial, text, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, text, timestamp, uniqueIndex, index, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -9,7 +9,7 @@ import { z } from "zod/v4";
 export const duplicateReviewGroupsTable = pgTable(
   "duplicate_review_groups",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     groupKey: text("group_key").notNull(),
     category: text("category").notNull().default("ingredient"),

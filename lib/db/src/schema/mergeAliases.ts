@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -19,7 +19,7 @@ import { z } from "zod/v4";
 // brands). `externalName` is the merged-away name; `canonicalName` is the name
 // that was kept. `scope` isolates the sandbox account's aliases from live.
 export const mergeAliasesTable = pgTable("merge_aliases", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   category: text("category").notNull().default("ingredient"),
   brand: text("brand"),

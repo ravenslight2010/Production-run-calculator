@@ -1,6 +1,5 @@
 import {
   pgTable,
-  serial,
   text,
   doublePrecision,
   integer,
@@ -26,7 +25,7 @@ import {
 export const inventoryItemsTable = pgTable(
   "inventory_items",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     key: text("key").notNull(),
     category: text("category").notNull(), // "packaging" | "ingredient"
@@ -56,7 +55,7 @@ export const inventoryItemsTable = pgTable(
 export const inventoryLocationsTable = pgTable(
   "inventory_locations",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     name: text("name").notNull(),
     isOnsite: boolean("is_onsite").notNull().default(false),
@@ -70,7 +69,7 @@ export const inventoryLocationsTable = pgTable(
 // place this lot lives; null means the onsite/line location (additive, nullable
 // so adding it stays push-force-safe on a populated table).
 export const inventoryLotsTable = pgTable("inventory_lots", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   itemId: integer("item_id")
     .notNull()
@@ -89,7 +88,7 @@ export const inventoryLotsTable = pgTable("inventory_lots", {
 // Immutable movement log: restock (+), consume (−, from run completion), adjust
 // (±, manual correction). `runId` makes auto-consumption idempotent.
 export const inventoryLedgerTable = pgTable("inventory_ledger", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   itemId: integer("item_id")
     .notNull()
@@ -141,7 +140,7 @@ export const inventorySettingsTable = pgTable(
 // A manager-reviewed photo count. Photos and AI output are retained only as
 // bounded workflow provenance; no inventory is changed until Apply.
 export const inventoryObservationsTable = pgTable("inventory_observations", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   status: text("status").notNull().default("draft"), // draft | applied | cancelled
   photos: jsonb("photos").notNull().default([]),
@@ -156,7 +155,7 @@ export const inventoryObservationsTable = pgTable("inventory_observations", {
 export const inventoryProductReferencesTable = pgTable(
   "inventory_product_references",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     itemKey: text("item_key").notNull(),
     productName: text("product_name").notNull(),
