@@ -1,6 +1,6 @@
 ---
-name: Orval Zod declaration order
-description: Generated Zod constraint constants can be emitted after validators that use them.
+name: Orval Zod generation behavior
+description: Generated Zod declaration order, date coercion, and package-graph quirks.
 ---
 
 Generated Zod output must normalize scalar constraint declarations ahead of validator initializers after Orval generation.
@@ -17,3 +17,14 @@ then the smoke check passes in an old install but fails after a frozen install.
 
 **How to apply:** When changing Orval, compare its peer graph with the packages
 the smoke check loads and keep each smoke-tested package explicitly declared.
+
+OpenAPI `date-time` request fields can generate `zod.coerce.date()`. A validated
+ISO string may therefore arrive at route logic as a `Date`, even when adjacent
+handwritten types still describe it as a string.
+
+**Why:** Assuming the parsed value remains a string can silently drop a valid
+observation timestamp from persisted diagnostics.
+
+**How to apply:** Normalize bounded date-time values after schema parsing, and
+test through the generated request schema or route rather than only calling a
+context builder with an unparsed string.

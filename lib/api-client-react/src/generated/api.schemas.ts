@@ -7054,7 +7054,7 @@ export const FieldCheckObservationInputDeviceCategory = {
 } as const;
 
 /**
- * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Stale-deployment-recovery accepts no metrics.
+ * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.
  */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};
 
@@ -7075,8 +7075,10 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
-  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Stale-deployment-recovery accepts no metrics. */
+  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics. */
   metrics: FieldCheckObservationInputMetrics;
+  /** Opaque request correlation reference received by the browser from a server response; client-reported and not used for authorization. */
+  reportedRequestCorrelationId?: string;
 }
 
 export interface FieldCheckObservationBatch {
@@ -7153,6 +7155,8 @@ export interface FieldCheckFailure {
   appBuild: string;
   deviceCategory: string;
   metrics: FieldCheckFailureMetrics;
+  /** Client-reported opaque request correlation reference; never an authorization credential. */
+  reportedRequestCorrelationId?: string;
 }
 
 /**
@@ -7288,6 +7292,40 @@ export interface FieldChecksReport {
   actionableCount: number;
 }
 
+export type IncidentContextRequestOperationCategory = typeof IncidentContextRequestOperationCategory[keyof typeof IncidentContextRequestOperationCategory];
+
+
+export const IncidentContextRequestOperationCategory = {
+  authentication: 'authentication',
+  diagnostics: 'diagnostics',
+  import: 'import',
+  inventory: 'inventory',
+  master_data: 'master_data',
+  sync: 'sync',
+  other: 'other',
+} as const;
+
+export type IncidentContextRequestOutcome = typeof IncidentContextRequestOutcome[keyof typeof IncidentContextRequestOutcome];
+
+
+export const IncidentContextRequestOutcome = {
+  http_server_error: 'http_server_error',
+  http_client_error: 'http_client_error',
+  authentication_rejected: 'authentication_rejected',
+  transport_failure: 'transport_failure',
+  offline_failure: 'offline_failure',
+  timeout: 'timeout',
+  cancelled: 'cancelled',
+} as const;
+
+export type IncidentContextRequestBackgroundInvolvement = typeof IncidentContextRequestBackgroundInvolvement[keyof typeof IncidentContextRequestBackgroundInvolvement];
+
+
+export const IncidentContextRequestBackgroundInvolvement = {
+  observed: 'observed',
+  not_observed: 'not_observed',
+} as const;
+
 /**
  * Captured details about a reported issue or a crash
  */
@@ -7308,6 +7346,20 @@ export interface IncidentContext {
   connectivity?: string;
   syncState?: string;
   signalKind?: string;
+  requestOperationCategory?: IncidentContextRequestOperationCategory;
+  requestOutcome?: IncidentContextRequestOutcome;
+  /**
+     * @minimum 0
+     * @maximum 10000000
+     */
+  requestElapsedMs?: number;
+  requestObservedAt?: string;
+  requestBackgroundInvolvement?: IncidentContextRequestBackgroundInvolvement;
+  /**
+     * @minimum 400
+     * @maximum 599
+     */
+  requestHttpStatus?: number;
 }
 
 export type ReportIncidentInputSource = typeof ReportIncidentInputSource[keyof typeof ReportIncidentInputSource];
@@ -7369,6 +7421,40 @@ export const ReportIncidentInputDiagnosticsSignalKind = {
   sync: 'sync',
 } as const;
 
+export type ReportIncidentInputDiagnosticsRequestOperationCategory = typeof ReportIncidentInputDiagnosticsRequestOperationCategory[keyof typeof ReportIncidentInputDiagnosticsRequestOperationCategory];
+
+
+export const ReportIncidentInputDiagnosticsRequestOperationCategory = {
+  authentication: 'authentication',
+  diagnostics: 'diagnostics',
+  import: 'import',
+  inventory: 'inventory',
+  master_data: 'master_data',
+  sync: 'sync',
+  other: 'other',
+} as const;
+
+export type ReportIncidentInputDiagnosticsRequestOutcome = typeof ReportIncidentInputDiagnosticsRequestOutcome[keyof typeof ReportIncidentInputDiagnosticsRequestOutcome];
+
+
+export const ReportIncidentInputDiagnosticsRequestOutcome = {
+  http_server_error: 'http_server_error',
+  http_client_error: 'http_client_error',
+  authentication_rejected: 'authentication_rejected',
+  transport_failure: 'transport_failure',
+  offline_failure: 'offline_failure',
+  timeout: 'timeout',
+  cancelled: 'cancelled',
+} as const;
+
+export type ReportIncidentInputDiagnosticsRequestBackgroundInvolvement = typeof ReportIncidentInputDiagnosticsRequestBackgroundInvolvement[keyof typeof ReportIncidentInputDiagnosticsRequestBackgroundInvolvement];
+
+
+export const ReportIncidentInputDiagnosticsRequestBackgroundInvolvement = {
+  observed: 'observed',
+  not_observed: 'not_observed',
+} as const;
+
 export type ReportIncidentInputDiagnostics = {
   /** @maxLength 80 */
   action?: string;
@@ -7383,6 +7469,20 @@ export type ReportIncidentInputDiagnostics = {
   signalKind?: ReportIncidentInputDiagnosticsSignalKind;
   /** @maxLength 128 */
   correlationId?: string;
+  requestOperationCategory?: ReportIncidentInputDiagnosticsRequestOperationCategory;
+  requestOutcome?: ReportIncidentInputDiagnosticsRequestOutcome;
+  /**
+     * @minimum 0
+     * @maximum 10000000
+     */
+  requestElapsedMs?: number;
+  requestObservedAt?: string;
+  requestBackgroundInvolvement?: ReportIncidentInputDiagnosticsRequestBackgroundInvolvement;
+  /**
+     * @minimum 400
+     * @maximum 599
+     */
+  requestHttpStatus?: number;
 };
 
 export interface ReportIncidentInput {

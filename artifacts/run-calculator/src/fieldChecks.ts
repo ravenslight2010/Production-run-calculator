@@ -5,12 +5,21 @@ import {
 } from "@workspace/field-check-contract";
 import { submitFieldCheckObservations } from "./inventoryShared";
 import { useAuth } from "./useAuth";
-import { AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS, PERFORMANCE_BUDGETS } from "./performanceDiagnostics";
-import { PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
+import {
+  AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS,
+  PERFORMANCE_BUDGETS,
+  type ApiFailureEvent,
+} from "./performanceDiagnostics";
+import {
+  API_OPERATION_CODES,
+  API_REQUEST_OUTCOME_CODES,
+  PERFORMANCE_SOURCE_CODES,
+  SYNC_ACK_FAILURE_CODES,
+} from "./fieldCheckDiagnosticDetails";
 import { consumeStaleAssetRecoveryAttempt } from "./pwaUpdateRecovery";
 export { fieldCheckDiagnosticLabel, PERFORMANCE_SOURCE_CODES, SYNC_ACK_FAILURE_CODES } from "./fieldCheckDiagnosticDetails";
 
-export const FIELD_CHECK_VERSION = "3";
+export const FIELD_CHECK_VERSION = "4";
 export const FIELD_CHECK_SIGNAL_EVENT = "calculator-field-check-signal";
 export const FIELD_CHECK_QUEUE_EVENT = "calculator-field-check-queue";
 export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
@@ -45,7 +54,12 @@ export const FIELD_CHECK_CATALOG = [
   { name: "offline-queue-replay", label: "Offline queue replay", observedBy: "browser" as const },
   { name: "pwa-update-handoff", label: "PWA update handoff", observedBy: "browser" as const },
   { name: "stale-deployment-recovery", label: "Stale-deployment recovery", observedBy: "browser" as const },
-  { name: "performance", label: "Performance", observedBy: "browser" as const },
+  {
+    name: "performance",
+    label: "Performance and API failures",
+    observedBy: "browser" as const,
+    evidence: "Client-observed elapsed request wait, allowlisted operation and outcome, HTTP status when received, browser-hidden transitions, release and device, and an optional client-reported server correlation reference. Elapsed wait is not server processing time.",
+  },
   { name: "touch-accuracy", label: "Touch accuracy", observedBy: "hardware" as const },
   { name: "keyboard-clearance", label: "Keyboard clearance", observedBy: "hardware" as const },
   { name: "orientation-layout", label: "Orientation layout", observedBy: "hardware" as const },
@@ -61,15 +75,17 @@ type Signal = {
   checkName: CheckName;
   outcome: Outcome;
   metrics?: Record<string, number>;
+  reportedRequestCorrelationId?: string;
 };
 
 const queueKey = "run-calc-field-check-queue";
 const queueDisplacementKey = "run-calc-field-check-queue-displacements-v1";
 const clientKey = "run-calc-field-check-client";
-const dedupKey = "run-calc-field-check-dedup-v3";
+const dedupKey = "run-calc-field-check-dedup-v4";
 const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
+const safeCorrelationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const defaultRetryMs = 30_000;
 // Expired rows stay local and visible, but are never resent.
 export const FIELD_CHECK_QUEUE_MAX_AGE_MS = FIELD_CHECK_MAX_CLOCK_SKEW_MS;
@@ -135,9 +151,40 @@ function safeMetrics(
   }
   if (checkName === "performance") {
     if (!Number.isFinite(metrics.durationMs) || metrics.durationMs! < 0 ||
-      !Number.isInteger(metrics.sourceCode) || !Object.values(PERFORMANCE_SOURCE_CODES).includes(metrics.sourceCode as 1 | 2 | 3 | 4)) return {};
+      !Number.isInteger(metrics.sourceCode) ||
+      !Object.values(PERFORMANCE_SOURCE_CODES).includes(metrics.sourceCode as 1 | 2 | 3 | 4 | 5 | 6)) return {};
     // Preserve very slow failures as a saturated measurement, not a missing sample.
-    return { durationMs: Math.round(Math.min(metrics.durationMs!, 10_000_000) * 100) / 100, sourceCode: metrics.sourceCode! };
+    const safe: Record<string, number> = {
+      durationMs: Math.round(Math.min(metrics.durationMs!, 10_000_000) * 100) / 100,
+      sourceCode: metrics.sourceCode!,
+    };
+    const hasRequestMetadata = ["outcomeCode", "operationCode", "backgroundCode"].some((key) =>
+      Object.hasOwn(metrics, key),
+    );
+    if (!hasRequestMetadata) {
+      return metrics.sourceCode! <= PERFORMANCE_SOURCE_CODES.navigationLoad ? safe : {};
+    }
+    if (!Number.isInteger(metrics.outcomeCode) ||
+      !Object.values(API_REQUEST_OUTCOME_CODES).includes(metrics.outcomeCode as 1 | 2 | 3 | 4 | 5 | 6 | 7) ||
+      !Number.isInteger(metrics.operationCode) ||
+      !Object.values(API_OPERATION_CODES).includes(metrics.operationCode as 1 | 2 | 3 | 4 | 5 | 6 | 7) ||
+      !Number.isInteger(metrics.backgroundCode) || ![0, 1].includes(metrics.backgroundCode!)) return {};
+    const status = metrics.httpStatusCode;
+    if (status !== undefined && (!Number.isInteger(status) || status! < 400 || status! > 599)) return {};
+    const outcomeCode = metrics.outcomeCode!;
+    if ((outcomeCode === API_REQUEST_OUTCOME_CODES.httpServerError && (status === undefined || status < 500)) ||
+      (outcomeCode === API_REQUEST_OUTCOME_CODES.authenticationRejected &&
+        status !== 401 && status !== 403) ||
+      (outcomeCode === API_REQUEST_OUTCOME_CODES.httpClientError && (status === undefined || status >= 500)) ||
+      (outcomeCode >= API_REQUEST_OUTCOME_CODES.transportFailure && status !== undefined) ||
+      (outcomeCode === API_REQUEST_OUTCOME_CODES.cancelled
+        ? outcome !== "incomplete"
+        : outcome !== "failure")) return {};
+    safe.outcomeCode = outcomeCode;
+    safe.operationCode = metrics.operationCode!;
+    safe.backgroundCode = metrics.backgroundCode!;
+    if (status !== undefined) safe.httpStatusCode = status!;
+    return safe;
   }
   if (checkName === "stale-deployment-recovery") return {};
   if (workflowChecks.has(checkName)) {
@@ -177,6 +224,7 @@ function loadQueue(): Array<{
   appBuild: string;
   deviceCategory: ReturnType<typeof deviceCategory>;
   metrics: Record<string, number>;
+  reportedRequestCorrelationId?: string;
 }> {
   try {
     const parsed = JSON.parse(localStorage.getItem(queueKey) ?? "[]");
@@ -195,6 +243,9 @@ function loadQueue(): Array<{
       originScope: typeof item.originScope === "string" && item.originScope.length <= 120
         ? item.originScope
         : null,
+      ...(safeCorrelationId.test(item.reportedRequestCorrelationId ?? "")
+        ? { reportedRequestCorrelationId: item.reportedRequestCorrelationId }
+        : {}),
     }));
   } catch {
     return [];
@@ -280,10 +331,20 @@ export function getFieldCheckQueueStatus(now = Date.now()): FieldCheckQueueStatu
   }
 }
 
-export function emitFieldCheckSignal(checkName: CheckName, outcome: Outcome, metrics?: Record<string, number>): void {
+export function emitFieldCheckSignal(
+  checkName: CheckName,
+  outcome: Outcome,
+  metrics?: Record<string, number>,
+  reportedRequestCorrelationId?: string,
+): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<Signal>(FIELD_CHECK_SIGNAL_EVENT, {
-    detail: { checkName, outcome, metrics: safeMetrics(checkName, outcome, metrics) },
+    detail: {
+      checkName,
+      outcome,
+      metrics: safeMetrics(checkName, outcome, metrics),
+      ...(reportedRequestCorrelationId ? { reportedRequestCorrelationId } : {}),
+    },
   }));
 }
 
@@ -293,11 +354,15 @@ function queueSignal(signal: Signal, appBuild: string, originScope: string): voi
   if (signal.checkName === "performance" && metrics.sourceCode === undefined) return;
   if (signal.checkName === "sync-acknowledgment" && signal.outcome === "failure" && metrics.failureCode === undefined) return;
   const now = Date.now();
-  // Separate builds and bounded causes/sources without retaining event names or URLs.
+  // Separate builds and source classes; the state below distinguishes bounded causes
+  // so a recovery followed by the same failure can be recorded again.
   let buildHash = 2166136261;
   for (const char of appBuild) buildHash = Math.imul(buildHash ^ char.charCodeAt(0), 16777619);
-  const category = metrics.sourceCode ?? metrics.failureCode ?? 0;
-  const bucket = `${originScope}:${(buildHash >>> 0).toString(16)}:${signal.checkName}:${Math.floor(now / bucketMs)}:${metrics.sourceCode ?? 0}`;
+  const sourceBucket = metrics.sourceCode ?? 0;
+  const category = metrics.sourceCode === undefined
+    ? String(metrics.failureCode ?? 0)
+    : `${metrics.sourceCode}:${metrics.outcomeCode ?? 0}:${metrics.operationCode ?? 0}`;
+  const bucket = `${originScope}:${(buildHash >>> 0).toString(16)}:${signal.checkName}:${Math.floor(now / bucketMs)}:${sourceBucket}`;
   const state = `${signal.outcome}:${category}`;
   // Keep repeated samples deduplicated even after delivery, but do not hide a
   // new failure following recovery in the same bucket. This is telemetry state,
@@ -307,7 +372,7 @@ function queueSignal(signal: Signal, appBuild: string, originScope: string): voi
     const parsed: unknown = JSON.parse(localStorage.getItem(dedupKey) ?? "[]");
     if (Array.isArray(parsed)) dedup = parsed.filter((item) =>
       item && typeof item.bucket === "string" && item.bucket.length <= 220 &&
-      /^(success|failure|incomplete):[0-4]$/.test(item.state) &&
+      /^(success|failure|incomplete):[0-9:]{1,16}$/.test(item.state) &&
       Number.isSafeInteger(item.sequence) && item.sequence >= 0,
     ).slice(-maxQueue);
   } catch {}
@@ -328,6 +393,9 @@ function queueSignal(signal: Signal, appBuild: string, originScope: string): voi
     appBuild: appBuild.slice(0, 100) || "local",
     deviceCategory: deviceCategory(),
     metrics,
+    ...(signal.checkName === "performance" && safeCorrelationId.test(signal.reportedRequestCorrelationId ?? "")
+      ? { reportedRequestCorrelationId: signal.reportedRequestCorrelationId }
+      : {}),
   });
   saveQueue(queue);
   try {
@@ -423,12 +491,53 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
     emitFieldCheckSignal("performance", entry.durationMs! > budget ? "failure" : "success",
       { durationMs: entry.durationMs!, sourceCode });
   };
+  const onApiFailure = (event: Event) => {
+    const detail = (event as CustomEvent<ApiFailureEvent>).detail;
+    if (!detail || !Number.isFinite(detail.elapsedMs) || detail.elapsedMs < 0) return;
+    const outcomeCode = ({
+      http_server_error: API_REQUEST_OUTCOME_CODES.httpServerError,
+      authentication_rejected: API_REQUEST_OUTCOME_CODES.authenticationRejected,
+      http_client_error: API_REQUEST_OUTCOME_CODES.httpClientError,
+      transport_failure: API_REQUEST_OUTCOME_CODES.transportFailure,
+      offline_failure: API_REQUEST_OUTCOME_CODES.offlineFailure,
+      timeout: API_REQUEST_OUTCOME_CODES.timeout,
+      cancelled: API_REQUEST_OUTCOME_CODES.cancelled,
+    } as const)[detail.requestOutcome];
+    const operationCode = ({
+      authentication: API_OPERATION_CODES.authentication,
+      diagnostics: API_OPERATION_CODES.diagnostics,
+      import: API_OPERATION_CODES.import,
+      inventory: API_OPERATION_CODES.inventory,
+      master_data: API_OPERATION_CODES.masterData,
+      sync: API_OPERATION_CODES.sync,
+      other: API_OPERATION_CODES.other,
+    } as const)[detail.operationCategory];
+    const sourceCode = detail.requestOutcome === "timeout"
+      ? PERFORMANCE_SOURCE_CODES.apiTimeout
+      : detail.requestOutcome === "cancelled"
+        ? PERFORMANCE_SOURCE_CODES.apiCancelled
+        : detail.requestOutcome === "http_server_error" ||
+            detail.requestOutcome === "http_client_error" ||
+            detail.requestOutcome === "authentication_rejected"
+          ? PERFORMANCE_SOURCE_CODES.apiHttpFailure
+          : PERFORMANCE_SOURCE_CODES.apiNetwork;
+    const outcome = detail.requestOutcome === "cancelled" ? "incomplete" : "failure";
+    emitFieldCheckSignal("performance", outcome, {
+      durationMs: detail.elapsedMs,
+      sourceCode,
+      outcomeCode,
+      operationCode,
+      backgroundCode: detail.backgroundObserved ? 1 : 0,
+      ...(detail.httpStatus === undefined ? {} : { httpStatusCode: detail.httpStatus }),
+    }, detail.correlationId);
+  };
 
   window.addEventListener(FIELD_CHECK_SIGNAL_EVENT, onSignal);
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("calculator-performance", onPerformance);
+  window.addEventListener("app:api-failure", onApiFailure);
   queueSignal({ checkName: "startup", outcome: "success" }, appBuild, originScope);
   if (consumeStaleAssetRecoveryAttempt(appBuild)) {
     queueSignal({ checkName: "stale-deployment-recovery", outcome: "success" }, appBuild, originScope);
@@ -447,6 +556,7 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
     window.removeEventListener("online", onOnline);
     window.removeEventListener("offline", onOffline);
     window.removeEventListener("calculator-performance", onPerformance);
+    window.removeEventListener("app:api-failure", onApiFailure);
   };
 }
 

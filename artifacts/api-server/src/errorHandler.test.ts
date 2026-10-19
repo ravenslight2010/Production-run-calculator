@@ -26,6 +26,7 @@ let server: Server;
 let baseUrl: string;
 let nonErrorServer: Server;
 let nonErrorBaseUrl: string;
+const requestErrorLog = vi.fn();
 
 beforeAll(async () => {
   const app = (await import("./app")).default;
@@ -45,6 +46,12 @@ beforeAll(async () => {
   });
   nonErrorApp.get("/api/test-error/object", async () => {
     throw { message: "sensitive object details", stack: "SECRET_STACK_TRACE" };
+  });
+  nonErrorApp.get("/api/inventory/items/:itemId/fail", (req, _res, next) => {
+    // Simulate the server-owned ID normally installed by observability middleware.
+    (req as typeof req & { correlationId?: string }).correlationId = "018f3a8b-1b2c-4d3e-8f90-123456789abc";
+    Object.defineProperty(req, "log", { value: { error: requestErrorLog } });
+    next(new Error("sensitive operation details"));
   });
   nonErrorApp.use(enhancedErrorMessages);
   await new Promise<void>((resolve) => {
@@ -108,4 +115,17 @@ describe("central JSON error handler", () => {
       );
     },
   );
+
+  it("retains safe error classification and operation correlation without logging record IDs", async () => {
+    requestErrorLog.mockClear();
+    const res = await fetch(`${nonErrorBaseUrl}/api/inventory/items/private-record-id/fail`);
+    expect(res.status).toBe(500);
+    expect(requestErrorLog).toHaveBeenCalledWith(expect.objectContaining({
+      correlationId: expect.any(String),
+      errorCategory: "server_error",
+      operationType: "inventory",
+      status: 500,
+    }), "request errored");
+    expect(JSON.stringify(requestErrorLog.mock.calls)).not.toMatch(/private-record-id|sensitive operation details/);
+  });
 });

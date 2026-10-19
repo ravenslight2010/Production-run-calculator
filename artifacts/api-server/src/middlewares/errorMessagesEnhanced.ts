@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
-import { safeErrorCode } from "../lib/observability";
+import { operationType, safeErrorCode } from "../lib/observability";
 import { recordSyncParserRejection } from "../lib/capacityTelemetry";
 
 /**
@@ -29,6 +29,17 @@ export function enhancedErrorMessages(
       : typeof e.statusCode === "number"
         ? e.statusCode
         : 500;
+  const errorCategory = err instanceof ZodError ? "validation_error"
+    : status === 401 || status === 403 ? "authentication_or_authorization"
+      : status === 413 ? "payload_too_large"
+        : e.type === "entity.parse.failed" ? "malformed_json"
+          : e.code === "ECONNREFUSED" || e.message?.includes("connect ECONNREFUSED")
+            ? "dependency_unavailable"
+            : e.code === "ETIMEDOUT" ||
+                (typeof e.message === "string" && e.message.toLowerCase().includes("timeout"))
+              ? "timeout"
+              : status >= 500 ? "server_error"
+                : status >= 400 ? "client_error" : "unknown";
 
   if (
     req.path.startsWith("/api/sync") &&
@@ -112,9 +123,9 @@ export function enhancedErrorMessages(
       event: "request_error",
       correlationId: (req as any).correlationId ?? (req as any).id,
       errorCode: safeErrorCode(err),
+      errorCategory,
+      operationType: operationType(req.path),
       status,
-      method: req.method,
-      url: req.url?.split("?")[0],
     },
     "request errored",
   );

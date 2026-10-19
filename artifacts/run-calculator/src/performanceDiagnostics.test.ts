@@ -6,6 +6,7 @@ import {
   fetchWithDiagnostics,
   getMemoryDiagnostics,
   getPerformanceDiagnostics,
+  installApiRequestInstrumentation,
   PERFORMANCE_BUDGETS,
   recordBrowserLoadTimings,
   recordDeferredStartup,
@@ -97,7 +98,7 @@ describe("calculator performance diagnostics", () => {
     });
 
     expect(getPerformanceDiagnostics()).toEqual([
-      expect.objectContaining({ name: "api:/api/inventory/items:200", kind: "api" }),
+      expect.objectContaining({ name: "api:inventory:200", kind: "api" }),
     ]);
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
@@ -109,17 +110,149 @@ describe("calculator performance diagnostics", () => {
     await expect(fetchWithDiagnostics("/api/items?secret=private-data")).rejects.toBe(failure);
 
     expect(getPerformanceDiagnostics()).toEqual([
-      expect.objectContaining({ name: "api-failure:/api/items:network", kind: "api" }),
+      expect.objectContaining({ name: "api-request-failure:other:transport_failure", kind: "api" }),
     ]);
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
 
-  it.each(["TimeoutError", "AbortError"])("uses the same bounded timeout/abort source for %s without retaining reasons", async (name) => {
+  it("separates HTTP 500 from transport errors and keeps only safe request metadata", async () => {
+    const listener = vi.fn();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("private response body", {
+      status: 500,
+      headers: { "x-correlation-id": "018f3a8b-1b2c-4d3e-8f90-123456789abc" },
+    })));
+
+    await fetchWithDiagnostics("/api/sync/private-record?customer=private-data");
+
+    const detail = listener.mock.calls[0]?.[0] && (listener.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail).toMatchObject({
+      operationCategory: "sync",
+      requestOutcome: "http_server_error",
+      httpStatus: 500,
+      correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+    });
+    expect(detail).toHaveProperty("observedAt");
+    expect(JSON.stringify(detail)).not.toMatch(/private-record|private-data|response body/);
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("instruments unwrapped same-origin API fetches without changing the response", async () => {
+    const previousWindowFetch = window.fetch;
+    const previousGlobalFetch = globalThis.fetch;
+    const nativeStub = vi.fn(async () => new Response("{}", { status: 401 }));
+    window.fetch = nativeStub as unknown as typeof fetch;
+    globalThis.fetch = window.fetch;
+    const uninstall = installApiRequestInstrumentation();
+    const listener = vi.fn();
+    window.addEventListener("app:api-failure", listener);
+    try {
+      const response = await window.fetch("/api/inventory/items/private-row?private=query");
+      expect(response.status).toBe(401);
+      expect(nativeStub).toHaveBeenCalledOnce();
+      expect((listener.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+        operationCategory: "inventory",
+        requestOutcome: "authentication_rejected",
+        httpStatus: 401,
+      });
+      expect(JSON.stringify((listener.mock.calls[0]?.[0] as CustomEvent).detail))
+        .not.toMatch(/private-row|private=query/);
+    } finally {
+      uninstall();
+      window.removeEventListener("app:api-failure", listener);
+      window.fetch = previousWindowFetch;
+      globalThis.fetch = previousGlobalFetch;
+    }
+  });
+
+  it("does not invent a server reference for a request that failed before a response", async () => {
+    const listener = vi.fn();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+
+    await expect(fetchWithDiagnostics("/api/inventory/items/secret-id?token=secret")).rejects.toThrow();
+
+    const detail = (listener.mock.calls[0]?.[0] as CustomEvent).detail;
+    expect(detail).toMatchObject({
+      operationCategory: "inventory",
+      requestOutcome: "transport_failure",
+      connectivity: "online",
+    });
+    expect(detail).not.toHaveProperty("correlationId");
+    expect(JSON.stringify(detail)).not.toMatch(/secret-id|token|secret/);
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("distinguishes explicit cancellation from timeout", async () => {
+    const listener = vi.fn();
+    const controller = new AbortController();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason));
+      })) as unknown as typeof fetch);
+
+    const request = fetchWithDiagnostics("/api/sync/today", { signal: controller.signal });
+    controller.abort();
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect((listener.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+      operationCategory: "sync",
+      requestOutcome: "cancelled",
+    });
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("bounds an unsignalled read and records hidden/resumed involvement without server timing claims", async () => {
+    vi.useFakeTimers();
+    const listener = vi.fn();
+    const oldVisibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    let resolveFetch: ((response: Response) => void) | undefined;
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((resolve, reject) => {
+        resolveFetch = resolve;
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason));
+      })) as unknown as typeof fetch);
+    const request = fetchWithDiagnostics("/api/inventory/items");
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    resolveFetch?.(new Response("{}", { status: 500 }));
+    expect((await request).status).toBe(500);
+    expect((listener.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+      operationCategory: "inventory",
+      backgroundObserved: true,
+    });
+
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason));
+      })) as unknown as typeof fetch);
+    const timeoutRequest = fetchWithDiagnostics("/api/inventory/items");
+    const timeoutRejection = expect(timeoutRequest).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await timeoutRejection;
+    expect((listener.mock.calls[1]?.[0] as CustomEvent).detail).toMatchObject({
+      operationCategory: "inventory",
+      requestOutcome: "timeout",
+      elapsedMs: 30_000,
+    });
+    window.removeEventListener("app:api-failure", listener);
+    if (oldVisibility) Object.defineProperty(document, "visibilityState", oldVisibility);
+    else delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["TimeoutError", "timeout"],
+    ["AbortError", "cancelled"],
+  ] as const)("classifies %s separately without retaining reasons", async (name, outcome) => {
     const failure = new DOMException("private cancellation reason", name);
     vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
     await expect(fetchWithDiagnostics("/api/items?private=query")).rejects.toBe(failure);
     expect(getPerformanceDiagnostics()).toEqual([
-      expect.objectContaining({ name: "api-failure:/api/items:timeout", kind: "api" }),
+      expect.objectContaining({ name: `api-request-failure:other:${outcome}`, kind: "api" }),
     ]);
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private");
   });

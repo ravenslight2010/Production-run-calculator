@@ -44,13 +44,72 @@ describe("browser incident capture", () => {
   it("captures API failures without retaining routes or response bodies", () => {
     const uninstall = installBrowserFailureCapture();
     window.dispatchEvent(new CustomEvent("app:api-failure", {
-      detail: { path: "/api/private?id=secret", status: 503 },
+      detail: {
+        operationCategory: "sync",
+        requestOutcome: "http_server_error",
+        elapsedMs: 12,
+        observedAt: "2026-10-16T22:48:00.000Z",
+        backgroundObserved: false,
+        connectivity: "online",
+        httpStatus: 503,
+      },
     }));
     expect(reportIncident).toHaveBeenCalledWith(expect.objectContaining({
       errorMessage: "API 503",
-      diagnostics: expect.objectContaining({ signalKind: "api_failure" }),
+      screen: "/",
+      diagnostics: expect.objectContaining({
+        signalKind: "sync",
+        requestOutcome: "http_server_error",
+      }),
     }));
     expect(JSON.stringify(reportIncident.mock.calls)).not.toContain("private");
+    uninstall();
+  });
+
+  it("captures structured HTTP failures separately from transport errors and keeps server references optional", () => {
+    const uninstall = installBrowserFailureCapture();
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
+        operationCategory: "sync",
+        requestOutcome: "http_server_error",
+        elapsedMs: 4_023_360,
+        observedAt: "2026-10-16T22:48:00.000Z",
+        backgroundObserved: true,
+        connectivity: "online",
+        httpStatus: 500,
+        correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+      },
+    }));
+    expect(reportIncident).toHaveBeenCalledWith(expect.objectContaining({
+      errorMessage: "API 500",
+      diagnostics: expect.objectContaining({
+        requestOperationCategory: "sync",
+        requestOutcome: "http_server_error",
+        requestElapsedMs: 4_023_360,
+        requestObservedAt: "2026-10-16T22:48:00.000Z",
+        requestBackgroundInvolvement: "observed",
+        requestHttpStatus: 500,
+        correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+      }),
+    }));
+
+    reportIncident.mockClear();
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
+        operationCategory: "inventory",
+        requestOutcome: "transport_failure",
+        elapsedMs: 52,
+        observedAt: "2026-10-16T22:49:00.000Z",
+        backgroundObserved: false,
+        connectivity: "online",
+      },
+    }));
+    const body = reportIncident.mock.calls[0]?.[0];
+    expect(body).toMatchObject({
+      errorMessage: "API transport failure",
+      diagnostics: expect.objectContaining({ requestOutcome: "transport_failure" }),
+    });
+    expect(body.diagnostics).not.toHaveProperty("correlationId");
     uninstall();
   });
 
