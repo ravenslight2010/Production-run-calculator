@@ -57,7 +57,11 @@ describe("allowlisted field-check export", () => {
         failureCount: 1, incompleteCount: 0, actionable: true, issueStatus: "open",
         recentFailures: [{
           outcome: "failure", observedAt: at.toISOString(), buildCategory: "unknown-local", deviceCategory: "mobile-chrome",
-          diagnostics: { durationMs: 20_001, durationAtCeiling: false, failureCode: "unavailable", sourceCode: 3 },
+          diagnostics: {
+            durationMs: 20_001, durationAtCeiling: false, failureCode: "unavailable",
+            sourceCode: 3,
+          },
+          reportedRequestCorrelationId: "unavailable",
         }],
       }],
     });
@@ -67,9 +71,11 @@ describe("allowlisted field-check export", () => {
       "lastSuccessfulAt", "lastSuccessfulDiagnostics", "failureCount", "incompleteCount", "actionable",
       "issueStatus", "recentFailures"]);
     expect(Object.keys(output.checks[0].recentFailures[0])).toEqual(["outcome", "observedAt",
-      "buildCategory", "deviceCategory", "diagnostics"]);
+      "buildCategory", "deviceCategory", "diagnostics", "reportedRequestCorrelationId"]);
     expect(Object.keys(output.checks[0].recentFailures[0].diagnostics)).toEqual(["durationMs",
       "durationAtCeiling", "failureCode", "sourceCode"]);
+    expect(output.diagnosticCodeLegend.legacyRequestClassification)
+      .toContain("not captured by the older record");
     expect(new TextEncoder().encode(result.json).length).toBeLessThan(FIELD_CHECK_EXPORT_MAX_BYTES);
   });
 
@@ -110,6 +116,34 @@ describe("allowlisted field-check export", () => {
     sample.metrics.durationMs++;
     output = JSON.parse(createFieldCheckExport(input, at).json).checks[0].recentFailures[0];
     expect(output.diagnostics.durationMs).toBe("unavailable");
+  });
+
+  it("exports only allowlisted API categories and a valid client-reported correlation reference", () => {
+    const input = fixture();
+    const failure = input.checks[0]!.recentFailures[0]!;
+    Object.assign(failure.metrics, {
+      sourceCode: 5, outcomeCode: 1, operationCode: 6, backgroundCode: 1, httpStatusCode: 500,
+      privatePath: 99,
+    });
+    Object.assign(failure, {
+      reportedRequestCorrelationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+      requestBody: "PRIVATE",
+    });
+    const output = JSON.parse(createFieldCheckExport(input, at).json).checks[0].recentFailures[0];
+    expect(output).toMatchObject({
+      diagnostics: {
+        sourceCode: 5,
+        requestOutcomeCode: 1,
+        operationCode: 6,
+        backgroundCode: 1,
+        httpStatusCode: 500,
+      },
+      reportedRequestCorrelationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+    });
+    expect(JSON.stringify(output)).not.toContain("PRIVATE");
+    failure.reportedRequestCorrelationId = "private-record-id";
+    expect(JSON.parse(createFieldCheckExport(input, at).json).checks[0].recentFailures[0]
+      .reportedRequestCorrelationId).toBe("unavailable");
   });
 
   it("keeps the maximum bounded snapshot below the byte cap and drops oversized scalar inputs", () => {

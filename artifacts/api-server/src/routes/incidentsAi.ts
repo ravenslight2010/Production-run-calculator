@@ -61,6 +61,9 @@ export function safeIncidentLogMetadata(data: ReportInput, context: IncidentCont
     connectivity: context.connectivity,
     screenClass,
     buildProvided: Boolean(data.appVersion),
+    ...(context.requestOperationCategory ? { requestOperationCategory: context.requestOperationCategory } : {}),
+    ...(context.requestOutcome ? { requestOutcome: context.requestOutcome } : {}),
+    ...(context.requestHttpStatus ? { requestHttpStatus: context.requestHttpStatus } : {}),
   };
 }
 
@@ -117,6 +120,40 @@ export function buildIncidentContext(data: ReportInput): IncidentContext {
   };
   if (isSafeCorrelationId(diagnostics?.correlationId)) {
     ctx.relatedCorrelationId = diagnostics.correlationId;
+  }
+  const operationCategories = ["authentication", "diagnostics", "import", "inventory", "master_data", "sync", "other"] as const;
+  const requestOutcomes = [
+    "http_server_error", "http_client_error", "authentication_rejected",
+    "transport_failure", "offline_failure", "timeout", "cancelled",
+  ] as const;
+  if (diagnostics?.requestOperationCategory && operationCategories.includes(diagnostics.requestOperationCategory)) {
+    ctx.requestOperationCategory = diagnostics.requestOperationCategory;
+  }
+  if (diagnostics?.requestOutcome && requestOutcomes.includes(diagnostics.requestOutcome)) {
+    ctx.requestOutcome = diagnostics.requestOutcome;
+  }
+  if (typeof diagnostics?.requestElapsedMs === "number" && Number.isFinite(diagnostics.requestElapsedMs)) {
+    ctx.requestElapsedMs = Math.round(Math.min(10_000_000, Math.max(0, diagnostics.requestElapsedMs)) * 100) / 100;
+  }
+  if (diagnostics?.requestBackgroundInvolvement === "observed" ||
+      diagnostics?.requestBackgroundInvolvement === "not_observed") {
+    ctx.requestBackgroundInvolvement = diagnostics.requestBackgroundInvolvement;
+  }
+  const requestHttpStatus = diagnostics?.requestHttpStatus;
+  if (typeof requestHttpStatus === "number" && Number.isInteger(requestHttpStatus) &&
+      requestHttpStatus >= 400 && requestHttpStatus <= 599) {
+    ctx.requestHttpStatus = requestHttpStatus;
+  }
+  const reportedObservedAt: unknown = diagnostics?.requestObservedAt;
+  const observedAt = reportedObservedAt instanceof Date
+    ? reportedObservedAt.getTime()
+    : typeof reportedObservedAt === "string" ? Date.parse(reportedObservedAt) : Number.NaN;
+  if (Number.isFinite(observedAt)) {
+    const now = Date.now();
+    if (Number.isFinite(observedAt) && observedAt >= now - 30 * 24 * 60 * 60 * 1000 &&
+        observedAt <= now + 5 * 60 * 1000) {
+      ctx.requestObservedAt = new Date(observedAt).toISOString();
+    }
   }
   const description = data.description ? redactDiagnosticText(data.description, 2000) : "";
   const errorMessage = data.errorMessage ? redactDiagnosticText(data.errorMessage, 500) : "";

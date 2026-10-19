@@ -9,6 +9,7 @@ import {
   migrateLocalProfilesToServerIfNeeded,
   reconcileProfilesFromServer,
   reconcileProfilesFromServerDetailed,
+  fetchBrandProfilesSnapshot,
   getProfileStamp,
   resetProfileSyncMemoryFallbackForTests,
 } from "./profileServerSync";
@@ -44,7 +45,7 @@ type ServerItem = {
   updatedAt: number;
 };
 
-type FetchCall = { method: string; body?: unknown };
+type FetchCall = { url: string; method: string; cache?: RequestCache; body?: unknown };
 
 let calls: FetchCall[] = [];
 let listItems: ServerItem[] = [];
@@ -127,7 +128,9 @@ beforeEach(() => {
     vi.fn(async (_url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       calls.push({
+        url: String(_url),
         method,
+        cache: init?.cache,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
       if (networkDown) throw new Error("network down");
@@ -992,5 +995,28 @@ describe("profile write acknowledgement failures", () => {
 
     expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY, force: true })]);
     expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined();
+  });
+});
+
+describe("export profile snapshot", () => {
+  it("reads a fresh server snapshot without adopting it into browser profile storage", async () => {
+    listItems = [
+      serverItem(KEY, 42, {
+        doughRecipeName: "Canonical Dough",
+        targetDoughballWeight: 12,
+      }),
+    ];
+
+    const snapshot = await fetchBrandProfilesSnapshot();
+
+    expect(snapshot).toEqual(listItems);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        url: "/api/brand-profiles",
+        method: "GET",
+        cache: "no-store",
+      }),
+    ]);
+    expect(localStorage.length).toBe(0);
   });
 });

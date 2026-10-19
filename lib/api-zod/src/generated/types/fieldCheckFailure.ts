@@ -14,4 +14,6 @@ export interface FieldCheckFailure {
   appBuild: string;
   deviceCategory: string;
   metrics: FieldCheckFailureMetrics;
+  /** Client-reported opaque request correlation reference; never an authorization credential. */
+  reportedRequestCorrelationId?: string;
 }

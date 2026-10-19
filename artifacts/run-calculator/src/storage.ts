@@ -3430,14 +3430,21 @@ export type SpecImportDisplayKind = ParsedRecipe["kind"] | "mix";
  * applySpecImport uses) show as "mix" so the selector reflects what will
  * actually happen on commit.
  */
-export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayKind {
+export function specImportRecipeDisplayKind(
+  r: ParsedRecipe,
+  serverMixNames: readonly string[] = [],
+): SpecImportDisplayKind {
   if (r.kind !== "cheese") return r.kind;
   if (r.forcedCategory === "mix") return "mix";
   if (r.forcedCategory === "cheese") return "cheese";
   // A user-typed rename never re-categorizes: the word heuristic is unreliable
   // on a name the user chose ("My Special Blend 2" is still a cheese recipe).
   if (r.userNamed) return "cheese";
-  const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
+  const userMixNamesLower = new Set(
+    [...loadList(MIX_RECIPE_NAMES_KEY, []), ...serverMixNames]
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean),
+  );
   return specImportCheeseRecipeIsMix(
     r.name ?? "",
     userMixNamesLower,
@@ -3468,6 +3475,8 @@ export type SpecImportServerPoolRecipe = {
   /** Dough only: per-customer variant list (label/weightOz/perTray). */
   doughballVariants?: unknown;
 };
+
+export type SpecImportServerMix = { name: string };
 
 /**
  * A name CORRECTION this import applied: the sheet wrote `newName` over a
@@ -3525,7 +3534,11 @@ function storageEntries(storage: BrowserKeyValueStorage): Array<[string, string]
 
 export function projectSpecImport(
   parsed: ParsedSpecImport,
-  serverPools?: { dough?: SpecImportServerPoolRecipe[]; sauce?: SpecImportServerPoolRecipe[] },
+  serverPools?: {
+    dough?: SpecImportServerPoolRecipe[];
+    sauce?: SpecImportServerPoolRecipe[];
+    mixes?: SpecImportServerMix[];
+  },
   dieLineDefaultOverrides?: DieLineDefaultsOverrides,
   forceUpdateProfileKeys?: ReadonlySet<string>,
   importMergeAliases?: ImportMergeAliasMap,
@@ -3608,6 +3621,7 @@ export function applySpecImport(
   serverPools?: {
     dough?: SpecImportServerPoolRecipe[];
     sauce?: SpecImportServerPoolRecipe[];
+    mixes?: SpecImportServerMix[];
   },
   /**
    * Manager-stored per-die line-setting overrides (Manage Lists → Die
@@ -3772,7 +3786,14 @@ export function applySpecImport(
   // Cheese-kind recipes whose name is really a MIX register under the Mixes
   // category instead (see specImportCheeseRecipeIsMix) — decide once up front
   // so the tombstone-clear and the name-list registration below stay in step.
-  const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
+  const serverMixNames = (serverPools?.mixes ?? [])
+    .map((mix) => mix.name.trim())
+    .filter(Boolean);
+  const userMixNamesLower = new Set(
+    [...loadList(MIX_RECIPE_NAMES_KEY, []), ...serverMixNames]
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean),
+  );
   const routesToMix = (r: ParsedRecipe): boolean => {
     if (r.kind !== "cheese") return false;
     // Explicit review-time override (the "mix"/"cheese" pick in the import
@@ -3939,7 +3960,7 @@ export function applySpecImport(
   // NOTE: mixes share the cheese preset map (only the NAME list differs), so
   // the pool mirror's keys must be filtered against the Mix name list or mix
   // slots would be re-typed "cheese" here before the mix resolver ever runs.
-  const mixNamesLowerNow = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.trim().toLowerCase()));
+  const mixNamesLowerNow = userMixNamesLower;
   // Merged-away names from the factory merge history are ALSO candidates: a
   // sheet may name a blend/mix that was since merged into another recipe, and
   // a spec-only workbook carries no recipe under the old name — without these
@@ -3968,6 +3989,7 @@ export function applySpecImport(
     ...parsed.recipes
       .filter(r => r.kind === "cheese" && routesToMix(r))
       .map(r => r.name),
+    ...serverMixNames,
     ...loadList(MIX_RECIPE_NAMES_KEY, []),
     ...mergedAwayNames("mixes"),
   ];

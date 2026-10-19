@@ -244,13 +244,16 @@ export function markProfileDeleted(key: string): void {
   void flushProfileQueue();
 }
 
-type ApiProfile = {
+export type ServerBrandProfileSnapshot = {
   key: string;
   brand: string;
   flavor: string;
   values: Record<string, unknown>;
   crustValues: Record<string, unknown>;
   updatedAt: number;
+};
+
+type ApiProfile = ServerBrandProfileSnapshot & {
   /** Upserts only: authoritative write — server bypasses the LWW stamp guard. */
   force?: boolean;
 };
@@ -310,6 +313,41 @@ async function apiList(): Promise<ApiProfile[]> {
 }
 
 let apiListInFlight: { generation: number; promise: Promise<ApiProfile[]> } | null = null;
+
+/**
+ * Read a fresh profile snapshot for exports. Unlike reconciliation this does
+ * not adopt anything into local/offline storage; export must describe the
+ * server-acknowledged profile state, not a possibly stale browser cache.
+ */
+export async function fetchBrandProfilesSnapshot(): Promise<ServerBrandProfileSnapshot[]> {
+  const res = await fetchWithTimeout(
+    "/api/brand-profiles",
+    {
+      headers: { "x-client-id": inventoryClientId() },
+      cache: "no-store",
+    },
+    10_000,
+  );
+  if (!res.ok) throw new Error(`List brand profiles failed (${res.status})`);
+  const data = (await res.json()) as { items?: unknown };
+  if (!Array.isArray(data?.items)) {
+    throw new Error("List brand profiles returned an invalid response");
+  }
+  const items = data.items;
+  if (items.some((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return true;
+    const profile = item as Record<string, unknown>;
+    return typeof profile.key !== "string"
+      || typeof profile.brand !== "string"
+      || typeof profile.flavor !== "string"
+      || !profile.values || typeof profile.values !== "object" || Array.isArray(profile.values)
+      || !profile.crustValues || typeof profile.crustValues !== "object" || Array.isArray(profile.crustValues)
+      || typeof profile.updatedAt !== "number" || !Number.isFinite(profile.updatedAt);
+  })) {
+    throw new Error("List brand profiles returned an invalid profile");
+  }
+  return items as ServerBrandProfileSnapshot[];
+}
 
 // The server processes at most this many items per request (its MAX_BATCH) —
 // anything beyond is silently truncated, so every save/delete call is chunked

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   claimStaleAssetRecoveryAttempt,
-  clearStaleAppShellCaches,
   consumeStaleAssetRecoveryAttempt,
   recordStaleAssetRecoveryAttempt,
   STALE_ASSET_RECOVERY_CONFIRMATION_WINDOW_MS,
@@ -98,53 +97,6 @@ describe("stale-asset recovery evidence", () => {
     expect(consumeStaleAssetRecoveryAttempt("new-build", unreadableStorage, 101_000)).toBe(false);
     expect(consumeStaleAssetRecoveryAttempt("new-build", unremovableStorage, 101_000)).toBe(false);
     expect(unremovableStorage.getItem(key)).toBe(marker);
-  });
-});
-
-describe("clearStaleAppShellCaches", () => {
-  it("resolves safely when CacheStorage is unavailable", async () => {
-    await expect(clearStaleAppShellCaches(undefined)).resolves.toBeUndefined();
-  });
-
-  it("removes precached app shells without deleting unrelated runtime caches", async () => {
-    const remove = vi.fn().mockResolvedValue(true);
-    await clearStaleAppShellCaches({
-      keys: vi.fn().mockResolvedValue([
-        "workbox-precache-v2-http://app.test/",
-        "google-fonts-cache",
-      ]),
-      delete: remove,
-    });
-
-    expect(remove).toHaveBeenCalledOnce();
-    expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
-  });
-
-  it("resolves safely when cache-key reads are rejected", async () => {
-    const remove = vi.fn();
-
-    await expect(clearStaleAppShellCaches({
-      keys: vi.fn().mockRejectedValue(new Error("cache keys unavailable")),
-      delete: remove,
-    })).resolves.toBeUndefined();
-
-    expect(remove).not.toHaveBeenCalled();
-  });
-
-  it("resolves safely when deleting app-shell caches is rejected without touching runtime caches", async () => {
-    const remove = vi.fn().mockRejectedValue(new Error("cache deletion unavailable"));
-
-    await expect(clearStaleAppShellCaches({
-      keys: vi.fn().mockResolvedValue([
-        "workbox-precache-v2-http://app.test/",
-        "google-fonts-cache",
-      ]),
-      delete: remove,
-    })).resolves.toBeUndefined();
-
-    expect(remove).toHaveBeenCalledOnce();
-    expect(remove).toHaveBeenCalledWith("workbox-precache-v2-http://app.test/");
-    expect(remove).not.toHaveBeenCalledWith("google-fonts-cache");
   });
 });
 

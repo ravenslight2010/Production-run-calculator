@@ -5,9 +5,7 @@ import { reportBrowserFailure } from "../browserIncidentCapture";
 import { WEB_BUILD_ID } from "../buildIdentity";
 import {
   claimStaleAssetRecoveryAttempt,
-  clearStaleAppShellCaches,
   recordStaleAssetRecoveryAttempt,
-  STALE_ASSET_RELOAD_FALLBACK_MS,
 } from "../pwaUpdateRecovery";
 import { emitFieldCheckSignal } from "../fieldChecks";
 import { checkPreHomeReloadSafety } from "../pwaStartupSafety";
@@ -18,7 +16,7 @@ import {
 
 type Props = {
   children: ReactNode;
-  onUpdateAndReload?: (canReload?: () => boolean) => Promise<void> | void;
+  onUpdateAndReload?: (canReload?: () => boolean, verifyBeforeReload?: () => Promise<boolean>) => Promise<void> | void;
   scheduleSafeIdleRecovery?: (
     safeAtFailure: boolean,
     recover: (canReload: () => boolean) => void | Promise<void>,
@@ -128,16 +126,12 @@ export default class ErrorBoundary extends Component<Props, State> {
 
     this.staleAssetRecoveryStarted = true;
     this.recordRecoveryAttempt();
-    const fallback = window.setTimeout(() => {
-      if (canReload()) window.location.reload();
-    }, STALE_ASSET_RELOAD_FALLBACK_MS);
     try {
-      await clearStaleAppShellCaches();
-      if (canReload()) await this.props.onUpdateAndReload(canReload);
+      if (canReload()) await this.props.onUpdateAndReload(canReload, checkPreHomeReloadSafety);
     } catch {
-      if (canReload()) window.location.reload();
-    } finally {
-      window.clearTimeout(fallback);
+      // The persistent update control owns retry and diagnostics. Never erase
+      // an offline shell or bypass its guard with an emergency reload.
+      emitFieldCheckSignal("stale-deployment-recovery", "incomplete");
     }
   }
 
@@ -166,7 +160,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             <p className="text-xs text-muted-foreground">
               {this.state.safeAtFailure
                 ? "Because reload was safe when the error occurred, the app will try one update after a minute without activity."
-                : "Automatic recovery is paused because the app could not confirm that reloading was safe. Use the button when you’re ready."}
+                : "Automatic recovery is paused because the app could not confirm that reloading was safe. Finish active work before updating."}
             </p>
           )}
           {this.state.diagnosticReference && (
@@ -182,27 +176,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               this.cancelSafeIdleRecovery?.();
               this.cancelSafeIdleRecovery = undefined;
               if (needsUpdate && this.props.onUpdateAndReload) {
-                if (claimStaleAssetRecoveryAttempt(WEB_BUILD_ID)) {
-                  if (staleDeploymentAsset) {
-                    this.recordRecoveryAttempt();
-                    // If the lazy chunk failed before the registration effect
-                    // settled, the normal worker handoff can wait indefinitely
-                    // in some browsers. Keep it as the primary path, but make
-                    // one network reload inevitable after clearing only the
-                    // stale precached shell.
-                    window.setTimeout(
-                      () => window.location.reload(),
-                      STALE_ASSET_RELOAD_FALLBACK_MS,
-                    );
-                    void clearStaleAppShellCaches().finally(() => {
-                      void this.props.onUpdateAndReload?.();
-                    });
-                  } else {
-                    void this.props.onUpdateAndReload();
-                  }
-                } else {
-                  window.location.reload();
-                }
+                void this.manualUpdate(staleDeploymentAsset);
               } else {
                 window.location.reload();
               }
@@ -215,6 +189,14 @@ export default class ErrorBoundary extends Component<Props, State> {
         </div>
       </main>
     );
+  }
+
+  private async manualUpdate(staleDeploymentAsset: boolean): Promise<void> {
+    // A manual click is permission to try, not permission to discard work.
+    const safeAtFailure = this.state.safeAtFailure;
+    const safeNow = safeAtFailure && await checkPreHomeReloadSafety();
+    if (staleDeploymentAsset && safeNow) this.recordRecoveryAttempt();
+    await this.props.onUpdateAndReload?.(() => safeAtFailure && safeNow, checkPreHomeReloadSafety);
   }
 }
 

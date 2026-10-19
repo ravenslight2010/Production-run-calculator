@@ -15,7 +15,7 @@
 import { fetchWithDiagnostics } from "./performanceDiagnostics";
 
 export const IMPORT_WAKE_HINT =
-  "The server didn't respond in time. If the app sat idle for a while it may just be waking up — wait a moment and try the import again.";
+  "The server didn't respond before the client timeout. If you were saving data, check whether it was saved before trying again. If the app sat idle, it may have been waking up.";
 
 export async function fetchWithTimeout(
   url: string,
@@ -24,10 +24,14 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
   const timeoutController = new AbortController();
   const callerSignal = init.signal;
+  let timedOut = false;
   const abort = () => timeoutController.abort(callerSignal?.reason);
   if (callerSignal?.aborted) abort();
   else callerSignal?.addEventListener("abort", abort, { once: true });
-  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort(new DOMException("Request timed out", "TimeoutError"));
+  }, timeoutMs);
   try {
     return await fetchWithDiagnostics(url, { ...init, signal: timeoutController.signal });
   } catch (err) {
@@ -35,7 +39,7 @@ export async function fetchWithTimeout(
     // from a different realm (worker, test env, some engines) where instanceof
     // fails even though the error IS a timeout/abort.
     const name = (err as { name?: unknown } | null)?.name;
-    if (name === "TimeoutError" || name === "AbortError") {
+    if (name === "TimeoutError" || (name === "AbortError" && timedOut)) {
       if (callerSignal?.aborted) throw err;
       throw new Error(IMPORT_WAKE_HINT);
     }

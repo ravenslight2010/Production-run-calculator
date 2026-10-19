@@ -2,6 +2,37 @@ const MAX_ENTRIES = 40;
 const SLOW_TRANSITION_MS = 250;
 const SLOW_LOAD_MS = 1500;
 const SLOW_CALCULATION_MS = 16;
+export const DEFAULT_READ_REQUEST_TIMEOUT_MS = 30_000;
+export const MAX_REQUEST_ELAPSED_MS = 10_000_000;
+
+export type ApiOperationCategory =
+  | "authentication"
+  | "diagnostics"
+  | "import"
+  | "inventory"
+  | "master_data"
+  | "sync"
+  | "other";
+
+export type ApiRequestOutcome =
+  | "http_server_error"
+  | "http_client_error"
+  | "authentication_rejected"
+  | "transport_failure"
+  | "offline_failure"
+  | "timeout"
+  | "cancelled";
+
+export type ApiFailureEvent = {
+  operationCategory: ApiOperationCategory;
+  requestOutcome: ApiRequestOutcome;
+  elapsedMs: number;
+  observedAt: string;
+  backgroundObserved: boolean;
+  connectivity: "online" | "offline" | "unknown";
+  httpStatus?: number;
+  correlationId?: string;
+};
 
 type ApiFailureInstrumentationPolicy = {
   instrumentDeliveryFailures: boolean;
@@ -30,6 +61,10 @@ export const DIAGNOSTIC_INGESTION_TRANSPORTS = {
     instrumentDeliveryFailures: false,
   },
 } as const satisfies Record<string, DiagnosticIngestionTransport>;
+
+type FetchTransport = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+let apiFetchTransport: FetchTransport | null = null;
+let installedApiFetchWrapper: typeof fetch | null = null;
 
 export type DiagnosticIngestionTransportName = keyof typeof DIAGNOSTIC_INGESTION_TRANSPORTS;
 export const IMPORT_PERFORMANCE_BUDGETS = {
@@ -71,6 +106,34 @@ function safePath(url: string): string {
   } catch {
     return url.split("?")[0]?.split("#")[0] || "/unknown";
   }
+}
+
+const SAFE_CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function operationCategory(url: string): ApiOperationCategory {
+  const path = safePath(url);
+  if (/^\/api\/(?:me|auth)(?:\/|$)/.test(path)) return "authentication";
+  if (/^\/api\/(?:incidents|field-checks)(?:\/|$)/.test(path)) return "diagnostics";
+  if (/^\/api\/(?:spec-import|premix-import|cheese-import|shipping-guide-import|import-operations)(?:\/|$)/.test(path)) return "import";
+  if (/^\/api\/(?:sync)(?:\/|$)/.test(path)) return "sync";
+  if (/^\/api\/(?:inventory|ingredients)(?:\/|$)/.test(path)) return "inventory";
+  if (/^\/api\/(?:mixes|cheese-recipes|dough-recipes|sauce-recipes|named-recipes)(?:\/|$)/.test(path)) return "master_data";
+  return "other";
+}
+
+function correlationIdFrom(response: Response): string | undefined {
+  const value = response.headers.get("x-correlation-id");
+  return value && SAFE_CORRELATION_ID.test(value) ? value : undefined;
+}
+
+function connectivity(): ApiFailureEvent["connectivity"] {
+  if (typeof navigator === "undefined" || typeof navigator.onLine !== "boolean") return "unknown";
+  return navigator.onLine ? "online" : "offline";
+}
+
+function emitApiFailure(detail: ApiFailureEvent): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<ApiFailureEvent>("app:api-failure", { detail }));
 }
 
 function remember(entry: PerformanceDiagnostic): void {
@@ -183,6 +246,7 @@ export function recordBrowserLoadTimings(): void {
  */
 export function installBrowserPerformanceDiagnostics(): void {
   if (typeof window === "undefined") return;
+  installApiRequestInstrumentation();
 
   const recordWhenLoaded = () => recordBrowserLoadTimings();
   if (document.readyState === "complete") {
@@ -245,35 +309,91 @@ export function getMemoryDiagnostics(): readonly MemoryDiagnostic[] {
  * logged or retained. This is the non-timeout counterpart to fetchWithTimeout.
  */
 async function fetchWithFailurePolicy(
-  url: string,
+  input: RequestInfo | URL,
   init: RequestInit | undefined,
   failurePolicy: ApiFailureInstrumentationPolicy,
+  transport?: FetchTransport,
 ): Promise<Response> {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const request = typeof Request !== "undefined" && input instanceof Request ? input : null;
   const startedAt = typeof performance === "undefined" ? null : performance.now();
-  const path = safePath(url);
-  try {
-    const response = await fetch(url, init);
+  const startedWallTime = Date.now();
+  const operation = operationCategory(url);
+  const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+  const callerSignal = init?.signal ?? request?.signal;
+  const mayBoundRead = failurePolicy.instrumentDeliveryFailures &&
+    (method === "GET" || method === "HEAD") && !callerSignal;
+  const timeoutController = mayBoundRead ? new AbortController() : null;
+  const requestInit = timeoutController
+    ? { ...init, signal: timeoutController.signal }
+    : init;
+  let hiddenObserved = typeof document !== "undefined" && document.visibilityState === "hidden";
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") hiddenObserved = true;
+  };
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityChange);
+  const timeoutId = timeoutController
+    ? setTimeout(() => timeoutController.abort(new DOMException("Request timed out", "TimeoutError")), DEFAULT_READ_REQUEST_TIMEOUT_MS)
+    : undefined;
+  const elapsedMs = () => Math.max(0, Math.min(MAX_REQUEST_ELAPSED_MS, Date.now() - startedWallTime));
+  const reportFailure = (
+    requestOutcome: ApiRequestOutcome,
+    fields: { httpStatus?: number; correlationId?: string } = {},
+  ) => {
+    const duration = elapsedMs();
+    emitApiFailure({
+      operationCategory: operation,
+      requestOutcome,
+      elapsedMs: duration,
+      observedAt: new Date().toISOString(),
+      backgroundObserved: hiddenObserved,
+      connectivity: connectivity(),
+      ...fields,
+    });
     if (startedAt !== null && typeof performance !== "undefined") {
-      recordPerformance(`api:${path}:${response.status}`, performance.now() - startedAt, "api");
+      recordPerformance(`api-request-failure:${operation}:${requestOutcome}`, duration, "api");
+    }
+  };
+  try {
+    const send = transport ?? apiFetchTransport ?? globalThis.fetch.bind(globalThis);
+    const response = await send(input, requestInit);
+    if (startedAt !== null && typeof performance !== "undefined") {
+      recordPerformance(`api:${operation}:${response.status}`, performance.now() - startedAt, "api");
+    }
+    if (failurePolicy.instrumentDeliveryFailures && !response.ok) {
+      const requestOutcome = response.status >= 500
+        ? "http_server_error"
+        : response.status === 401 || response.status === 403
+          ? "authentication_rejected"
+          : "http_client_error";
+      reportFailure(requestOutcome, {
+        httpStatus: response.status,
+        correlationId: correlationIdFrom(response),
+      });
     }
     return response;
   } catch (err) {
     // Diagnostic ingestion must not observe its own transport failures. Doing
     // so can feed an ingestion outage back into the same passive field-check
     // stream and amplify retries. Successful delivery remains measurable.
-    if (
-      failurePolicy.instrumentDeliveryFailures &&
-      startedAt !== null &&
-      typeof performance !== "undefined"
-    ) {
-      const name = (err as { name?: unknown } | null)?.name;
-      recordPerformance(
-        `api-failure:${path}:${name === "TimeoutError" || name === "AbortError" ? "timeout" : "network"}`,
-        performance.now() - startedAt,
-        "api",
-      );
+    if (failurePolicy.instrumentDeliveryFailures) {
+      const errorName = (err as { name?: unknown } | null)?.name;
+      const activeSignal = timeoutController?.signal ?? callerSignal;
+      const signalReasonName = activeSignal?.reason?.name;
+      const requestOutcome: ApiRequestOutcome =
+        errorName === "TimeoutError" || signalReasonName === "TimeoutError"
+          ? "timeout"
+          : errorName === "AbortError" || activeSignal?.aborted
+            ? "cancelled"
+            : connectivity() === "offline"
+              ? "offline_failure"
+              : "transport_failure";
+      reportFailure(requestOutcome);
     }
     throw err;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange);
   }
 }
 
@@ -290,6 +410,54 @@ export function fetchDiagnosticIngestion(
 ): Promise<Response> {
   const transport = DIAGNOSTIC_INGESTION_TRANSPORTS[transportName];
   return fetchWithFailurePolicy(transport.path, init, transport);
+}
+
+function sameOriginApiRequest(input: RequestInfo | URL): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const url = new URL(raw, window.location.origin);
+    return url.origin === window.location.origin && /^\/api(?:\/|$)/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isDiagnosticDelivery(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const request = typeof Request !== "undefined" && input instanceof Request ? input : null;
+  const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+  if (method !== "POST") return false;
+  try {
+    const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const path = new URL(raw, window.location.origin).pathname;
+    return path === "/api/incidents" ||
+      path === "/api/field-checks/observations" ||
+      path === "/api/field-checks/hardware-confirmations";
+  } catch {
+    return false;
+  }
+}
+
+/** Instrument same-origin API calls that still use the browser's raw fetch API. */
+export function installApiRequestInstrumentation(): () => void {
+  if (typeof window === "undefined" || installedApiFetchWrapper) return () => {};
+  const original = window.fetch.bind(window);
+  apiFetchTransport = original;
+  const wrapper: typeof fetch = (input, init) => {
+    if (!sameOriginApiRequest(input) || isDiagnosticDelivery(input, init)) {
+      return original(input, init);
+    }
+    return fetchWithFailurePolicy(input, init, { instrumentDeliveryFailures: true }, original);
+  };
+  installedApiFetchWrapper = wrapper;
+  window.fetch = wrapper;
+  return () => {
+    if (window.fetch === wrapper) window.fetch = original;
+    if (installedApiFetchWrapper === wrapper) {
+      installedApiFetchWrapper = null;
+      apiFetchTransport = null;
+    }
+  };
 }
 
 export const PERFORMANCE_BUDGETS = {

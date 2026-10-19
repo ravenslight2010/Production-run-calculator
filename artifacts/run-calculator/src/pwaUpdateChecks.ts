@@ -7,10 +7,7 @@
  */
 export const SERVICE_WORKER_UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
-type UpdateableServiceWorkerRegistration = Pick<
-  ServiceWorkerRegistration,
-  "update"
->;
+type UpdateableServiceWorkerRegistration = { update: () => Promise<unknown> };
 
 function isPageVisible() {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
@@ -19,11 +16,13 @@ function isPageVisible() {
 export function startServiceWorkerUpdateChecks(
   registration: UpdateableServiceWorkerRegistration,
   intervalMs = SERVICE_WORKER_UPDATE_CHECK_INTERVAL_MS,
+  checkIdentity?: () => void,
 ) {
   let stopped = false;
 
   const checkForUpdate = () => {
     if (stopped || !isPageVisible()) return;
+    checkIdentity?.();
 
     // A failed background check is non-disruptive: the existing worker and
     // staff's current work remain usable, and a later check can try again.

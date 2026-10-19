@@ -262,6 +262,47 @@ describe("POST /incidents — operational reporting without generated diagnosis"
     expect(ctx.errorStack).toContain("InventoryScreen");
   });
 
+  it("persists bounded API failure evidence separately from its incident reference", async () => {
+    const relatedRequestId = "018f3a8b-1b2c-4d3e-8f90-123456789abc";
+    const observedAt = new Date().toISOString();
+    const res = await req(OPERATOR, "POST", "/api/incidents", {
+      source: "auto_crash",
+      screen: "/",
+      appPlatform: "web",
+      appVersion: "app-build:identified",
+      errorMessage: "API 500",
+      diagnostics: {
+        action: "call_api",
+        outcome: "error",
+        connectivity: "online",
+        syncState: "unknown",
+        signalKind: "api_failure",
+        correlationId: relatedRequestId,
+        requestOperationCategory: "sync",
+        requestOutcome: "http_server_error",
+        requestElapsedMs: 4_023_360,
+        requestObservedAt: observedAt,
+        requestBackgroundInvolvement: "not_observed",
+        requestHttpStatus: 500,
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { incidentId: string; correlationId: string };
+    expect(body.correlationId).toBe(res.headers.get("x-correlation-id"));
+    expect(body.correlationId).not.toBe(relatedRequestId);
+    const [row] = await db.select().from(incidentsTable).where(eq(incidentsTable.id, body.incidentId));
+    expect(row.context).toMatchObject({
+      correlationId: body.correlationId,
+      relatedCorrelationId: relatedRequestId,
+      requestOperationCategory: "sync",
+      requestOutcome: "http_server_error",
+      requestElapsedMs: 4_023_360,
+      requestObservedAt: observedAt,
+      requestBackgroundInvolvement: "not_observed",
+      requestHttpStatus: 500,
+    });
+  });
+
   it("never persists token-shaped diagnostic references or raw screen/build payloads", async () => {
     const token = "eyJhbGciOiJIUzI1NiJ9.abcdefghijklmnop.secretpayload";
     const res = await req(OPERATOR, "POST", "/api/incidents", {

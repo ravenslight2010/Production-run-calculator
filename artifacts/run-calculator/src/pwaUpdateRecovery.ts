@@ -101,34 +101,16 @@ export function claimStaleAssetRecoveryAttempt(
   storage: SessionStorageLike | undefined =
     typeof sessionStorage === "undefined" ? undefined : sessionStorage,
 ): boolean {
-  if (!storage) return true;
+  if (!storage) return false;
   const key = `${STALE_ASSET_RECOVERY_PREFIX}${buildId}`;
   try {
     if (storage.getItem(key) === "1") return false;
     storage.setItem(key, "1");
     return true;
   } catch {
-    // Storage may be unavailable in privacy modes. The user-click-only update
-    // flow remains safer than refusing recovery altogether.
-    return true;
-  }
-}
-
-export async function clearStaleAppShellCaches(
-  cacheStorage: Pick<CacheStorage, "keys" | "delete"> | undefined =
-    typeof caches === "undefined" ? undefined : caches,
-): Promise<void> {
-  if (!cacheStorage) return;
-  try {
-    const keys = await cacheStorage.keys();
-    await Promise.all(
-      keys
-        .filter((key) => key.startsWith("workbox-precache"))
-        .map((key) => cacheStorage.delete(key)),
-    );
-  } catch {
-    // Cache cleanup is best-effort; the worker update and network reload still
-    // provide a recovery path when browser cache APIs are unavailable.
+    // Without a durable claim an automatic recovery could loop across pages.
+    // Explicit retries use the coordinator and do not need this claim.
+    return false;
   }
 }
 

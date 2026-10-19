@@ -298,6 +298,26 @@ describe("POST /api/mixes — perPizza DB round-trip", () => {
     expect(m.components[1]).toEqual({ ingredient: "Green Peppers", perPizza: 0.5 });
   });
 
+  it("persists per-batch pounds separately from per-pizza ounces across POST and GET", async () => {
+    const mix = specDerivedMix({
+      id: "mix-per-batch-round-trip",
+      components: [
+        { ingredient: "Test Spinach", perPizza: 0, perBatchLbs: 4.25 },
+        { ingredient: "Mozzarella", perPizza: 1.5, perBatchLbs: 12 },
+      ],
+    });
+    const posted = await postMixes([mix]);
+    expect(posted.status).toBe(200);
+    expect(posted.items[0]?.components).toEqual([
+      { ingredient: "Test Spinach", perPizza: 0, perBatchLbs: 4.25 },
+      { ingredient: "Mozzarella", perPizza: 1.5, perBatchLbs: 12 },
+    ]);
+
+    const reloaded = await getMixes();
+    expect(reloaded.status).toBe(200);
+    expect(reloaded.items[0]?.components).toEqual(posted.items[0]?.components);
+  });
+
   it("persists perPizza so a subsequent GET returns the same values (not zeroed)", async () => {
     // POST sets the values
     await postMixes([specDerivedMix()]);

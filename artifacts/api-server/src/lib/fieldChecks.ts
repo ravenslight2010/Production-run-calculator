@@ -175,6 +175,7 @@ const workflowCheckNames = new Set<FieldCheckName>([
 const productionRunSaveFailureCodes = new Set([1, 2, 3, 4]);
 const metricKey = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const observationId = /^[a-zA-Z0-9:_-]{8,160}$/;
+const reportedCorrelationMetricKey = "__reportedRequestCorrelationId";
 
 const observationSchema = z.object({
   observationId: z.string().regex(observationId),
@@ -196,23 +197,33 @@ const observationSchema = z.object({
     "iphone",
     "other-browser",
   ]),
+  reportedRequestCorrelationId: z.string().uuid().optional(),
   metrics: z.record(z.string(), z.number().finite().min(0).max(10_000_000)).default({}),
 }).superRefine((value, ctx) => {
   if (!catalogByName.has(value.checkName as FieldCheckName)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkName"], message: "Unsupported field check" });
   }
-  if (["sync-acknowledgment", "performance"].includes(value.checkName) && !["1", "2", "3"].includes(value.checkVersion)) {
+  if (["sync-acknowledgment", "performance"].includes(value.checkName) && !["1", "2", "3", "4"].includes(value.checkVersion)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["checkVersion"], message: "Unsupported diagnostic observation version" });
   }
   if (value.metrics && Object.keys(value.metrics).length > FIELD_CHECK_MAX_METRICS) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Too many metrics" });
+  }
+  if (value.reportedRequestCorrelationId &&
+      (value.checkName !== "performance" || value.checkVersion !== "4" ||
+        !Object.hasOwn(value.metrics, "outcomeCode"))) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reportedRequestCorrelationId"],
+      message: "Request correlation references are limited to structured performance failures",
+    });
   }
   for (const key of Object.keys(value.metrics ?? {})) {
     if (!metricKey.test(key)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics", key], message: "Invalid metric name" });
     }
   }
-  if (value.checkVersion === "3" && value.checkName === "sync-acknowledgment") {
+  if (["3", "4"].includes(value.checkVersion) && value.checkName === "sync-acknowledgment") {
     const keys = Object.keys(value.metrics);
     const valid = value.outcome === "failure"
       ? keys.length === 1 && Number.isInteger(value.metrics.failureCode) && [1, 2, 3].includes(value.metrics.failureCode!)
@@ -224,6 +235,50 @@ const observationSchema = z.object({
       Object.hasOwn(value.metrics, "durationMs") &&
       Number.isInteger(value.metrics.sourceCode) && [1, 2, 3, 4].includes(value.metrics.sourceCode!);
     if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected bounded durationMs and an approved performance source only" });
+  }
+  if (value.checkVersion === "4" && value.checkName === "performance") {
+    const metrics = value.metrics;
+    const keys = Object.keys(metrics);
+    const basicLoadEvidence = keys.length === 2 &&
+      Object.hasOwn(metrics, "durationMs") &&
+      Number.isInteger(metrics.sourceCode) && [1, 2].includes(metrics.sourceCode!);
+    const extendedRequestEvidence = (keys.length === 5 || keys.length === 6) &&
+      ["durationMs", "sourceCode", "outcomeCode", "operationCode", "backgroundCode"]
+        .every((key) => Object.hasOwn(metrics, key)) &&
+      keys.every((key) => [
+        "durationMs", "sourceCode", "outcomeCode", "operationCode", "backgroundCode", "httpStatusCode",
+      ].includes(key)) &&
+      Number.isInteger(metrics.sourceCode) && [3, 4, 5, 6].includes(metrics.sourceCode!) &&
+      Number.isInteger(metrics.outcomeCode) && [1, 2, 3, 4, 5, 6, 7].includes(metrics.outcomeCode!) &&
+      Number.isInteger(metrics.operationCode) && [1, 2, 3, 4, 5, 6, 7].includes(metrics.operationCode!) &&
+      Number.isInteger(metrics.backgroundCode) && [0, 1].includes(metrics.backgroundCode!);
+    const status = metrics.httpStatusCode;
+    const outcomeCode = metrics.outcomeCode;
+    const httpStatusValid = status === undefined ||
+      (Number.isInteger(status) && status >= 400 && status <= 599);
+    const outcomeStatusValid = outcomeCode === 1
+      ? typeof status === "number" && status >= 500
+      : outcomeCode === 2
+        ? status === 401 || status === 403
+        : outcomeCode === 3
+          ? typeof status === "number" && status >= 400 && status < 500 && status !== 401 && status !== 403
+          : status === undefined;
+    const sourceOutcomeValid = metrics.sourceCode === 3 ? outcomeCode === 6
+      : metrics.sourceCode === 4 ? outcomeCode === 4 || outcomeCode === 5
+        : metrics.sourceCode === 5 ? outcomeCode === 1 || outcomeCode === 2 || outcomeCode === 3
+          : metrics.sourceCode === 6 ? outcomeCode === 7
+            : false;
+    const outcomeValid = value.outcome === "incomplete"
+      ? outcomeCode === 7
+      : value.outcome === "failure" && outcomeCode !== 7;
+    if (!basicLoadEvidence && (!extendedRequestEvidence || !httpStatusValid ||
+        !outcomeStatusValid || !sourceOutcomeValid || !outcomeValid)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["metrics"],
+        message: "Expected bounded performance data and an approved request outcome, operation and lifecycle category",
+      });
+    }
   }
   if (value.checkName === "stale-deployment-recovery" && Object.keys(value.metrics).length !== 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Recovery evidence does not accept metrics" });
@@ -345,6 +400,7 @@ export type FieldCheckFailure = {
   appBuild: string;
   deviceCategory: string;
   metrics: FieldCheckMetrics;
+  reportedRequestCorrelationId?: string;
 };
 
 export type FieldCheckSummary = {
@@ -435,12 +491,20 @@ function isFresh(observedAt: Date | null, expiresHours: number | null, now: numb
 }
 
 function failureDto(row: FieldCheckObservation): FieldCheckFailure {
+  const storedMetrics = (row.metrics ?? {}) as Record<string, unknown>;
+  const reportedRequestCorrelationId = storedMetrics[reportedCorrelationMetricKey];
+  const metrics = Object.fromEntries(Object.entries(storedMetrics)
+    .filter(([key, value]) => key !== reportedCorrelationMetricKey &&
+      typeof value === "number" && Number.isFinite(value))) as FieldCheckMetrics;
   return {
     outcome: row.outcome as FieldCheckOutcome,
     observedAt: row.observedAt.toISOString(),
     appBuild: row.appBuild,
     deviceCategory: row.deviceCategory,
-    metrics: (row.metrics ?? {}) as FieldCheckMetrics,
+    metrics,
+    ...(typeof reportedRequestCorrelationId === "string" && z.string().uuid().safeParse(reportedRequestCorrelationId).success
+      ? { reportedRequestCorrelationId }
+      : {}),
   };
 }
 
@@ -466,7 +530,12 @@ export async function recordFieldCheckBatch(
           observedAt,
           appBuild: input.appBuild,
           deviceCategory: input.deviceCategory,
-          metrics: input.metrics,
+          metrics: {
+            ...input.metrics,
+            ...(input.reportedRequestCorrelationId
+              ? { [reportedCorrelationMetricKey]: input.reportedRequestCorrelationId }
+              : {}),
+          },
         })
         .onConflictDoNothing({
           target: [fieldCheckObservationsTable.scope, fieldCheckObservationsTable.observationId],
@@ -489,6 +558,9 @@ export async function recordFieldCheckBatch(
           appBuild: input.appBuild,
           deviceCategory: input.deviceCategory,
           metrics: input.metrics,
+          ...(input.reportedRequestCorrelationId
+            ? { reportedRequestCorrelationId: input.reportedRequestCorrelationId }
+            : {}),
         } : undefined,
         updatedAt: new Date(),
       };

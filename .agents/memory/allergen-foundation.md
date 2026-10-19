@@ -12,3 +12,11 @@ Do not use the footprint to block production, confirm cleaning, release QC holds
 **Why:** The first increment was intentionally limited to ingredient mapping and incomplete-safe run visibility; it must not imply QC release or replace established manual sequencing behavior.
 
 **How to apply:** When extending allergen tracking, preserve explicit review state and unknown coverage. Treat changes to run labels, sequencing, cleaning, or release gates as separate scope requiring approval.
+
+## Approved placement
+
+Keep the full derived ingredient footprint in QC rather than occupying the Run screen. The owner explicitly chose this over a collapsed Run footprint.
+
+**Why:** The expanded ingredient-review list obstructs the operational Run workflow on small screens; QC is the approved home for its detail.
+
+**How to apply:** Preserve existing manual run labels and warnings. Moving the footprint is not permission to change allergen interpretations, QC capabilities, or production gating.

@@ -27,6 +27,7 @@ import {
   buildPremixCandidates,
   suggestPremixRedirects,
   mergePremixIntoMixes,
+  coalescePremixMixesById,
   collectPremixFreezerPulls,
   collectPremixPrepItems,
   isPrepOnlyPremix,
@@ -93,10 +94,9 @@ export type PremixImportPrepared = {
    */
   freezerPulls: Record<string, PremixFreezerPull[]>;
   /**
-   * Per-batch-only "prep for the run" rows split OUT of the mixes (e.g. fresh
-   * spinach) — shown read-only in the review so the split is visible. These are
-   * NOT added as mix ingredients; ones with a pull note still flow to freezer
-   * pulls via `freezerPulls`.
+   * Per-batch-only "prep for the run" rows (e.g. fresh spinach), shown as a
+   * read-only reminder while their per-batch lbs remain on the corresponding
+   * mix components for export/import fidelity.
    */
   prepItems: PremixPrepItem[];
   /**
@@ -244,29 +244,21 @@ export async function preparePremixImport(
     }
   }
 
-  // Convert to the Mix model; drop any block that can't form a valid mix.
-  // Split the per-batch-only "prep for the run" rows OUT of each mix (operator's
-  // model: those are prep / pull-early, not per-pizza ingredients), and skip a
-  // block entirely when EVERY row is prep — it isn't a mix at all.
-  const seen = new Set<string>();
-  const mixes: Mix[] = [];
+  // Convert to the Mix model; retain per-batch-only rows as reference-only
+  // component quantities. They do not contribute to per-pizza math, and are
+  // also surfaced separately as prep reminders. Explicit prep mixes are valid
+  // even when they have no positive per-pizza row.
+  const convertedMixes: Mix[] = [];
   const sourceByMixId: Record<string, PremixSourceEvidence> = {};
   for (let i = 0; i < groundedMixes.length; i++) {
     const pm = groundedMixes[i]!;
-    if (isPrepOnlyPremix(pm)) continue;
-    const mix = premixToMix(pm, { perPizzaOnly: true });
+    if (isPrepOnlyPremix(pm) && pm.isPrep !== true) continue;
+    const mix = premixToMix(pm);
     if (!mix) continue;
-    if (pm.sourceEvidence) sourceByMixId[mix.id] = pm.sourceEvidence;
-    // De-dup within the import by deterministic id (re-importing the same block
-    // across sheets/files collapses to one).
-    if (seen.has(mix.id)) {
-      const idx = mixes.findIndex((m) => m.id === mix.id);
-      if (idx >= 0) mixes[idx] = mix;
-      continue;
-    }
-    seen.add(mix.id);
-    mixes.push(mix);
+    if (pm.sourceEvidence && !sourceByMixId[mix.id]) sourceByMixId[mix.id] = pm.sourceEvidence;
+    convertedMixes.push(mix);
   }
+  const mixes = coalescePremixMixesById(convertedMixes);
 
   const existingIds = new Set(existing.map((m) => m.id));
   const summary = summarizePremixImport(mixes, (id) => existingIds.has(id));

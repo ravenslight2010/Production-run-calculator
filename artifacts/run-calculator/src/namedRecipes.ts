@@ -51,9 +51,11 @@ function endpointFor(kind: NamedRecipeKind): string {
 
 export async function fetchNamedRecipes(
   kind: NamedRecipeKind,
+  options: { cache?: RequestCache } = {},
 ): Promise<NamedRecipe[]> {
   const res = await fetch(endpointFor(kind), {
     headers: { "x-client-id": inventoryClientId() },
+    ...(options.cache ? { cache: options.cache } : {}),
   });
   if (!res.ok) throw new Error(`List ${kind} recipes failed (${res.status})`);
   const data = (await res.json()) as { items: unknown };

@@ -703,6 +703,75 @@ describe("field-check evidence from two authenticated clients", () => {
     expect(recovered.checks.find((check: { name: string }) => check.name === "sync-acknowledgment"))
       .toMatchObject({ status: "healthy", actionable: false, failureCount: 3, recentFailures: expect.arrayContaining(sync.recentFailures) });
   });
+
+  it("retains v4 API outcomes and only client-reported opaque correlation references", async () => {
+    const correlationId = "018f3a8b-1b2c-4d3e-8f90-123456789abc";
+    const base = {
+      checkName: "performance",
+      checkVersion: "4",
+      outcome: "failure",
+      observedAt: new Date().toISOString(),
+      appBuild: "local",
+      deviceCategory: "mobile-chrome",
+      metrics: {
+        durationMs: 4_023_360,
+        sourceCode: 5,
+        outcomeCode: 1,
+        operationCode: 6,
+        backgroundCode: 1,
+        httpStatusCode: 500,
+      },
+    };
+    const response = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...base,
+        observationId: "v4-http-500-evidence",
+        reportedRequestCorrelationId: correlationId,
+      }],
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: 1, duplicate: 0 });
+
+    const noReference = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...base,
+        observationId: "v4-http-without-ref",
+        metrics: {
+          durationMs: 52,
+          sourceCode: 4,
+          outcomeCode: 4,
+          operationCode: 4,
+          backgroundCode: 0,
+        },
+      }],
+    });
+    expect(noReference.status).toBe(202);
+
+    const report = await (await request(MANAGER, "GET", "/api/field-checks")).json() as FieldChecksReport;
+    const failures = report.checks.find((check) => check.name === "performance")?.recentFailures ?? [];
+    expect(failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        reportedRequestCorrelationId: correlationId,
+        metrics: base.metrics,
+      }),
+      expect.objectContaining({
+        metrics: { durationMs: 52, sourceCode: 4, outcomeCode: 4, operationCode: 4, backgroundCode: 0 },
+      }),
+    ]));
+    expect(failures.find((failure) => failure.metrics.durationMs === 52))
+      .not.toHaveProperty("reportedRequestCorrelationId");
+
+    for (const invalid of [
+      { ...base, observationId: "v4-wrong-http-class", metrics: { ...base.metrics, httpStatusCode: 400 } },
+      { ...base, observationId: "v4-malformed-reference", reportedRequestCorrelationId: "private-record-id" },
+    ]) {
+      const rejected = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+        observations: [invalid],
+      });
+      expect(rejected.status).toBe(400);
+    }
+  });
+
   it("persists bounded workflow outcomes and exposes only their duration summary", async () => {
     const observation = {
       observationId: "browser-spec-import:spec-import-review-commit:1:success",

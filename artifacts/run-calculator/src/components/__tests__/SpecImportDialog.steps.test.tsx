@@ -21,7 +21,13 @@ vi.mock("@/storage", () => ({
   // Offer the die as an existing option so the step-2 die selector always renders
   // (even when a row's die is empty), letting the test read its value directly.
   existingDieTypesForImport: () => ["D1"],
-  specImportRecipeDisplayKind: (r: ParsedRecipe) => r.kind,
+  specImportRecipeDisplayKind: (r: ParsedRecipe, serverMixNames: string[] = []) => {
+    const name = (r.name ?? "").trim().toLowerCase();
+    if (r.kind === "cheese" && serverMixNames.some((mix) => mix.trim().toLowerCase() === name)) {
+      return "mix";
+    }
+    return r.kind;
+  },
 }));
 
 afterEach(() => cleanup());
@@ -68,6 +74,12 @@ function renderDialog(
   prepared: SpecImportPrepared,
   onConfirm: (p: ParsedSpecImport, learnedRenames: SpecImportAlias[]) => void = () => {},
   ai: { allowed?: boolean; retryAvailable?: boolean; onRetry?: () => void } = {},
+  existingRecipeNamesByKind: { dough: string[]; sauce: string[]; cheese: string[]; mix: string[] } = {
+    dough: [],
+    sauce: [],
+    cheese: [],
+    mix: [],
+  },
 ) {
   return render(
     <SpecImportDialog
@@ -80,13 +92,31 @@ function renderDialog(
       canUseAiTools={ai.allowed ?? false}
       aiRetryAvailable={ai.retryAvailable ?? false}
       onUseAiFallback={ai.onRetry ?? (() => {})}
-      existingRecipeNamesByKind={{ dough: [], sauce: [], cheese: [], mix: [] }}
+      existingRecipeNamesByKind={existingRecipeNamesByKind}
       onConfirm={onConfirm}
     />,
   );
 }
 
 describe("SpecImportDialog two-step wizard", () => {
+  it("shows a server-known one-row Mix in the Mix category during review", () => {
+    const name = "Bobo's Deluxe Meat Mix";
+    const prepared = makePrepared(
+      [{ brand: "Bobo's", flavor: "Deluxe", applicators: [], pepperonis: [] }],
+      [{ kind: "cheese", name, rows: [{ ingredient: "Red Onion", lbs: 1 }] }],
+    );
+    renderDialog(prepared, () => {}, {}, {
+      dough: [],
+      sauce: [],
+      cheese: [],
+      mix: [name],
+    });
+
+    fireEvent.click(screen.getByText("Next"));
+
+    expect((screen.getByTestId("spec-recipe-kind-rk0") as HTMLSelectElement).value).toBe("mix");
+  });
+
   it("shows unresolved guidance without offering AI to users who lack permission", () => {
     const prepared = makePrepared([]);
     prepared.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;

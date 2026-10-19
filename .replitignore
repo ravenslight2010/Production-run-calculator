@@ -7,3 +7,6 @@
 # Python tooling is development-only; do not send the workspace's
 # incomplete local environment to the deployment builder.
 .pythonlibs
+
+# Isolated browser evidence is not application source or publish input.
+artifacts/run-calculator/generated-artifacts

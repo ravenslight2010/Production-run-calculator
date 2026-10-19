@@ -1,34 +1,21 @@
 // @vitest-environment node
 //
-// End-to-end scripted check for: "Cheese/premix re-imports must not undo
-// customer renames" — exercises the FULL client import pipeline (real workbook
-// bytes → readWorkbookGrids → deterministic parse → grounding → link pass)
-// with only the network glue mocked to in-memory stores.
-//
-// Loop under test (mirrors the pool managers' rename control exactly):
-//   1. Import the real cheese / premix workbook from
-//      attached_assets/source-library, confirm-all into the pool.
-//   2. Rename a customer group the way renameBrandGroup does: rewrite the
-//      brand on every pool row (ids kept), learn the SAME kind:"brand" alias
-//      rows maybeLearnBrandRename persists (buildBrandRenameAliases).
-//   3. Re-import the SAME workbook and assert the old tab brand lands on the
-//      RENAMED group: candidates carry the new brand, the review pre-links
-//      them onto the renamed rows (cheese: linkTo; premix: redirect
-//      suggestion), and confirming does NOT resurrect the old brand group.
+// End-to-end checks for real source workbooks. The Cheese workbook exercises
+// successful customer rename/re-import. The retained premix source workbook
+// has conflicting same-key blocks, so its supported behavior is to fail closed
+// before any pool write rather than choosing one formula.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Mix } from "@workspace/mixes";
-import { renameMixesBrand } from "@workspace/mixes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { renameCheeseRecipesBrand } from "@workspace/cheese-recipes";
-import { redirectPremixCandidate, mergePremixIntoMixes } from "@workspace/premix-import";
 import { mergeCheeseRecipes } from "@workspace/cheese-import";
 import type { SpecImportAlias } from "@workspace/spec-import";
 
 // ── In-memory server stores (shared across mocks) ───────────────────────────
-const { aliasStore, mixPool, cheesePool, knownStore } = vi.hoisted(() => ({
+const { aliasStore, mixPool, cheesePool, knownStore, writeCounts } = vi.hoisted(() => ({
   aliasStore: { rows: [] as unknown[] },
   mixPool: { rows: [] as unknown[] },
   cheesePool: { rows: [] as unknown[] },
@@ -36,6 +23,7 @@ const { aliasStore, mixPool, cheesePool, knownStore } = vi.hoisted(() => ({
   // for brands the app knows about, so the harness seeds the workbook's real
   // customers here.
   knownStore: { brands: [] as string[] },
+  writeCounts: { mixes: 0, cheese: 0 },
 }));
 
 function aliasKey(a: SpecImportAlias): string {
@@ -64,6 +52,7 @@ vi.mock("./mixes", async (importOriginal) => {
     ...actual,
     fetchMixes: async () => [...(mixPool.rows as Mix[])],
     saveMixes: async (rows: Mix[]) => {
+      writeCounts.mixes += 1;
       mixPool.rows = rows;
       return rows;
     },
@@ -72,6 +61,7 @@ vi.mock("./mixes", async (importOriginal) => {
 vi.mock("./cheeseRecipes", () => ({
   fetchCheeseRecipes: async () => [...(cheesePool.rows as CheeseRecipe[])],
   saveCheeseRecipes: async (rows: CheeseRecipe[]) => {
+    writeCounts.cheese += 1;
     cheesePool.rows = rows;
     return rows;
   },
@@ -135,6 +125,8 @@ beforeEach(() => {
   mixPool.rows = [];
   cheesePool.rows = [];
   knownStore.brands = [];
+  writeCounts.mixes = 0;
+  writeCounts.cheese = 0;
 });
 
 describe("brand rename → real cheese workbook re-import lands on the renamed group", () => {
@@ -189,64 +181,18 @@ describe("brand rename → real cheese workbook re-import lands on the renamed g
   });
 });
 
-describe("brand rename → real premix workbook re-import lands on the renamed group", () => {
-  it("remaps the old tab brand, redirects onto renamed rows, and does not resurrect the old group", async () => {
-    // The premix brand guess only fires for known brands — seed the workbook's
-    // real customer the way profiles would in the app.
+describe("conflicting blocks in the real premix workbook", () => {
+  it("rejects the source before any pool write instead of choosing a same-key formula", async () => {
     knownStore.brands = ["Bobo's"];
+    const protectedRows = [{ id: "preserve-me", name: "Existing Mix" }] as unknown as Mix[];
+    mixPool.rows = protectedRows;
 
-    // 1. First import of the real workbook, confirm all.
-    const first = await preparePremixImport([premixBuf()]);
-    expect(first.mixes.length).toBeGreaterThan(10);
-    mixPool.rows = first.mixes;
-
-    const oldBrand = "Bobo's";
-    const newBrand = "Bobo Pizza Co";
-    const group = first.mixes.filter((m) => brandLc(m.brand) === brandLc(oldBrand));
-    expect(group.length).toBeGreaterThan(0);
-    const groupIds = group.map((m) => m.id);
-
-    // 2. Rename the group the way renameBrandGroup does (ids kept) + learn.
-    const changed = renameMixesBrand(mixPool.rows as Mix[], oldBrand, newBrand);
-    expect(changed.length).toBe(groupIds.length);
-    const changedById = new Map(changed.map((m) => [m.id, m]));
-    mixPool.rows = (mixPool.rows as Mix[]).map((m) => changedById.get(m.id) ?? m);
-    learnBrandRename(oldBrand, newBrand);
-    // The app's known list keeps BOTH names (pool rename does not edit
-    // profiles) — the alias must win over the exact old-brand match.
-    knownStore.brands = [oldBrand, newBrand];
-
-    // 3. Re-import the same workbook.
-    const second = await preparePremixImport([premixBuf()]);
-    const groupCands = second.candidates.filter(
-      (c) => brandLc(c.mix.brand) === brandLc(newBrand) || brandLc(c.mix.brand) === brandLc(oldBrand),
+    await expect(preparePremixImport([premixBuf()])).rejects.toThrow(
+      /Conflicting premix blocks for "Red Hot Chicken Mix"/,
     );
-    expect(groupCands.length).toBe(groupIds.length);
-    for (const c of groupCands) {
-      // The learned brand alias must remap every candidate to the new brand...
-      expect(c.mix.brand).toBe(newBrand);
-      // ...and each must land on its renamed pool row: either a clean exact-id
-      // update or a pre-applied redirect onto a row of the renamed group.
-      const exact = second.existingIds.includes(c.mix.id);
-      const redirect = second.redirectSuggestions[c.mix.id];
-      expect(exact || (redirect !== undefined && groupIds.includes(redirect))).toBe(true);
-    }
-
-    // 4. Confirm-all the way the dialog does: pre-applied redirects + merge.
-    const existsById = (id: string) => (mixPool.rows as Mix[]).some((m) => m.id === id);
-    const applied = second.candidates.map((c) => {
-      const to = second.redirectSuggestions[c.mix.id];
-      if (!to) return c.mix;
-      const t = (mixPool.rows as Mix[]).find((m) => m.id === to)!;
-      return redirectPremixCandidate(c, { id: t.id, name: t.name, brand: t.brand, flavor: t.flavor }, existsById).mix;
-    });
-    const merged = mergePremixIntoMixes(mixPool.rows as Mix[], applied);
-    // No resurrected old-brand group, no duplicated rows in the renamed group.
-    expect(merged.some((m) => brandLc(m.brand) === brandLc(oldBrand))).toBe(false);
-    const renamedGroup = merged.filter((m) => brandLc(m.brand) === brandLc(newBrand));
-    const keys = renamedGroup.map(
-      (m) => `${m.name.trim().toLowerCase()}\u0000${(m.flavor ?? "").trim().toLowerCase()}`,
-    );
-    expect(new Set(keys).size).toBe(keys.length);
+    expect(mixPool.rows).toEqual(protectedRows);
+    expect(writeCounts.mixes).toBe(0);
+    expect(writeCounts.cheese).toBe(0);
+    expect(aliasStore.rows).toEqual([]);
   });
 });

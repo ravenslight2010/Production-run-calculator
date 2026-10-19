@@ -11,6 +11,7 @@ const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("fetchWithTimeout", () => {
@@ -33,20 +34,25 @@ describe("fetchWithTimeout", () => {
     await expect(fetchWithTimeout("/api/x", {}, 5_000)).rejects.toThrow(IMPORT_WAKE_HINT);
   });
 
-  it("remaps an AbortError to the friendly wake-up message", async () => {
-    globalThis.fetch = vi.fn(async () => {
-      throw new DOMException("Aborted.", "AbortError");
-    }) as unknown as typeof fetch;
-    await expect(fetchWithTimeout("/api/x", {}, 5_000)).rejects.toThrow(IMPORT_WAKE_HINT);
+  it("remaps AbortError only when its own timeout fired", async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted.", "AbortError")));
+      })) as unknown as typeof fetch;
+    const request = fetchWithTimeout("/api/x", {}, 5_000);
+    const rejection = expect(request).rejects.toThrow(IMPORT_WAKE_HINT);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await rejection;
   });
 
-  it("actually times out a hung fetch via AbortSignal.timeout", async () => {
+  it("actually times out a hung fetch with an explicit timeout abort reason", async () => {
     globalThis.fetch = realFetch;
     // A fetch that never resolves on its own: point at a signal-respecting stub.
     globalThis.fetch = ((_url: RequestInfo | URL, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => {
-          reject(init.signal!.reason ?? new DOMException("Aborted.", "AbortError"));
+          reject(new DOMException("Aborted.", "AbortError"));
         });
       })) as unknown as typeof fetch;
     await expect(fetchWithTimeout("/api/hang", {}, 50)).rejects.toThrow(IMPORT_WAKE_HINT);
@@ -58,5 +64,17 @@ describe("fetchWithTimeout", () => {
       throw boom;
     }) as unknown as typeof fetch;
     await expect(fetchWithTimeout("/api/x", {}, 5_000)).rejects.toBe(boom);
+  });
+
+  it("preserves caller cancellation instead of describing it as a timeout", async () => {
+    const caller = new AbortController();
+    const failure = new DOMException("Caller stopped request", "AbortError");
+    globalThis.fetch = ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(failure));
+      })) as unknown as typeof fetch;
+    const request = fetchWithTimeout("/api/x", { signal: caller.signal }, 5_000);
+    caller.abort(failure);
+    await expect(request).rejects.toBe(failure);
   });
 });

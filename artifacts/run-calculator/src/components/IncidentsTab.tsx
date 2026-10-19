@@ -172,9 +172,34 @@ function IncidentRow({
               <code className="select-all">{ctx.correlationId ?? "Unavailable for older reports"}</code>
             </p>
             {ctx.relatedCorrelationId && (
-              <p className="mt-1"><span className="font-semibold text-foreground">Failed request:</span>{" "}
+              <p className="mt-1"><span className="font-semibold text-foreground">Related request reference (client-reported):</span>{" "}
                 <code className="select-all">{ctx.relatedCorrelationId}</code>
               </p>
+            )}
+            {ctx.requestOperationCategory && ctx.requestOutcome && (
+              <>
+                <p className="mt-1">
+                  <span className="font-semibold text-foreground">Request:</span>{" "}
+                  {ctx.requestOperationCategory} · {ctx.requestOutcome.replaceAll("_", " ")}
+                  {ctx.requestHttpStatus ? ` · HTTP ${ctx.requestHttpStatus}` : ""}
+                </p>
+                {ctx.requestObservedAt && (
+                  <p className="mt-1">
+                    Browser-observed at {new Date(ctx.requestObservedAt).toLocaleString()}
+                    {typeof ctx.requestElapsedMs === "number"
+                      ? ` · elapsed request lifetime ${ctx.requestElapsedMs === 10_000_000 ? "at least " : ""}${Math.round(ctx.requestElapsedMs)} ms`
+                      : ""}
+                  </p>
+                )}
+                <p className="mt-1">
+                  {ctx.requestBackgroundInvolvement === "observed"
+                    ? "A background/hidden transition was observed during the request."
+                    : ctx.requestBackgroundInvolvement === "not_observed"
+                      ? "No browser-hidden transition was observed; OS suspension is unknown."
+                      : "Background involvement is unknown."}
+                  {" "}Elapsed request lifetime is not server processing time.
+                </p>
+              </>
             )}
             <p className="mt-1">
               {ctx.action ?? "unknown action"} · {ctx.outcome ?? "unknown outcome"} · retry {ctx.retryCount ?? 0} ·
@@ -494,6 +519,12 @@ function FieldChecksPanel({
                     </p>
                     {fieldCheckDiagnosticLabel(check.name, failure.metrics) && (
                       <p className="mt-1 text-muted-foreground">{fieldCheckDiagnosticLabel(check.name, failure.metrics)}</p>
+                    )}
+                    {failure.reportedRequestCorrelationId && (
+                      <p className="mt-1 text-muted-foreground">
+                        Client-reported request reference:{" "}
+                        <code className="select-all">{failure.reportedRequestCorrelationId}</code>
+                      </p>
                     )}
                     {failure.appBuild === "local" && (
                       <p className="text-muted-foreground">Unidentified local build; not release verification evidence.</p>

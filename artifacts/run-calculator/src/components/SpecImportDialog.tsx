@@ -502,7 +502,7 @@ function buildRecipeItems(
     return exists ? { kind: targetKind, linkExisting: exists } : undefined;
   };
   const kept = prepared.parsed.recipes.map((r, i): RecipeItem => {
-    const kind = specImportRecipeDisplayKind(r);
+    const kind = specImportRecipeDisplayKind(r, existingByKind?.mix ?? []);
     const linkExisting = suggestLink(r.name ?? "", kind, r.brand ?? "");
     // Cross-family hint is only applied when no same-family link was remembered.
     const crossFamily = !linkExisting ? suggestCrossFamily(r.name ?? "", kind) : undefined;
@@ -551,7 +551,7 @@ function buildRecipeItems(
     brandTouched: false,
     flavorTouched: false,
     name: r.name ?? "",
-    kind: specImportRecipeDisplayKind(r),
+    kind: specImportRecipeDisplayKind(r, existingByKind?.mix ?? []),
     brand: r.brand ?? "",
     flavor: r.flavor ?? "",
     ...(r.confirmedRowsUnit ? { confirmedRowsUnit: r.confirmedRowsUnit } : {}),
@@ -1067,7 +1067,10 @@ export default function SpecImportDialog({
         // This is a SEPARATE alias kind that bypasses the isCrossFamilyMixCheesePair
         // guard on appType — the guard only applies to appType aliases (which
         // auto-apply to applicator slots) not to these explicit user-confirmed picks.
-        const parsedKind = specImportRecipeDisplayKind(r.baseOrig);
+        const parsedKind = specImportRecipeDisplayKind(
+          r.baseOrig,
+          existingRecipeNamesByKind.mix ?? [],
+        );
         if (parsedKind !== r.kind) {
           out.push({
             kind: "crossFamilyRouting",

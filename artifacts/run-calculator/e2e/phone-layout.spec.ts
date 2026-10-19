@@ -917,6 +917,136 @@ test.describe("phone layout smoke", () => {
     });
   }
 
+  test("expanded update details never cover Run or bottom tabs and QC owns the allergen footprint", async ({
+    page,
+    playwright,
+  }, testInfo) => {
+    const apiBase =
+      process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    const fixtures = await AuthorizedBrowserFixtures.create(
+      playwright,
+      apiBase,
+      getSignupCode(),
+    );
+    try {
+      // Keep the test active while it changes viewports. A waiting worker must
+      // not trigger an idle handoff in the middle of the layout assertions.
+      await page.addInitScript(() => {
+        document.documentElement.style.fontSize = "150%";
+        setInterval(() => window.dispatchEvent(new Event("mousedown")), 250);
+      });
+      const account = await fixtures.createAccount({
+        username: uniqueTestId("allergen-layout"),
+        password: "PhoneLayoutTest123!",
+        capabilities: ["manage-inventory", "record-qc", "manage-qc"],
+        onboardingSeen: true,
+      });
+      await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: account.token,
+        url: new URL(page.url()).origin,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.waitForLoadState("domcontentloaded");
+      await page.setViewportSize({ width: 320, height: 740 });
+
+      const updateDetailsButton = page.getByTestId("button-app-update-details");
+      await expect(updateDetailsButton).toBeVisible();
+      await updateDetailsButton.click();
+      await expect(page.getByTestId("app-update-details")).toBeVisible();
+
+      const responsiveViewports = [
+        { name: "320px phone portrait", width: 320, height: 740 },
+        { name: "phone landscape", width: 568, height: 320 },
+        { name: "tablet portrait", width: 768, height: 1024 },
+        { name: "tablet landscape", width: 1024, height: 768 },
+        { name: "desktop", width: 1280, height: 800 },
+      ] as const;
+
+      for (const viewport of responsiveViewports) {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await expect(page.getByTestId("app-update-control"), viewport.name).toBeVisible();
+        if (await updateDetailsButton.getAttribute("aria-expanded") !== "true") {
+          await updateDetailsButton.click();
+        }
+        await expect(page.getByTestId("app-update-details"), viewport.name).toBeVisible();
+
+        for (const tabName of PRIMARY_TABS) {
+          const tab = page.locator(`[data-testid="${tabName}"]`);
+          await expect(tab, `${viewport.name}: ${tabName}`).toBeVisible();
+          const hitAndOverlap = await page.evaluate((selector) => {
+            const update = document.querySelector('[data-testid="app-update-control"]');
+            const tabElement = document.querySelector(selector);
+            if (!update || !tabElement) return { hit: false, overlaps: true };
+            const updateRect = update.getBoundingClientRect();
+            const tabRect = tabElement.getBoundingClientRect();
+            const target = document.elementFromPoint(
+              tabRect.left + tabRect.width / 2,
+              tabRect.top + tabRect.height / 2,
+            );
+            return {
+              hit: target === tabElement || tabElement.contains(target),
+              overlaps: updateRect.left < tabRect.right
+                && updateRect.right > tabRect.left
+                && updateRect.top < tabRect.bottom
+                && updateRect.bottom > tabRect.top,
+              updateRect: {
+                top: updateRect.top,
+                bottom: updateRect.bottom,
+                height: updateRect.height,
+                maxHeight: getComputedStyle(update).maxHeight,
+              },
+              tabRect: {
+                top: tabRect.top,
+                bottom: tabRect.bottom,
+                height: tabRect.height,
+              },
+            };
+          }, `[data-testid="${tabName}"]`);
+          expect(hitAndOverlap.hit, `${viewport.name}: ${tabName} center must receive pointer input`).toBe(true);
+          expect(
+            hitAndOverlap.overlaps,
+            `${viewport.name}: update panel must not overlap ${tabName}; geometry=${JSON.stringify(hitAndOverlap)}`,
+          ).toBe(false);
+        }
+
+        await page.locator('[data-testid="tab-run"]').click();
+        await expect(page.locator('[data-testid="tab-run"]')).toHaveAttribute("data-state", "active");
+        await expect(page.getByTestId("button-start-run")).toBeVisible();
+        await expect(page.getByTestId("run-allergen-footprint")).toHaveCount(0);
+        if (viewport.name === "phone landscape") {
+          await page.screenshot({
+            path: testInfo.outputPath("run-phone-landscape.png"),
+          });
+        }
+        await page.locator('[data-testid="tab-warehouse"]').click();
+        await expect(page.locator('[data-testid="tab-warehouse"]')).toHaveAttribute("data-state", "active");
+      }
+
+      await page.setViewportSize({ width: 568, height: 320 });
+      if (await updateDetailsButton.getAttribute("aria-expanded") !== "true") {
+        await updateDetailsButton.click();
+      }
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: "QC workflows & history", exact: true }).click();
+      await expect(page.getByTestId("qc-run-allergen-footprint")).toBeVisible();
+      await expect(page.getByTestId("qc-allergen-run-id")).toHaveText(
+        `Run ${(await page.getByTestId("text-qc-run-id").textContent())?.trim()}`,
+      );
+      await page.getByTestId("qc-run-allergen-footprint").scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath("qc-phone-landscape.png"),
+      });
+    } finally {
+      await page.close();
+      await fixtures.cleanup();
+    }
+  });
+
   for (const viewport of [
     { width: 375, height: 812 },
     { width: 568, height: 320 },

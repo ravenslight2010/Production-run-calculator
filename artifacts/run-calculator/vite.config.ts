@@ -125,6 +125,24 @@ function workbookBoundaryManifest(): Plugin {
   };
 }
 
+function publishedBuildIdentity(buildId: string): Plugin {
+  const body = JSON.stringify({ buildId });
+  return {
+    name: "published-build-identity",
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "app-build.json", source: body });
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!(req.url ?? "").split("?")[0].endsWith("/app-build.json")) return next();
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Content-Type", "application/json");
+        res.end(body);
+      });
+    },
+  };
+}
+
 export default defineConfig(async ({ command }) => ({
   base: basePath,
   define: {
@@ -136,6 +154,7 @@ export default defineConfig(async ({ command }) => ({
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
     workbookBoundaryManifest(),
+    publishedBuildIdentity(resolveWebBuildId(command)),
     VitePWA({
       // The authored worker activates promptly but does not claim existing
       // pages, so an active run is never interrupted. AppUpdatePrompt still
