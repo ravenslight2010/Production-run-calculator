@@ -620,6 +620,11 @@ async function seedBreakSchedule(): Promise<{
 async function openSettings(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
+  // Wait for the dropdown to fully unmount before returning. Radix keeps the
+  // menu in the DOM through its close fade-out; an axe scan that lands during
+  // the fade computes opacity-blended colors and reports phantom dark-on-dark
+  // contrast violations (plus a region violation for the popper wrapper).
+  await expect(page.getByRole("menu")).toHaveCount(0);
   const heading = page.getByRole("heading", { name: "Manage Lists & Settings" });
   await expect(heading).toBeVisible();
   return heading;
