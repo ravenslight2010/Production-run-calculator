@@ -14,6 +14,24 @@ export type ApiOperationCategory =
   | "sync"
   | "other";
 
+export type ApiRequestRoute =
+  | "authentication"
+  | "sync_today_read"
+  | "sync_today_write"
+  | "sync_dated"
+  | "sync_auto_track_claim"
+  | "sync_manual_section"
+  | "sync_operational_intents"
+  | "sync_events"
+  | "sync_scheduled"
+  | "sync_other"
+  | "other";
+
+export type ApiRequestReasonCode =
+  | "SYNC_VALIDATION_FAILED"
+  | "SYNC_PAYLOAD_NOT_OBJECT"
+  | "SYNC_PAYLOAD_TOO_LARGE";
+
 export type ApiRequestOutcome =
   | "http_server_error"
   | "http_client_error"
@@ -25,12 +43,14 @@ export type ApiRequestOutcome =
 
 export type ApiFailureEvent = {
   operationCategory: ApiOperationCategory;
+  requestRoute: ApiRequestRoute;
   requestOutcome: ApiRequestOutcome;
   elapsedMs: number;
   observedAt: string;
   backgroundObserved: boolean;
   connectivity: "online" | "offline" | "unknown";
   httpStatus?: number;
+  reasonCode?: ApiRequestReasonCode;
   correlationId?: string;
 };
 
@@ -119,6 +139,66 @@ function operationCategory(url: string): ApiOperationCategory {
   if (/^\/api\/(?:inventory|ingredients)(?:\/|$)/.test(path)) return "inventory";
   if (/^\/api\/(?:mixes|cheese-recipes|dough-recipes|sauce-recipes|named-recipes)(?:\/|$)/.test(path)) return "master_data";
   return "other";
+}
+
+function requestRoute(url: string, method: string): ApiRequestRoute {
+  const path = safePath(url);
+  if (/^\/api\/(?:me|auth)(?:\/|$)/.test(path)) return "authentication";
+  if (path === "/api/sync/today") return method === "GET" ? "sync_today_read" : "sync_today_write";
+  if (/^\/api\/sync\/\d{4}-\d{2}-\d{2}$/.test(path)) return "sync_dated";
+  if (path === "/api/sync/auto-track/claim") return "sync_auto_track_claim";
+  if (path === "/api/sync/manual-section") return "sync_manual_section";
+  if (path === "/api/sync/operational-intents") return "sync_operational_intents";
+  if (path === "/api/sync/events") return "sync_events";
+  if (path === "/api/sync/scheduled") return "sync_scheduled";
+  if (path.startsWith("/api/sync/")) return "sync_other";
+  return "other";
+}
+
+async function responseReasonCode(
+  response: Response,
+  route: ApiRequestRoute,
+): Promise<ApiRequestReasonCode | undefined> {
+  if (!route.startsWith("sync_") || response.status < 400) return undefined;
+  const genericValidationCode = response.status === 400
+    ? "SYNC_VALIDATION_FAILED"
+    : undefined;
+  if (!response.headers.get("content-type")?.includes("application/json")) {
+    return genericValidationCode;
+  }
+  const reader = response.clone().body?.getReader();
+  if (!reader) return genericValidationCode;
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > 2048) {
+        await reader.cancel();
+        return genericValidationCode;
+      }
+      chunks.push(value);
+    }
+    const text = new TextDecoder().decode(
+      chunks.reduce((all, chunk) => {
+        const joined = new Uint8Array(all.length + chunk.length);
+        joined.set(all);
+        joined.set(chunk, all.length);
+        return joined;
+      }, new Uint8Array()),
+    );
+    const reasonCode = (JSON.parse(text) as { reasonCode?: unknown } | null)?.reasonCode;
+    return reasonCode === "SYNC_PAYLOAD_NOT_OBJECT" || reasonCode === "SYNC_PAYLOAD_TOO_LARGE"
+      ? reasonCode
+      : genericValidationCode;
+  } catch {
+    // Diagnostics must never change whether the caller receives its response.
+    return genericValidationCode;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function correlationIdFrom(response: Response): string | undefined {
@@ -305,8 +385,9 @@ export function getMemoryDiagnostics(): readonly MemoryDiagnostic[] {
 
 /**
  * Fetch an API request while recording only bounded, privacy-safe diagnostics.
- * The URL is reduced to its pathname and neither request nor response data is
- * logged or retained. This is the non-timeout counterpart to fetchWithTimeout.
+ * Raw paths, request/response bodies, and query values are never retained; only
+ * a fixed route family and an allowlisted response reason code may be recorded.
+ * This is the non-timeout counterpart to fetchWithTimeout.
  */
 async function fetchWithFailurePolicy(
   input: RequestInfo | URL,
@@ -320,6 +401,7 @@ async function fetchWithFailurePolicy(
   const startedWallTime = Date.now();
   const operation = operationCategory(url);
   const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+  const route = requestRoute(url, method);
   const callerSignal = init?.signal ?? request?.signal;
   const mayBoundRead = failurePolicy.instrumentDeliveryFailures &&
     (method === "GET" || method === "HEAD") && !callerSignal;
@@ -338,17 +420,20 @@ async function fetchWithFailurePolicy(
   const elapsedMs = () => Math.max(0, Math.min(MAX_REQUEST_ELAPSED_MS, Date.now() - startedWallTime));
   const reportFailure = (
     requestOutcome: ApiRequestOutcome,
-    fields: { httpStatus?: number; correlationId?: string } = {},
+    fields: { httpStatus?: number; reasonCode?: ApiRequestReasonCode; correlationId?: string } = {},
   ) => {
     const duration = elapsedMs();
     emitApiFailure({
       operationCategory: operation,
+      requestRoute: route,
       requestOutcome,
       elapsedMs: duration,
       observedAt: new Date().toISOString(),
       backgroundObserved: hiddenObserved,
       connectivity: connectivity(),
-      ...fields,
+      ...(fields.httpStatus === undefined ? {} : { httpStatus: fields.httpStatus }),
+      ...(fields.reasonCode === undefined ? {} : { reasonCode: fields.reasonCode }),
+      ...(fields.correlationId === undefined ? {} : { correlationId: fields.correlationId }),
     });
     if (startedAt !== null && typeof performance !== "undefined") {
       recordPerformance(`api-request-failure:${operation}:${requestOutcome}`, duration, "api");
@@ -361,6 +446,7 @@ async function fetchWithFailurePolicy(
       recordPerformance(`api:${operation}:${response.status}`, performance.now() - startedAt, "api");
     }
     if (failurePolicy.instrumentDeliveryFailures && !response.ok) {
+      const reasonCode = await responseReasonCode(response, route);
       const requestOutcome = response.status >= 500
         ? "http_server_error"
         : response.status === 401 || response.status === 403
@@ -368,6 +454,7 @@ async function fetchWithFailurePolicy(
           : "http_client_error";
       reportFailure(requestOutcome, {
         httpStatus: response.status,
+        reasonCode,
         correlationId: correlationIdFrom(response),
       });
     }

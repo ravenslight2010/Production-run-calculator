@@ -46,12 +46,14 @@ describe("browser incident capture", () => {
     window.dispatchEvent(new CustomEvent("app:api-failure", {
       detail: {
         operationCategory: "sync",
+        requestRoute: "sync_today_write",
         requestOutcome: "http_server_error",
         elapsedMs: 12,
         observedAt: "2026-10-16T22:48:00.000Z",
         backgroundObserved: false,
         connectivity: "online",
         httpStatus: 503,
+        reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
       },
     }));
     expect(reportIncident).toHaveBeenCalledWith(expect.objectContaining({
@@ -71,12 +73,14 @@ describe("browser incident capture", () => {
     window.dispatchEvent(new CustomEvent("app:api-failure", {
       detail: {
         operationCategory: "sync",
+        requestRoute: "sync_today_write",
         requestOutcome: "http_server_error",
         elapsedMs: 4_023_360,
         observedAt: "2026-10-16T22:48:00.000Z",
         backgroundObserved: true,
         connectivity: "online",
         httpStatus: 500,
+        reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
         correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
       },
     }));
@@ -84,7 +88,9 @@ describe("browser incident capture", () => {
       errorMessage: "API 500",
       diagnostics: expect.objectContaining({
         requestOperationCategory: "sync",
+        requestRoute: "sync_today_write",
         requestOutcome: "http_server_error",
+        requestReasonCode: "SYNC_PAYLOAD_TOO_LARGE",
         requestElapsedMs: 4_023_360,
         requestObservedAt: "2026-10-16T22:48:00.000Z",
         requestBackgroundInvolvement: "observed",

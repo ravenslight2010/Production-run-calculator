@@ -1638,6 +1638,49 @@ describe("server auto-track tick recovery under database pressure", () => {
     }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, scope)));
   }
 
+  it("keeps packaging progress committed while an unconfigured Sauce barrel remains retryable", async () => {
+    await seedTickRun();
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = before.data as any;
+    data.dayState.runs[0] = {
+      ...data.dayState.runs[0],
+      startedAt: TICK_NOW - 30 * 60_000,
+      metaUpdatedAt: TICK_NOW - 30 * 60_000,
+    };
+    data.runValues[TICK_RUN] = {
+      ...data.runValues[TICK_RUN],
+      freezerTime: 0,
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 2,
+      frontlineRecipeName: "Unmapped Sauce",
+      frontlineRecipe: [],
+      sauceBarrelLbs: 10,
+    };
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 24, scope: "live", date: TICK_DATE,
+    });
+
+    expect(result.outcomes.sauceConfigurationBlocked).toBeGreaterThan(0);
+    expect(result.accepted).toBeGreaterThan(0);
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const finalData = after.data as any;
+    expect(finalData.runValues[TICK_RUN].sauceBarrelsMade).toBe(0);
+    expect(finalData.runValues[TICK_RUN].skidsCompleted + finalData.runValues[TICK_RUN].casesOnCurrentSkid)
+      .toBeGreaterThan(0);
+    const tickLedger = (await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track");
+    expect(tickLedger.some((entry) => (entry.actionData as any)?.channel === "sauce-barrel")).toBe(false);
+    expect(tickLedger.some((entry) => (entry.actionData as any)?.channel === "case")).toBe(true);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+  });
+
   async function removeTickFailureTrigger() {
     await db.execute(sql`
       DROP TRIGGER IF EXISTS reject_auto_track_tick_trigger ON daily_sync;

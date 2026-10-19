@@ -7338,6 +7338,26 @@ export const IncidentContextRequestOperationCategory = {
   other: 'other',
 } as const;
 
+/**
+ * Fixed route-family label; never a raw URL or path parameter.
+ */
+export type IncidentContextRequestRoute = typeof IncidentContextRequestRoute[keyof typeof IncidentContextRequestRoute];
+
+
+export const IncidentContextRequestRoute = {
+  authentication: 'authentication',
+  sync_today_read: 'sync_today_read',
+  sync_today_write: 'sync_today_write',
+  sync_dated: 'sync_dated',
+  sync_auto_track_claim: 'sync_auto_track_claim',
+  sync_manual_section: 'sync_manual_section',
+  sync_operational_intents: 'sync_operational_intents',
+  sync_events: 'sync_events',
+  sync_scheduled: 'sync_scheduled',
+  sync_other: 'sync_other',
+  other: 'other',
+} as const;
+
 export type IncidentContextRequestOutcome = typeof IncidentContextRequestOutcome[keyof typeof IncidentContextRequestOutcome];
 
 
@@ -7349,6 +7369,18 @@ export const IncidentContextRequestOutcome = {
   offline_failure: 'offline_failure',
   timeout: 'timeout',
   cancelled: 'cancelled',
+} as const;
+
+/**
+ * Allowlisted server validation code; no response message or body is retained.
+ */
+export type IncidentContextRequestReasonCode = typeof IncidentContextRequestReasonCode[keyof typeof IncidentContextRequestReasonCode];
+
+
+export const IncidentContextRequestReasonCode = {
+  SYNC_VALIDATION_FAILED: 'SYNC_VALIDATION_FAILED',
+  SYNC_PAYLOAD_NOT_OBJECT: 'SYNC_PAYLOAD_NOT_OBJECT',
+  SYNC_PAYLOAD_TOO_LARGE: 'SYNC_PAYLOAD_TOO_LARGE',
 } as const;
 
 export type IncidentContextRequestBackgroundInvolvement = typeof IncidentContextRequestBackgroundInvolvement[keyof typeof IncidentContextRequestBackgroundInvolvement];
@@ -7380,7 +7412,11 @@ export interface IncidentContext {
   syncState?: string;
   signalKind?: string;
   requestOperationCategory?: IncidentContextRequestOperationCategory;
+  /** Fixed route-family label; never a raw URL or path parameter. */
+  requestRoute?: IncidentContextRequestRoute;
   requestOutcome?: IncidentContextRequestOutcome;
+  /** Allowlisted server validation code; no response message or body is retained. */
+  requestReasonCode?: IncidentContextRequestReasonCode;
   /**
      * @minimum 0
      * @maximum 10000000
@@ -7467,6 +7503,26 @@ export const ReportIncidentInputDiagnosticsRequestOperationCategory = {
   other: 'other',
 } as const;
 
+/**
+ * Fixed route-family label; never a raw URL or path parameter.
+ */
+export type ReportIncidentInputDiagnosticsRequestRoute = typeof ReportIncidentInputDiagnosticsRequestRoute[keyof typeof ReportIncidentInputDiagnosticsRequestRoute];
+
+
+export const ReportIncidentInputDiagnosticsRequestRoute = {
+  authentication: 'authentication',
+  sync_today_read: 'sync_today_read',
+  sync_today_write: 'sync_today_write',
+  sync_dated: 'sync_dated',
+  sync_auto_track_claim: 'sync_auto_track_claim',
+  sync_manual_section: 'sync_manual_section',
+  sync_operational_intents: 'sync_operational_intents',
+  sync_events: 'sync_events',
+  sync_scheduled: 'sync_scheduled',
+  sync_other: 'sync_other',
+  other: 'other',
+} as const;
+
 export type ReportIncidentInputDiagnosticsRequestOutcome = typeof ReportIncidentInputDiagnosticsRequestOutcome[keyof typeof ReportIncidentInputDiagnosticsRequestOutcome];
 
 
@@ -7478,6 +7534,18 @@ export const ReportIncidentInputDiagnosticsRequestOutcome = {
   offline_failure: 'offline_failure',
   timeout: 'timeout',
   cancelled: 'cancelled',
+} as const;
+
+/**
+ * Allowlisted server validation code; no response message or body is retained.
+ */
+export type ReportIncidentInputDiagnosticsRequestReasonCode = typeof ReportIncidentInputDiagnosticsRequestReasonCode[keyof typeof ReportIncidentInputDiagnosticsRequestReasonCode];
+
+
+export const ReportIncidentInputDiagnosticsRequestReasonCode = {
+  SYNC_VALIDATION_FAILED: 'SYNC_VALIDATION_FAILED',
+  SYNC_PAYLOAD_NOT_OBJECT: 'SYNC_PAYLOAD_NOT_OBJECT',
+  SYNC_PAYLOAD_TOO_LARGE: 'SYNC_PAYLOAD_TOO_LARGE',
 } as const;
 
 export type ReportIncidentInputDiagnosticsRequestBackgroundInvolvement = typeof ReportIncidentInputDiagnosticsRequestBackgroundInvolvement[keyof typeof ReportIncidentInputDiagnosticsRequestBackgroundInvolvement];
@@ -7503,7 +7571,11 @@ export type ReportIncidentInputDiagnostics = {
   /** @maxLength 128 */
   correlationId?: string;
   requestOperationCategory?: ReportIncidentInputDiagnosticsRequestOperationCategory;
+  /** Fixed route-family label; never a raw URL or path parameter. */
+  requestRoute?: ReportIncidentInputDiagnosticsRequestRoute;
   requestOutcome?: ReportIncidentInputDiagnosticsRequestOutcome;
+  /** Allowlisted server validation code; no response message or body is retained. */
+  requestReasonCode?: ReportIncidentInputDiagnosticsRequestReasonCode;
   /**
      * @minimum 0
      * @maximum 10000000

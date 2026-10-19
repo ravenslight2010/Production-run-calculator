@@ -182,7 +182,14 @@ function IncidentRow({
                   <span className="font-semibold text-foreground">Request:</span>{" "}
                   {ctx.requestOperationCategory} · {ctx.requestOutcome.replaceAll("_", " ")}
                   {ctx.requestHttpStatus ? ` · HTTP ${ctx.requestHttpStatus}` : ""}
+                  {ctx.requestRoute ? ` · ${ctx.requestRoute.replaceAll("_", " ")}` : ""}
                 </p>
+                {ctx.requestReasonCode && (
+                  <p className="mt-1">
+                    <span className="font-semibold text-foreground">Reason code:</span>{" "}
+                    <code>{ctx.requestReasonCode}</code>
+                  </p>
+                )}
                 {ctx.requestObservedAt && (
                   <p className="mt-1">
                     Browser-observed at {new Date(ctx.requestObservedAt).toLocaleString()}

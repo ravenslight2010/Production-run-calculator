@@ -2873,9 +2873,29 @@ const SERVER_TICK_DEFAULT_MS = 15_000;
 const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
 const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
+const sauceConfigurationWarningAt = new Map<string, number>();
+const SAUCE_CONFIGURATION_WARNING_INTERVAL_MS = 5 * 60_000;
+
+function warnSauceConfigurationBlocked(scope: Scope, date: string, runId: string, nowMs: number): void {
+  const key = `${scope}:${date}:${createHash("sha256").update(runId).digest("hex").slice(0, 12)}`;
+  const lastWarningAt = sauceConfigurationWarningAt.get(key) ?? 0;
+  if (nowMs - lastWarningAt < SAUCE_CONFIGURATION_WARNING_INTERVAL_MS) return;
+  sauceConfigurationWarningAt.set(key, nowMs);
+  if (sauceConfigurationWarningAt.size > 500) {
+    const oldestKey = sauceConfigurationWarningAt.keys().next().value;
+    if (oldestKey) sauceConfigurationWarningAt.delete(oldestKey);
+  }
+  logger.warn({
+    event: "server_auto_track_sauce_configuration_blocked",
+    scope,
+    date,
+    runIdHash: key.slice(key.lastIndexOf(":") + 1),
+  }, "Sauce auto-track is waiting for a valid inventory mapping; unrelated production counts continue");
+}
 
 export function clearServerTickDateBackoffsForTests(): void {
   serverTickDateBackoffs.clear();
+  sauceConfigurationWarningAt.clear();
 }
 
 function serverTickBackoffKey(scope: Scope, date: string): string {
@@ -2985,6 +3005,28 @@ export async function runAutoTrackServerTicks(opts: {
             continue;
           }
           const applied = applyAutoTrackClaim(data, claim, nowMs);
+          if (applied.outcome === "accepted" && applied.inventoryConsumption?.kind === "sauce-barrel") {
+            const consumption = applied.inventoryConsumption;
+            try {
+              await consumeSauceBarrelInTransaction(
+                tx,
+                consumption.runId,
+                consumption.barrelIndex,
+                consumption.itemKey,
+                consumption.qty,
+                true,
+                consumption.eventId,
+              );
+            } catch (error) {
+              if (!(error instanceof SauceInventoryConfigurationError)) throw error;
+              outcomesHere.sauceConfigurationBlocked = (outcomesHere.sauceConfigurationBlocked ?? 0) + 1;
+              warnSauceConfigurationBlocked(scope, row.date, claim.runId, nowMs);
+              // Do not persist the sauce claim or its coordination advance. It
+              // remains due for retry after setup is repaired, while later
+              // independent case/applicator claims can still commit.
+              continue;
+            }
+          }
           outcomesHere[applied.outcome] = (outcomesHere[applied.outcome] ?? 0) + 1;
           canonicalRevision++;
           await tx.insert(operationalIntentLedgerTable).values({
@@ -3014,10 +3056,6 @@ export async function runAutoTrackServerTicks(opts: {
             serverReceivedAt: new Date(serverTime),
           });
           if (applied.outcome !== "accepted") continue;
-          if (applied.inventoryConsumption?.kind === "sauce-barrel") {
-            const consumption = applied.inventoryConsumption;
-            await consumeSauceBarrelInTransaction(tx, consumption.runId, consumption.barrelIndex, consumption.itemKey, consumption.qty, true, consumption.eventId);
-          }
           data = applied.data;
           if (/^app[1-4]-batch$/.test(claim.channel)) {
             const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));

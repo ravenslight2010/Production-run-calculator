@@ -1802,6 +1802,22 @@ export async function consumeSauceBarrelInTransaction(
   const claimId = eventId
     ? `${runId}:sauce-event:${eventId}`
     : `${runId}:sauce-barrel:${barrelIndex}`;
+  const [existingClaim] = await tx
+    .select({ runId: inventoryConsumedRunsTable.runId })
+    .from(inventoryConsumedRunsTable)
+    .where(and(
+      eq(inventoryConsumedRunsTable.runId, claimId),
+      eq(inventoryConsumedRunsTable.scope, scope),
+    ))
+    .limit(1);
+  if (existingClaim) return { applied: false, consumed: 0 };
+
+  const [item] = await tx
+    .select()
+    .from(inventoryItemsTable)
+    .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, scope)));
+  if (!item && requireItem) throw new SauceInventoryConfigurationError();
+
   const [claim] = await tx
     .insert(inventoryConsumedRunsTable)
     .values({ runId: claimId, scope })
@@ -1811,12 +1827,7 @@ export async function consumeSauceBarrelInTransaction(
     .returning();
   if (!claim) return { applied: false, consumed: 0 };
 
-  const [item] = await tx
-    .select()
-    .from(inventoryItemsTable)
-    .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, scope)));
   if (!item) {
-    if (requireItem) throw new SauceInventoryConfigurationError();
     return { applied: true, consumed: 0 };
   }
 

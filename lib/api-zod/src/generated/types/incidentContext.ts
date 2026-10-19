@@ -8,6 +8,8 @@
 import type { IncidentContextRequestBackgroundInvolvement } from './incidentContextRequestBackgroundInvolvement';
 import type { IncidentContextRequestOperationCategory } from './incidentContextRequestOperationCategory';
 import type { IncidentContextRequestOutcome } from './incidentContextRequestOutcome';
+import type { IncidentContextRequestReasonCode } from './incidentContextRequestReasonCode';
+import type { IncidentContextRequestRoute } from './incidentContextRequestRoute';
 
 /**
  * Captured details about a reported issue or a crash
@@ -30,7 +32,11 @@ export interface IncidentContext {
   syncState?: string;
   signalKind?: string;
   requestOperationCategory?: IncidentContextRequestOperationCategory;
+  /** Fixed route-family label; never a raw URL or path parameter. */
+  requestRoute?: IncidentContextRequestRoute;
   requestOutcome?: IncidentContextRequestOutcome;
+  /** Allowlisted server validation code; no response message or body is retained. */
+  requestReasonCode?: IncidentContextRequestReasonCode;
   /**
      * @minimum 0
      * @maximum 10000000

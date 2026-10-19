@@ -62,7 +62,9 @@ export function safeIncidentLogMetadata(data: ReportInput, context: IncidentCont
     screenClass,
     buildProvided: Boolean(data.appVersion),
     ...(context.requestOperationCategory ? { requestOperationCategory: context.requestOperationCategory } : {}),
+    ...(context.requestRoute ? { requestRoute: context.requestRoute } : {}),
     ...(context.requestOutcome ? { requestOutcome: context.requestOutcome } : {}),
+    ...(context.requestReasonCode ? { requestReasonCode: context.requestReasonCode } : {}),
     ...(context.requestHttpStatus ? { requestHttpStatus: context.requestHttpStatus } : {}),
   };
 }
@@ -129,8 +131,21 @@ export function buildIncidentContext(data: ReportInput): IncidentContext {
   if (diagnostics?.requestOperationCategory && operationCategories.includes(diagnostics.requestOperationCategory)) {
     ctx.requestOperationCategory = diagnostics.requestOperationCategory;
   }
+  const requestRoutes = [
+    "authentication", "sync_today_read", "sync_today_write", "sync_dated",
+    "sync_auto_track_claim", "sync_manual_section", "sync_operational_intents",
+    "sync_events", "sync_scheduled", "sync_other", "other",
+  ] as const;
+  if (diagnostics?.requestRoute && requestRoutes.includes(diagnostics.requestRoute)) {
+    ctx.requestRoute = diagnostics.requestRoute;
+  }
   if (diagnostics?.requestOutcome && requestOutcomes.includes(diagnostics.requestOutcome)) {
     ctx.requestOutcome = diagnostics.requestOutcome;
+  }
+  if (diagnostics?.requestReasonCode === "SYNC_VALIDATION_FAILED" ||
+      diagnostics?.requestReasonCode === "SYNC_PAYLOAD_NOT_OBJECT" ||
+      diagnostics?.requestReasonCode === "SYNC_PAYLOAD_TOO_LARGE") {
+    ctx.requestReasonCode = diagnostics.requestReasonCode;
   }
   if (typeof diagnostics?.requestElapsedMs === "number" && Number.isFinite(diagnostics.requestElapsedMs)) {
     ctx.requestElapsedMs = Math.round(Math.min(10_000_000, Math.max(0, diagnostics.requestElapsedMs)) * 100) / 100;

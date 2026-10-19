@@ -128,12 +128,58 @@ describe("calculator performance diagnostics", () => {
     const detail = listener.mock.calls[0]?.[0] && (listener.mock.calls[0][0] as CustomEvent).detail;
     expect(detail).toMatchObject({
       operationCategory: "sync",
+      requestRoute: "sync_other",
       requestOutcome: "http_server_error",
       httpStatus: 500,
       correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
     });
     expect(detail).toHaveProperty("observedAt");
     expect(JSON.stringify(detail)).not.toMatch(/private-record|private-data|response body/);
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("captures an allowlisted sync route and server reason code without response content", async () => {
+    const listener = vi.fn();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "private message",
+      reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
+      privateField: "private-data",
+    }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    })));
+
+    await fetchWithDiagnostics("/api/sync/today?today=private-date", { method: "PUT" });
+
+    const detail = (listener.mock.calls[0]?.[0] as CustomEvent).detail;
+    expect(detail).toMatchObject({
+      operationCategory: "sync",
+      requestRoute: "sync_today_write",
+      requestOutcome: "http_client_error",
+      httpStatus: 400,
+      reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
+    });
+    expect(JSON.stringify(detail)).not.toMatch(/private message|private-data|private-date/);
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("reduces unrecognized sync validation responses to a fixed reason label", async () => {
+    const listener = vi.fn();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      reasonCode: "private-user-data",
+    }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    })));
+
+    await fetchWithDiagnostics("/api/sync/today", { method: "PUT" });
+
+    const detail = (listener.mock.calls[0]?.[0] as CustomEvent).detail;
+    expect(detail.requestRoute).toBe("sync_today_write");
+    expect(detail.reasonCode).toBe("SYNC_VALIDATION_FAILED");
+    expect(JSON.stringify(detail)).not.toContain("private-user-data");
     window.removeEventListener("app:api-failure", listener);
   });
 

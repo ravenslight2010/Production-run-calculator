@@ -13486,9 +13486,17 @@ components:
         requestOperationCategory:
           type: string
           enum: [authentication, diagnostics, import, inventory, master_data, sync, other]
+        requestRoute:
+          type: string
+          description: Fixed route-family label; never a raw URL or path parameter.
+          enum: [authentication, sync_today_read, sync_today_write, sync_dated, sync_auto_track_claim, sync_manual_section, sync_operational_intents, sync_events, sync_scheduled, sync_other, other]
         requestOutcome:
           type: string
           enum: [http_server_error, http_client_error, authentication_rejected, transport_failure, offline_failure, timeout, cancelled]
+        requestReasonCode:
+          type: string
+          description: Allowlisted server validation code; no response message or body is retained.
+          enum: [SYNC_VALIDATION_FAILED, SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
         requestElapsedMs: { type: number, minimum: 0, maximum: 10000000 }
         requestObservedAt: { type: string, format: date-time }
         requestBackgroundInvolvement:
@@ -13545,9 +13553,17 @@ components:
             requestOperationCategory:
               type: string
               enum: [authentication, diagnostics, import, inventory, master_data, sync, other]
+            requestRoute:
+              type: string
+              description: Fixed route-family label; never a raw URL or path parameter.
+              enum: [authentication, sync_today_read, sync_today_write, sync_dated, sync_auto_track_claim, sync_manual_section, sync_operational_intents, sync_events, sync_scheduled, sync_other, other]
             requestOutcome:
               type: string
               enum: [http_server_error, http_client_error, authentication_rejected, transport_failure, offline_failure, timeout, cancelled]
+            requestReasonCode:
+              type: string
+              description: Allowlisted server validation code; no response message or body is retained.
+              enum: [SYNC_VALIDATION_FAILED, SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
             requestElapsedMs: { type: number, minimum: 0, maximum: 10000000 }
             requestObservedAt: { type: string, format: date-time }
             requestBackgroundInvolvement:
