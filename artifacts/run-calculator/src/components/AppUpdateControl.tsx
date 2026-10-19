@@ -19,7 +19,7 @@ export function AppUpdateControl({ state, check, update, cancelUpdate }: {
   if (state.phase === "confirmed") message = "This page is running the requested version.";
   if (state.phase === "checking") message = "Checking for a newer published version.";
   if (state.phase === "ready") message = "A newer version is available. Updating remains protected while work is in progress.";
-  if (state.phase === "waiting") message = "Update requested. It will install after the live run is ended, changed forms and open work are finished, and pending saves are acknowledged. You can cancel the request.";
+  if (state.phase === "waiting") message = "Update requested. It will install after the live run is ended, changed forms and open work are finished, and sync succeeds. If sync reports an error, retry or resolve it first. You can cancel the request.";
   if (state.phase === "deferred") message = "The queued update was cancelled. Automatic installation is paused until you check for updates or request it again.";
   if (state.phase === "updating") message = "Preparing the update. This page will move only after the existing safety checks pass.";
   const showAttention = !["unchecked", "current"].includes(state.phase);

@@ -18,7 +18,8 @@ it("always exposes update controls, version, status and retry without hiding blo
   fireEvent.click(screen.getByRole("button", { name: "Update app" }));
   expect(update).toHaveBeenCalledOnce();
   rerender(<AppUpdateControl state={{ phase: "waiting", running: "old-build", target: "new-build" }} check={check} update={update} cancelUpdate={cancelUpdate} />);
-  expect(screen.getByRole("status").textContent).toContain("pending saves are acknowledged");
+  expect(screen.getByRole("status").textContent).toContain("sync succeeds");
+  expect(screen.getByRole("status").textContent).toContain("retry or resolve it first");
   fireEvent.click(screen.getByRole("button", { name: "Cancel queued update" }));
   expect(cancelUpdate).toHaveBeenCalledOnce();
   rerender(<AppUpdateControl state={{ phase: "updating", running: "old-build", target: "new-build" }} check={check} update={update} cancelUpdate={cancelUpdate} />);
