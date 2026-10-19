@@ -26,9 +26,12 @@ export class StaleCheeseRecipeSnapshotError extends Error {
   }
 }
 
-export async function fetchCheeseRecipes(): Promise<CheeseRecipe[]> {
+export async function fetchCheeseRecipes(
+  options: { cache?: RequestCache } = {},
+): Promise<CheeseRecipe[]> {
   const res = await fetch("/api/cheese-recipes", {
     headers: { "x-client-id": inventoryClientId() },
+    ...(options.cache ? { cache: options.cache } : {}),
   });
   if (!res.ok) throw new Error(`List cheese recipes failed (${res.status})`);
   const data = (await res.json()) as { items: unknown };

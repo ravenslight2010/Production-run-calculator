@@ -1,4 +1,5 @@
 import { WEB_BUILD_ID } from "./buildIdentity";
+import type { ApiFailureEvent } from "./performanceDiagnostics";
 import {
   reportIncident,
   type IncidentDiagnosis,
@@ -66,17 +67,36 @@ export function installBrowserFailureCapture(): () => void {
   };
   window.addEventListener("unhandledrejection", rejection);
   const apiFailure = (event: Event) => {
-    const detail = (event as CustomEvent<{ path?: string; status?: number; correlationId?: string }>).detail;
-    const kind = detail?.path?.includes("/sync") ? "sync" : "api_failure";
-    void reportBrowserFailure(kind, new Error(`API ${detail?.status ?? "failure"}`), {
+    const detail = (event as CustomEvent<ApiFailureEvent>).detail;
+    if (!detail?.requestOutcome || !detail.operationCategory) return;
+    const kind = detail.operationCategory === "sync" ? "sync" : "api_failure";
+    const errorMessage = detail.httpStatus !== undefined
+      ? `API ${detail.httpStatus}`
+      : ({
+        transport_failure: "API transport failure",
+        offline_failure: "API request failed while browser reported offline",
+        timeout: "API request timed out",
+        cancelled: "API request cancelled",
+        http_server_error: "API server error",
+        http_client_error: "API client error",
+        authentication_rejected: "API authentication rejected",
+      } as const)[detail.requestOutcome];
+    void reportBrowserFailure(kind, new Error(errorMessage), {
+      screen: "/",
       diagnostics: {
         action: "call_api",
-        outcome: "error",
+        outcome: detail.requestOutcome === "cancelled" ? "degraded" : "error",
         retryCount: 0,
-        connectivity: navigator.onLine ? "online" : "offline",
+        connectivity: detail.connectivity ?? (navigator.onLine ? "online" : "offline"),
         syncState: kind === "sync" ? "blocked" : "unknown",
         signalKind: kind,
-        correlationId: detail?.correlationId,
+        ...(detail.correlationId ? { correlationId: detail.correlationId } : {}),
+        requestOperationCategory: detail.operationCategory,
+        requestOutcome: detail.requestOutcome,
+        requestElapsedMs: detail.elapsedMs,
+        requestObservedAt: detail.observedAt,
+        requestBackgroundInvolvement: detail.backgroundObserved ? "observed" : "not_observed",
+        requestHttpStatus: detail.httpStatus,
       },
     });
   };

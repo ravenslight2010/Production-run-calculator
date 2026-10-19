@@ -18,6 +18,7 @@
 // through pickAlias exactly as the spec importer's assignment pass consults it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as XLSX from "xlsx";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Mix } from "@workspace/mixes";
@@ -109,6 +110,26 @@ function readAsArrayBuffer(path: string): ArrayBuffer {
 
 const premixBuf = () =>
   readAsArrayBuffer(resolve(LIB, "premix/Updated_Pre_Mix_Sheets_1784339838726.xlsx"));
+function cleanPremixBuf(): ArrayBuffer {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      ["Product Brand", "Bobo's", "", "", "Product Brand", "Bobo's"],
+      ["Product Flavor", "Deluxe", "", "", "Product Flavor", "Breakfast"],
+      ["Bobo's Deluxe Veggie Mix", "", "", "", "Bobo's Breakfast Mix"],
+      ["Is Prep", "No", "", "", "Is Prep", "No"],
+      ["Ingredient", "Per Pizza (oz)", "Per Batch (lbs)", "", "Ingredient", "Per Pizza (oz)", "Per Batch (lbs)"],
+      ["Mozzarella", "1", "10", "", "Egg", "1", "10"],
+      ["Total", "1", "10", "", "Total", "1", "10"],
+    ]),
+    "Bobo's",
+  );
+  const bytes = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Uint8Array;
+  const result = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(result).set(bytes);
+  return result;
+}
 const cheeseBuf = () =>
   readAsArrayBuffer(
     resolve(LIB, "cheese/Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26_1784339826076.xlsx"),
@@ -139,11 +160,11 @@ beforeEach(() => {
   cheesePool.rows = [];
 });
 
-describe("merge → real workbook re-import lands on the survivor (mixes)", () => {
+describe("merge → workbook re-import lands on the survivor (mixes)", () => {
   it("pre-links the merged-away sheet name onto the surviving mix and does not resurrect it", async () => {
-    // 1. First import of the real workbook, confirm all.
-    const first = await preparePremixImport([premixBuf()]);
-    expect(first.mixes.length).toBeGreaterThan(10);
+    // 1. First import of a real .xlsx workbook, confirm all.
+    const first = await preparePremixImport([cleanPremixBuf()]);
+    expect(first.mixes).toHaveLength(2);
     mixPool.rows = first.mixes;
 
     // 2. Merge two mixes that BOTH come from this workbook.
@@ -156,7 +177,7 @@ describe("merge → real workbook re-import lands on the survivor (mixes)", () =
     learnMergeAliases("mixes", [source!.name], target!.name, target!.brand);
 
     // 3. Re-import the same workbook.
-    const second = await preparePremixImport([premixBuf()]);
+    const second = await preparePremixImport([cleanPremixBuf()]);
     const cand = second.candidates.find((c) => c.mix.name === source!.name);
     expect(cand).toBeTruthy();
     // The merged-away id must no longer be a clean exact-id update...
@@ -179,7 +200,7 @@ describe("merge → real workbook re-import lands on the survivor (mixes)", () =
   });
 
   it("pre-links after a merge into a renamed survivor whose name is NOT on the sheet", async () => {
-    const first = await preparePremixImport([premixBuf()]);
+    const first = await preparePremixImport([cleanPremixBuf()]);
     mixPool.rows = first.mixes;
     const source = first.mixes.find((m) => m.name === "Bobo's Deluxe Veggie Mix")!;
     // Merge into a typed target with no pool row: handleApplyRecipeNameMerge
@@ -188,13 +209,20 @@ describe("merge → real workbook re-import lands on the survivor (mixes)", () =
     mixPool.rows = (mixPool.rows as Mix[]).map((m) => (m.id === source.id ? survivor : m));
     learnMergeAliases("mixes", [source.name], survivor.name, survivor.brand);
 
-    const second = await preparePremixImport([premixBuf()]);
+    const second = await preparePremixImport([cleanPremixBuf()]);
     const cand = second.candidates.find((c) => c.mix.name === source.name)!;
     // Rename kept the deterministic id, so the sheet block is a clean exact-id
     // update onto the renamed row — no redirect needed, nothing resurrects.
     expect(second.existingIds).toContain(cand.mix.id);
     const merged = mergePremixIntoMixes(mixPool.rows as Mix[], second.mixes);
     expect(merged.filter((m) => m.id === source.id)).toHaveLength(1);
+  });
+
+  it("fails closed on same-key formula conflicts in an existing workbook", async () => {
+    await expect(preparePremixImport([premixBuf()])).rejects.toThrow(
+      /conflicting premix blocks/i,
+    );
+    expect(mixPool.rows).toEqual([]);
   });
 });
 

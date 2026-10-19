@@ -1,34 +1,29 @@
 - [Policy evidence anchors](policy-evidence-anchors.md) — operational policy prose is checked by stable regex anchors; preserve required phrases when clarifying task rules.
 - [Allergen foundation](allergen-foundation.md) — reviewed-empty is none of the nine; missing or unreviewed is unknown; the footprint stays visibility-only and separate from manual labels.
-- [Drizzle evaluation](drizzle-generator-evaluation.md) + [timestamps](drizzle-raw-timestamp-decoding.md) — ignore volatile SQL metadata; normalize raw aggregates despite `sql<Date>`.
+- [Drizzle evaluation](drizzle-generator-evaluation.md) + [timestamps](drizzle-raw-timestamp-decoding.md) — ignore volatile SQL metadata; normalize raw aggregates and timestamp results.
 - [Orval Zod declaration order](orval-zod-declaration-order.md) — normalize generated scalars before validators; declare smoke-tested toolchain packages directly, not via Orval peers.
-- [npm registry script metadata](npm-registry-script-metadata.md) — local registry lifecycle tests must advertise package scripts in version metadata as well as the tarball.
-- [npm tarball transport](npm-tarball-transport.md) — strict TLS verification does not guarantee HTTPS-only tarball redirects; exercise and observe downgrade behavior directly.
+- [npm lifecycle](npm-registry-script-metadata.md) + [tarball transport](npm-tarball-transport.md) — test script metadata and HTTPS-only redirects, not just strict TLS.
 - [pnpm lockfile](post-merge-setup.md) + [provenance](pnpm12-lockfile-provenance.md) + [outdated scope](pnpm-outdated-scope-limits.md) — repair peers; verify direct importers and preserve provenance.
 - [Security override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to the affected parent when a global major replacement could disrupt other consumers.
-- [Safe observability](observability-safe-events.md) + [event-loop histogram](event-loop-delay-monitor-warmup.md) — bounded payload-free events; wait one interval before a stall test.
+- [Safe observability](observability-safe-events.md) + [event-loop histogram](event-loop-delay-monitor-warmup.md) + [diagnostic persistence](diagnostic-persistence-scope.md) — bound event data and distinguish diagnostic writes from other transactions.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
 - [Dough families](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) + [weights](dough-weight-server-pool.md) — specific flavors first; fill only unset weights.
 - [Near-dup scan](near-dup-scan-perf.md) + [print/share](recipe-print-share.md) + [import matcher](name-match-near-dup.md) — share one matcher; loose matches auto-rename; aborts preserve clipboard.
 - [AI JSON retry](ai-json-retry.md) + [Gemini fallback](gemini-fallback-cache-identity.md) — retry malformed JSON/free 429s; keep fallback IDs out of primary cache identity.
-- [Diagnostic persistence scope](diagnostic-persistence-scope.md) — architecture checks must distinguish diagnostic writes from unrelated transactions in the same module.
 - [src](die-size-source.md) + [heal](die-type-master-heal.md) + [defaults](die-defaults-switch-aware.md) + [pick](die-picker-e2e-names.md) — crust owns die; bought crusts none; picks switch-aware.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only](web-mobile-parity.md) + [screens](cast-screens.md) + [live sync](live-sync-web-mobile.md) — station displays stay web-only; sync uses non-clobber merges and a 10 MB JSON limit.
 - [edits](autosave-edit-attribution.md) + [forms](open-form-profile-clobber.md) + [pending](scheduled-run-profile-snapshot.md) — attribute edits; refresh forms and pending runs after profile writes.
-- [Auth & sessions](daily-reset-auth-boundary.md) + [revocation](password-change-session-invalidation.md) — server owns reset boundaries; keep roles and tokens scope-fenced.
-- [Inventory merge](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) — serialize stock drawdowns once.
-- [Stock corrections](completed-run-stock-corrections.md) — reconcile saved edits against a durable baseline and ledger.
-- [Old-schema fixtures](isolated-db-may-predate-migrations.md) + [session fixtures](session-boundary-integration-fixtures.md) — databases may predate migrations; create sessions after test DB setup.
-- [Pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve dynamic imports, workflow roles, and writable sockets.
-- [Browser](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) — isolate state, model permission gates, diagnose requests, and stabilize offline tests.
-- [Browser picker dialogs](browser-evidence-assertions.md) — scope search and options to the active touch-picker dialog; closed dialogs may leave hidden inputs matching global queries.
-- [Browser storage availability](browser-localstorage-availability.md) — localStorage is optional cache; guard method calls, property reads, migrations, and async startup work.
-- [Visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate data; keep tests stable.
-- [Phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — isolate inputs and guard missing query parameters.
+- [Auth & sessions](daily-reset-auth-boundary.md) + [revocation](password-change-session-invalidation.md) + [daily reset](daily-reset-trigger.md) + [identity](auth-identity-cache.md) + [account lifecycle](account-lifecycle-sessions.md) — server owns rollover; keep roles, tokens, and sessions fenced.
+- [Inventory merge](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) + [stock corrections](completed-run-stock-corrections.md) — serialize drawdowns and reconcile edits against a durable ledger.
+- [DB fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, workflow roles, and writable sockets.
+- [Browser](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
+- [Browser picker assertions](browser-evidence-assertions.md) — scope queries to the active touch dialog; hidden closed-dialog inputs may match global selectors.
+- [Browser storage](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable localStorage and missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
+- [Spec export integrity](spec-export.md) — fresh server snapshots; keep per-pizza oz and batch lbs separate; blanks are unknown, and conflicts remain visible.
 - [Shared memory](learned-memory-pattern.md) + [aliases](learned-import-aliases.md) — corrections and learned aliases are shared.
 - [Reviewer coverage](ai-corrections-full-coverage.md) + [memory health](ai-memory-health-audits.md) — fail-safe review treats historic aliases as evidence.
 - [Run progress](press-done-model.md) + [occupancy](cases-line-occupancy.md) + [auto-track](autotrack-remainder-carry.md) — separate WIP; carry fractions, cap demand, hide dough batches in crust mode.
@@ -112,7 +107,7 @@
 - [Profile import precedence](profile-import-precedence.md) — explicit product-level metadata must fence every later shared-recipe and pool hydration path, including force mode.
 - [Recipe row unit provenance](recipe-row-unit-provenance.md) — unit labels describe raw values only and must follow the selected row set through merges.
 - [Shared recipe refresh](shared-master-data-refresh.md) + [Mix Plan snapshots](mix-plan-snapshot-refresh.md) — invalidate canonical views after shared edits and run-value changes.
-- [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely and keep short-landscape overlays reachable.
+- [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely; keep overlays and app-shell panels clear of fixed tabs on short screens.
 - [Case-based input validity](case-based-production-input-validity.md) — without positive pizzas-per-case, suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
@@ -157,10 +152,10 @@
 - [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
-
-- [Auto-track remainder carry](autotrack-remainder-carry.md) + [zero seed](autotrack-zero-seed.md) — remainder carry + resets-before-write ordering (fixed interval REJECTED); dough counters decrement-only w/ one-shot Suggest seed when left 0.
+- [Auto-track remainder carry](autotrack-zero-seed.md) + [zero seed](autotrack-remainder-carry.md) — remainder carry + resets-before-write ordering (fixed interval REJECTED); dough counters decrement-only w/ one-shot Suggest seed when left 0.
 - [Scheduled-day and import auth](scheduled-day-client-date.md) + [schedule-import-401.md] — key sync by client date and stop raw-fetch writes on 401 before hydration or reporting per-day failures.
 - [Profile source-of-truth for pending runs](scheduled-run-profile-snapshot.md) — profile saves fan out to ALL not-started runs (today + scheduled) w/ LWW stamps; started runs keep their snapshot.
 - [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.
 - [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher for importer link passes; only loose-key equality may auto-rename, reorder/typo/family-fold are declinable suggestions (prod cross-link incident).
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
+- [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.

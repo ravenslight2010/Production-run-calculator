@@ -7,6 +7,9 @@
  */
 import type { ReportIncidentInputDiagnosticsConnectivity } from './reportIncidentInputDiagnosticsConnectivity';
 import type { ReportIncidentInputDiagnosticsOutcome } from './reportIncidentInputDiagnosticsOutcome';
+import type { ReportIncidentInputDiagnosticsRequestBackgroundInvolvement } from './reportIncidentInputDiagnosticsRequestBackgroundInvolvement';
+import type { ReportIncidentInputDiagnosticsRequestOperationCategory } from './reportIncidentInputDiagnosticsRequestOperationCategory';
+import type { ReportIncidentInputDiagnosticsRequestOutcome } from './reportIncidentInputDiagnosticsRequestOutcome';
 import type { ReportIncidentInputDiagnosticsSignalKind } from './reportIncidentInputDiagnosticsSignalKind';
 import type { ReportIncidentInputDiagnosticsSyncState } from './reportIncidentInputDiagnosticsSyncState';
 
@@ -24,4 +27,18 @@ export type ReportIncidentInputDiagnostics = {
   signalKind?: ReportIncidentInputDiagnosticsSignalKind;
   /** @maxLength 128 */
   correlationId?: string;
+  requestOperationCategory?: ReportIncidentInputDiagnosticsRequestOperationCategory;
+  requestOutcome?: ReportIncidentInputDiagnosticsRequestOutcome;
+  /**
+     * @minimum 0
+     * @maximum 10000000
+     */
+  requestElapsedMs?: number;
+  requestObservedAt?: Date;
+  requestBackgroundInvolvement?: ReportIncidentInputDiagnosticsRequestBackgroundInvolvement;
+  /**
+     * @minimum 400
+     * @maximum 599
+     */
+  requestHttpStatus?: number;
 };

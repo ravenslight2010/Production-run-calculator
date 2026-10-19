@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import {
   AuthorizedBrowserFixtures,
@@ -17,6 +18,13 @@ test.beforeAll(async ({ playwright }) => {
 test.afterAll(async () => { await fixtures?.cleanup(); });
 
 test("manager sees safe sync categories and performance sources from isolated API evidence", async ({ page, request }, testInfo) => {
+  let browserPhase = "setup";
+  const uncaughtPageErrors: string[] = [];
+  const consoleErrorPhases: string[] = [];
+  page.on("pageerror", () => uncaughtPageErrors.push(browserPhase));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrorPhases.push(browserPhase);
+  });
   const account = await fixtures.createAccount({
     username: uniqueTestId("field_diagnostics"), password: "TestPass123!",
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
@@ -39,6 +47,59 @@ test("manager sees safe sync categories and performance sources from isolated AP
     headers: { Authorization: `Bearer ${account.token}` }, data: { observations: samples },
   });
   expect(result.status()).toBe(202);
+  const requestReference = randomUUID();
+  const requestFailure = await request.post(`${API_BASE}/api/field-checks/observations`, {
+    headers: { Authorization: `Bearer ${account.token}` },
+    data: { observations: [{
+      observationId: uniqueTestId("api_request_failure"),
+      checkName: "performance",
+      checkVersion: "4",
+      outcome: "failure",
+      observedAt: new Date().toISOString(),
+      appBuild: "local",
+      deviceCategory: "mobile-chrome",
+      metrics: {
+        durationMs: 4_023_360,
+        sourceCode: 5,
+        outcomeCode: 1,
+        operationCode: 6,
+        backgroundCode: 1,
+        httpStatusCode: 500,
+      },
+      reportedRequestCorrelationId: requestReference,
+    }] },
+  });
+  expect(requestFailure.status()).toBe(202);
+  const incidentRequestReference = randomUUID();
+  const incidentObservedAt = new Date().toISOString();
+  const incidentResponse = await request.post(`${API_BASE}/api/incidents`, {
+    headers: { Authorization: `Bearer ${account.token}` },
+    data: {
+      source: "auto_crash",
+      screen: "/",
+      appPlatform: "web",
+      appVersion: "app-build:identified",
+      errorMessage: "API 500",
+      diagnostics: {
+        action: "call_api",
+        outcome: "error",
+        retryCount: 0,
+        connectivity: "online",
+        syncState: "unknown",
+        signalKind: "api_failure",
+        correlationId: incidentRequestReference,
+        requestOperationCategory: "sync",
+        requestOutcome: "http_server_error",
+        requestElapsedMs: 4_023_360,
+        requestObservedAt: incidentObservedAt,
+        requestBackgroundInvolvement: "not_observed",
+        requestHttpStatus: 500,
+      },
+    },
+  });
+  expect(incidentResponse.status()).toBe(200);
+  const incidentData = await incidentResponse.json();
+  expect(incidentData.correlationId).not.toBe(incidentRequestReference);
   const recoveryAttempt = await request.post(`${API_BASE}/api/field-checks/observations`, {
     headers: { Authorization: `Bearer ${account.token}` },
     data: { observations: [{
@@ -58,12 +119,20 @@ test("manager sees safe sync categories and performance sources from isolated AP
     status: 202, json: { accepted: 0, duplicate: 0 },
   }));
   await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  browserPhase = "manager-view";
   await page.goto("/");
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Reported issues" }).click();
   const failures = page.getByLabel("Actionable field-check failures");
   await expect(failures).toBeVisible();
+  await expect(page.getByText(incidentData.correlationId, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(incidentRequestReference, { exact: true })).toBeVisible();
+  await expect(page.getByText(/sync · http server error · HTTP 500/).first()).toBeVisible();
+  await expect(page.getByText(/Browser-observed at/).first()).toBeVisible();
+  await expect(page.getByText(/elapsed request lifetime 4023360 ms/).first()).toBeVisible();
+  await expect(page.getByText(/No browser-hidden transition was observed; OS suspension is unknown/).first()).toBeVisible();
+  await expect(page.getByText(/build app-build:identified/).first()).toBeVisible();
   const fieldChecks = page.getByTestId("field-checks-panel");
   await expect(fieldChecks.getByText("Evidence coverage: Never observed").first()).toBeVisible();
   const recoveryCard = fieldChecks.getByText("Stale-deployment recovery", { exact: true }).locator("../..");
@@ -72,11 +141,28 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await expect(recoveryCard).toContainText("Last success: Not yet");
   await expect(fieldChecks.getByText(/Server receipt delay estimate: Unknown\/unconfirmed/).first()).toBeVisible();
   await expect(fieldChecks.getByText(/Server receipt delay estimate: .*after the browser timestamp/).first()).toBeVisible();
-  await expect(fieldChecks.getByLabel("This browser's pending field-check delivery")).toContainText("This browser only:");
   for (const label of ["Login or permission rejected", "Server rejected a stale/reset write", "Sync retries exhausted",
-    "Home bundle load · 20001 ms", "Page navigation load · 20002 ms", "API timeout / abort · 20003 ms"]) {
+    "Home bundle load · client elapsed request wait 20001 ms",
+    "Page navigation load · client elapsed request wait 20002 ms"]) {
     await expect(failures.getByText(label, { exact: true })).toBeVisible();
   }
+  await expect(failures.getByText(/API HTTP failure · sync · HTTP 5xx · HTTP 500 · client elapsed request wait 4023360 ms/))
+    .toBeVisible();
+  await expect(failures.getByText(requestReference, { exact: true })).toBeVisible();
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+    { width: 820, height: 1180 },
+    { width: 1180, height: 820 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(failures).toContainText(requestReference);
+    await expect(page.getByText(incidentData.correlationId, { exact: true }).first()).toBeVisible();
+    expect(await page.locator("html").evaluate((html) => html.scrollWidth))
+      .toBeLessThanOrEqual(viewport.width);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   // The UI intentionally shows three failures per check; the API retains all four sources.
   const report = await request.get(`${API_BASE}/api/field-checks`, { headers: { Authorization: `Bearer ${account.token}` } });
   const data = await report.json();
@@ -92,6 +178,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
   // Preserve the support-download regression alongside filtering: a failed
   // download must never delete or recover observations.
   const before = await failures.innerText();
+  browserPhase = "simulated-export-failure";
   await page.evaluate(() => {
     const original = URL.createObjectURL;
     URL.createObjectURL = () => { throw new Error("isolated download failure"); };
@@ -100,6 +187,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await downloadButton.click();
   await expect(page.getByRole("alert").filter({ hasText: "Couldn’t download the report" })).toBeVisible();
   expect(await failures.innerText()).toBe(before);
+  browserPhase = "manager-view";
   await page.evaluate(() => (window as unknown as { restoreExportUrl: () => void }).restoreExportUrl());
   const downloadEvent = page.waitForEvent("download");
   await downloadButton.click();
@@ -119,6 +207,11 @@ test("manager sees safe sync categories and performance sources from isolated AP
     .toEqual(expect.arrayContaining([expect.objectContaining({
       buildCategory: "unknown-local", deviceCategory: "mobile-chrome",
       diagnostics: expect.objectContaining({ sourceCode: 4, durationMs: 20004 }),
+    })]));
+  expect(exported.checks.find((check: { name: string }) => check.name === "performance").recentFailures)
+    .toEqual(expect.arrayContaining([expect.objectContaining({
+      reportedRequestCorrelationId: requestReference,
+      diagnostics: expect.objectContaining({ requestOutcomeCode: 1, httpStatusCode: 500 }),
     })]));
   await expect(page.getByRole("alert").filter({ hasText: "Couldn’t download the report" })).toHaveCount(0);
   expect(await failures.innerText()).toBe(before);
@@ -168,6 +261,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await filters.screenshot({ path: testInfo.outputPath("field-evidence-filters.png") });
 
   // A rejected read must not leave previous population results displayed.
+  browserPhase = "simulated-read-rejection";
   await page.route("**/api/field-checks?*", (route) => route.fulfill({
     status: 400, json: { error: "Invalid field-check filters" },
   }));
@@ -177,6 +271,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await expect(panel.getByText("Couldn’t load field-check evidence.", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(failures).toHaveCount(0);
   await page.unroute("**/api/field-checks?*");
+  browserPhase = "manager-recovery";
   await filters.getByRole("button", { name: "Clear field filters" }).click();
   await expect(population).toContainText("Unfiltered:");
   await expect(failures).toBeVisible();
@@ -194,10 +289,18 @@ test("manager sees safe sync categories and performance sources from isolated AP
     headers: { Authorization: `Bearer ${restricted.token}` },
   });
   expect(denied.status()).toBe(403);
+  browserPhase = "restricted-manager-view";
   await page.context().addCookies([{ name: "rc_auth", value: restricted.token, url: API_BASE }]);
   await page.reload();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
   await expect(downloadButton).toHaveCount(0);
   await page.getByRole("button", { name: /^More/ }).click();
   await expect(page.getByRole("menuitem", { name: "Reported issues" })).toHaveCount(0);
+  expect(uncaughtPageErrors).toEqual([]);
+  const expectedErrorPhases = new Set([
+    "simulated-export-failure",
+    "simulated-read-rejection",
+    "restricted-manager-view",
+  ]);
+  expect(consoleErrorPhases.filter((phase) => !expectedErrorPhases.has(phase))).toEqual([]);
 });

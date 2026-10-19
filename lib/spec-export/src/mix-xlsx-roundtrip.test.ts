@@ -6,7 +6,7 @@
 // importer is FULLY deterministic — parsing, name grounding (alias → exact →
 // fuzzy), and Mix conversion never touch the network. So the entire
 // export → re-import loop can be asserted here with zero AI: a regression in
-// the premix layout (name row position, "Per Pizza" anchor, Total row,
+// the premix layout (name row position, unit-labeled per-pizza/per-batch anchors, Total row,
 // "Pull N Days Early" note, tab-name brand/flavor grounding, sheet-name
 // dedupe) fails in CI instead of silently corrupting a manager's re-import.
 
@@ -16,7 +16,9 @@ import type { Mix } from "@workspace/mixes";
 import { normalizeMix } from "@workspace/mixes";
 import {
   buildPremixCandidates,
+  coalescePremixMixesById,
   groundPremix,
+  isPrepOnlyPremix,
   mergePremixIntoMixes,
   parsePremixWorkbook,
   premixId,
@@ -49,6 +51,7 @@ const known: PremixKnown = {
     "Provolone",
     "Herb Blend",
     "Olive Oil",
+    "Prep Base",
   ],
 };
 
@@ -81,7 +84,7 @@ const originals: Mix[] = [
     batchSize: 62.5,
     daysEarly: 0,
     components: [
-      { ingredient: "Green Peppers", perPizza: 0.35 },
+      { ingredient: "Green Peppers", perPizza: 0.35, perBatchLbs: 8.75 },
       { ingredient: "Onions", perPizza: 0.4 },
       { ingredient: "Mushrooms", perPizza: 0.25 },
     ],
@@ -97,7 +100,7 @@ const originals: Mix[] = [
       { ingredient: "Sausage Crumble", perPizza: 0.6 },
       { ingredient: "Diced Pepperoni", perPizza: 0.45 },
       // Flat per-batch addition: the sheet leaves "Per Pizza" at 0.
-      { ingredient: "Spice Blend", perPizza: 0 },
+      { ingredient: "Spice Blend", perPizza: 0, perBatchLbs: 1.5 },
     ],
   }),
   mkMix({
@@ -125,6 +128,23 @@ const originals: Mix[] = [
       { ingredient: "Olive Oil", perPizza: 0.05 },
     ],
   }),
+  ...["Hot Giardiniera Mix", "Pineapples", "Spinach"].map((name) =>
+    mkMix({
+      name,
+      brand: "",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      isPrep: true,
+      components: [
+        {
+          ingredient: "Prep Base",
+          perPizza: name === "Spinach" ? 0 : 0.25,
+          perBatchLbs: 2.5,
+        },
+      ],
+    }),
+  ),
 ];
 
 // ── xlsx write/read halves (verbatim from the app glue / spec round-trip) ────
@@ -165,10 +185,16 @@ function importMixes(grids: ReadonlyArray<SheetGrid>): {
 } {
   const parsed = parsePremixWorkbook(grids);
   const grounded = parsed.map((p) => groundPremix(p, known, []));
-  const mixes = grounded
+  const converted = grounded
+    .filter((g) => !isPrepOnlyPremix(g.mix) || g.mix.isPrep === true)
     .map((g) => premixToMix(g.mix))
     .filter((m): m is Mix => m !== null);
-  return { mixes, allResolved: grounded.every((g) => g.productResolved) };
+  const mixes = coalescePremixMixesById(converted);
+  return {
+    mixes,
+    // Owner-confirmed prep-only mixes intentionally have no product assignment.
+    allResolved: grounded.every((g) => g.productResolved || g.mix.isPrep === true),
+  };
 }
 
 /** The fields the task guards: everything a re-import must recover exactly. */
@@ -180,6 +206,7 @@ function projection(m: Mix) {
     flavor: m.flavor,
     batchSize: m.batchSize,
     daysEarly: m.daysEarly,
+    isPrep: m.isPrep === true,
     components: m.components,
   };
 }
@@ -198,16 +225,22 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
       "Basha's Ultra Thin Crust",
       "Bobo's",
       "Lowes 7in",
+      "Unassigned",
     ]);
   });
 
   it("writes explicit brand/flavor markers for every grouped mix block", () => {
     const parsed = parsePremixWorkbook(recoveredGrids);
-    expect(parsed.map((mix) => [mix.name, mix.productBrand, mix.productFlavor])).toEqual([
+    expect(parsed.filter((mix) => mix.productBrand).map((mix) => [mix.name, mix.productBrand, mix.productFlavor])).toEqual([
       ["Ultra Cheese Blend", "Basha's Ultra Thin Crust", "Cheese"],
       ["Bobo's Deluxe Mix", "Bobo's", "Deluxe"],
       ["Bobo's Deluxe Veggie Mix", "Bobo's", "Deluxe"],
       ["Topping Blend", "Lowes 7in", "Supreme"],
+    ]);
+    expect(parsed.filter((mix) => mix.isPrep === true).map((mix) => mix.name).sort()).toEqual([
+      "Hot Giardiniera Mix",
+      "Pineapples",
+      "Spinach",
     ]);
   });
 
@@ -219,6 +252,28 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
     expect(recovered.map(projection).sort(byId)).toEqual(
       originals.map(projection).sort(byId),
     );
+  });
+
+  it("round-trips the three confirmed prep identities without product or batch assignment", () => {
+    const prep = recovered.filter((mix) => mix.isPrep === true);
+    expect(prep.map((mix) => mix.name).sort()).toEqual([
+      "Hot Giardiniera Mix",
+      "Pineapples",
+      "Spinach",
+    ]);
+    for (const mix of prep) {
+      expect(mix.brand).toBe("");
+      expect(mix.flavor).toBe("");
+      expect(mix.batchSize).toBe(0);
+      expect(mix.components).toEqual([
+        {
+          ingredient: "Prep Base",
+          perPizza: mix.name === "Spinach" ? 0 : 0.25,
+          perBatchLbs: 2.5,
+        },
+      ]);
+    }
+    expect(recovered.find((mix) => mix.name === "Topping Blend")?.isPrep).toBe(false);
   });
 
   it("re-imports as updates of the same mixes (stable ids, no duplicates)", () => {
@@ -290,7 +345,7 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
       g.name === "Lowes 7in"
         ? {
             name: g.name,
-            rows: g.rows.map((r) => r.map((c) => (c === "Per Pizza" ? "PP" : c))),
+            rows: g.rows.map((r) => r.map((c) => (c.startsWith("Per Pizza") ? "PP" : c))),
           }
         : g,
     );
@@ -336,6 +391,6 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
           }
         : g,
     );
-    expect(importMixes(noGrounding).allResolved).toBe(false);
+    expect(() => importMixes(noGrounding)).toThrow(/conflicting premix blocks/i);
   });
 });

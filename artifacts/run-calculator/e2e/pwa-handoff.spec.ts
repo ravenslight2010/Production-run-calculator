@@ -23,7 +23,7 @@ import * as XLSX from "xlsx";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
-import { canonicalSyncJson } from "@workspace/sync-contract";
+import { applySyncDeltaData, canonicalSyncJson, isSyncRecord } from "@workspace/sync-contract";
 import {
   mkdtemp,
   readFile,
@@ -269,17 +269,21 @@ async function startVersionedServer(
     sessionRecovery?: boolean;
     sessionRecoveryIntentOutbox?: boolean;
     safeSessionSnapshot?: boolean;
+    lifecycleSnapshot?: boolean;
     preHomeSafetyTimeout?: boolean;
     fieldCheckObservations?: boolean;
     initialUserId?: string;
   } = {},
 ) {
   let currentVersion: Version = "old";
+  let failWorkerChecks = false;
+  let failIdentityChecks = false;
   let staleAssetFailureArmed = false;
   let staleAssetFailureTriggered = false;
   let staleAssetRequestCount = 0;
   let sessionValid = true;
   let snapshotHasActiveRun = !options.safeSessionSnapshot;
+  let lifecycleSnapshot: Record<string, unknown> | undefined;
   let intentPermissionGranted = true;
   let temporarySessionProbeFailuresRemaining = 0;
   const sessionProbeFailuresByTestTab = new Map<string, number>();
@@ -374,6 +378,11 @@ async function startVersionedServer(
       const requestPath = safeRequestPath(request.url);
       if (!requestPath) {
         response.writeHead(400).end("Invalid path");
+        return;
+      }
+      if ((failWorkerChecks && requestPath === "service-worker.js")
+        || (failIdentityChecks && requestPath === "app-build.json")) {
+        response.writeHead(503, { "cache-control": "no-store" }).end("Fixture unavailable");
         return;
       }
 
@@ -681,21 +690,26 @@ async function startVersionedServer(
             ? requestedDate
             : new Date().toISOString().slice(0, 10);
           const run = {
-            id: "pwa-session-reconnect-run",
-            brand: "Offline",
-            flavor: "Session",
+            id: options.lifecycleSnapshot ? "pwa-smoke-active-run" : "pwa-session-reconnect-run",
+            brand: options.lifecycleSnapshot ? "" : "Offline",
+            flavor: options.lifecycleSnapshot ? "" : "Session",
             startedAt: 1_000,
           };
-          const canonical = {
+          const canonical = lifecycleSnapshot ?? {
             syncVersion: 1,
             completeness: "complete",
             dayState: {
               date,
-              runs: snapshotHasActiveRun ? [run] : [],
+              runs: snapshotHasActiveRun
+                ? options.lifecycleSnapshot
+                  ? [run, { id: "pwa-smoke-next-run", brand: "", flavor: "" }]
+                  : [run]
+                : [],
               currentIndex: 0,
             },
             runValues: snapshotHasActiveRun ? { [run.id]: {} } : {},
           };
+          if (options.lifecycleSnapshot) lifecycleSnapshot = canonical;
           sessionSnapshotReads.push({ date, activeRun: snapshotHasActiveRun });
           const snapshotId = createHash("sha256")
             .update(canonicalSyncJson(canonical))
@@ -717,6 +731,19 @@ async function startVersionedServer(
           return;
         }
         if (method === "PUT") {
+          if (options.lifecycleSnapshot && lifecycleSnapshot) {
+            let raw = "";
+            for await (const chunk of request) raw += chunk;
+            const incoming: unknown = JSON.parse(raw || "{}");
+            if (!isSyncRecord(incoming)) throw new Error("Invalid lifecycle fixture write");
+            const delta = Object.fromEntries(
+              ["dayState", "runValues"].filter((key) => key in incoming)
+                .map((key) => [key, incoming[key]]),
+            );
+            const next = applySyncDeltaData(lifecycleSnapshot, delta);
+            if (!next) throw new Error("Invalid lifecycle fixture delta");
+            lifecycleSnapshot = next;
+          }
           sessionRecoveryRequests.syncWrites += 1;
           sessionRecoveryRequests.acceptedWrites += 1;
           response.writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -854,6 +881,8 @@ async function startVersionedServer(
       currentVersion = version;
       staleAssetFailureTriggered = true;
     },
+    failWorkerChecks(fail: boolean) { failWorkerChecks = fail; },
+    failIdentityChecks(fail: boolean) { failIdentityChecks = fail; },
     armStaleAssetFailure() {
       staleAssetFailureArmed = true;
     },
@@ -954,6 +983,165 @@ test.describe("PWA update handoff", () => {
 
   test.afterAll(async () => {
     if (fixture) await rm(fixture.root, { recursive: true, force: true });
+  });
+
+  async function openControlledOld(page: import("@playwright/test").Page, server: Awaited<ReturnType<typeof startVersionedServer>>) {
+    // Activity prevents automatic handoff while these tests exercise explicit actions.
+    await page.addInitScript(() => { setInterval(() => window.dispatchEvent(new Event("mousedown")), 250); });
+    await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(async () => (await navigator.serviceWorker.ready).active?.state === "activated");
+    await page.goto("about:blank");
+    await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+    await expect(page.getByTestId("button-start-run")).toBeVisible();
+    await page.getByRole("button", { name: /App updates/ }).click();
+    await expect(page.getByTestId("running-build")).toHaveText("pwa-old-build");
+  }
+
+  test("keeps update controls reachable and preserves stored work through a confirmed manual two-build handoff", async ({ page }) => {
+    const server = await startVersionedServer({ old: fixture.oldDir, new: fixture.newDir }, fixture.staleHomeChunk);
+    try {
+      await openControlledOld(page, server);
+      const preserved = await page.evaluate(async () => {
+        // A valid persisted pending-sync record for a non-active scope must not
+        // be delivered by this user or erased by update recovery.
+        const key = "run-calculator:sync-pending-v1:pwa-preserved-scope:2099-01-01";
+        const snapshot = { dayState: { date: "2099-01-01", runs: [] }, runValues: {} };
+        const queued = JSON.stringify({
+          version: 1, id: "preserve-pending", scope: "pwa-preserved-scope", date: "2099-01-01",
+          epoch: 1, baseSnapshotId: "fixture-base", baseline: snapshot, payload: snapshot,
+        });
+        localStorage.setItem(key, queued);
+        localStorage.setItem("run-calc:pwa-fixture-settings", JSON.stringify({ contrast: "high", sound: false }));
+        // Use real application-owned preference/run-value keys too, not only
+        // sentinel storage that startup code would never read.
+        localStorage.setItem("run-calc-active-tab", "dough");
+        history.replaceState(null, "", `${location.pathname}${location.search}#dough`);
+        localStorage.setItem("run-calc-run-pwa-preserved-run", JSON.stringify({ pizzasPerCase: 12 }));
+        await new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open("pwa-preserved-business-fixture", 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("queued-work");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const db = request.result;
+            const tx = db.transaction("queued-work", "readwrite");
+            tx.objectStore("queued-work").put({ id: "fixture-review", reviewed: true }, "pending");
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+        });
+        return { key, queued };
+      });
+      const other = await page.context().newPage();
+      await other.goto(`${server.baseUrl}/sign-in`, { waitUntil: "domcontentloaded" });
+      await other.getByLabel(/username/i).fill("unsaved-fixture");
+      server.publish("new");
+      const check = page.getByRole("button", { name: "Check for updates", exact: true });
+      await check.click();
+      const update = page.getByRole("button", { name: "Update app", exact: true }).first();
+      await expect(update).toBeVisible();
+      for (const control of [check, update]) {
+        const box = await control.boundingBox();
+        const viewport = page.viewportSize()!;
+        expect(box).not.toBeNull();
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.y).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+        expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+      }
+      await update.click();
+      try {
+        await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", { timeout: 30_000 });
+      } catch {
+        const diagnostic = await page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.getRegistration();
+          return {
+            active: registration?.active?.state, waiting: registration?.waiting?.state,
+            installing: registration?.installing?.state,
+            events: JSON.parse(sessionStorage.getItem("run-calc:pwa-update-diagnostics:v1") ?? "[]"),
+          };
+        });
+        throw new Error(`Manual handoff not confirmed: ${JSON.stringify(diagnostic)}`);
+      }
+      await page.getByRole("button", { name: /App updates/ }).click();
+      await expect(page.getByTestId("running-build")).toHaveText("pwa-new-build");
+      await expect.poll(() => page.evaluate(() => {
+        const events = JSON.parse(sessionStorage.getItem("run-calc:pwa-update-diagnostics:v1") ?? "[]");
+        return events.some((event: { phase: string }) => event.phase === "confirmed");
+      })).toBe(true);
+      await expect(other.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await expect(other.getByLabel(/username/i)).toHaveValue("unsaved-fixture");
+      const after = await page.evaluate(async ({ key }) => {
+        const idb = await new Promise<unknown>((resolve, reject) => {
+          const request = indexedDB.open("pwa-preserved-business-fixture", 1);
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const db = request.result;
+            const tx = db.transaction("queued-work");
+            const get = tx.objectStore("queued-work").get("pending");
+            get.onsuccess = () => resolve(get.result);
+            get.onerror = () => reject(get.error);
+            tx.oncomplete = () => db.close();
+          };
+        });
+        return {
+          queued: localStorage.getItem(key), settings: localStorage.getItem("run-calc:pwa-fixture-settings"),
+          activeTab: localStorage.getItem("run-calc-active-tab"),
+          runValues: localStorage.getItem("run-calc-run-pwa-preserved-run"), idb,
+        };
+      }, preserved);
+      expect(after).toEqual({
+        queued: preserved.queued, settings: JSON.stringify({ contrast: "high", sound: false }),
+        activeTab: "dough", runValues: JSON.stringify({ pizzasPerCase: 12 }),
+        idb: { id: "fixture-review", reviewed: true },
+      });
+      await other.close();
+    } finally { await server.close(); }
+  });
+
+  test("reproduces repeated old-shell refreshes after failed worker discovery and recovers on explicit retry without clearing data", async ({ page }) => {
+    const server = await startVersionedServer({ old: fixture.oldDir, new: fixture.newDir }, fixture.staleHomeChunk);
+    try {
+      await openControlledOld(page, server);
+      await page.evaluate(() => localStorage.setItem("pwa-retry-pending", "retained"));
+      server.failWorkerChecks(true);
+      server.publish("new");
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.getByRole("button", { name: /App updates/ }).click();
+        await expect(page.getByTestId("running-build")).toHaveText("pwa-old-build");
+      }
+      await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+      await page.getByRole("button", { name: "Update app", exact: true }).first().click();
+      await expect(page.getByRole("status").filter({ hasText: "Update failed" })).toBeVisible({ timeout: 25_000 });
+      await expect(page.getByTestId("running-build")).toHaveText("pwa-old-build");
+      server.failWorkerChecks(false);
+      await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+      await page.getByRole("button", { name: "Update app", exact: true }).first().click();
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", { timeout: 30_000 });
+      expect(await page.evaluate(() => localStorage.getItem("pwa-retry-pending"))).toBe("retained");
+      await page.waitForTimeout(2000);
+      expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("run-calc:pwa-update-diagnostics:v1") ?? "[]")
+        .filter((event: { phase: string }) => event.phase === "confirmed").length)).toBe(1);
+    } finally { await server.close(); }
+  });
+
+  test("does not call unavailable identity current and remains retryable across offline reconnect", async ({ page }) => {
+    const server = await startVersionedServer({ old: fixture.oldDir, new: fixture.newDir }, fixture.staleHomeChunk);
+    try {
+      await openControlledOld(page, server);
+      server.failIdentityChecks(true);
+      await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Update failed" })).toBeVisible();
+      await page.context().setOffline(true);
+      await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
+      await expect(page.getByTestId("button-start-run")).toBeVisible();
+      await page.context().setOffline(false);
+      server.failIdentityChecks(false);
+      await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Current." })).toBeVisible();
+    } finally { await page.context().setOffline(false); await server.close(); }
   });
 
   test("decodes HTML-linked Apple touch icon and SVG favicon from the production build", async ({
@@ -1486,7 +1674,7 @@ test.describe("PWA update handoff", () => {
     const server = await startVersionedServer({
       old: fixture.oldDir,
       new: fixture.newDir,
-    }, fixture.staleHomeChunk);
+    }, fixture.staleHomeChunk, { sessionRecovery: true, lifecycleSnapshot: true });
 
     try {
       await page.addInitScript(() => {
@@ -1502,7 +1690,7 @@ test.describe("PWA update handoff", () => {
             id: "pwa-smoke-active-run",
             brand: "",
             flavor: "",
-            startedAt: Date.now(),
+            startedAt: 1_000,
           }, {
             id: "pwa-smoke-next-run",
             brand: "",
@@ -1551,13 +1739,15 @@ test.describe("PWA update handoff", () => {
       });
 
       const updateMessage = page.getByText("Update available", { exact: true });
-      const reloadAction = page.getByRole("button", { name: "Reload now" });
+      const reloadAction = page.getByRole("button", { name: "Update app", exact: true });
       await expect(updateMessage).toHaveCount(1);
       await expect(reloadAction).toHaveCount(1);
       await expect(updateMessage).toBeVisible({
         timeout: 20_000,
       });
       await expect(reloadAction).toBeVisible();
+      await reloadAction.click();
+      await expect(page.getByRole("button", { name: /App updates · Blocked by work/ })).toBeVisible();
       await page.waitForTimeout(1500);
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await expect(stopRun).toBeVisible();
@@ -1575,21 +1765,12 @@ test.describe("PWA update handoff", () => {
         )
         .toBe(true);
 
-      server.publish("new");
-      await page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.ready;
-        if (!registration) throw new Error("Expected an active service worker");
-
-        const update = registration.update.bind(registration);
-        Object.defineProperty(registration, "update", {
-          configurable: true,
-          value: async () => {
-            const key = "__pwaSmokeUpdateCalls";
-            const calls = Number(sessionStorage.getItem(key) ?? "0") + 1;
-            sessionStorage.setItem(key, String(calls));
-            return update();
-          },
-        });
+      let handoffNavigations = 0;
+      page.on("request", (request) => {
+        // Home also updates its fragment within the same document. Count real
+        // main-document requests, not those harmless same-document events.
+        if (request.isNavigationRequest() && request.resourceType() === "document"
+          && request.frame() === page.mainFrame()) handoffNavigations += 1;
       });
 
       // Use Home's real run lifecycle. Stopping the run makes the calculator
@@ -1598,16 +1779,19 @@ test.describe("PWA update handoff", () => {
       await page.waitForTimeout(500);
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await expect(reloadAction).toBeVisible();
-      // The update has been safely discovered and the prompt remains
-      // available. Complete the handoff through the same user-facing action
-      // used when a browser does not expose a reliable idle transition.
-      await reloadAction.click();
+      // The earlier explicit click was blocked, not permission to discard
+      // work. Only a new uninterrupted safe-idle window may hand off now.
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
         timeout: 30_000,
       });
-      await expect
-        .poll(() => page.evaluate(() => sessionStorage.getItem("__pwaSmokeUpdateCalls")))
-        .toBe("1");
+      await page.getByRole("button", { name: /App updates/ }).click();
+      await expect(page.getByTestId("running-build")).toHaveText("pwa-new-build");
+      await expect.poll(() => page.evaluate(() =>
+        JSON.parse(sessionStorage.getItem("run-calc:pwa-update-diagnostics:v1") ?? "[]")
+          .filter((event: { phase: string }) => event.phase === "confirmed").length,
+      )).toBe(1);
+      await page.waitForTimeout(1500);
+      expect(handoffNavigations).toBe(1);
       await expect(updateMessage).toHaveCount(0);
     } finally {
       await server.close();
@@ -3720,7 +3904,7 @@ test.describe("PWA update handoff", () => {
     const server = await startVersionedServer(
       { old: fixture.oldDir, new: fixture.newDir },
       fixture.staleHomeChunk,
-      { sessionRecovery: true, fieldCheckObservations: true },
+      { sessionRecovery: true, fieldCheckObservations: true, safeSessionSnapshot: true },
     );
 
     try {
@@ -3732,6 +3916,9 @@ test.describe("PWA update handoff", () => {
         sameSite: "Lax",
       }]);
       await page.addInitScript(() => {
+        // Model manual recovery through activity, not by inventing an active
+        // server run that the explicit update would now correctly refuse.
+        setInterval(() => window.dispatchEvent(new Event("mousedown")), 250);
         const markerKey = "run-calc:stale-asset-recovery-pending:v1";
         const captureKey = "__pwa_recovery_marker_capture";
         const originalSetItem = Storage.prototype.setItem;
@@ -3829,10 +4016,11 @@ test.describe("PWA update handoff", () => {
     const server = await startVersionedServer(
       { old: fixture.oldDir, new: fixture.newDir },
       fixture.staleHomeChunk,
-      { sessionRecovery: true, fieldCheckObservations: true },
+      { sessionRecovery: true, fieldCheckObservations: true, safeSessionSnapshot: true },
     );
     const otherPage = await page.context().newPage();
     const markerCaptureScript = (testTab: string) => {
+      setInterval(() => window.dispatchEvent(new Event("mousedown")), 250);
       const markerKey = "run-calc:stale-asset-recovery-pending:v1";
       const captureKey = "__pwa_tab_local_recovery_marker_capture";
       const originalSetItem = Storage.prototype.setItem;

@@ -13,7 +13,7 @@ import type {
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { Mix } from "@workspace/mixes";
 
-const { applySpy, saveNamedSpy, fetchNamedSpy, applyOperationSpy } = vi.hoisted(() => ({
+const { applySpy, saveNamedSpy, fetchNamedSpy, fetchMixSpy, applyOperationSpy } = vi.hoisted(() => ({
   applySpy: vi.fn(() => ({ touchedProfiles: [], crustProfiles: [] })),
   saveNamedSpy: vi.fn(async () => []),
   applyOperationSpy: vi.fn(async (operationId: string) => ({
@@ -29,6 +29,7 @@ const { applySpy, saveNamedSpy, fetchNamedSpy, applyOperationSpy } = vi.hoisted(
       components: [{ ingredient: "Old Ingredient", lbs: 1 }],
     },
   ]),
+  fetchMixSpy: vi.fn(async () => []),
 }));
 
 vi.mock("./storage", () => ({
@@ -99,7 +100,7 @@ vi.mock("./cheeseRecipes", () => ({
   saveCheeseRecipes: async (items: CheeseRecipe[]) => items,
 }));
 vi.mock("./mixes", () => ({
-  fetchMixes: async () => [] as Mix[],
+  fetchMixes: fetchMixSpy,
   saveMixes: async (items: Mix[]) => items,
 }));
 vi.mock("./dieLineDefaultsServer", () => ({
@@ -163,6 +164,8 @@ describe("commitSpecImport completeness", () => {
         components: [{ ingredient: "Old Ingredient", lbs: 1 }],
       },
     ]);
+    fetchMixSpy.mockReset();
+    fetchMixSpy.mockResolvedValue([]);
     saveNamedSpy.mockReset();
     applyOperationSpy.mockClear();
     localStorage.clear();
@@ -218,6 +221,20 @@ describe("commitSpecImport completeness", () => {
     );
   });
 
+  it("fails before local apply when the authoritative Mix pool cannot be loaded", async () => {
+    localStorage.setItem("import-preflight-sentinel", "unchanged");
+    fetchMixSpy.mockRejectedValueOnce(new Error("upstream detail must not reach the UI"));
+
+    await expect(commitSpecImport(prepared())).rejects.toThrow(
+      "Could not load the current Mix recipes. Refresh and try applying the import again.",
+    );
+
+    expect(applySpy).not.toHaveBeenCalled();
+    expect(applyOperationSpy).not.toHaveBeenCalled();
+    expect(saveNamedSpy).not.toHaveBeenCalled();
+    expect(localStorage.getItem("import-preflight-sentinel")).toBe("unchanged");
+  });
+
   it("rejects when the server acknowledges fewer normalized components", async () => {
     saveNamedSpy.mockResolvedValueOnce([
       { id: "sauce-1", name: "House Marinara", components: [{ ingredient: "Crushed Tomato", lbs: 20 }] },
@@ -267,5 +284,23 @@ describe("commitSpecImport completeness", () => {
     ]);
     expect(payload.changes.doughRecipes.upsert[0].id).not.toContain("spec-import-");
     expect(payload.changes.sauceRecipes.upsert[0].id).not.toContain("spec-import-");
+  });
+
+  it("passes the one freshly fetched Mix snapshot into the local projection", async () => {
+    fetchMixSpy.mockResolvedValueOnce([
+      { id: "mix-1", name: "Known Topping Mix", components: [] },
+    ]);
+
+    await commitSpecImport(
+      prepared(),
+      undefined,
+      undefined,
+      "import-spec-mix-pool-snapshot",
+    );
+
+    expect(fetchMixSpy).toHaveBeenCalledOnce();
+    expect(applySpy.mock.calls[0][1]).toEqual(expect.objectContaining({
+      mixes: [{ name: "Known Topping Mix" }],
+    }));
   });
 });

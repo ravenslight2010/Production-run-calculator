@@ -91,6 +91,55 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
     expect(JSON.stringify(metadata)).not.toContain("private");
     expect(metadata.screenClass).toBe("other");
   });
+
+  it("keeps bounded API classifications and client-reported request references explicit", () => {
+    const data = {
+      source: "auto_crash" as const,
+      screen: "/",
+      appPlatform: "web" as const,
+      errorMessage: "API 500",
+      diagnostics: {
+        signalKind: "api_failure" as const,
+        correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+        requestOperationCategory: "sync" as const,
+        requestOutcome: "http_server_error" as const,
+        requestElapsedMs: 4_023_360,
+        requestObservedAt: new Date("2026-10-16T22:48:00.000Z"),
+        requestBackgroundInvolvement: "not_observed" as const,
+        requestHttpStatus: 500,
+      },
+    };
+    const context = buildIncidentContext(data);
+    expect(context).toMatchObject({
+      relatedCorrelationId: data.diagnostics.correlationId,
+      requestOperationCategory: "sync",
+      requestOutcome: "http_server_error",
+      requestElapsedMs: 4_023_360,
+      requestObservedAt: "2026-10-16T22:48:00.000Z",
+      requestBackgroundInvolvement: "not_observed",
+      requestHttpStatus: 500,
+    });
+    const metadata = safeIncidentLogMetadata(data, context);
+    expect(metadata).toMatchObject({
+      requestOperationCategory: "sync",
+      requestOutcome: "http_server_error",
+      requestHttpStatus: 500,
+    });
+    expect(JSON.stringify(metadata)).not.toContain(data.diagnostics.correlationId);
+
+    const forged = buildIncidentContext({
+      ...data,
+      diagnostics: {
+        ...data.diagnostics,
+        correlationId: "private-record-id",
+        requestElapsedMs: 90_000_000,
+        requestObservedAt: new Date("2001-01-01T00:00:00.000Z"),
+      },
+    });
+    expect(forged.relatedCorrelationId).toBeUndefined();
+    expect(forged.requestElapsedMs).toBe(10_000_000);
+    expect(forged.requestObservedAt).toBeUndefined();
+  });
 });
 describe("sanitizeUserInput — strips prompt-injection override lines", () => {
   it('drops "ignore the instructions above" variants', () => {

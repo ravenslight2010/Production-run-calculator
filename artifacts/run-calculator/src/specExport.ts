@@ -22,15 +22,15 @@ import {
   type ExportProfile,
   type ExportRecipe,
 } from "@workspace/spec-export";
+import { DEFAULT_VALUES, type FormValues, type RecipeRow } from "./types";
+import type { Mix } from "@workspace/mixes";
 import {
-  loadBrandFlavors,
-  loadProfile,
-  loadDoughRecipePresets,
-  loadFrontlineRecipePresets,
-  loadCheeseRecipePresets,
-} from "./storage";
+  fetchBrandProfilesSnapshot,
+  type ServerBrandProfileSnapshot,
+} from "./profileServerSync";
+import { fetchNamedRecipes } from "./namedRecipes";
+import { fetchCheeseRecipes } from "./cheeseRecipes";
 import { fetchMixes } from "./mixes";
-import type { FormValues, RecipeRow } from "./types";
 import { downloadWorkbook } from "./specExportWorkbook";
 
 /** Which kinds of data the user can pick to export. */
@@ -48,84 +48,153 @@ function rowsFrom(recipe: ReadonlyArray<{ ingredient: string; lbs: number }> | u
  * referenced by a profile but missing from its library is added from the
  * profile's inline rows so nothing is dropped from the export.
  */
-function gatherSpecInput(): SpecExportInput {
-  const brandFlavors = loadBrandFlavors();
-  const profiles: ExportProfile[] = [];
-
-  for (const [brand, flavors] of Object.entries(brandFlavors)) {
-    for (const flavor of flavors ?? []) {
-      const v = loadProfile(brand, flavor);
-      if (!v) continue;
-      profiles.push({
-        brand,
-        flavor,
-        dieType: v.dieType,
-        sauceOzPerPizza: v.sauceOzPerPizza,
-        applicators: [1, 2, 3, 4].map((s) => ({
-          type: (v as Record<string, unknown>)[`app${s}Type`] as string,
-          ozPerPizza: (v as Record<string, unknown>)[`app${s}OzPerPizza`] as number,
-        })),
-        pepperonis: [1, 2].map((s) => ({
-          type: (v as Record<string, unknown>)[`pep${s}Type`] as string,
-          sticks: (v as Record<string, unknown>)[`pep${s}Sticks`] as number,
-          ozPerPizza: (v as Record<string, unknown>)[`pep${s}OzPerPizza`] as number,
-        })),
-        doughRecipeName: v.doughRecipeName,
-        targetDoughballWeight: v.targetDoughballWeight,
-        doughballsPerTray: v.doughballsPerTray,
-        sauceRecipeName: v.frontlineRecipeName,
-        cheeseRecipeNames: [
-          v.app1CheeseRecipeName,
-          v.app2CheeseRecipeName,
-          v.app3CheeseRecipeName,
-          v.app4CheeseRecipeName,
-        ],
-      });
-    }
-  }
-
-  // Build recipe lists from the libraries, keyed case-insensitively so a
-  // profile-inline recipe only fills a genuine gap (never shadows a library one).
-  const doughMap = new Map<string, ExportRecipe>();
-  for (const [name, preset] of Object.entries(loadDoughRecipePresets())) {
-    doughMap.set(name.toLowerCase(), { name, rows: rowsFrom(preset?.rows) });
-  }
-  const sauceMap = new Map<string, ExportRecipe>();
-  for (const [name, rows] of Object.entries(loadFrontlineRecipePresets())) {
-    sauceMap.set(name.toLowerCase(), { name, rows: rowsFrom(rows) });
-  }
-  const cheeseMap = new Map<string, ExportRecipe>();
-  for (const [name, rows] of Object.entries(loadCheeseRecipePresets())) {
-    cheeseMap.set(name.toLowerCase(), { name, rows: rowsFrom(rows) });
-  }
-
-  const addInline = (map: Map<string, ExportRecipe>, name: string | undefined, rows: RecipeRow[]) => {
-    const nm = (name ?? "").trim();
-    if (!nm || rows.length === 0) return;
-    // Fill from the profile's inline rows when the library has no entry for this
-    // name OR has one with no usable rows (so an empty library entry never
-    // shadows real ingredient data).
-    const existing = map.get(nm.toLowerCase());
-    if (!existing || existing.rows.length === 0) map.set(nm.toLowerCase(), { name: existing?.name ?? nm, rows });
+function profileToExport(profile: ServerBrandProfileSnapshot): ExportProfile | null {
+  const brand = profile.brand.trim();
+  const flavor = profile.flavor.trim();
+  if (!brand || !flavor) return null;
+  const v = {
+    ...DEFAULT_VALUES,
+    ...profile.values,
+    ...profile.crustValues,
+  } as FormValues;
+  return {
+    brand,
+    flavor,
+    dieType: v.dieType,
+    sauceOzPerPizza: v.sauceOzPerPizza,
+    applicators: [1, 2, 3, 4].map((s) => ({
+      type: (v as Record<string, unknown>)[`app${s}Type`] as string,
+      ozPerPizza: (v as Record<string, unknown>)[`app${s}OzPerPizza`] as number,
+    })),
+    pepperonis: [1, 2].map((s) => ({
+      type: (v as Record<string, unknown>)[`pep${s}Type`] as string,
+      sticks: (v as Record<string, unknown>)[`pep${s}Sticks`] as number,
+      ozPerPizza: (v as Record<string, unknown>)[`pep${s}OzPerPizza`] as number,
+    })),
+    doughRecipeName: v.doughRecipeName,
+    targetDoughballWeight: v.targetDoughballWeight,
+    doughballsPerTray: v.doughballsPerTray,
+    sauceRecipeName: v.frontlineRecipeName,
+    cheeseRecipeNames: [
+      v.app1CheeseRecipeName,
+      v.app2CheeseRecipeName,
+      v.app3CheeseRecipeName,
+      v.app4CheeseRecipeName,
+    ],
   };
-  for (const [brand, flavors] of Object.entries(brandFlavors)) {
-    for (const flavor of flavors ?? []) {
-      const v = loadProfile(brand, flavor);
-      if (!v) continue;
-      addInline(doughMap, v.doughRecipeName, rowsFrom(v.doughRecipe));
-      addInline(sauceMap, v.frontlineRecipeName, rowsFrom(v.frontlineRecipe));
-      addInline(cheeseMap, v.app1CheeseRecipeName, rowsFrom(v.app1CheeseRecipe));
-      addInline(cheeseMap, v.app2CheeseRecipeName, rowsFrom(v.app2CheeseRecipe));
-      addInline(cheeseMap, v.app3CheeseRecipeName, rowsFrom(v.app3CheeseRecipe));
-      addInline(cheeseMap, v.app4CheeseRecipeName, rowsFrom(v.app4CheeseRecipe));
-    }
-  }
+}
 
+function recipeRowsSignature(rows: ReadonlyArray<RecipeRow>): string {
+  return JSON.stringify(
+    rows.map((row) => [row.ingredient.trim().toLowerCase(), row.lbs]),
+  );
+}
+
+function addInline(recipes: ExportRecipe[], name: string | undefined, rows: RecipeRow[]): void {
+  const nm = (name ?? "").trim();
+  if (!nm || rows.length === 0) return;
+  const matching = recipes.filter((recipe) => recipe.name.trim().toLowerCase() === nm.toLowerCase());
+  const populated = matching.filter((recipe) => recipe.rows.length > 0);
+  const signature = recipeRowsSignature(rows);
+  if (populated.some((recipe) => recipeRowsSignature(recipe.rows) === signature)) return;
+  if (populated.length === 0 && matching.length > 0) {
+    const index = recipes.indexOf(matching[0]!);
+    recipes[index] = { name: matching[0]!.name, rows };
+    return;
+  }
+  // A conflicting inline formula is not a tie-breaker. Retain it as a second
+  // same-name recipe so the workbook exposes the conflict for review.
+  recipes.push({ name: populated[0]?.name ?? nm, rows });
+}
+
+function addCheeseInlineUnlessMix(
+  recipes: ExportRecipe[],
+  appType: string | undefined,
+  name: string | undefined,
+  rows: RecipeRow[],
+  mixOnlyNameKeys: ReadonlySet<string>,
+): void {
+  const nameKey = (name ?? "").trim().toLowerCase();
+  if (
+    appType?.trim().toLowerCase() === "mix" ||
+    (nameKey && mixOnlyNameKeys.has(nameKey))
+  ) return;
+  addInline(recipes, name, rows);
+}
+
+async function gatherSpecInput(mixPoolPromise: Promise<Mix[]>): Promise<SpecExportInput> {
+  const [serverProfiles, doughPool, saucePool, cheesePool, mixPool] = await Promise.all([
+    fetchBrandProfilesSnapshot(),
+    fetchNamedRecipes("dough", { cache: "no-store" }),
+    fetchNamedRecipes("sauce", { cache: "no-store" }),
+    fetchCheeseRecipes({ cache: "no-store" }),
+    mixPoolPromise,
+  ]);
+  const profiles: ExportProfile[] = [];
+  const doughRecipes: ExportRecipe[] = doughPool.map((recipe) => ({
+    name: recipe.name,
+    rows: rowsFrom(recipe.components),
+  }));
+  const sauceRecipes: ExportRecipe[] = saucePool.map((recipe) => ({
+    name: recipe.name,
+    rows: rowsFrom(recipe.components),
+  }));
+  const cheeseRecipes: ExportRecipe[] = cheesePool.map((recipe) => ({
+    name: recipe.name,
+    rows: rowsFrom(recipe.components),
+  }));
+  const cheeseNameKeys = new Set(
+    cheesePool.map((recipe) => recipe.name.trim().toLowerCase()).filter(Boolean),
+  );
+  const mixOnlyNameKeys = new Set(
+    mixPool
+      .map((mix) => mix.name.trim())
+      .filter((name) => name && !cheeseNameKeys.has(name.toLowerCase()))
+      .map((name) => name.toLowerCase()),
+  );
+
+  // Profile-inline rows fill a genuinely missing or empty server library entry.
+  // If they disagree with a populated entry, both versions remain visible.
+  // Process each source row directly so same-key conflicts are not replaced by
+  // whichever row happened to be returned first from the profile endpoint.
+  const sortedServerProfiles = [...serverProfiles].sort((a, b) =>
+    a.brand.trim().toLowerCase().localeCompare(b.brand.trim().toLowerCase())
+    || a.flavor.trim().toLowerCase().localeCompare(b.flavor.trim().toLowerCase())
+    || JSON.stringify(a.values).localeCompare(JSON.stringify(b.values)),
+  );
+  for (const serverProfile of sortedServerProfiles) {
+    const profile = profileToExport(serverProfile);
+    if (!profile) continue;
+    profiles.push(profile);
+    const v = {
+      ...DEFAULT_VALUES,
+      ...serverProfile.values,
+      ...serverProfile.crustValues,
+    } as FormValues;
+    addInline(doughRecipes, v.doughRecipeName, rowsFrom(v.doughRecipe));
+    addInline(sauceRecipes, v.frontlineRecipeName, rowsFrom(v.frontlineRecipe));
+    // Mixes share the profile's applicator-recipe fields, but their canonical
+    // rows come from the Mix library (and use a different unit basis). Do not
+    // leak those inline values into the Cheese recipe workbook.
+    addCheeseInlineUnlessMix(
+      cheeseRecipes, v.app1Type, v.app1CheeseRecipeName, rowsFrom(v.app1CheeseRecipe), mixOnlyNameKeys,
+    );
+    addCheeseInlineUnlessMix(
+      cheeseRecipes, v.app2Type, v.app2CheeseRecipeName, rowsFrom(v.app2CheeseRecipe), mixOnlyNameKeys,
+    );
+    addCheeseInlineUnlessMix(
+      cheeseRecipes, v.app3Type, v.app3CheeseRecipeName, rowsFrom(v.app3CheeseRecipe), mixOnlyNameKeys,
+    );
+    addCheeseInlineUnlessMix(
+      cheeseRecipes, v.app4Type, v.app4CheeseRecipeName, rowsFrom(v.app4CheeseRecipe), mixOnlyNameKeys,
+    );
+  }
   return {
     profiles,
-    doughRecipes: [...doughMap.values()],
-    sauceRecipes: [...sauceMap.values()],
-    cheeseRecipes: [...cheeseMap.values()],
+    doughRecipes,
+    sauceRecipes,
+    cheeseRecipes,
+    mixOnlyRecipeNames: [...mixOnlyNameKeys],
   };
 }
 
@@ -144,35 +213,40 @@ export async function exportSpecRecipes(
 ): Promise<ExportResult> {
   const downloaded: Partial<Record<ExportWorkbookKind, number>> = {};
   const failed: ExportWorkbookKind[] = [];
-  const specInput =
-    selection.specs || selection.dough || selection.sauce || selection.cheese
-      ? gatherSpecInput()
+  const needsSpecInput = selection.specs || selection.dough || selection.sauce || selection.cheese;
+  const mixPoolPromise =
+    needsSpecInput || selection.mixes
+      ? fetchMixes({ cache: "no-store" })
+      : null;
+  const specInputPromise =
+    needsSpecInput
+      ? gatherSpecInput(mixPoolPromise!)
       : null;
   const jobs: Array<{ kind: ExportWorkbookKind; filename: string; grids: () => Promise<SheetGrid[]> }> = [
     {
       kind: "specs",
       filename: `specs-${dateStr}.xlsx`,
-      grids: async () => buildSpecsExportGrids(specInput!),
+      grids: async () => buildSpecsExportGrids(await specInputPromise!),
     },
     {
       kind: "dough",
       filename: `dough-recipes-${dateStr}.xlsx`,
-      grids: async () => buildDoughExportGrids(specInput!),
+      grids: async () => buildDoughExportGrids(await specInputPromise!),
     },
     {
       kind: "sauce",
       filename: `sauce-recipes-${dateStr}.xlsx`,
-      grids: async () => buildSauceExportGrids(specInput!),
+      grids: async () => buildSauceExportGrids(await specInputPromise!),
     },
     {
       kind: "cheese",
       filename: `cheese-recipes-${dateStr}.xlsx`,
-      grids: async () => buildCheeseExportGrids(specInput!),
+      grids: async () => buildCheeseExportGrids(await specInputPromise!),
     },
     {
       kind: "mixes",
       filename: `mixes-${dateStr}.xlsx`,
-      grids: async () => buildMixExportGrids(await fetchMixes()),
+      grids: async () => buildMixExportGrids(await mixPoolPromise!),
     },
   ];
   for (const job of jobs) {

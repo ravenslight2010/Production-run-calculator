@@ -498,12 +498,36 @@ export const reportIncidentBodyDiagnosticsActionMax = 80;
 export const reportIncidentBodyDiagnosticsRetryCountMin = 0;
 export const reportIncidentBodyDiagnosticsRetryCountMax = 10;
 export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
+export const reportIncidentBodyDiagnosticsRequestElapsedMsMin = 0;
+export const reportIncidentBodyDiagnosticsRequestElapsedMsMax = 10000000;
+export const reportIncidentBodyDiagnosticsRequestHttpStatusMin = 400;
+export const reportIncidentBodyDiagnosticsRequestHttpStatusMax = 599;
+export const listIncidentsResponseContextRequestElapsedMsMin = 0;
+export const listIncidentsResponseContextRequestElapsedMsMax = 10000000;
+export const listIncidentsResponseContextRequestHttpStatusMin = 400;
+export const listIncidentsResponseContextRequestHttpStatusMax = 599;
+export const getIncidentResponseContextRequestElapsedMsMin = 0;
+export const getIncidentResponseContextRequestElapsedMsMax = 10000000;
+export const getIncidentResponseContextRequestHttpStatusMin = 400;
+export const getIncidentResponseContextRequestHttpStatusMax = 599;
+export const reviewIncidentResponseContextRequestElapsedMsMin = 0;
+export const reviewIncidentResponseContextRequestElapsedMsMax = 10000000;
+export const reviewIncidentResponseContextRequestHttpStatusMin = 400;
+export const reviewIncidentResponseContextRequestHttpStatusMax = 599;
+export const resolveIncidentResponseContextRequestElapsedMsMin = 0;
+export const resolveIncidentResponseContextRequestElapsedMsMax = 10000000;
+export const resolveIncidentResponseContextRequestHttpStatusMin = 400;
+export const resolveIncidentResponseContextRequestHttpStatusMax = 599;
 export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
 export const getBackgroundOperationDiagnosticsResponseAutomaticTrackingBackoffDeferredDateCountMin = 0;
 export const getBackgroundOperationDiagnosticsResponseAutomaticTrackingBackoffDeferredDateCountMax = 100;
 export const updateManagerActionItemBodyDeferReasonMax = 2000;
 export const updateManagerActionItemBodyResolutionNoteMax = 2000;
 export const updateIncidentWorkflowBodyNoteMax = 2000;
+export const updateIncidentWorkflowResponseContextRequestElapsedMsMin = 0;
+export const updateIncidentWorkflowResponseContextRequestElapsedMsMax = 10000000;
+export const updateIncidentWorkflowResponseContextRequestHttpStatusMin = 400;
+export const updateIncidentWorkflowResponseContextRequestHttpStatusMax = 599;
 export const createRoleBodyNameMax = 60;
 export const updateRoleBodyNameMax = 60;
 export const resetStaffPasswordBodyNewPasswordMin = 6;
@@ -7218,7 +7242,8 @@ export const SubmitFieldCheckObservationsBody = zod.object({
   "observedAt": zod.coerce.date(),
   "appBuild": zod.string().min(1).max(submitFieldCheckObservationsBodyObservationsItemAppBuildMax),
   "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'other-browser']),
-  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Performance requires only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Stale-deployment-recovery accepts no metrics.')
+  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.'),
+  "reportedRequestCorrelationId": zod.uuid().optional().describe('Opaque request correlation reference received by the browser from a server response; client-reported and not used for authorization.')
 })).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
 })
 
@@ -7275,7 +7300,8 @@ export const GetFieldChecksResponse = zod.object({
   "observedAt": zod.coerce.date(),
   "appBuild": zod.string(),
   "deviceCategory": zod.string(),
-  "metrics": zod.record(zod.string(), zod.number())
+  "metrics": zod.record(zod.string(), zod.number()),
+  "reportedRequestCorrelationId": zod.uuid().optional().describe('Client-reported opaque request correlation reference; never an authorization credential.')
 })),
   "failureCount": zod.int(),
   "incompleteCount": zod.int(),
@@ -7372,6 +7398,8 @@ export const ApplyAiRetentionCleanupResponse = zod.object({
 
 
 
+
+
 export const ReportIncidentBody = zod.object({
   "source": zod.enum(['user_report', 'auto_crash']),
   "screen": zod.string().max(reportIncidentBodyScreenMax).describe('Screen/route the user was on'),
@@ -7388,7 +7416,13 @@ export const ReportIncidentBody = zod.object({
   "connectivity": zod.enum(['online', 'offline', 'unstable', 'unknown']).optional(),
   "syncState": zod.enum(['idle', 'pending', 'retrying', 'blocked', 'unknown']).optional(),
   "signalKind": zod.enum(['user_report', 'crash', 'rejected_promise', 'api_failure', 'startup', 'update', 'sync']).optional(),
-  "correlationId": zod.string().max(reportIncidentBodyDiagnosticsCorrelationIdMax).optional()
+  "correlationId": zod.string().max(reportIncidentBodyDiagnosticsCorrelationIdMax).optional(),
+  "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestElapsedMs": zod.number().min(reportIncidentBodyDiagnosticsRequestElapsedMsMin).max(reportIncidentBodyDiagnosticsRequestElapsedMsMax).optional(),
+  "requestObservedAt": zod.coerce.date().optional(),
+  "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
+  "requestHttpStatus": zod.int().min(reportIncidentBodyDiagnosticsRequestHttpStatusMin).max(reportIncidentBodyDiagnosticsRequestHttpStatusMax).optional()
 }).optional()
 })
 
@@ -7409,6 +7443,10 @@ export const ReportIncidentResponse = zod.object({
  * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
  * @summary List incidents (manager only)
  */
+
+
+
+
 export const ListIncidentsResponseItem = zod.object({
   "id": zod.string(),
   "source": zod.enum(['user_report', 'auto_crash']),
@@ -7431,7 +7469,13 @@ export const ListIncidentsResponseItem = zod.object({
   "retryCount": zod.int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
-  "signalKind": zod.string().optional()
+  "signalKind": zod.string().optional(),
+  "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestElapsedMs": zod.number().min(listIncidentsResponseContextRequestElapsedMsMin).max(listIncidentsResponseContextRequestElapsedMsMax).optional(),
+  "requestObservedAt": zod.coerce.date().optional(),
+  "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
+  "requestHttpStatus": zod.int().min(listIncidentsResponseContextRequestHttpStatusMin).max(listIncidentsResponseContextRequestHttpStatusMax).optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -7499,6 +7543,10 @@ export const GetIncidentParams = zod.object({
   "id": zod.coerce.string()
 })
 
+
+
+
+
 export const GetIncidentResponse = zod.object({
   "id": zod.string(),
   "source": zod.enum(['user_report', 'auto_crash']),
@@ -7521,7 +7569,13 @@ export const GetIncidentResponse = zod.object({
   "retryCount": zod.int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
-  "signalKind": zod.string().optional()
+  "signalKind": zod.string().optional(),
+  "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestElapsedMs": zod.number().min(getIncidentResponseContextRequestElapsedMsMin).max(getIncidentResponseContextRequestElapsedMsMax).optional(),
+  "requestObservedAt": zod.coerce.date().optional(),
+  "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
+  "requestHttpStatus": zod.int().min(getIncidentResponseContextRequestHttpStatusMin).max(getIncidentResponseContextRequestHttpStatusMax).optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -7560,6 +7614,10 @@ export const ReviewIncidentParams = zod.object({
   "id": zod.coerce.string()
 })
 
+
+
+
+
 export const ReviewIncidentResponse = zod.object({
   "id": zod.string(),
   "source": zod.enum(['user_report', 'auto_crash']),
@@ -7582,7 +7640,13 @@ export const ReviewIncidentResponse = zod.object({
   "retryCount": zod.int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
-  "signalKind": zod.string().optional()
+  "signalKind": zod.string().optional(),
+  "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestElapsedMs": zod.number().min(reviewIncidentResponseContextRequestElapsedMsMin).max(reviewIncidentResponseContextRequestElapsedMsMax).optional(),
+  "requestObservedAt": zod.coerce.date().optional(),
+  "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
+  "requestHttpStatus": zod.int().min(reviewIncidentResponseContextRequestHttpStatusMin).max(reviewIncidentResponseContextRequestHttpStatusMax).optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -7622,6 +7686,10 @@ export const ResolveIncidentParams = zod.object({
   "id": zod.coerce.string()
 })
 
+
+
+
+
 export const ResolveIncidentResponse = zod.object({
   "id": zod.string(),
   "source": zod.enum(['user_report', 'auto_crash']),
@@ -7644,7 +7712,13 @@ export const ResolveIncidentResponse = zod.object({
   "retryCount": zod.int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
-  "signalKind": zod.string().optional()
+  "signalKind": zod.string().optional(),
+  "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestElapsedMs": zod.number().min(resolveIncidentResponseContextRequestElapsedMsMin).max(resolveIncidentResponseContextRequestElapsedMsMax).optional(),
+  "requestObservedAt": zod.coerce.date().optional(),
+  "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
+  "requestHttpStatus": zod.int().min(resolveIncidentResponseContextRequestHttpStatusMin).max(resolveIncidentResponseContextRequestHttpStatusMax).optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
@@ -7793,6 +7867,10 @@ export const UpdateIncidentWorkflowBody = zod.object({
   "note": zod.string().max(updateIncidentWorkflowBodyNoteMax).optional()
 })
 
+
+
+
+
 export const UpdateIncidentWorkflowResponse = zod.object({
   "id": zod.string(),
   "source": zod.enum(['user_report', 'auto_crash']),
@@ -7815,7 +7893,13 @@ export const UpdateIncidentWorkflowResponse = zod.object({
   "retryCount": zod.int().optional(),
   "connectivity": zod.string().optional(),
   "syncState": zod.string().optional(),
-  "signalKind": zod.string().optional()
+  "signalKind": zod.string().optional(),
+  "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestElapsedMs": zod.number().min(updateIncidentWorkflowResponseContextRequestElapsedMsMin).max(updateIncidentWorkflowResponseContextRequestElapsedMsMax).optional(),
+  "requestObservedAt": zod.coerce.date().optional(),
+  "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
+  "requestHttpStatus": zod.int().min(updateIncidentWorkflowResponseContextRequestHttpStatusMin).max(updateIncidentWorkflowResponseContextRequestHttpStatusMax).optional()
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),

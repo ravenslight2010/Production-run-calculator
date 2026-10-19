@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import type { SheetGrid } from "@workspace/spec-import";
+import { PROMPT_MAX_CELL_CHARS, type SheetGrid } from "@workspace/spec-import";
 import { buildSpecRecipeExportWorkbooks, type SpecExportInput } from "./index";
 
 // ── Representative dataset (verbatim from the real-AI harness) ───────────────
@@ -267,5 +267,147 @@ describe("spec export survives a real .xlsx write→read round-trip with zero lo
       ({ ...g, rows: g.rows.filter((r) => r[0] !== "Spice Blend") }),
     );
     expect(canonical(tampered)).not.toEqual(canonical(sauce.grids));
+  });
+});
+
+describe("conflicting and case-only exports survive a real .xlsx round-trip", () => {
+  it("keeps row identity, recipe conflicts, wrapped targets, and sheet-name collisions", () => {
+    const longFlavors = Array.from(
+      { length: 8 },
+      (_, index) => `Long Flavor ${index + 1} ${"x".repeat(32)}`,
+    );
+    const conflicted: SpecExportInput = {
+      profiles: [
+        {
+          brand: "Acme",
+          flavor: "Cheese",
+          dieType: "Classic",
+          doughRecipeName: "Shared Dough",
+          applicators: [],
+          pepperonis: [],
+          cheeseRecipeNames: [],
+        },
+        {
+          brand: "ACME",
+          flavor: "CHEESE",
+          dieType: "classic",
+          doughRecipeName: "shared dough",
+          applicators: [],
+          pepperonis: [],
+          cheeseRecipeNames: [],
+        },
+        {
+          brand: "Acme",
+          flavor: "Cheese",
+          dieType: "Alternate",
+          doughRecipeName: "SHARED DOUGH",
+          applicators: [],
+          pepperonis: [],
+          cheeseRecipeNames: [],
+        },
+        ...longFlavors.map((flavor) => ({
+          brand: "Acme",
+          flavor,
+          dieType: "Classic",
+          doughRecipeName: "Shared Dough",
+          applicators: [],
+          pepperonis: [],
+          cheeseRecipeNames: [],
+        })),
+      ],
+      doughRecipes: [
+        {
+          name: "Shared Dough",
+          rows: [
+            { ingredient: "Flour", lbs: 10 },
+            { ingredient: "Flour", lbs: 0 },
+          ],
+        },
+        {
+          name: "shared dough",
+          rows: [
+            { ingredient: "flour", lbs: 10 },
+            { ingredient: "flour", lbs: 0 },
+          ],
+        },
+        { name: "SHARED DOUGH", rows: [{ ingredient: "Flour", lbs: 11 }] },
+        { name: "Collision/Recipe", rows: [{ ingredient: "Salt", lbs: 1 }] },
+        { name: "Collision:Recipe", rows: [{ ingredient: "Salt", lbs: 2 }] },
+      ],
+      sauceRecipes: [],
+      cheeseRecipes: [],
+    };
+    const specsGrid = buildSpecRecipeExportWorkbooks(conflicted).find(
+      (workbook) => workbook.kind === "specs",
+    )!.grids;
+    const doughGrid = buildSpecRecipeExportWorkbooks(conflicted).find(
+      (workbook) => workbook.kind === "dough",
+    )!.grids;
+    const specsReadback = readWorkbook(writeWorkbook(specsGrid));
+    const doughReadback = readWorkbook(writeWorkbook(doughGrid));
+
+    expect(canonical(specsReadback)).toEqual(canonical(specsGrid));
+    expect(canonical(doughReadback)).toEqual(canonical(doughGrid));
+    expect(conflicted.profiles).toHaveLength(11);
+    expect(specsReadback).toHaveLength(1);
+    expect(specsReadback[0]!.rows).toHaveLength(longFlavors.length + 3);
+    expect(conflicted.doughRecipes).toHaveLength(5);
+    expect(doughReadback).toHaveLength(4);
+
+    const sharedSheets = doughReadback.filter((grid) =>
+      grid.rows[0]?.[0]?.toLowerCase().includes("shared dough"),
+    );
+    expect(sharedSheets).toHaveLength(2);
+    expect(
+      sharedSheets.flatMap((grid) => grid.rows).filter((row) => row[0]?.toLowerCase() === "recipe: shared dough"),
+    ).toHaveLength(2);
+    expect(sharedSheets.some((grid) => grid.rows.some((row) => row[0]?.toLowerCase() === "flour" && row[1] === "10"))).toBe(true);
+    expect(sharedSheets.some((grid) => grid.rows.some((row) => row[0]?.toLowerCase() === "flour" && row[1] === "0"))).toBe(true);
+    expect(sharedSheets.some((grid) => grid.rows.some((row) => row[0]?.toLowerCase() === "flour" && row[1] === "11"))).toBe(true);
+
+    const targetRows = sharedSheets.flatMap((grid) =>
+      grid.rows.filter((row) => row[0]?.toLowerCase().startsWith("acme:")),
+    );
+    expect(targetRows.length).toBeGreaterThan(2);
+    expect(targetRows.every((row) => row[0]!.length <= PROMPT_MAX_CELL_CHARS)).toBe(true);
+    const targetText = targetRows.map((row) => row[0]).join("\n");
+    for (const flavor of longFlavors) expect(targetText).toContain(flavor);
+
+    const foldedSheetNames = doughReadback.map((grid) => grid.name.toLowerCase());
+    expect(new Set(foldedSheetNames).size).toBe(foldedSheetNames.length);
+    expect(doughReadback.some((grid) => /\(2\)$/i.test(grid.name))).toBe(true);
+  });
+});
+
+describe("Mix profile references survive real XLSX export without becoming Cheese targets", () => {
+  it("keeps the Mix name in Specs and leaves the same-name Cheese block unassigned", () => {
+    const mixLinked: SpecExportInput = {
+      profiles: [{
+        brand: "Sample Food",
+        flavor: "Veggie",
+      applicators: [{ type: "Whole Mozzarella", ozPerPizza: 1 }],
+        pepperonis: [],
+        cheeseRecipeNames: ["Garden Mix"],
+      }],
+      doughRecipes: [],
+      sauceRecipes: [],
+      cheeseRecipes: [{ name: "Garden Mix", rows: [{ ingredient: "Onion", lbs: 2 }] }],
+    mixOnlyRecipeNames: ["Garden Mix"],
+    };
+    const workbooks = buildSpecRecipeExportWorkbooks(mixLinked);
+    const specsGrid = workbooks.find((workbook) => workbook.kind === "specs")!.grids;
+    const cheeseGrid = workbooks.find((workbook) => workbook.kind === "cheese")!.grids;
+    const specsReadback = readWorkbook(writeWorkbook(specsGrid));
+    const cheeseReadback = readWorkbook(writeWorkbook(cheeseGrid));
+    const profileRow = specsReadback.flatMap((grid) => grid.rows)
+      .find((row) => row[1] === "Veggie")!;
+    const cheeseRows = cheeseReadback.flatMap((grid) => grid.rows);
+
+    expect(canonical(specsReadback)).toEqual(canonical(specsGrid));
+    expect(canonical(cheeseReadback)).toEqual(canonical(cheeseGrid));
+    expect(profileRow).toContain("Whole Mozzarella");
+    expect(profileRow).toContain("Garden Mix");
+    expect(cheeseRows.some((row) => row[0] === "Recipe: Garden Mix")).toBe(true);
+    expect(cheeseRows.some((row) => row[0] === "Sample Food: Veggie")).toBe(false);
   });
 });

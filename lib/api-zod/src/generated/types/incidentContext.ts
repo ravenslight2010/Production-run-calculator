@@ -5,6 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { IncidentContextRequestBackgroundInvolvement } from './incidentContextRequestBackgroundInvolvement';
+import type { IncidentContextRequestOperationCategory } from './incidentContextRequestOperationCategory';
+import type { IncidentContextRequestOutcome } from './incidentContextRequestOutcome';
 
 /**
  * Captured details about a reported issue or a crash
@@ -26,4 +29,18 @@ export interface IncidentContext {
   connectivity?: string;
   syncState?: string;
   signalKind?: string;
+  requestOperationCategory?: IncidentContextRequestOperationCategory;
+  requestOutcome?: IncidentContextRequestOutcome;
+  /**
+     * @minimum 0
+     * @maximum 10000000
+     */
+  requestElapsedMs?: number;
+  requestObservedAt?: Date;
+  requestBackgroundInvolvement?: IncidentContextRequestBackgroundInvolvement;
+  /**
+     * @minimum 400
+     * @maximum 599
+     */
+  requestHttpStatus?: number;
 }

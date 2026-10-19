@@ -11,6 +11,7 @@ const DEVICES = ["desktop-chrome", "desktop-safari", "desktop-firefox", "mobile-
   "mobile-safari", "tablet-browser", "other-browser", "android-phone", "android-tablet", "ipad", "iphone"];
 const STATUSES = ["healthy", "collecting", "needs-review", "unsupported"];
 const COVERAGES = ["never-observed", "current", "stale", "no-success"];
+const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const FIELD_CHECK_EXPORT_MAX_BYTES = 64_000;
 const MISSING = "unavailable";
 function record(value: unknown): Record<string, unknown> {
@@ -44,10 +45,23 @@ function diagnostics(name: string, value: unknown) {
   const failureCode = typeof metrics.failureCode === "number" && failureCodes.includes(metrics.failureCode)
     ? metrics.failureCode : MISSING;
   const sourceCode = name === "performance" && typeof metrics.sourceCode === "number" &&
-    [1, 2, 3, 4].includes(metrics.sourceCode) ? metrics.sourceCode : MISSING;
+    [1, 2, 3, 4, 5, 6].includes(metrics.sourceCode) ? metrics.sourceCode : MISSING;
+  const requestOutcomeCode = name === "performance" && typeof metrics.outcomeCode === "number" &&
+    [1, 2, 3, 4, 5, 6, 7].includes(metrics.outcomeCode) ? metrics.outcomeCode : MISSING;
+  const operationCode = name === "performance" && typeof metrics.operationCode === "number" &&
+    [1, 2, 3, 4, 5, 6, 7].includes(metrics.operationCode) ? metrics.operationCode : MISSING;
+  const backgroundCode = name === "performance" && (metrics.backgroundCode === 0 || metrics.backgroundCode === 1)
+    ? metrics.backgroundCode : MISSING;
+  const httpStatusCode = name === "performance" && typeof metrics.httpStatusCode === "number" &&
+    Number.isInteger(metrics.httpStatusCode) && metrics.httpStatusCode >= 400 && metrics.httpStatusCode <= 599
+    ? metrics.httpStatusCode : MISSING;
+  const requestDetailsAvailable = name === "performance" && requestOutcomeCode !== MISSING;
   return {
     durationMs, durationAtCeiling: durationMs === 10_000_000,
     failureCode, sourceCode,
+    ...(requestDetailsAvailable
+      ? { requestOutcomeCode, operationCode, backgroundCode, httpStatusCode }
+      : {}),
   };
 }
 
@@ -88,6 +102,10 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
               ? "revision-shaped-unverified" : "unknown",
           deviceCategory: category(failure.deviceCategory, DEVICES),
           diagnostics: diagnostics(name, failure.metrics),
+          reportedRequestCorrelationId:
+            typeof failure.reportedRequestCorrelationId === "string" &&
+            CORRELATION_ID.test(failure.reportedRequestCorrelationId)
+              ? failure.reportedRequestCorrelationId : MISSING,
         };
       }),
     };
@@ -115,12 +133,17 @@ export function createFieldCheckExport(input: unknown, capturedAt = new Date()) 
       notice: "Not release readiness or physical-device verification. Hardware entries are reported confirmations only. Build categories do not verify revision identity or environment.",
       missingDetailLabel: MISSING,
       coverage: "Existing report snapshot only; at most five recent non-successes per check. Not a complete observation history.",
-      sanitization: "Fixed categories, canonical timestamps and bounded numeric diagnostics only. No operational payloads or identifiers.",
+      sanitization: "Fixed categories, canonical timestamps and bounded numeric diagnostics only. Request elapsed time is client-observed, not server duration. No operational payloads or personal identifiers; an optional opaque correlation reference may be included.",
     },
     diagnosticCodeLegend: {
       syncFailure: { 1: "Login or permission rejected", 2: "Stale/reset write rejected", 3: "Sync retries exhausted" },
       productionRunSaveFailure: { 1: "Login or permission rejected", 2: "Stale/reset save rejected", 3: "Unrecoverable sync conflict", 4: "Sync retries exhausted" },
-      performanceSource: { 1: "Home bundle load", 2: "Page navigation load", 3: "API timeout / abort", 4: "API network failure" },
+      performanceSource: { 1: "Home bundle load", 2: "Page navigation load", 3: "API timeout", 4: "API transport failure", 5: "API HTTP failure", 6: "API request cancelled" },
+      requestOutcome: { 1: "HTTP 5xx", 2: "Authentication rejected", 3: "HTTP 4xx", 4: "Transport failure", 5: "Browser reported offline", 6: "Client timeout", 7: "Cancelled" },
+      apiOperation: { 1: "Authentication", 2: "Diagnostics", 3: "Import", 4: "Inventory", 5: "Master data", 6: "Sync", 7: "Other" },
+      backgroundInvolvement: { 0: "No browser-hidden transition observed; OS suspension unknown", 1: "Background/hidden transition observed" },
+      reportedRequestCorrelationId: "Client-reported opaque server reference; not independently verified and never used for authorization.",
+      legacyRequestClassification: "Missing structured request codes were not captured by the older record; do not infer an outcome, operation or background state.",
       durationAtCeiling: "A duration of 10000000 ms is a lower bound, not an exact duration.",
     },
     reportGeneratedAt: timestamp(report.generatedAt),

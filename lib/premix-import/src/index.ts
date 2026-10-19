@@ -47,8 +47,7 @@ export type { SheetGrid, SpecImportAlias };
 export type ParsedPremixComponent = {
   /** Ingredient name (first line of the cell, trimmed). */
   ingredient: string;
-  /** Per-pizza amount (lbs). 0 when the sheet leaves the "Per Pizza" cell blank
-   *  (a flat per-batch addition — the Mix model only carries per-pizza). */
+  /** Per-pizza amount (oz). 0 when the sheet leaves the "Per Pizza" cell blank. */
   perPizza: number;
   /** Per-batch amount (lbs) straight from the sheet; kept for reference/debug. */
   perBatch: number;
@@ -60,6 +59,7 @@ export type PremixSourceEvidence = {
   daysEarly?: WorkbookCellReference;
   productBrand?: WorkbookCellReference;
   productFlavor?: WorkbookCellReference;
+  isPrep?: WorkbookCellReference;
   productMatchVerified?: boolean;
   resolvedBrand?: string;
   resolvedFlavor?: string;
@@ -106,6 +106,8 @@ export type ParsedPremix = {
   /** Explicit product markers emitted by grouped exports, when present. */
   productBrand?: string;
   productFlavor?: string;
+  /** Explicit Is Prep Yes/No marker. Absent in older premix workbooks. */
+  isPrep?: boolean;
   /** True when product marker rows were present, including intentionally blank markers. */
   productMarked?: boolean;
   /** Review-only source references. premixToMix deliberately does not persist these. */
@@ -145,7 +147,7 @@ const TOTAL_RE = /^total$/;
 // ingredient-column text (prefix match). Tolerates the sheet's typos
 // ("TOTAL AMOUTN", "#OF MIXES", etc.).
 const STOP_LABEL_RE =
-  /^(max batches|total cases|cases needed|total amount|total amoutn|amount needed|amount of mix|total needed|amount already|amount being|amount drained|pull for mix|#\s*of mixes|per batch|per\s*t?\s*pizza|pounds|lbs)\b/;
+  /^(max batches|total cases|cases needed|total amount|total amoutn|amount needed|amount of mix|total needed|amount already|amount being|amount drained|pull for mix|#\s*of mixes|per batch|per\s*t?\s*pizza|is prep|pounds|lbs)\b/;
 
 // "Pull 3 Days Early" / "PULL OLD MIX 2 DAYS PRIOR" → captures the day count.
 const DAYS_EARLY_RE = /pull\s+(?:old\s+mix\s+)?(\d+)\s+days?\s+(?:early|prior|ahead|before)/i;
@@ -263,6 +265,20 @@ function findProductMarkers(
   };
 }
 
+function findPrepMarker(
+  rows: string[][],
+  headerRow: number,
+  ingredientCol: number,
+): { isPrep?: boolean; row?: number } {
+  for (let r = Math.max(0, headerRow - 6); r < headerRow; r++) {
+    if (norm(cell(rows, r, ingredientCol)) !== "is prep") continue;
+    const value = norm(cell(rows, r, ingredientCol + 1));
+    if (value === "yes" || value === "true") return { isPrep: true, row: r };
+    if (value === "no" || value === "false") return { isPrep: false, row: r };
+  }
+  return {};
+}
+
 function findLocalDaysEarly(
   rows: string[][],
   headerRow: number,
@@ -344,6 +360,7 @@ function parseBlock(
   if (!name && components.length === 0) return null;
 
   const markers = findProductMarkers(rows, anchor.row, ingredientCol);
+  const prepMarker = findPrepMarker(rows, anchor.row, ingredientCol);
   const { daysEarly, notes, noteRow, noteCol } =
     markers.productMarked
       ? findLocalDaysEarly(rows, anchor.row, ingredientCol, blockEndCol)
@@ -403,6 +420,7 @@ function parseBlock(
       components,
       sheetName: grid.name,
       ...markers,
+      ...(prepMarker.isPrep !== undefined ? { isPrep: prepMarker.isPrep } : {}),
     },
     sourceEvidence: {
       ...(blockName.row !== undefined
@@ -416,6 +434,16 @@ function parseBlock(
         : {}),
       ...(findMarkerCell("product brand") ? { productBrand: findMarkerCell("product brand") } : {}),
       ...(findMarkerCell("product flavor") ? { productFlavor: findMarkerCell("product flavor") } : {}),
+      ...(prepMarker.row !== undefined
+        ? {
+            isPrep: workbookCellReference(
+              grid.name,
+              prepMarker.row,
+              ingredientCol + 1,
+              grid.sourceFile,
+            ),
+          }
+        : {}),
       components: componentRows.map((row, index) => ({
         ingredientName: components[index]?.ingredient ?? "",
         perPizzaValue: components[index]?.perPizza ?? 0,
@@ -869,7 +897,7 @@ export function premixToMix(
     // into the reference-only lbs/batch column (normalizeMix drops <= 0).
     ...(c.perBatch > 0 ? { perBatchLbs: c.perBatch } : {}),
   }));
-  return normalizeMix({
+  const mix = normalizeMix({
     id: premixId(parsed),
     name: parsed.name,
     brand: parsed.brand,
@@ -880,7 +908,57 @@ export function premixToMix(
     amountAlreadyMade: 0,
     components,
     enabled: true,
+    ...(parsed.isPrep !== undefined ? { isPrep: parsed.isPrep } : {}),
   });
+  // Keep an explicit workbook "No" through the review merge so it can clear a
+  // prior prep classification when the manager confirms the new export.
+  if (mix && parsed.isPrep === false) mix.isPrep = false;
+  return mix;
+}
+
+function premixMixDataSignature(mix: Mix): string {
+  return JSON.stringify([
+    mix.name.trim().toLowerCase(),
+    (mix.brand ?? "").trim().toLowerCase(),
+    (mix.flavor ?? "").trim().toLowerCase(),
+    mix.batchSize,
+    mix.daysEarly,
+    mix.notes ?? "",
+    mix.components.map((component) => [
+      component.ingredient.trim().toLowerCase(),
+      component.perPizza,
+      component.perBatchLbs ?? null,
+    ]),
+  ]);
+}
+
+/**
+ * Collapse only identical premix blocks with the same deterministic id. A
+ * conflicting formula or conflicting explicit prep marker is an import error,
+ * not a last-write-wins choice. An old workbook with no prep marker can be
+ * enriched by a newer copy that explicitly carries the marker.
+ */
+export function coalescePremixMixesById(imported: ReadonlyArray<Mix>): Mix[] {
+  const byId = new Map<string, Mix>();
+  for (const mix of imported) {
+    const previous = byId.get(mix.id);
+    if (!previous) {
+      byId.set(mix.id, mix);
+      continue;
+    }
+    if (
+      premixMixDataSignature(previous) !== premixMixDataSignature(mix)
+      || (previous.isPrep !== undefined && mix.isPrep !== undefined && previous.isPrep !== mix.isPrep)
+    ) {
+      throw new Error(
+        `Conflicting premix blocks for "${mix.name}" share the same product key. Review the source workbooks and import one version; nothing was applied.`,
+      );
+    }
+    if (previous.isPrep === undefined && mix.isPrep !== undefined) {
+      byId.set(mix.id, { ...previous, isPrep: mix.isPrep });
+    }
+  }
+  return [...byId.values()];
 }
 
 /**
@@ -1267,8 +1345,38 @@ function mergeMixNotes(existingNotes: string | undefined, importedNotes: string 
  * instead of being reset by the import (see mergeMixNotes for the note policy).
  * Cellulose is also retained when omitted because it is a manager-maintained
  * preservative addition rather than a reliably sheet-carried component.
+ * A blank per-batch cell is unknown, not a deletion: preserve an existing
+ * reference amount for the same ingredient/per-pizza row. Repeated identical
+ * ingredient rows are matched by occurrence order, not summed or collapsed.
  * Existing mixes not in the import are preserved. Pure.
  */
+function preserveUnspecifiedPerBatch(
+  existing: ReadonlyArray<MixComponent>,
+  imported: ReadonlyArray<MixComponent>,
+): MixComponent[] {
+  const keyOf = (component: MixComponent) =>
+    JSON.stringify([
+      component.ingredient.trim().toLowerCase().replace(/\s+/g, " "),
+      component.perPizza,
+    ]);
+  const previousByKey = new Map<string, MixComponent[]>();
+  for (const component of existing) {
+    const key = keyOf(component);
+    const rows = previousByKey.get(key) ?? [];
+    rows.push(component);
+    previousByKey.set(key, rows);
+  }
+  const occurrenceByKey = new Map<string, number>();
+  return imported.map((component) => {
+    const key = keyOf(component);
+    const occurrence = occurrenceByKey.get(key) ?? 0;
+    occurrenceByKey.set(key, occurrence + 1);
+    const previous = previousByKey.get(key)?.[occurrence];
+    if (component.perBatchLbs != null || previous?.perBatchLbs == null) return component;
+    return { ...component, perBatchLbs: previous.perBatchLbs };
+  });
+}
+
 export function mergePremixIntoMixes(
   existing: ReadonlyArray<Mix>,
   imported: ReadonlyArray<Mix>,
@@ -1284,13 +1392,14 @@ export function mergePremixIntoMixes(
     const importedHasCellulose = m.components.some((c) =>
       isCelluloseIngredient(c.ingredient),
     );
+    const importedComponents = preserveUnspecifiedPerBatch(prev.components, m.components);
     const merged: Mix = {
       ...m,
       // A parsed workbook is not a new server revision. Keep the baseline
       // unless the caller supplied its own (possibly stale) revision.
       updatedAt: m.updatedAt ?? prev.updatedAt,
       components: [
-        ...m.components,
+        ...importedComponents,
         ...(importedHasCellulose
           ? []
           : prev.components.filter((c) => isCelluloseIngredient(c.ingredient))),
@@ -1298,6 +1407,9 @@ export function mergePremixIntoMixes(
       amountAlreadyMade: prev.amountAlreadyMade,
       enabled: prev.enabled,
     };
+    // Older premix workbooks predate the prep marker. Missing means
+    // "not represented", not "turn off prep".
+    if (m.isPrep === undefined && prev.isPrep === true) merged.isPrep = true;
     const notes = mergeMixNotes(prev.notes, m.notes);
     if (notes) merged.notes = notes;
     else delete merged.notes;

@@ -21,6 +21,7 @@ import {
   collectPremixPrepItems,
   PREMIX_PREP_RE,
   isPrepOnlyPremix,
+  coalescePremixMixesById,
   type PremixKnown,
   type SheetGrid,
 } from "./index";
@@ -104,6 +105,32 @@ describe("parsePremixWorkbook", () => {
     const flat = mix.components.find((c) => c.ingredient === "1/8 Green Pepper");
     expect(flat?.perPizza).toBe(0);
     expect(flat?.perBatch).toBe(10);
+  });
+
+  it("parses explicit prep status and retains its source location without changing units", () => {
+    const makeGrid = (value?: string): SheetGrid => ({
+      name: "Unassigned",
+      rows: [
+        ["Hot Giardiniera Mix"],
+        ...(value === undefined ? [] : [["Is Prep", value]]),
+        ["Ingredient", "Per Pizza (oz)", "Per Batch (lbs)"],
+        ["Prep Base", "0", "2.5"],
+        ["Total", "0", "2.5"],
+      ],
+    });
+    const [yes] = parsePremixWorkbookWithSources([
+      { ...makeGrid("Yes"), sourceFile: "synthetic.xlsx" },
+    ]);
+    expect(yes).toMatchObject({ name: "Hot Giardiniera Mix", isPrep: true });
+    expect(yes.sourceEvidence?.isPrep).toMatchObject({ file: "synthetic.xlsx", cell: "B2" });
+    expect(yes.components).toEqual([
+      { ingredient: "Prep Base", perPizza: 0, perBatch: 2.5 },
+    ]);
+
+    const [no] = parsePremixWorkbook([makeGrid("No")]);
+    expect(no.isPrep).toBe(false);
+    const [legacy] = parsePremixWorkbook([makeGrid()]);
+    expect(legacy).not.toHaveProperty("isPrep");
   });
 
   it("attaches review-only sheet and cell coordinates without changing the ordinary parse result", () => {
@@ -599,6 +626,59 @@ describe("conversion + summary", () => {
     expect(updated.components).toEqual(mixes[0].components);
   });
 
+  it("an older premix workbook without Is Prep preserves an existing prep classification", () => {
+    const prepGrid: SheetGrid = {
+      name: "Unassigned",
+      rows: [
+        ["Spinach"],
+        ["Ingredient", "Per Pizza", "Per Batch"],
+        ["Prep Base", "0", "2.5"],
+        ["Total", "0", "2.5"],
+      ],
+    };
+    const [parsed] = parsePremixWorkbook([prepGrid]);
+    const imported = premixToMix(parsed)!;
+    const existing: Mix = { ...imported, isPrep: true };
+    const [merged] = mergePremixIntoMixes([existing], [imported]);
+    expect(merged?.isPrep).toBe(true);
+    expect(merged?.components).toEqual([{ ingredient: "Prep Base", perPizza: 0, perBatchLbs: 2.5 }]);
+  });
+
+  it("coalesces only identical same-key blocks and surfaces conflicting formulas", () => {
+    const first: Mix = {
+      id: "same-key",
+      name: "Spinach",
+      brand: "",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      amountAlreadyMade: 0,
+      components: [
+        { ingredient: "Prep Base", perPizza: 0, perBatchLbs: 2.5 },
+        { ingredient: "Prep Base", perPizza: 0, perBatchLbs: 2.5 },
+      ],
+      enabled: true,
+    };
+    const explicitPrep = {
+      ...first,
+      name: "spinach",
+      isPrep: true,
+      components: first.components.map((component) => ({ ...component, ingredient: "prep base" })),
+    };
+    expect(coalescePremixMixesById([first, explicitPrep])).toEqual([
+      { ...first, isPrep: true },
+    ]);
+    expect(() =>
+      coalescePremixMixesById([
+        first,
+        { ...first, components: [{ ...first.components[0]!, perBatchLbs: 3 }] },
+      ]),
+    ).toThrow(/conflicting premix blocks/i);
+    expect(() => coalescePremixMixesById([explicitPrep, { ...first, isPrep: false }])).toThrow(
+      /conflicting premix blocks/i,
+    );
+  });
+
   it("builds per-mix review candidates tagged new vs update", () => {
     const mixes = parsePremixWorkbook([HANNAFORD]).map(
       (p) => premixToMix(groundPremix(p, KNOWN, []).mix)!,
@@ -789,6 +869,47 @@ describe("re-import always updates components via mergePremixIntoMixes", () => {
     const [merged] = mergePremixIntoMixes([existing], [imported]);
     expect(merged.updatedAt).toBe(revision);
     expect(merged.components).toEqual(imported.components);
+  });
+
+  it("preserves blank per-batch cells by matching repeated ingredient rows in order", () => {
+    const existing = mkMix({
+      id: "saved",
+      name: "Mix",
+      components: [
+        { ingredient: "Mozzarella", perPizza: 0.5, perBatchLbs: 20 },
+        { ingredient: "Mozzarella", perPizza: 0.5, perBatchLbs: 21 },
+      ],
+    });
+    const imported = mkMix({
+      id: "saved",
+      name: "Mix",
+      components: [
+        { ingredient: "mozzarella", perPizza: 0.5 },
+        { ingredient: "Mozzarella", perPizza: 0.5, perBatchLbs: 25 },
+      ],
+    });
+
+    const [merged] = mergePremixIntoMixes([existing], [imported]);
+    expect(merged.components).toEqual([
+      { ingredient: "mozzarella", perPizza: 0.5, perBatchLbs: 20 },
+      { ingredient: "Mozzarella", perPizza: 0.5, perBatchLbs: 25 },
+    ]);
+  });
+
+  it("does not attach a saved per-batch amount to a changed per-pizza row", () => {
+    const existing = mkMix({
+      id: "saved",
+      name: "Mix",
+      components: [{ ingredient: "Mozzarella", perPizza: 0.5, perBatchLbs: 20 }],
+    });
+    const imported = mkMix({
+      id: "saved",
+      name: "Mix",
+      components: [{ ingredient: "Mozzarella", perPizza: 0.75 }],
+    });
+
+    const [merged] = mergePremixIntoMixes([existing], [imported]);
+    expect(merged.components).toEqual([{ ingredient: "Mozzarella", perPizza: 0.75 }]);
   });
 
   it("keeps explicit stale revisions and leaves new recipes unstamped", () => {

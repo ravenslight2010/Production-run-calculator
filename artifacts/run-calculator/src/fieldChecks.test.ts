@@ -171,7 +171,7 @@ describe("field-check observer", () => {
       durationMs: 80.13,
       failureCode: PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite,
     });
-    expect(saveFailure?.observationId).toContain(":production-run-save-sync:v3:");
+    expect(saveFailure?.observationId).toContain(":production-run-save-sync:v4:");
     const saveSuccess = observations.find((item: { checkName: string; outcome: string }) =>
       item.checkName === "production-run-save-sync" && item.outcome === "success",
     );
@@ -419,15 +419,12 @@ describe("field-check observer", () => {
     expect(JSON.stringify(sync)).not.toMatch(/runId|response/);
   });
 
-  it("classifies selected timings at their existing budgets and separates safe sources", async () => {
+  it("classifies page timings and ignores deprecated path-bearing API timing names", async () => {
     const stop = createFieldCheckObserver("local", TEST_SCOPE);
     recordPerformance("startup:home-chunk-load", 10_000, "load");
     recordPerformance("startup:home-chunk-load", 10_001, "load");
     recordPerformance("browser:navigation-to-load", 1500, "load");
     recordPerformance("browser:navigation-to-load", 1501, "load");
-    recordPerformance("api-failure:/api/private-run-id:timeout", 2000, "api");
-    recordPerformance("api-failure:/api/private-run-id:network", 2001, "api");
-    recordPerformance("api-failure:/api/private-run-id:unknown", 3000, "api");
     recordPerformance("hmr:update", 5000, "hmr");
     emitFieldCheckSignal("performance", "failure", { durationMs: 10, sourceCode: 99 });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -439,12 +436,69 @@ describe("field-check observer", () => {
       ["failure", { durationMs: 10_001, sourceCode: 1 }],
       ["success", { durationMs: 1500, sourceCode: 2 }],
       ["failure", { durationMs: 1501, sourceCode: 2 }],
-      ["failure", { durationMs: 2000, sourceCode: 3 }],
-      ["failure", { durationMs: 2001, sourceCode: 4 }],
     ]);
-    expect(JSON.stringify(samples)).not.toContain("private-run-id");
     expect(fieldCheckDiagnosticLabel("performance", {})).toContain("older evidence");
     expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 2 })).toContain("stale/reset");
+  });
+
+  it("queues a quick HTTP 500 with operation, elapsed time, observation, background and correlation evidence", async () => {
+    const stop = createFieldCheckObserver("app-build:abc123", TEST_SCOPE);
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
+        operationCategory: "sync",
+        requestOutcome: "http_server_error",
+        elapsedMs: 52,
+        observedAt: "2026-10-16T22:49:00.000Z",
+        backgroundObserved: true,
+        connectivity: "online",
+        httpStatus: 500,
+        correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stop();
+    const sample = submit.mock.calls.flatMap((call) => call[0])
+      .find((item: { checkName: string }) => item.checkName === "performance");
+    expect(sample).toMatchObject({
+      checkName: "performance",
+      checkVersion: "4",
+      outcome: "failure",
+      appBuild: "app-build:abc123",
+      reportedRequestCorrelationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
+      metrics: {
+        durationMs: 52,
+        sourceCode: 5,
+        outcomeCode: 1,
+        operationCode: 6,
+        backgroundCode: 1,
+        httpStatusCode: 500,
+      },
+    });
+    expect(fieldCheckDiagnosticLabel("performance", sample.metrics))
+      .toContain("API HTTP failure · sync · HTTP 5xx · HTTP 500");
+  });
+
+  it("stores cancelled and uncorrelated transport failures distinctly without inventing references", async () => {
+    const stop = createFieldCheckObserver("app-build:abc123", TEST_SCOPE);
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
+        operationCategory: "inventory",
+        requestOutcome: "cancelled",
+        elapsedMs: 40,
+        observedAt: new Date().toISOString(),
+        backgroundObserved: false,
+        connectivity: "online",
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stop();
+    const sample = submit.mock.calls.flatMap((call) => call[0])
+      .find((item: { checkName: string }) => item.checkName === "performance");
+    expect(sample).toMatchObject({
+      outcome: "incomplete",
+      metrics: { sourceCode: 6, outcomeCode: 7, operationCode: 4, backgroundCode: 0 },
+    });
+    expect(sample).not.toHaveProperty("reportedRequestCorrelationId");
   });
 
   it("retains a very slow event as a capped duration instead of dropping its failure", async () => {

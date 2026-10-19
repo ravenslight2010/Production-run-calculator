@@ -56,7 +56,11 @@ export type ExportProfile = {
   doughballsPerTray?: number;
   /** frontlineRecipeName reference (ties this profile to a sauce recipe). */
   sauceRecipeName?: string;
-  /** appNCheeseRecipeName references, index 0..3 → applicator slots 1..4. */
+  /**
+   * appNCheeseRecipeName references, index 0..3 → applicator slots 1..4.
+   * Mix links remain in the Specs profile rows but do not become Cheese recipe
+   * targets; their canonical recipes are exported through the Mixes workbook.
+   */
   cheeseRecipeNames?: (string | undefined)[];
 };
 
@@ -65,6 +69,8 @@ export type SpecExportInput = {
   doughRecipes: ExportRecipe[];
   sauceRecipes: ExportRecipe[];
   cheeseRecipes: ExportRecipe[];
+  /** Canonical Mix names absent from the Cheese pool; these are not Cheese targets. */
+  mixOnlyRecipeNames?: string[];
 };
 
 /** Compatibility selection used by buildSpecExportGrids. */
@@ -93,6 +99,60 @@ function num(n: number | undefined | null): string {
 
 function text(s: string | undefined | null): string {
   return (s ?? "").toString().trim();
+}
+
+function folded(s: string | undefined | null): string {
+  return text(s).toLowerCase();
+}
+
+function compareFolded(a: string, b: string): number {
+  return folded(a).localeCompare(folded(b)) || a.localeCompare(b);
+}
+
+function profileValueSignature(profile: ExportProfile): string {
+  return JSON.stringify([
+    folded(profile.dieType),
+    profile.sauceOzPerPizza,
+    profile.applicators.map((app) => [folded(app.type), app.ozPerPizza]),
+    profile.pepperonis.map((pep) => [folded(pep.type), pep.sticks, pep.ozPerPizza]),
+    folded(profile.doughRecipeName),
+    profile.targetDoughballWeight,
+    profile.doughballsPerTray,
+    folded(profile.sauceRecipeName),
+    profile.cheeseRecipeNames?.map(folded) ?? null,
+  ]);
+}
+
+function compareProfiles(a: ExportProfile, b: ExportProfile): number {
+  return compareFolded(a.brand, b.brand)
+    || compareFolded(a.flavor, b.flavor)
+    || profileValueSignature(a).localeCompare(profileValueSignature(b));
+}
+
+function recipeSignature(recipe: ExportRecipe): string {
+  return JSON.stringify([
+    folded(recipe.name),
+    (recipe.rows ?? [])
+      .filter((row) => text(row.ingredient))
+      .map((row) => [folded(row.ingredient), row.lbs]),
+  ]);
+}
+
+/**
+ * Collapse only case-only identical recipe records. Ingredient row order,
+ * repeated rows, zero values, and conflicting same-name formulas are retained.
+ */
+function coalesceIdenticalRecipes(recipes: ReadonlyArray<ExportRecipe>): ExportRecipe[] {
+  const sorted = [...recipes].sort(
+    (a, b) => compareFolded(a.name, b.name) || recipeSignature(a).localeCompare(recipeSignature(b)),
+  );
+  const seen = new Set<string>();
+  return sorted.filter((recipe) => {
+    const signature = recipeSignature(recipe);
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
 }
 
 // ── Excel sheet-name sanitiser ───────────────────────────────────────────────
@@ -155,10 +215,12 @@ function addTarget(tie: RecipeTie, brand: string, flavor: string): void {
   const b = brand.trim();
   const f = flavor.trim();
   if (!b || !f) return;
-  const list = tie.targetsByBrand.get(b) ?? [];
+  const existingBrand = [...tie.targetsByBrand.keys()].find((key) => folded(key) === folded(b));
+  const brandKey = existingBrand ?? b;
+  const list = tie.targetsByBrand.get(brandKey) ?? [];
   if (!list.some((x) => x.toLowerCase() === f.toLowerCase())) {
     list.push(f);
-    tie.targetsByBrand.set(b, list);
+    tie.targetsByBrand.set(brandKey, list);
   }
 }
 
@@ -174,6 +236,7 @@ function eq(a: string | undefined, b: string): boolean {
 function tieRecipes(
   profiles: ReadonlyArray<ExportProfile>,
   kind: "dough" | "sauce" | "cheese",
+  mixOnlyRecipeNames?: ReadonlySet<string>,
 ): Map<string, RecipeTie> {
   const byName = new Map<string, RecipeTie>();
   const get = (name: string): RecipeTie => {
@@ -193,7 +256,7 @@ function tieRecipes(
     }
     return tie;
   };
-  for (const p of profiles) {
+  for (const p of [...profiles].sort(compareProfiles)) {
     if (kind === "dough") {
       const nm = text(p.doughRecipeName);
       if (nm) {
@@ -229,13 +292,24 @@ function tieRecipes(
       for (let slot = 1; slot <= 4; slot++) {
         const nm = text(names[slot - 1]);
         if (!nm) continue;
+        // The profile field is shared by Cheese and Mix slots. Keep Mix
+        // assignments in the Specs workbook, but don't label them as Cheese
+        // recipe targets. Mix-only library names are excluded too, including
+        // legacy slots whose applicator type is not the literal "Mix".
+        if (
+          folded(p.applicators[slot - 1]?.type) === "mix" ||
+          mixOnlyRecipeNames?.has(folded(nm))
+        ) continue;
         const tie = get(nm);
         addTarget(tie, p.brand, p.flavor);
         const brand = text(p.brand);
         if (brand) {
-          const slots = tie.appSlotsByBrand.get(brand) ?? [];
+          const brandKey =
+            [...tie.appSlotsByBrand.keys()].find((key) => folded(key) === folded(brand))
+            ?? brand;
+          const slots = tie.appSlotsByBrand.get(brandKey) ?? [];
           if (!slots.includes(slot)) slots.push(slot);
-          tie.appSlotsByBrand.set(brand, slots);
+          tie.appSlotsByBrand.set(brandKey, slots);
         }
       }
     }
@@ -253,10 +327,7 @@ function tieRecipes(
  * is readable without knowing the import format.
  */
 function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "Profiles"): SheetGrid {
-  const sorted = [...profiles].sort(
-    (a, b) =>
-      a.brand.localeCompare(b.brand) || a.flavor.localeCompare(b.flavor),
-  );
+  const sorted = [...profiles].sort(compareProfiles);
 
   // Scan to find the highest slot index that has at least one non-empty value
   // across all exported profiles, so trailing empty columns are omitted.
@@ -298,6 +369,14 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "
   }
 
   const rows: string[][] = [header];
+  const identityColumns = header.map(
+    (label) =>
+      label === "Brand"
+      || label === "Flavor"
+      || label === "Die Type"
+      || /(?: Type| Recipe)$/.test(label),
+  );
+  const seenRows = new Set<string>();
   for (const p of sorted) {
     const brand = text(p.brand);
     const flavor = text(p.flavor);
@@ -332,6 +411,13 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>, sheetName = "
       const type = text(pp?.type);
       row.push(type, type ? num(pp?.sticks) : "", type ? num(pp?.ozPerPizza) : "");
     }
+    const signature = JSON.stringify(
+      row.map((value, index) =>
+        identityColumns[index] ? text(value).toLowerCase() : text(value),
+      ),
+    );
+    if (seenRows.has(signature)) continue;
+    seenRows.add(signature);
     rows.push(row);
   }
   return {
@@ -451,17 +537,18 @@ function validProfiles(profiles: ReadonlyArray<ExportProfile>): ExportProfile[] 
 
 /** Specs workbook: one worksheet per brand, preserving the Brand column. */
 export function buildSpecsExportGrids(input: SpecExportInput): SheetGrid[] {
-  const byBrand = new Map<string, ExportProfile[]>();
-  for (const profile of validProfiles(input.profiles ?? [])) {
+  const byBrand = new Map<string, { display: string; profiles: ExportProfile[] }>();
+  for (const profile of [...validProfiles(input.profiles ?? [])].sort(compareProfiles)) {
     const brand = text(profile.brand);
-    const list = byBrand.get(brand) ?? [];
-    list.push(profile);
-    byBrand.set(brand, list);
+    const key = folded(brand);
+    const entry = byBrand.get(key) ?? { display: brand, profiles: [] };
+    entry.profiles.push(profile);
+    byBrand.set(key, entry);
   }
   return dedupeSheetNames(
-    [...byBrand.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([brand, profiles]) => buildProfilesGrid(profiles, brand)),
+    [...byBrand.values()]
+      .sort((a, b) => compareFolded(a.display, b.display))
+      .map(({ display, profiles }) => buildProfilesGrid(profiles, display)),
   );
 }
 
@@ -469,8 +556,7 @@ export function buildSpecsExportGrids(input: SpecExportInput): SheetGrid[] {
 export function buildDoughExportGrids(input: SpecExportInput): SheetGrid[] {
   const ties = tieRecipes(input.profiles ?? [], "dough");
   return dedupeSheetNames(
-    [...(input.doughRecipes ?? [])]
-      .sort((a, b) => a.name.localeCompare(b.name))
+    coalesceIdenticalRecipes(input.doughRecipes ?? [])
       .map((recipe) =>
         buildRecipeGrid(
           recipeSheetName(text(recipe.name) || "Dough Recipe", "Dough"),
@@ -487,8 +573,7 @@ export function buildDoughExportGrids(input: SpecExportInput): SheetGrid[] {
 export function buildSauceExportGrids(input: SpecExportInput): SheetGrid[] {
   const ties = tieRecipes(input.profiles ?? [], "sauce");
   return dedupeSheetNames(
-    [...(input.sauceRecipes ?? [])]
-      .sort((a, b) => a.name.localeCompare(b.name))
+    coalesceIdenticalRecipes(input.sauceRecipes ?? [])
       .map((recipe) =>
         buildRecipeGrid(
           recipeSheetName(text(recipe.name) || "Sauce Recipe", "Sauce"),
@@ -507,10 +592,15 @@ export function buildSauceExportGrids(input: SpecExportInput): SheetGrid[] {
  * Unassigned.
  */
 export function buildCheeseExportGrids(input: SpecExportInput): SheetGrid[] {
-  const recipes = (input.cheeseRecipes ?? []).filter(
+  const recipes = coalesceIdenticalRecipes(input.cheeseRecipes ?? []).filter(
     (recipe) => text(recipe.name) && (recipe.rows ?? []).some((row) => text(row.ingredient)),
   );
-  const ties = tieRecipes(input.profiles ?? [], "cheese");
+  const mixOnlyNameKeys: Set<string> = new Set(
+    (input.mixOnlyRecipeNames ?? [])
+      .map((name) => folded(name))
+      .filter((name) => name.length > 0),
+  );
+  const ties = tieRecipes(input.profiles ?? [], "cheese", mixOnlyNameKeys);
   const brands = new Set<string>();
   for (const recipe of recipes) {
     const tie = ties.get(text(recipe.name).toLowerCase());
@@ -567,48 +657,57 @@ export function buildSpecExportGrids(
  *   <mix name>
  *   Pull N Days Early                    (only when daysEarly > 0)
  *   Ingredient | Per Pizza | Per Batch   (the "Per Pizza" anchor)
- *   <ingredient> | <perPizza> |
- *   Total | (blank) | <batchSize>
+ *   <ingredient> | <per-pizza oz> | <per-batch lbs>
+ *   Total | (blank) | <batchSize lbs>
  * Explicit markers preserve each product association when several vertical
  * blocks share one brand tab. The original mix name keeps deterministic IDs
  * stable on re-import. Pure. Disabled/empty mixes are still exported.
  */
 export function buildMixExportGrids(mixes: ReadonlyArray<Mix>): SheetGrid[] {
-  const byBrand = new Map<string, Mix[]>();
+  const byBrand = new Map<string, { display: string; mixes: Mix[] }>();
   for (const mix of mixes) {
-    const brand = text(mix.brand) || "Unassigned";
-    const list = byBrand.get(brand) ?? [];
-    list.push(mix);
-    byBrand.set(brand, list);
+    const rawBrand = text(mix.brand);
+    const key = folded(rawBrand);
+    const entry = byBrand.get(key) ?? {
+      display: rawBrand || "Unassigned",
+      mixes: [],
+    };
+    entry.mixes.push(mix);
+    byBrand.set(key, entry);
   }
   const grids: SheetGrid[] = [];
-  const entries = [...byBrand.entries()].sort(([a], [b]) => {
-    if (a === "Unassigned") return 1;
-    if (b === "Unassigned") return -1;
-    return a.localeCompare(b);
+  const entries = [...byBrand.entries()].sort(([, a], [, b]) => {
+    if (!a.mixes[0]?.brand) return 1;
+    if (!b.mixes[0]?.brand) return -1;
+    return compareFolded(a.display, b.display);
   });
-  for (const [brand, brandMixes] of entries) {
+  for (const [brandKey, { display: brand, mixes: brandMixes }] of entries) {
     const rows: string[][] = [];
     const accentRows: number[] = [];
     const headerRows: number[] = [];
     for (const m of [...brandMixes].sort((a, b) =>
-      text(a.flavor).localeCompare(text(b.flavor)) || text(a.name).localeCompare(text(b.name)),
+      compareFolded(text(a.flavor), text(b.flavor))
+      || compareFolded(text(a.name), text(b.name))
+      || text(a.id).localeCompare(text(b.id)),
     )) {
       const name = text(m.name);
       const components = (m.components ?? []).filter((c) => text(c.ingredient));
       if (!name && components.length === 0) continue;
       if (rows.length) rows.push([]);
       accentRows.push(rows.length);
-      rows.push(["Product Brand", text(m.brand)]);
+      const productBrand =
+        folded(m.brand) === brandKey && brandKey ? brand : text(m.brand);
+      rows.push(["Product Brand", productBrand]);
       rows.push(["Product Flavor", text(m.flavor)]);
       rows.push([name || `${text(m.brand)} ${text(m.flavor)}`.trim()]);
+      rows.push(["Is Prep", m.isPrep === true ? "Yes" : "No"]);
       if (m.daysEarly && m.daysEarly > 0) {
         rows.push([`Pull ${m.daysEarly} Days Early`]);
       }
       headerRows.push(rows.length);
-      rows.push(["Ingredient", "Per Pizza", "Per Batch"]);
+      rows.push(["Ingredient", "Per Pizza (oz)", "Per Batch (lbs)"]);
       for (const c of components) {
-        rows.push([text(c.ingredient), num(c.perPizza), ""]);
+        rows.push([text(c.ingredient), num(c.perPizza), num(c.perBatchLbs)]);
       }
       rows.push(["Total", "", num(m.batchSize)]);
     }

@@ -616,19 +616,6 @@ async function parseApiResponse<T>(
   requestEpoch: number,
 ): Promise<T> {
   if (!res.ok) {
-    if (
-      typeof window !== "undefined"
-      && !path.includes("diagnostic:incidents")
-      && !path.startsWith("/incidents")
-    ) {
-      window.dispatchEvent(new CustomEvent("app:api-failure", {
-        detail: {
-          path: path.split("?")[0],
-          status: res.status,
-          correlationId: res.headers.get("x-correlation-id") ?? undefined,
-        },
-      }));
-    }
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))
@@ -1454,6 +1441,12 @@ export type IncidentContext = {
   connectivity?: string;
   syncState?: string;
   signalKind?: string;
+  requestOperationCategory?: "authentication" | "diagnostics" | "import" | "inventory" | "master_data" | "sync" | "other";
+  requestOutcome?: "http_server_error" | "http_client_error" | "authentication_rejected" | "transport_failure" | "offline_failure" | "timeout" | "cancelled";
+  requestElapsedMs?: number;
+  requestObservedAt?: string;
+  requestBackgroundInvolvement?: "observed" | "not_observed";
+  requestHttpStatus?: number;
 };
 export type ReportIncidentBody = {
   source: IncidentSource;
@@ -1472,6 +1465,12 @@ export type ReportIncidentBody = {
     syncState?: "idle" | "pending" | "retrying" | "blocked" | "unknown";
     signalKind?: "user_report" | "crash" | "rejected_promise" | "api_failure" | "startup" | "update" | "sync";
     correlationId?: string;
+    requestOperationCategory?: IncidentContext["requestOperationCategory"];
+    requestOutcome?: IncidentContext["requestOutcome"];
+    requestElapsedMs?: number;
+    requestObservedAt?: string;
+    requestBackgroundInvolvement?: IncidentContext["requestBackgroundInvolvement"];
+    requestHttpStatus?: number;
   };
 };
 // "Seen before" signal: how many prior similar incidents were found and the
@@ -1543,6 +1542,8 @@ export type FieldCheckObservationInput = {
     | "ipad"
     | "other-browser";
   metrics?: Record<string, number>;
+  /** Opaque correlation reference reported by the client from the server response header. */
+  reportedRequestCorrelationId?: string;
 };
 
 export const submitFieldCheckObservations = async (
@@ -1585,6 +1586,7 @@ export type FieldCheckFailure = {
   appBuild: string;
   deviceCategory: string;
   metrics: Record<string, number>;
+  reportedRequestCorrelationId?: string;
 };
 export type FieldCheckSummary = {
   name: string;

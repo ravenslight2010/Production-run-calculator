@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { QcAllergenReviewInput } from "@workspace/api-client-react";
-import { DEFAULT_VALUES } from "../types";
+import type { Ingredient } from "@workspace/ingredient-catalog";
+import type { IngredientSubstitution } from "@workspace/inventory-math";
+import { DEFAULT_VALUES, type FormValues } from "../types";
 import QcWorkflowTab from "./QcWorkflowTab";
 
 const qcMocks = vi.hoisted(() => ({
@@ -70,6 +72,7 @@ const qcMocks = vi.hoisted(() => ({
     isFetching: false,
     refetch: vi.fn(),
   },
+  ingredients: [] as Ingredient[],
   runs: {} as Record<string, unknown>,
   history: {
     data: { items: [], hasMore: false },
@@ -133,15 +136,7 @@ vi.mock("@workspace/api-client-react", () => ({
 
 vi.mock("../masterData", () => ({
   useMasterDataSlice: () => ({
-    data: [{
-      id: "flour",
-      name: "Flour",
-      categories: ["dough"],
-      mergedInto: null,
-      enabled: true,
-      allergens: [],
-      allergensReviewed: false,
-    }],
+    data: qcMocks.ingredients,
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -157,6 +152,15 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.useRealTimers();
+  qcMocks.ingredients = [{
+    id: "flour",
+    name: "Flour",
+    categories: ["dough"],
+    mergedInto: null,
+    enabled: true,
+    allergens: [],
+    allergensReviewed: false,
+  }];
   qcMocks.targets.data = {
     profileKey: "brand::flavor",
     targets: [{
@@ -208,6 +212,8 @@ const stagedIngredients: QcAllergenReviewInput["stagedIngredients"] = [
 
 type RenderOptions = {
   runId?: string;
+  values?: FormValues;
+  substitutions?: IngredientSubstitution[];
   runStartedAt?: number | null;
   runStoppages?: Array<{ type?: string; startedAt: number; endedAt?: number }>;
   runIsActive?: boolean;
@@ -227,8 +233,8 @@ function renderTab(options: RenderOptions = {}) {
         runStoppages={currentOptions.runStoppages ?? []}
         profileKey="brand::flavor"
         runIsActive={currentOptions.runIsActive ?? false}
-        values={DEFAULT_VALUES}
-        substitutions={[]}
+        values={currentOptions.values ?? DEFAULT_VALUES}
+        substitutions={currentOptions.substitutions ?? []}
         stagedIngredients={stagedIngredients}
         canRecordQc
         canManageQc={currentOptions.canManageQc ?? false}
@@ -246,6 +252,59 @@ function renderTab(options: RenderOptions = {}) {
   };
 }
 describe("QC workflow UI", () => {
+  it("shows the selected run's mapped, unknown, and substituted footprint without stale run details", () => {
+    qcMocks.ingredients = [
+      {
+        id: "flour",
+        name: "Flour",
+        categories: ["dough"],
+        mergedInto: null,
+        enabled: true,
+        allergens: ["wheat"],
+        allergensReviewed: true,
+      },
+      {
+        id: "substitute",
+        name: "Sample Substitute",
+        categories: ["dough"],
+        mergedInto: null,
+        enabled: true,
+        allergens: ["soy"],
+        allergensReviewed: true,
+      },
+    ];
+    const values: FormValues = {
+      ...DEFAULT_VALUES,
+      doughRecipeName: "House Dough",
+      doughRecipe: [{ ingredient: "Flour", ingredientId: "flour", lbs: 20 }],
+      pep1Type: "Unmapped Pep Type",
+    };
+    const substitutions: IngredientSubstitution[] = [{
+      id: "sub-flour",
+      ingredient: "Flour",
+      action: "swap",
+      substitute: "Sample Substitute",
+    }];
+    const { rerenderTab } = renderTab({ runId: "run-1", values, substitutions });
+    const panel = screen.getByTestId("qc-run-allergen-footprint");
+
+    expect(screen.getByTestId("qc-allergen-run-id").textContent).toBe("Run run-1");
+    expect(screen.getByTestId("run-allergen-soy").textContent).toContain("Sample Substitute");
+    expect(screen.queryByTestId("run-allergen-wheat")).toBeNull();
+    expect(
+      screen.getAllByTestId("run-allergen-unknown-ingredient")
+        .map((row) => row.textContent)
+        .join(" "),
+    ).toContain("Unmapped Pep Type — not found in the ingredient catalog");
+
+    rerenderTab({ runId: "run-2", values, substitutions: [] });
+
+    expect(screen.getByTestId("qc-allergen-run-id").textContent).toBe("Run run-2");
+    expect(panel.textContent).not.toContain("Run run-1");
+    expect(screen.getByTestId("run-allergen-wheat").textContent).toContain("Flour");
+    expect(screen.queryByTestId("run-allergen-soy")).toBeNull();
+  });
+
   it("submits observations only for server-resolved expected components", () => {
     qcMocks.run.data.componentChecklist = {
       status: "complete",

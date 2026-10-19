@@ -20,6 +20,12 @@ export type IncidentContext = {
   connectivity?: string;
   syncState?: string;
   signalKind?: string;
+  requestOperationCategory?: "authentication" | "diagnostics" | "import" | "inventory" | "master_data" | "sync" | "other";
+  requestOutcome?: "http_server_error" | "http_client_error" | "authentication_rejected" | "transport_failure" | "offline_failure" | "timeout" | "cancelled";
+  requestElapsedMs?: number;
+  requestObservedAt?: string;
+  requestBackgroundInvolvement?: "observed" | "not_observed";
+  requestHttpStatus?: number;
 };
 
 export type IncidentSource = "user_report" | "auto_crash";

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunTemplate } from "./types";
 import {
   deleteRunTemplate,
+  flushRunTemplates,
   localRunTemplates,
   migrateLegacyRunTemplates,
   reconcileRunTemplates,
@@ -20,6 +21,10 @@ beforeEach(() => {
   setRunTemplatesScope("live");
   vi.restoreAllMocks();
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("run template repository", () => {
@@ -57,6 +62,97 @@ describe("run template repository", () => {
     // The newer edit is sent in a subsequent round, never in parallel with
     // the first request.
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/run-templates")).toHaveLength(2);
+  });
+
+  it.each(["save", "delete"] as const)(
+    "bounds a hung %s write and keeps its outbox entry without retrying it",
+    async (operation) => {
+      vi.useFakeTimers();
+      const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Client stopped waiting", "AbortError"));
+          }, { once: true });
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      if (operation === "save") {
+        saveRunTemplate(template());
+      } else {
+        localStorage.setItem("run-calc-templates:live", JSON.stringify([
+          { ...template(), revision: 1, deleted: false },
+        ]));
+        deleteRunTemplate("one");
+      }
+
+      const flushing = flushRunTemplates();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushing;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[1]?.method).toBe(operation === "save" ? "POST" : "DELETE");
+      expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
+    },
+  );
+
+  it("recovers a save committed after client timeout with a read, not a write retry", async () => {
+    vi.useFakeTimers();
+    let serverTemplates: unknown[] = [];
+    const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        const submitted = (JSON.parse(String(init.body)) as { templates: unknown[] }).templates;
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            // The server may finish its transaction after the browser aborts.
+            serverTemplates = submitted;
+            reject(new DOMException("Client stopped waiting", "AbortError"));
+          }, { once: true });
+        });
+      }
+      return Promise.resolve(response(serverTemplates));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    saveRunTemplate(template("committed"));
+    const flushing = flushRunTemplates();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushing;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
+
+    await reconcileRunTemplates();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["POST", "GET"]);
+    expect(localRunTemplates()).toEqual([template("committed")]);
+    expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toEqual([]);
+  });
+
+  it("keeps an uncommitted timed-out save queued after canonical recovery without replay", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Client stopped waiting", "AbortError"));
+          }, { once: true });
+        });
+      }
+      return Promise.resolve(response([]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    saveRunTemplate(template("not committed"));
+    const flushing = flushRunTemplates();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushing;
+    await reconcileRunTemplates();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["POST", "GET"]);
+    expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
   });
 
   it("keeps a server tombstone over a stale pending local save", async () => {
