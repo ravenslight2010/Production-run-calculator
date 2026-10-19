@@ -700,7 +700,7 @@ test_stable_branch_protection_workflow_contract() {
   notification_block=$(stable_branch_protection_step_block \
     "Notify maintainers of scheduled protection drift")
   assert_contains "$notification_block" \
-    "uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7"
+    "uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0"
   assert_contains "$notification_block" \
     "const title = '[Alert] Stable branch protection drift detected';"
   assert_contains "$notification_block" "github.paginate("
