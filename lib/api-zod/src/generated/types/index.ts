@@ -821,6 +821,8 @@ export * from './syncUnchangedResponse';
 export * from './syncUpgradeRequiredResponse';
 export * from './syncWriteRequest';
 export * from './syncWriteRequestPayload';
+export * from './syncWriteValidationError';
+export * from './syncWriteValidationErrorReasonCode';
 export * from './transferInput';
 export * from './unreviewedIncidentCount';
 export * from './updateIngredientAllergenMappingInput';

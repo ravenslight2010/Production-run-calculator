@@ -146,7 +146,7 @@ function safeMetrics(
   if (!metrics) return {};
   if (checkName === "sync-acknowledgment") {
     return outcome === "failure" && Number.isInteger(metrics.failureCode) &&
-      Object.values(SYNC_ACK_FAILURE_CODES).includes(metrics.failureCode as 1 | 2 | 3)
+      Object.values(SYNC_ACK_FAILURE_CODES).includes(metrics.failureCode as 1 | 2 | 3 | 4)
       ? { failureCode: metrics.failureCode! } : {};
   }
   if (checkName === "performance") {

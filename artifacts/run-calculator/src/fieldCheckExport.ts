@@ -40,7 +40,7 @@ function diagnostics(name: string, value: unknown) {
   const duration = metrics.durationMs;
   const durationMs = typeof duration === "number" && Number.isFinite(duration) && duration >= 0 && duration <= 10_000_000
     ? duration : MISSING;
-  const failureCodes = name === "sync-acknowledgment" ? [1, 2, 3]
+  const failureCodes = name === "sync-acknowledgment" ? [1, 2, 3, 4]
     : name === "production-run-save-sync" ? [1, 2, 3, 4] : [];
   const failureCode = typeof metrics.failureCode === "number" && failureCodes.includes(metrics.failureCode)
     ? metrics.failureCode : MISSING;

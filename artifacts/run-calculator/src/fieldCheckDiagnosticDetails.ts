@@ -4,6 +4,7 @@ export const SYNC_ACK_FAILURE_CODES = {
   authenticationRejected: 1,
   staleOrResetWrite: 2,
   retriesExhausted: 3,
+  requestRejected: 4,
 } as const;
 export const PERFORMANCE_SOURCE_CODES = {
   homeChunkLoad: 1,
@@ -38,6 +39,7 @@ export function fieldCheckDiagnosticLabel(checkName: string, metrics: Record<str
       1: "Login or permission rejected",
       2: "Server rejected a stale/reset write",
       3: "Sync retries exhausted",
+      4: "Server rejected the sync request",
     } as Record<number, string>)[metrics.failureCode!] ?? "Failure category unavailable (older evidence)";
   }
   if (checkName === "performance") {

@@ -71,6 +71,7 @@ describe("field-check contract", () => {
     const accepts = (checkName: string, metrics: Record<string, number>, outcome = "failure", checkVersion = "3") =>
       validateFieldCheckBatch({ observations: [{ ...validObservation, checkName, checkVersion, outcome, metrics }] }).ok;
     for (const failureCode of [1, 2, 3]) expect(accepts("sync-acknowledgment", { failureCode })).toBe(true);
+    expect(accepts("sync-acknowledgment", { failureCode: 4 }, "failure", "4")).toBe(true);
     expect(accepts("sync-acknowledgment", {})).toBe(false);
     expect(accepts("sync-acknowledgment", { failureCode: 4 })).toBe(false);
     expect(accepts("sync-acknowledgment", { failureCode: 1.5 })).toBe(false);
@@ -90,6 +91,7 @@ describe("field-check contract", () => {
     expect(accepts("sync-acknowledgment", {}, "failure", "2")).toBe(true);
     expect(accepts("performance", { durationMs: 2000 }, "failure", "2")).toBe(true);
     expect(accepts("sync-acknowledgment", { failureCode: 99 }, "failure", "4")).toBe(false);
+    expect(accepts("sync-acknowledgment", { failureCode: 4 }, "failure", "3")).toBe(false);
   });
   it("accepts bounded browser observations and rejects unknown checks", () => {
     expect(validateFieldCheckBatch({ observations: [validObservation] }).ok).toBe(true);

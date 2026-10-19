@@ -7687,8 +7687,10 @@ describe("PUT /sync — payload sanitizer", () => {
       body: JSON.stringify({ senderId: "attacker", payload: { history: bigHistory, dayState: { runs: [], resetAt: 0 } } }),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
+    const body = (await res.json()) as { error: string; reasonCode?: string };
     expect(body.error).toMatch(/too large/i);
+    expect(body.reasonCode).toBe("SYNC_PAYLOAD_TOO_LARGE");
+    expect(JSON.stringify(body)).not.toContain("attacker");
   });
 
   it("returns 400 when the payload is not a JSON object (string, array, null)", async () => {
@@ -7699,6 +7701,9 @@ describe("PUT /sync — payload sanitizer", () => {
         body: JSON.stringify({ senderId: "x", payload: JSON.parse(nonObject) }),
       });
       expect(res.status).toBe(400);
+      const body = await res.json() as { error?: string; reasonCode?: string };
+      expect(body.reasonCode).toBe("SYNC_PAYLOAD_NOT_OBJECT");
+      expect(JSON.stringify(body)).not.toContain(nonObject);
     }
   });
 

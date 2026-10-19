@@ -321,6 +321,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   consumeSyncWriteResponse,
+  isPermanentSyncWriteRejection,
   shouldReplaySyncWrite,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
@@ -328,8 +329,10 @@ import {
   mergeSparseServerRunMap,
   persistedSyncPayload,
   reconstructPartialSyncPayload,
+  readSyncWriteRejectionCode,
   syncPayloadMatchesSnapshot,
   syncWriteFieldCheck,
+  type SyncWriteRejectionCode,
 } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -9432,6 +9435,7 @@ export default function Home() {
     });
     const requestBytes = new Blob([requestBody]).size;
     let responseStatus = 0;
+    let writeFailureReasonCode: SyncWriteRejectionCode | null = null;
     let recoverableConflictResponse = false;
     writeToday({
       payload,
@@ -9469,10 +9473,14 @@ export default function Home() {
       // Any non-success response other than the documented canonical 409
       // fallback must follow the retry path below.
       // consumeCanonicalSyncWriteResponse intentionally does not throw for
-      // HTTP errors so callers can safely inspect their response bodies; a
-      // sync write must not be recorded as acknowledged just because the
-      // server returned parseable JSON with a 5xx status.
-      if (!res.ok && res.status !== 409) throw new Error(`Sync write failed: ${res.status}`);
+      // HTTP errors so callers can inspect only allowlisted validation codes;
+      // non-success responses are never sync acknowledgements.
+      if (!res.ok && res.status !== 409) {
+        if (isPermanentSyncWriteRejection(res.status)) {
+          writeFailureReasonCode = await readSyncWriteRejectionCode(res);
+        }
+        throw new Error(`Sync write failed: ${res.status}`);
+      }
       const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
@@ -9703,6 +9711,25 @@ export default function Home() {
           "Stale sync change was retained locally because it could not be safely rebased",
           "stale-base-unrecoverable",
           currentRunId,
+        );
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
+      if (isPermanentSyncWriteRejection(responseStatus)) {
+        // A validation rejection cannot succeed by retrying the same payload.
+        // Keep the local intent and expose only its safe reason code.
+        emitProductionRunSaveOutcome("failure", requestStartedAt);
+        pushAcknowledgedRef.current = true;
+        setSyncRetryWaiting(false);
+        setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent(
+          "failure",
+          "Server rejected the sync request; local change is retained",
+          `${responseStatus} · ${writeFailureReasonCode ?? "SYNC_REQUEST_REJECTED"}`,
+          currentRunId,
+          syncWriteFieldCheck({ ok: false, status: responseStatus }),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         return;

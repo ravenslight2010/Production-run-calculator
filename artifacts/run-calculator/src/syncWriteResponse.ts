@@ -30,6 +30,32 @@ export type PartialSyncEnvelope = {
   data?: unknown;
 };
 
+export const SYNC_WRITE_REJECTION_CODES = [
+  "SYNC_PAYLOAD_NOT_OBJECT",
+  "SYNC_PAYLOAD_TOO_LARGE",
+] as const;
+export type SyncWriteRejectionCode = (typeof SYNC_WRITE_REJECTION_CODES)[number];
+
+export function isPermanentSyncWriteRejection(status: number): boolean {
+  return status === 400;
+}
+
+/**
+ * Read only the server's allowlisted machine reason. Never return or retain
+ * the error message or any other response fields from a rejected write.
+ */
+export async function readSyncWriteRejectionCode(
+  response: Response,
+): Promise<SyncWriteRejectionCode | null> {
+  const parsed: unknown = await response.clone().json().catch(() => null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const code = (parsed as Record<string, unknown>).reasonCode;
+  return typeof code === "string"
+    && (SYNC_WRITE_REJECTION_CODES as readonly string[]).includes(code)
+    ? code as SyncWriteRejectionCode
+    : null;
+}
+
 export type SyncWriteFieldCheck = {
   checkName: "sync-acknowledgment";
   outcome: "success" | "failure";
@@ -47,6 +73,13 @@ export function syncWriteFieldCheck(input: {
   stale?: boolean;
   retriesExhausted?: boolean;
 }): SyncWriteFieldCheck | undefined {
+  if (isPermanentSyncWriteRejection(input.status)) {
+    return {
+      checkName: "sync-acknowledgment",
+      outcome: "failure",
+      metrics: { failureCode: SYNC_ACK_FAILURE_CODES.requestRejected },
+    };
+  }
   if (input.stale || input.retriesExhausted || input.status === 401 || input.status === 403) {
     const failureCode = input.stale ? SYNC_ACK_FAILURE_CODES.staleOrResetWrite
       : input.status === 401 || input.status === 403 ? SYNC_ACK_FAILURE_CODES.authenticationRejected

@@ -4748,7 +4748,8 @@ paths:
         acknowledgment or persistence.
         Version 3 sync-acknowledgment failures require only failureCode (integer
         1 login/permission rejection, 2 stale/reset write, 3 exhausted retries);
-        successful sync observations have empty metrics. Version 3 performance
+        version 4 also allows 4 for a permanent sync request rejection.
+        Successful sync observations have empty metrics. Version 3 performance
         observations require only durationMs (0 to 10000000) and sourceCode
         (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API
         network failure). Stale-deployment-recovery accepts no metrics; an
@@ -5622,6 +5623,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SyncUpgradeRequiredResponse"
+        "400":
+          description: The sync write payload is malformed or exceeds the sanitized payload limit; no payload content is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncWriteValidationError"
 
   /sync/events:
     get:
@@ -6952,6 +6959,16 @@ components:
                 syncVersion: { type: integer, enum: [1] }
                 completeness: { type: string, enum: [complete, partial] }
                 baseSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+
+    SyncWriteValidationError:
+      type: object
+      required: [error, reasonCode]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        reasonCode:
+          type: string
+          enum: [SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
 
     SyncUpgradeRequiredResponse:
       type: object
@@ -13277,8 +13294,9 @@ components:
             Workflow categories require durationMs from 0 to 900000. Only a
             production-run-save-sync failure may additionally include failureCode
             as integer 1 through 4; other workflow metrics are rejected.
-            In versions 3 and 4, sync-acknowledgment failures require only failureCode
-            (integer 1 through 3); other sync outcomes have empty metrics.
+            In version 3, sync-acknowledgment failures require failureCode
+            (integer 1 through 3). Version 4 also allows 4 for a permanent
+            sync request rejection; other sync outcomes have empty metrics.
             Version 3 performance allows durationMs and sourceCode (1 home bundle,
             2 navigation load, 3 API timeout/abort, 4 API network). Version 4
             API request failures additionally require fixed outcome, operation, and

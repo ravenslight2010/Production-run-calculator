@@ -2128,6 +2128,19 @@ export interface SyncWriteRequest {
   payload: SyncWriteRequestPayload;
 }
 
+export type SyncWriteValidationErrorReasonCode = typeof SyncWriteValidationErrorReasonCode[keyof typeof SyncWriteValidationErrorReasonCode];
+
+
+export const SyncWriteValidationErrorReasonCode = {
+  SYNC_PAYLOAD_NOT_OBJECT: 'SYNC_PAYLOAD_NOT_OBJECT',
+  SYNC_PAYLOAD_TOO_LARGE: 'SYNC_PAYLOAD_TOO_LARGE',
+} as const;
+
+export interface SyncWriteValidationError {
+  error: string;
+  reasonCode: SyncWriteValidationErrorReasonCode;
+}
+
 export interface SyncUpgradeRequiredResponse {
   ok: true;
   data: SyncPayload;
@@ -7054,7 +7067,7 @@ export const FieldCheckObservationInputDeviceCategory = {
 } as const;
 
 /**
- * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.
+ * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require failureCode (integer 1 through 3). Version 4 also allows 4 for a permanent sync request rejection; other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.
  */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};
 
@@ -7075,7 +7088,7 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
-  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics. */
+  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require failureCode (integer 1 through 3). Version 4 also allows 4 for a permanent sync request rejection; other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics. */
   metrics: FieldCheckObservationInputMetrics;
   /** Opaque request correlation reference received by the browser from a server response; client-reported and not used for authorization. */
   reportedRequestCorrelationId?: string;

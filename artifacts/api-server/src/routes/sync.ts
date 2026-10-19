@@ -1711,7 +1711,10 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       durationMs: performance.now() - telemetryStartedAt,
       parserRejected: true,
     });
-    res.status(400).json({ error: "payload must be a JSON object" }); return;
+    res.status(400).json({
+      error: "payload must be a JSON object",
+      reasonCode: "SYNC_PAYLOAD_NOT_OBJECT",
+    }); return;
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) {
@@ -1724,7 +1727,10 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       durationMs: performance.now() - telemetryStartedAt,
       parserRejected: true,
     });
-    res.status(400).json({ error: "Payload too large" }); return;
+    res.status(400).json({
+      error: "Payload too large",
+      reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
+    }); return;
   }
   const sanitizedBytes = Buffer.byteLength(JSON.stringify(sanitized));
   const legacyUnversionedComplete = isLegacyUnversionedComplete(sanitized);

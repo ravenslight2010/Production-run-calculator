@@ -9,6 +9,8 @@ import {
   persistedSyncPayload,
   readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
+  readSyncWriteRejectionCode,
+  isPermanentSyncWriteRejection,
   syncWriteFieldCheck,
   shouldReplaySyncWrite,
   syncPayloadMatchesSnapshot,
@@ -37,6 +39,35 @@ describe("consumeSyncWriteResponse", () => {
 
   it("does not classify non-terminal diagnostics as a sync acknowledgment", () => {
     expect(syncWriteFieldCheck({ ok: false, status: 503 })).toBeUndefined();
+  });
+
+  it("classifies a permanent 400 validation rejection separately from exhausted retries", () => {
+    expect(isPermanentSyncWriteRejection(400)).toBe(true);
+    expect(isPermanentSyncWriteRejection(503)).toBe(false);
+    expect(isPermanentSyncWriteRejection(409)).toBe(false);
+    expect(syncWriteFieldCheck({ ok: false, status: 400 })).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "failure",
+      metrics: { failureCode: 4 },
+    });
+  });
+
+  it("reads only known safe sync rejection codes and ignores response contents", async () => {
+    const response = (body: unknown) => new Response(JSON.stringify(body), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+    expect(await readSyncWriteRejectionCode(response({
+      reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
+      error: "private request value",
+      payload: "private request value",
+    }))).toBe("SYNC_PAYLOAD_TOO_LARGE");
+    expect(await readSyncWriteRejectionCode(response({
+      reasonCode: "PRIVATE_PAYLOAD",
+      error: "private request value",
+    }))).toBeNull();
+    expect(await readSyncWriteRejectionCode(response("private request value"))).toBeNull();
+    expect(await readSyncWriteRejectionCode(new Response("not json", { status: 400 }))).toBeNull();
   });
 
   it("replays stale-base fallbacks after canonical adoption but not ordinary acknowledgements", () => {
