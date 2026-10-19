@@ -160,6 +160,21 @@ async function seedScenario(
   });
 }
 
+/**
+ * Assert the run-action slot shows START RUN. START RUN and STOP RUN render in
+ * the same mutually-exclusive status-controls slot (LiveRunTabContent), so a
+ * slot holding exactly one button named START RUN proves STOP RUN is absent —
+ * with a locator family that can match, unlike a bare toHaveCount(0) on the
+ * STOP RUN locator, which passes forever if that selector rots (#4i).
+ */
+async function expectRunActionStart(page: Page): Promise<void> {
+  const runAction = page
+    .getByTestId("button-start-run")
+    .or(page.getByRole("button", { name: "STOP RUN", exact: true }));
+  await expect(runAction).toHaveCount(1);
+  await expect(runAction).toContainText("START RUN");
+}
+
 async function clearBrowserState(page: Page): Promise<void> {
   await page.evaluate(() => {
     localStorage.clear();
@@ -212,8 +227,7 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
   }).toBe(frontline.pendingRunId);
   await expect(page.getByTestId("tab-run")).toBeVisible();
   await page.getByTestId("tab-run").click();
-  await expect(page.getByTestId("button-start-run")).toBeVisible();
-  await expect(page.getByRole("button", { name: "STOP RUN", exact: true })).toHaveCount(0);
+  await expectRunActionStart(page);
   await expect(page.getByTestId("input-casesNeeded")).toHaveValue("83");
   expect(await readSavedCasesNeeded(page, frontline.endedRunId)).toBe(37);
   expect(await readSavedCasesNeeded(page, frontline.pendingRunId)).toBe(83);
@@ -222,6 +236,8 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
   await page.getByTestId("tab-sauce").click();
   await page.getByTestId("tab-frontline").click();
   await expect.poll(() => readCurrentRunId(page)).toBe(frontline.pendingRunId);
+  // Absence is proven here: this locator matched (visible) on the Run tab
+  // earlier in this same test, so count 0 on the station tab is a real check.
   await expect(page.getByTestId("button-start-run")).toHaveCount(0);
   await page.screenshot({
     path: testInfo.outputPath("frontline-handoff-after-tab-change.png"),
@@ -252,8 +268,7 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
     intervals: [500, 1_000, 2_000],
   }).toBe(packaging.pendingRunId);
   await page.getByTestId("tab-run").click();
-  await expect(page.getByTestId("button-start-run")).toBeVisible();
-  await expect(page.getByRole("button", { name: "STOP RUN", exact: true })).toHaveCount(0);
+  await expectRunActionStart(page);
   await expect(page.getByTestId("input-casesNeeded")).toHaveValue("83");
   expect(await readSavedCasesNeeded(page, packaging.endedRunId)).toBe(37);
   expect(await readSavedCasesNeeded(page, packaging.pendingRunId)).toBe(83);
@@ -263,8 +278,7 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 60_000 });
   await expect.poll(() => readCurrentRunId(page)).toBe(packaging.pendingRunId);
-  await expect(page.getByTestId("button-start-run")).toBeVisible();
-  await expect(page.getByRole("button", { name: "STOP RUN", exact: true })).toHaveCount(0);
+  await expectRunActionStart(page);
   await expect(page.getByTestId("input-casesNeeded")).toHaveValue("83");
   expect(await readSavedCasesNeeded(page, packaging.endedRunId)).toBe(37);
   expect(await readSavedCasesNeeded(page, packaging.pendingRunId)).toBe(83);
@@ -354,10 +368,16 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
   await notes.fill(draft);
   await expect(notes).toBeFocused();
   await expect(notes).toHaveValue(draft);
-  // useClock updates active runs every second. Summary's Time Left is a
-  // remaining-work estimate, not an elapsed clock, so wait beyond one cadence
-  // and verify the uncommitted editor survives the context update.
-  await page.waitForTimeout(1_250);
+  // useClock updates active runs every second. Wait for an actual Time Left
+  // tick — the deterministic event the fixed pause approximated — then verify
+  // the uncommitted editor survives the context update.
+  const timeLeftValue = summaryCard
+    .getByText("Time Left", { exact: true })
+    .locator("xpath=following-sibling::div[1]");
+  const timeLeftBefore = await timeLeftValue.textContent();
+  await expect
+    .poll(() => timeLeftValue.textContent(), { timeout: 10_000 })
+    .not.toBe(timeLeftBefore);
   await expect(notes).toBeFocused();
   await expect(notes).toHaveValue(draft);
 });

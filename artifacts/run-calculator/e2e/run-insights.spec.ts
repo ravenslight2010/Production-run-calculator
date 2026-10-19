@@ -90,8 +90,22 @@ async function signIn(
   await page.getByRole("button", { name: /^sign in$/i }).click();
   // Wait for the main app tabs to be ready
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-  // Brief pause for startup async effects (seedProfilesFromServer, etc.)
-  await page.waitForTimeout(1500);
+  // Wait for the startup sync (seedProfilesFromServer) to land this profile in
+  // localStorage — the deterministic signal the fixed pause approximated. The
+  // profile may be written as an individual dough key or inside the scoped
+  // profile cache blob, so accept either shape.
+  const profileSuffix = `${product.brand.toLowerCase().trim()}__${product.flavor.toLowerCase().trim()}`;
+  await expect.poll(
+    () => page.evaluate(
+      ({ doughKey, suffix }) =>
+        Boolean(localStorage.getItem(doughKey)) ||
+        Array.from({ length: localStorage.length }, (_, i) =>
+          localStorage.getItem(localStorage.key(i)!) ?? "",
+        ).some((v) => v.includes(`"${suffix}"`)),
+      { doughKey: `run-calc-profile-${profileSuffix}`, suffix: profileSuffix },
+    ),
+    { timeout: 20_000 },
+  ).toBe(true);
 }
 
 /**
@@ -167,7 +181,13 @@ async function goToSetup(page: Page): Promise<void> {
   const setupItem = page.getByRole("menuitem", { name: /^setup$/i });
   await setupItem.waitFor({ state: "visible", timeout: 5_000 });
   await setupItem.click();
-  await page.waitForTimeout(400);
+  // Wait for the Setup view to mount instead of a fixed pause. Every caller
+  // works with the Run Insights card, whose refresh button is the Setup
+  // screen's stable anchor.
+  await page.locator('[data-testid="button-run-insights-refresh"]').waitFor({
+    state: "attached",
+    timeout: 10_000,
+  });
 }
 
 // ── DB client lifecycle ───────────────────────────────────────────────────────
