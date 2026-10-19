@@ -14564,6 +14564,10 @@ export default function Home() {
     || undoBusy
     || exporting
     || freezerSurplusBusy
+    || syncPendingCount > 0
+    || syncPushFailed
+    || syncRetryWaiting
+    || !pushAcknowledgedRef.current
     || foregroundRecoveryNotice?.kind === "recovering"
   );
   const automaticUpdateReloadSafe = isAutomaticUpdateReloadSafe({
@@ -14571,6 +14575,8 @@ export default function Home() {
     hasUnsavedForm,
     hasBlockingDialog,
     hasBlockingOperation,
+    hasPendingSync: syncPendingCount > 0 || !pushAcknowledgedRef.current,
+    hasFailedSync: syncPushFailed || syncRetryWaiting,
   });
 
   useEffect(() => {

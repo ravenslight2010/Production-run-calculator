@@ -6,7 +6,8 @@ afterEach(cleanup);
 it("always exposes update controls, version, status and retry without hiding blockers", () => {
   const check = vi.fn();
   const update = vi.fn();
-  const { rerender } = render(<AppUpdateControl state={{ phase: "unchecked", running: "old-build" }} check={check} update={update} />);
+  const cancelUpdate = vi.fn();
+  const { rerender } = render(<AppUpdateControl state={{ phase: "unchecked", running: "old-build" }} check={check} update={update} cancelUpdate={cancelUpdate} />);
   const trigger = screen.getByRole("button", { name: /App updates/ });
   expect(trigger.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(trigger);
@@ -16,9 +17,16 @@ it("always exposes update controls, version, status and retry without hiding blo
   expect(screen.getByRole("status").textContent).toContain("paused run still blocks");
   fireEvent.click(screen.getByRole("button", { name: "Update app" }));
   expect(update).toHaveBeenCalledOnce();
-  rerender(<AppUpdateControl state={{ phase: "updating", running: "old-build", target: "new-build" }} check={check} update={update} />);
+  rerender(<AppUpdateControl state={{ phase: "waiting", running: "old-build", target: "new-build" }} check={check} update={update} cancelUpdate={cancelUpdate} />);
+  expect(screen.getByRole("status").textContent).toContain("pending saves are acknowledged");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel queued update" }));
+  expect(cancelUpdate).toHaveBeenCalledOnce();
+  rerender(<AppUpdateControl state={{ phase: "updating", running: "old-build", target: "new-build" }} check={check} update={update} cancelUpdate={cancelUpdate} />);
   expect((screen.getByRole("button", { name: "Check for updates" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Update app" }) as HTMLButtonElement).disabled).toBe(true);
+  rerender(<AppUpdateControl state={{ phase: "deferred", running: "old-build", target: "new-build" }} check={check} update={update} cancelUpdate={cancelUpdate} />);
+  fireEvent.click(screen.getByRole("button", { name: "Resume update" }));
+  expect(update).toHaveBeenCalledTimes(2);
 });
 
 it("keeps update states and actions in normal page flow instead of a fixed overlay", () => {
@@ -29,6 +37,8 @@ it("keeps update states and actions in normal page flow instead of a fixed overl
     "checking",
     "current",
     "ready",
+    "waiting",
+    "deferred",
     "updating",
     "blocked",
     "offline",
@@ -40,11 +50,12 @@ it("keeps update states and actions in normal page flow instead of a fixed overl
       state={{ phase: "unchecked", running: "old-build" }}
       check={check}
       update={update}
+      cancelUpdate={vi.fn()}
     />,
   );
 
   for (const phase of states) {
-    const target = ["ready", "updating", "blocked"].includes(phase)
+    const target = ["ready", "waiting", "deferred", "updating", "blocked"].includes(phase)
       ? "new-build"
       : undefined;
     rerender(
@@ -52,15 +63,18 @@ it("keeps update states and actions in normal page flow instead of a fixed overl
         state={{ phase, running: "old-build", ...(target ? { target } : {}) }}
         check={check}
         update={update}
+        cancelUpdate={vi.fn()}
       />,
     );
     const control = screen.getByTestId("app-update-control");
     expect(control.className).not.toMatch(/\bfixed\b/);
     expect(screen.getByRole("button", { name: /App updates/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeTruthy();
-    expect(Boolean(screen.queryByRole("button", { name: "Update app" }))).toBe(Boolean(target));
+    expect(Boolean(screen.queryByRole("button", { name: "Update app" }))).toBe(Boolean(target) && phase !== "waiting" && phase !== "deferred");
+    expect(Boolean(screen.queryByRole("button", { name: "Resume update" }))).toBe(phase === "deferred");
+    expect(Boolean(screen.queryByRole("button", { name: "Cancel queued update" }))).toBe(phase === "waiting");
     if (!["unchecked", "current"].includes(phase)) {
-      expect(screen.getByRole("status").textContent).toContain(phase === "ready" ? "Update ready" : phase === "blocked" ? "Blocked by work" : phase === "failed" ? "Update failed" : phase === "confirmed" ? "Update complete" : phase === "offline" ? "Offline" : phase === "updating" ? "Updating" : "Checking");
+      expect(screen.getByRole("status").textContent).toContain(phase === "ready" ? "Update ready" : phase === "waiting" ? "Waiting for work to save" : phase === "deferred" ? "Update paused" : phase === "blocked" ? "Blocked by work" : phase === "failed" ? "Update failed" : phase === "confirmed" ? "Update complete" : phase === "offline" ? "Offline" : phase === "updating" ? "Updating" : "Checking");
     }
   }
 });

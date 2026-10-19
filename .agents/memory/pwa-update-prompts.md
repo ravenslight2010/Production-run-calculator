@@ -40,6 +40,12 @@ before saying the app is current. Installation, activation, and a reload request
 are intermediate stages; update completion requires the next document to report
 the exact intended build. Keep the confirmation attempt tab-local and bounded.
 
+**Manual update behavior:** An explicit Update app request made while work is
+active queues a cancellable handoff. Keep automatic handoffs subject to the
+existing idle rule. Resume the manual request only after the live run has ended,
+forms and blocking operations are settled, and pending sync has been acknowledged;
+failed sync remains a blocker. Do not force-reload an active run or unsaved work.
+
 **Why:** Worker lifecycle promises and controlling events do not prove that a new
 page started. Reporting success early conceals stranded handoffs.
 

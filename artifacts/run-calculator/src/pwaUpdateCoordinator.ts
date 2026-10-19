@@ -1,6 +1,6 @@
 import { WEB_BUILD_ID } from "./buildIdentity";
 
-export type UpdatePhase = "unchecked" | "checking" | "current" | "ready" | "updating" | "blocked" | "offline" | "failed" | "confirmed";
+export type UpdatePhase = "unchecked" | "checking" | "current" | "ready" | "waiting" | "deferred" | "updating" | "blocked" | "offline" | "failed" | "confirmed";
 export type UpdateState = { phase: UpdatePhase; running: string; target?: string; stage?: string };
 const ATTEMPT_KEY = "run-calc:pwa-update-attempt:v1";
 export const UPDATE_STAGE_TIMEOUT_MS = 15_000;
@@ -68,6 +68,7 @@ export function createUpdateCoordinator(options: {
   safe: () => boolean;
   reload: () => void;
   changed: (state: UpdateState) => void;
+  subscribeSafe?: (notify: () => void) => () => void;
   identity?: () => Promise<string>;
   running?: string;
 }) {
@@ -75,6 +76,8 @@ export function createUpdateCoordinator(options: {
   let state: UpdateState = { running, phase: "unchecked" };
   let started = false;
   let busy = false;
+  let waitingForSafe = false;
+  let stopWaitingForSafe: (() => void) | undefined;
   const publish = (phase: UpdatePhase, stage?: string) => {
     state = { ...state, phase, stage };
     try {
@@ -87,7 +90,7 @@ export function createUpdateCoordinator(options: {
     options.changed(state);
   };
   const check = async () => {
-    if (busy) return;
+    if (busy || waitingForSafe) return;
     busy = true;
     publish("checking");
     try {
@@ -104,7 +107,7 @@ export function createUpdateCoordinator(options: {
     if (!guard()) { publish("blocked", "safety"); return; }
     if (!state.target || state.target === running || ["failed", "offline"].includes(state.phase)) await check();
     const recoveringCurrent = Boolean(verifyBeforeReload && state.target === running && state.phase === "current");
-    if (!state.target || (!recoveringCurrent && (state.target === running || !["ready", "blocked"].includes(state.phase)))) return;
+    if (!state.target || (!recoveringCurrent && (state.target === running || !["ready", "waiting", "deferred", "blocked"].includes(state.phase)))) return;
     if (!guard()) { publish("blocked", "safety"); return; }
     busy = true;
     let navigating = false;
@@ -140,6 +143,41 @@ export function createUpdateCoordinator(options: {
       publish(navigator.onLine === false ? "offline" : "failed", stage);
     } finally { busy = navigating; }
   };
+  const cancelQueuedUpdate = () => {
+    if (!waitingForSafe) return;
+    waitingForSafe = false;
+    stopWaitingForSafe?.();
+    stopWaitingForSafe = undefined;
+    const phase = state.target && state.target !== running ? "deferred" : "current";
+    publish(phase);
+  };
+  const requestUpdate = async () => {
+    if (busy || waitingForSafe) return;
+    if (state.phase === "deferred" && state.target === running) {
+      publish("current");
+      return;
+    }
+    if (options.safe()) {
+      await update();
+      return;
+    }
+    if (!options.subscribeSafe) {
+      publish("blocked", "safety");
+      return;
+    }
+    waitingForSafe = true;
+    publish("waiting", "safety");
+    const resumeWhenSafe = () => {
+      if (!waitingForSafe || !options.safe()) return;
+      waitingForSafe = false;
+      stopWaitingForSafe?.();
+      stopWaitingForSafe = undefined;
+      void update();
+    };
+    stopWaitingForSafe = options.subscribeSafe(resumeWhenSafe);
+    // Close the race between the first safety check and listener registration.
+    resumeWhenSafe();
+  };
   const start = () => {
     if (!started) {
       started = true;
@@ -147,5 +185,5 @@ export function createUpdateCoordinator(options: {
     }
     return state;
   };
-  return { start, check, update, snapshot: () => state };
+  return { start, check, update, requestUpdate, cancelQueuedUpdate, snapshot: () => state };
 }

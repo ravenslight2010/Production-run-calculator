@@ -3,15 +3,15 @@ import type { UpdateState } from "../pwaUpdateCoordinator";
 
 const labels = {
   unchecked: "Not checked", checking: "Checking", current: "Current",
-  ready: "Update ready", updating: "Updating", blocked: "Blocked by work",
+  ready: "Update ready", waiting: "Waiting for work to save", deferred: "Update paused", updating: "Updating", blocked: "Blocked by work",
   offline: "Offline", failed: "Update failed", confirmed: "Update complete",
 };
 
-export function AppUpdateControl({ state, check, update }: {
-  state: UpdateState; check: () => void; update: () => void;
+export function AppUpdateControl({ state, check, update, cancelUpdate }: {
+  state: UpdateState; check: () => void; update: () => void; cancelUpdate: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const busy = state.phase === "checking" || state.phase === "updating";
+  const busy = state.phase === "checking" || state.phase === "waiting" || state.phase === "updating";
   let message: ReactNode = "Check for a newer published version. Saved work is kept.";
   if (state.phase === "blocked") message = "Sign in if safety cannot be checked. Finish and end the live run, save changed forms, finish the import review, and wait for pending operations before updating. A paused run still blocks updates. If this screen cannot open your work, finish it from another signed-in tab or device. Your work has not been discarded.";
   if (state.phase === "failed") message = "The update could not be confirmed. Keep working or check again when online.";
@@ -19,6 +19,8 @@ export function AppUpdateControl({ state, check, update }: {
   if (state.phase === "confirmed") message = "This page is running the requested version.";
   if (state.phase === "checking") message = "Checking for a newer published version.";
   if (state.phase === "ready") message = "A newer version is available. Updating remains protected while work is in progress.";
+  if (state.phase === "waiting") message = "Update requested. It will install after the live run is ended, changed forms and open work are finished, and pending saves are acknowledged. You can cancel the request.";
+  if (state.phase === "deferred") message = "The queued update was cancelled. Automatic installation is paused until you check for updates or request it again.";
   if (state.phase === "updating") message = "Preparing the update. This page will move only after the existing safety checks pass.";
   const showAttention = !["unchecked", "current"].includes(state.phase);
   return (
@@ -47,7 +49,16 @@ export function AppUpdateControl({ state, check, update }: {
         >
           Check for updates
         </button>
-        {state.target && state.target !== state.running && (
+        {state.target && state.target !== state.running && state.phase === "waiting" ? (
+          <button
+            type="button"
+            className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60"
+            onClick={cancelUpdate}
+            data-testid="button-cancel-app-update"
+          >
+            Cancel queued update
+          </button>
+        ) : state.target && state.target !== state.running && (
           <button
             type="button"
             className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
@@ -55,7 +66,7 @@ export function AppUpdateControl({ state, check, update }: {
             onClick={update}
             data-testid="button-update-app"
           >
-            Update app
+            {state.phase === "deferred" ? "Resume update" : "Update app"}
           </button>
         )}
         {showAttention && (

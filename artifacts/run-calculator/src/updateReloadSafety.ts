@@ -11,6 +11,8 @@ export type UpdateReloadSafetyInputs = {
   hasUnsavedForm: boolean;
   hasBlockingDialog: boolean;
   hasBlockingOperation: boolean;
+  hasPendingSync: boolean;
+  hasFailedSync: boolean;
 };
 
 export function isAutomaticUpdateReloadSafe({
@@ -18,11 +20,15 @@ export function isAutomaticUpdateReloadSafe({
   hasUnsavedForm,
   hasBlockingDialog,
   hasBlockingOperation,
+  hasPendingSync,
+  hasFailedSync,
 }: UpdateReloadSafetyInputs): boolean {
   return !hasActiveRun
     && !hasUnsavedForm
     && !hasBlockingDialog
-    && !hasBlockingOperation;
+    && !hasBlockingOperation
+    && !hasPendingSync
+    && !hasFailedSync;
 }
 
 export function hasAutomaticUpdateReloadBlockingSurface(
