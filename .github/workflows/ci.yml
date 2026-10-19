@@ -22,7 +22,7 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 2
@@ -68,7 +68,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Initialize machine-readable test report
@@ -98,7 +98,7 @@ jobs:
     # observed runs fit within the bounded release typecheck budget.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           lfs: true
@@ -141,7 +141,7 @@ jobs:
     # explicitly sharded package gates, but normally completes well below this.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Initialize machine-readable test report
@@ -177,7 +177,7 @@ jobs:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-reduced-motion-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Initialize machine-readable test report
@@ -222,7 +222,7 @@ jobs:
     # Fixture-only validation should stay short while allowing cold installs.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Initialize machine-readable test report
@@ -275,7 +275,7 @@ jobs:
       TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-api-postgres-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Initialize machine-readable test report
@@ -312,7 +312,7 @@ jobs:
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-schema-rollback-${{ github.run_id }}-${{ github.run_attempt }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 2
@@ -356,7 +356,7 @@ jobs:
     # bounded cap so registry stalls cannot hold a runner indefinitely.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # pnpm version is read from the "packageManager" field in package.json
@@ -382,7 +382,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Set up QEMU (multi-arch builds)
@@ -441,7 +441,7 @@ jobs:
       PORT: 3000
       BASE_PATH: /
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # pnpm version is read from the "packageManager" field in package.json
@@ -475,7 +475,7 @@ jobs:
       TEST_RESULTS_REPORT_PATH: test-evidence/merged-test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-merged-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Download test reports from this workflow run

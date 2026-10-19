@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           # Isolated zip-asset inventory gates inspect the real archives, not
@@ -296,7 +296,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           # Isolated zip-asset inventory gates inspect the real archives, not
@@ -521,7 +521,7 @@ jobs:
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
       TEST_RESULTS_EXPECT_FULL_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Full dispatch also runs the standard job. Download both reports there so
