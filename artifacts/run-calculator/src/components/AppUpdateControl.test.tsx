@@ -20,3 +20,47 @@ it("always exposes update controls, version, status and retry without hiding blo
   expect((screen.getByRole("button", { name: "Check for updates" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Update app" }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it("keeps update states and actions in normal page flow instead of a fixed overlay", () => {
+  const check = vi.fn();
+  const update = vi.fn();
+  const states = [
+    "unchecked",
+    "checking",
+    "current",
+    "ready",
+    "updating",
+    "blocked",
+    "offline",
+    "failed",
+    "confirmed",
+  ] as const;
+  const { rerender } = render(
+    <AppUpdateControl
+      state={{ phase: "unchecked", running: "old-build" }}
+      check={check}
+      update={update}
+    />,
+  );
+
+  for (const phase of states) {
+    const target = ["ready", "updating", "blocked"].includes(phase)
+      ? "new-build"
+      : undefined;
+    rerender(
+      <AppUpdateControl
+        state={{ phase, running: "old-build", ...(target ? { target } : {}) }}
+        check={check}
+        update={update}
+      />,
+    );
+    const control = screen.getByTestId("app-update-control");
+    expect(control.className).not.toMatch(/\bfixed\b/);
+    expect(screen.getByRole("button", { name: /App updates/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+    expect(Boolean(screen.queryByRole("button", { name: "Update app" }))).toBe(Boolean(target));
+    if (!["unchecked", "current"].includes(phase)) {
+      expect(screen.getByRole("status").textContent).toContain(phase === "ready" ? "Update ready" : phase === "blocked" ? "Blocked by work" : phase === "failed" ? "Update failed" : phase === "confirmed" ? "Update complete" : phase === "offline" ? "Offline" : phase === "updating" ? "Updating" : "Checking");
+    }
+  }
+});

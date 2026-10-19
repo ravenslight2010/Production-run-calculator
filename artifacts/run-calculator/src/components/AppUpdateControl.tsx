@@ -17,23 +17,65 @@ export function AppUpdateControl({ state, check, update }: {
   if (state.phase === "failed") message = "The update could not be confirmed. Keep working or check again when online.";
   if (state.phase === "offline") message = "Keep working offline. Reconnect and check again to update.";
   if (state.phase === "confirmed") message = "This page is running the requested version.";
+  if (state.phase === "checking") message = "Checking for a newer published version.";
+  if (state.phase === "ready") message = "A newer version is available. Updating remains protected while work is in progress.";
+  if (state.phase === "updating") message = "Preparing the update. This page will move only after the existing safety checks pass.";
+  const showAttention = !["unchecked", "current"].includes(state.phase);
   return (
-    <aside className="fixed bottom-2 right-2 z-[100] max-w-[calc(100vw-1rem)] rounded-lg border bg-background p-2 text-foreground shadow-lg" aria-label="App updates">
-      <button type="button" className="min-h-10 px-3 text-sm" aria-expanded={open}
-        aria-controls="app-update-details" onClick={() => setOpen(!open)}>
-        App updates · {labels[state.phase]}
-      </button>
-      {open && <div id="app-update-details" className="max-h-[60dvh] w-80 max-w-full space-y-2 overflow-y-auto p-2 text-sm">
-        <p className="break-all">Running version: <code data-testid="running-build">{state.running}</code></p>
-        {state.target && <p className="break-all">Available version: <code>{state.target}</code></p>}
-        <p role="status" aria-live="polite">{labels[state.phase]}. {message}</p>
-        {state.stage && <p className="text-xs">Update stage: {state.stage}</p>}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="min-h-11 rounded border px-3" disabled={busy} onClick={check}>Check for updates</button>
-          {state.target && state.target !== state.running &&
-            <button type="button" className="min-h-11 rounded border px-3" disabled={busy} onClick={update}>Update app</button>}
-        </div>
-      </div>}
+    <aside
+      className="relative z-10 max-h-[calc(100dvh-5rem)] w-full overflow-y-auto overscroll-contain border-b border-border/80 bg-background text-foreground"
+      aria-label="App updates"
+      data-testid="app-update-control"
+    >
+      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:px-4">
+        <button
+          type="button"
+          className="min-h-10 rounded px-2 text-left text-sm font-semibold hover:bg-muted/60"
+          aria-expanded={open}
+          aria-controls="app-update-details"
+          onClick={() => setOpen(!open)}
+          data-testid="button-app-update-details"
+        >
+          App updates · {labels[state.phase]}
+        </button>
+        <button
+          type="button"
+          className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={busy}
+          onClick={check}
+          data-testid="button-check-for-updates"
+        >
+          Check for updates
+        </button>
+        {state.target && state.target !== state.running && (
+          <button
+            type="button"
+            className="min-h-10 rounded border border-border px-3 text-sm font-medium hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={busy}
+            onClick={update}
+            data-testid="button-update-app"
+          >
+            Update app
+          </button>
+        )}
+        {showAttention && (
+          <p className="w-full break-words px-2 pb-1 text-xs text-muted-foreground" role="status" aria-live="polite">
+            {labels[state.phase]}. {message}
+          </p>
+        )}
+        {open && (
+          <div
+            id="app-update-details"
+            className="w-full space-y-1 border-t border-border/70 px-2 py-2 text-xs"
+            data-testid="app-update-details"
+          >
+            <p className="break-all">Running version: <code data-testid="running-build">{state.running}</code></p>
+            {state.target && <p className="break-all">Available version: <code>{state.target}</code></p>}
+            {!showAttention && <p>{labels[state.phase]}. {message}</p>}
+            {state.stage && <p>Update stage: {state.stage}</p>}
+          </div>
+        )}
+      </div>
     </aside>
   );
 }

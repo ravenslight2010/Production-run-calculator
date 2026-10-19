@@ -1,8 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 import { releaseBrowserWebServers } from "./playwright.release-servers";
+import { webkitLaunchOptions } from "./e2e/webkit-runtime";
 
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const webkitOptions = webkitLaunchOptions();
 const realMobileBrowserWsEndpoint =
   process.env.PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT;
 
@@ -39,6 +41,15 @@ export default defineConfig({
       name: "chromium",
       testMatch: ["live-sauce-dough-phone.spec.ts", "phone-layout.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "webkit-update-layout",
+      testMatch: "phone-layout.spec.ts",
+      grep: /expanded update details never cover Run or bottom tabs and QC owns the allergen footprint/,
+      use: {
+        ...devices["Desktop Safari"],
+        ...(webkitOptions ? { launchOptions: webkitOptions } : {}),
+      },
     },
     {
       name: "mobile-slow-network",

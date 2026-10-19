@@ -117,3 +117,48 @@ All commands used `bash scripts/src/run-release-node.sh` and pinned Node 24.21.0
   Interrupted/broad output was not counted as a full-suite pass.
 - Managed web and API workflows restarted; final web startup clean on its
   assigned port. `git diff --check` used for final whitespace validation.
+
+## Addendum: Run/QC footprint and update-control placement
+
+**Result: PASS for the scoped UI relocation and responsive behavior.**
+
+- Run no longer renders the derived ingredient allergen footprint. Existing
+  manual allergen labels, sequencing warnings, production rules, and Start Run
+  behavior were not changed.
+- QC uses its existing derived footprint and ingredient query, identifies the
+  selected run, and retains the visibility-only disclaimer. Component tests
+  cover mapped contributors, missing/unreviewed mappings, reviewed-empty,
+  substitutions, selected pepperoni types, and run switching without stale
+  content.
+- App update status/actions now use normal document flow. All nine coordinator
+  phases remain available; details and attention copy are scrollable within a
+  viewport-bounded control, and the old fixed toast was removed. The update
+  coordinator and its reload protections were not changed.
+- PASS: focused component tests (3 files, 17 tests), calculator typecheck, and
+  the existing manual two-build handoff/storage-preservation browser test.
+- PASS: Chromium and WebKit layout browser test at 320×740, 568×320,
+  768×1024, 1024×768, and 1280×800 with 150% text sizing. Each primary bottom
+  tab was hit-tested and checked for geometric overlap with the expanded update
+  control. The test also checks Run/QC placement and selected-run identity.
+- PASS: the signed-out `/sign-up` preview displays the failed-update notice and
+  Check for updates action in normal flow above the form. Its unauthenticated
+  API requests returned 401, as expected for a signed-out browser; no auth
+  behavior was changed.
+- Sanitized browser captures were produced by the focused test:
+  `artifacts/run-calculator/test-results/phone-layout-phone-layout--9c538-owns-the-allergen-footprint-chromium/run-phone-landscape.png`,
+  `.../chromium/qc-phone-landscape.png`,
+  `.../webkit-update-layout/run-phone-landscape.png`, and
+  `.../webkit-update-layout/qc-phone-landscape.png`. These use synthetic
+  accounts/runs and are local test evidence, not production captures.
+
+### Failure ledger
+
+| Finding | Status | Evidence and owner/next action |
+| --- | --- | --- |
+| First signed-in browser attempt reached a stopped preview and returned 502; a later attempt used the remote preview instead of the isolated browser server. | RESOLVED | Started the existing development workflows, then ran the test against local disposable services and an authorized isolated fixture. No production records were used. |
+| At 568×320 with 150% text, the update control extended about 2 px into the fixed Run tab area. | RESOLVED | The browser assertion reported the control bottom at 236 px and tab top at 233.8 px. The control now scrolls within a shorter dynamic-viewport cap; Chromium and WebKit both pass the overlap and click checks. |
+| An early WebKit run navigated during a layout assertion while the app was idle. | RESOLVED | The test now keeps the page active during viewport changes and waits for the initial document load. The final focused WebKit run passes; the two-build handoff remains covered separately. |
+| A manager-only test account without QC capabilities did not render the QC panel. | RESOLVED | This matched the existing authorization boundary. The browser fixture now uses only inventory and QC capabilities; no app roles or permissions were changed. |
+| The isolated browser’s QC catalog request returned an error, so its screenshot shows the panel’s explicit unknown state rather than mapped ingredient contributors. | BLOCKED (non-blocking to this presentation task) | The panel fails closed and does not report an allergen-free result. The mapped/unreviewed/reviewed-empty and substitution cases pass in the focused component tests. The separate API diagnostics task owns checking this local catalog request; no API scope was changed here. |
+| Physical Android Chrome and iOS Safari/PWA layouts. | MISSING | Only Chromium and WebKit browser emulation were available. No physical-device behavior is claimed or required for this task. |
+| Publication and production update verification. | NOT REACHED | This fork was not published; no production result is claimed. |

@@ -15,9 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { registerMasterDataQueryClient } from "./masterData";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ToastAction } from "@/components/ui/toast";
 import { AuthProvider } from "@/AuthContext";
-import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/useAuth";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
@@ -193,7 +191,6 @@ const AppUpdateContext = createContext<AppUpdateContextValue | null>(null);
 function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const stopUpdateWatchRef = useRef<(() => void) | undefined>(undefined);
   const registrationRef = useRef<ServiceWorkerRegistration | undefined>(undefined);
-  const [activatedUpdateReady, setActivatedUpdateReady] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>({ phase: "unchecked", running: WEB_BUILD_ID });
   const coordinatorRef = useRef<ReturnType<typeof createUpdateCoordinator> | null>(null);
   if (!coordinatorRef.current) {
@@ -240,7 +237,6 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
         const isUpdate = Boolean(registration.active);
         onStateChange = () => {
           if (worker.state === "installed" && isUpdate) {
-            setActivatedUpdateReady(true);
             void coordinator.check();
           }
         };
@@ -258,16 +254,12 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
     },
     [coordinator],
   );
-  const {
-    needRefresh: [needRefresh],
-  } = useRegisterSW({
+  useRegisterSW({
     onRegisteredSW,
     // Detection is not permission to reload. The coordinator owns navigation.
     onNeedReload: () => { void coordinator.check(); },
     onRegisterError: () => { void coordinator.check(); },
   });
-  const { toast } = useToast();
-  const toastedRef = useRef(false);
   const handleUpdateAndReload = useCallback(
     (canReload: () => boolean = getAutomaticUpdateReloadSafety, verifyBeforeReload?: () => Promise<boolean>) =>
       coordinator.update(canReload, verifyBeforeReload),
@@ -354,40 +346,15 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
     updateIdle,
   ]);
 
-  useEffect(() => {
-    if ((!needRefresh && !activatedUpdateReady) || toastedRef.current) return;
-
-    toastedRef.current = true;
-    toast({
-      title: "Update available",
-      description: "A new version of the app is ready.",
-      duration: Infinity,
-      persistent: true,
-      action: (
-        <ToastAction
-          altText="Update app when work is saved"
-          onClick={() => void handleUpdateAndReload()}
-        >
-          Update app
-        </ToastAction>
-      ),
-    });
-  }, [
-    activatedUpdateReady,
-    handleUpdateAndReload,
-    needRefresh,
-    toast,
-  ]);
-
   return (
     <AppUpdateContext.Provider value={{
       updateAndReload: handleUpdateAndReload,
       scheduleSafeIdleRecovery,
     }}>
-      {children}
       <AppUpdateControl state={updateState}
         check={() => void coordinator.check()}
         update={() => void handleUpdateAndReload()} />
+      {children}
     </AppUpdateContext.Provider>
   );
 }

@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Ingredient } from "@workspace/ingredient-catalog";
+import {
+  deriveRunAllergenFootprint,
+  type Ingredient,
+} from "@workspace/ingredient-catalog";
 import type { IngredientSubstitution } from "@workspace/inventory-math";
 import { DEFAULT_VALUES } from "../types";
-import {
-  MASTER_DATA_QUERY_KEY,
-  type MasterDataBootstrap,
-} from "../masterData";
+import { collectRunAllergenComponents } from "../runAllergenFootprint";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
 
 afterEach(cleanup);
@@ -18,23 +17,25 @@ function renderPanel(
   values: typeof DEFAULT_VALUES,
   ingredients: Ingredient[],
   substitutions: IngredientSubstitution[] = [],
+  runId = "run-1",
 ) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  queryClient.setQueryData(
-    MASTER_DATA_QUERY_KEY,
-    { ingredients } as unknown as MasterDataBootstrap,
+  const footprint = deriveRunAllergenFootprint(
+    collectRunAllergenComponents(values, substitutions),
+    ingredients,
   );
   return render(
-    <QueryClientProvider client={queryClient}>
-      <RunAllergenFootprintPanel values={values} substitutions={substitutions} />
-    </QueryClientProvider>,
+    <RunAllergenFootprintPanel
+      runId={runId}
+      footprint={footprint}
+      isLoading={false}
+      isError={false}
+      onRetry={vi.fn()}
+    />,
   );
 }
 
 describe("RunAllergenFootprintPanel", () => {
-  it("shows mapped contributors and labels absent or unreviewed mappings as unknown", () => {
+  it("shows mapped contributors and identifies missing or unreviewed mappings as unknown", () => {
     const values = {
       ...DEFAULT_VALUES,
       doughRecipeName: "House Dough",
@@ -65,6 +66,7 @@ describe("RunAllergenFootprintPanel", () => {
       },
     ]);
 
+    expect(screen.getByTestId("qc-allergen-run-id").textContent).toBe("Run run-1");
     expect(screen.getByTestId("run-allergen-coverage-status").textContent).toMatch(/Coverage incomplete/i);
     expect(screen.getByTestId("run-allergen-wheat").textContent).toContain("Flour");
     const unknownRows = screen.getAllByTestId("run-allergen-unknown-ingredient");
@@ -77,7 +79,7 @@ describe("RunAllergenFootprintPanel", () => {
     );
   });
 
-  it("distinguishes reviewed-empty mappings from unknown and refuses to compute without recipe data", () => {
+  it("distinguishes reviewed-empty mappings from unavailable recipe data", () => {
     renderPanel(
       {
         ...DEFAULT_VALUES,
