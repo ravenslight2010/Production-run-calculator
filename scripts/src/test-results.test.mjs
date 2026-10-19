@@ -1723,7 +1723,7 @@ test("workflow contracts publish reports on failure without changing triggers or
   assert.match(release, /cancel-in-progress: false/u);
   assert.match(department, /pull_request:\n\s+workflow_dispatch:/u);
   assert.match(calibration, /on:\n\s+workflow_dispatch:/u);
-  const downloadAction = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
+  const downloadAction = "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333";
   assert.match(ci, /aggregate-test-results:\n\s+name: Aggregate CI test results\n\s+if: always\(\)\n\s+needs:/u);
   assert.match(ci, /continue-on-error: true\n\s+runs-on: ubuntu-latest\n\s+timeout-minutes: 5/u);
   assert.match(ci, new RegExp(`uses: ${downloadAction.replaceAll("/", "\\/")}`, "u"));
