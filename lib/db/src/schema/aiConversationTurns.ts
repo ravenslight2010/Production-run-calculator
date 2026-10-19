@@ -1,4 +1,4 @@
-import { index, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { index, pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -14,7 +14,7 @@ import { usersTable } from "./users";
 export const aiConversationTurnsTable = pgTable(
   "ai_conversation_turns",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     userId: text("user_id")
       .notNull()
       .references(() => usersTable.id, { onDelete: "cascade" }),
