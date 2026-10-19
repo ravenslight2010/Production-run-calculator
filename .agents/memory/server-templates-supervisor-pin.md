@@ -10,6 +10,22 @@ gate supervisor actions); changing it is manager-gated (`manage-staff` → 403).
 Clients keep a local cache as an offline fallback and write-through then reconcile
 with the server's canonical response.
 
+## Timed-out revisioned template writes
+**Rule:** bound run-template POST/DELETE waits, retain the durable outbox after
+timeout, and reconcile with the canonical GET before any later replay. Do not
+retry a write from the timeout handler: an aborted browser request may still
+commit on the server.
+
+**Why:** template mutations carry monotonic revisions, so a canonical read can
+recognize a committed operation and clear its outbox entry without a duplicate
+write. A missing operation remains queued for the repository's ordinary
+online/focus recovery path.
+
+**How to apply:** preserve the revision and outbox entry when the response is
+uncertain; on the next recovery pass, compare server revisions before flushing.
+Do not apply this timeout/recovery policy to unrelated writes without reviewing
+their commit and acknowledgment contracts.
+
 ## Empty PIN = "no gate" (the key parity decision)
 **Rule:** an empty PIN (`""`) is a *valid* facility value meaning "no gate /
 unlocked everywhere". The server route ALLOWS empty (do not re-add an

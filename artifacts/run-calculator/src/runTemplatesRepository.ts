@@ -4,6 +4,7 @@
 import type { RunTemplate } from "./types";
 import { TEMPLATES_KEY } from "./types";
 import { browserRecordStore } from "./adapters/browserRecordStore";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type RunTemplateRecord = RunTemplate & { revision: number; deleted: boolean };
 type OutboxOp =
@@ -13,6 +14,9 @@ type OutboxOp =
 const OUTBOX_KEY = "run-calc-templates-outbox-v1";
 const MIGRATION_KEY = "run-calc-templates-repository-migrated-v1";
 const LEGACY_CLAIM_KEY = "run-calc-templates-legacy-scope-v1";
+// Revisioned writes are safe to reconcile after a client abort, but an
+// unresponsive transport must not hold an outbox flush open indefinitely.
+const RUN_TEMPLATE_WRITE_TIMEOUT_MS = 30_000;
 export type RunTemplateScope = "live" | "sandbox";
 let activeScope: RunTemplateScope = "live";
 const flushes = new Map<RunTemplateScope, Promise<RunTemplate[]>>();
@@ -223,13 +227,21 @@ export async function flushRunTemplates(): Promise<RunTemplate[]> {
       const deletes = sent.filter((op): op is Extract<OutboxOp, { type: "delete" }> => op.type === "delete").map((op) => ({ id: op.id, revision: op.revision }));
       let response: RunTemplateRecord[] | undefined;
       if (saves.length) {
-        const res = await fetch("/api/run-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templates: saves }) });
+        const res = await fetchWithTimeout(
+          "/api/run-templates",
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templates: saves }) },
+          RUN_TEMPLATE_WRITE_TIMEOUT_MS,
+        );
         if (!res.ok) throw new Error(`saveRunTemplate failed (${res.status})`);
         response = ((await res.json()) as { templates?: RunTemplateRecord[] }).templates;
         if (activeScope !== scope) return localRunTemplates();
       }
       if (deletes.length) {
-        const res = await fetch("/api/run-templates", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: deletes }) });
+        const res = await fetchWithTimeout(
+          "/api/run-templates",
+          { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: deletes }) },
+          RUN_TEMPLATE_WRITE_TIMEOUT_MS,
+        );
         if (!res.ok) throw new Error(`deleteRunTemplates failed (${res.status})`);
         response = ((await res.json()) as { templates?: RunTemplateRecord[] }).templates;
         if (activeScope !== scope) return localRunTemplates();
