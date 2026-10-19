@@ -21,9 +21,12 @@ export class StaleMixSnapshotError extends Error {
   }
 }
 
-export async function fetchMixes(): Promise<Mix[]> {
+export async function fetchMixes(
+  options: { cache?: RequestCache } = {},
+): Promise<Mix[]> {
   const res = await fetch("/api/mixes", {
     headers: { "x-client-id": inventoryClientId() },
+    ...(options.cache ? { cache: options.cache } : {}),
   });
   if (!res.ok) throw new Error(`List mixes failed (${res.status})`);
   const data = (await res.json()) as { items: unknown };

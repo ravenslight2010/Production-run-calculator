@@ -143,6 +143,15 @@ describe("specImportRecipeDisplayKind", () => {
     expect(specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", rows })).toBe("cheese");
   });
 
+  it("uses the live Mix pool for a one-row recipe even when the browser list is stale", () => {
+    const oneRow = {
+      kind: "cheese" as const,
+      name: "Bobo's Deluxe Meat Mix",
+      rows: [{ ingredient: "Red Onion", lbs: 1 }],
+    };
+    expect(specImportRecipeDisplayKind(oneRow, ["Bobo's Deluxe Meat Mix"])).toBe("mix");
+  });
+
   it("forcedCategory beats both the heuristic and the user Mix list", () => {
     saveList(MIX_RECIPE_NAMES_KEY, ["cheese blend"]);
     const rows = [
@@ -216,6 +225,38 @@ describe("applySpecImport mix routing", () => {
     const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
     expect(prof?.app1CheeseRecipeName ?? "").toBe("");
     expect(prof?.app1CheeseRecipe ?? []).toEqual([]);
+  });
+
+  it("routes a known one-row server Mix away from Cheese and repairs a stale cheese-typed link", () => {
+    const name = "Bobo's Deluxe Meat Mix";
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        {
+          brand: "Bobo's",
+          flavor: "Deluxe",
+          applicators: [{ type: "cheese", recipeName: name, ozPerPizza: 2.35 }],
+          pepperonis: [],
+        },
+      ],
+      recipes: [
+        {
+          kind: "cheese",
+          name,
+          brand: "Bobo's",
+          flavor: "Deluxe",
+          app: 1,
+          rows: [{ ingredient: "Red Onion", lbs: 1 }],
+        },
+      ],
+    };
+
+    applySpecImport(parsed, undefined, { mixes: [{ name }] });
+
+    expect(loadList(MIX_RECIPE_NAMES_KEY, [])).toContain(name);
+    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).not.toContain(name);
+    const profile = loadProfile("Bobo's", "Deluxe") as Record<string, unknown> | null;
+    expect(profile?.app1Type).toBe("Mix");
+    expect(profile?.app1CheeseRecipeName).toBe(name);
   });
 
   it("does NOT tie a recipe the user reclassified to 'mix' onto the cheese slot", () => {

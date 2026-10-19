@@ -23,6 +23,7 @@
 - [Browser storage](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable localStorage and missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
+- [Spec export integrity](spec-export.md) — fresh server snapshots; keep per-pizza oz and batch lbs separate; blanks are unknown, and conflicts remain visible.
 - [Shared memory](learned-memory-pattern.md) + [aliases](learned-import-aliases.md) — corrections and learned aliases are shared.
 - [Reviewer coverage](ai-corrections-full-coverage.md) + [memory health](ai-memory-health-audits.md) — fail-safe review treats historic aliases as evidence.
 - [Run progress](press-done-model.md) + [occupancy](cases-line-occupancy.md) + [auto-track](autotrack-remainder-carry.md) — separate WIP; carry fractions, cap demand, hide dough batches in crust mode.

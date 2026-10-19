@@ -3277,8 +3277,23 @@ export async function commitSpecImport(
   const livePools: {
     dough?: SpecImportServerPoolRecipe[];
     sauce?: SpecImportServerPoolRecipe[];
+    mixes?: Array<{ name: string }>;
   } = {};
   const poolNamesByKind: { dough?: string[]; sauce?: string[] } = {};
+  // Mix membership is needed to keep one-row, previously-known mixes out of
+  // the Cheese pool and to repair stale cheese-typed profile links. Fetch this
+  // canonical list before projection/local apply; an empty fallback could
+  // misclassify the same import and persist the wrong category.
+  let existingMixes: Mix[];
+  try {
+    existingMixes = await fetchMixes();
+  } catch (cause) {
+    throw new Error(
+      "Could not load the current Mix recipes. Refresh and try applying the import again.",
+      { cause },
+    );
+  }
+  livePools.mixes = existingMixes.map((mix) => ({ name: mix.name }));
   let fullRelinked = prepared.parsed;
   // Accumulate near-exact auto-links across both kinds so the caller can
   // surface "Auto-linked N near-duplicate recipe names" in the import summary,
@@ -3506,12 +3521,7 @@ export async function commitSpecImport(
   if (corrections.length) {
     // Liveness universes for the "old name is a real recipe" guard. A failed
     // fetch means "unknown" — deletion is skipped for that kind (fail safe).
-    let mixesLive: { name: string; components?: Array<{ ingredient: string }> }[] | null = null;
-    try {
-      mixesLive = await fetchMixes();
-    } catch {
-      // Unknown — skip deletions that need the mixes universe.
-    }
+    const mixesLive: { name: string; components?: Array<{ ingredient: string }> }[] = existingMixes;
     let cheeseLive: { name: string; components?: Array<{ ingredient: string }> }[] | null =
       existingCheeseForLink;
     if (!cheeseLive) {
@@ -3529,7 +3539,7 @@ export async function commitSpecImport(
         return pool.some((r) => specImportNamedRecipeNamesEqual(r.name, c.oldName));
       }
       if (c.kind === "appType") {
-        if (mixesLive === null || cheeseLive === null) return null;
+        if (cheeseLive === null) return null;
         return [...mixesLive.map((m) => m.name), ...cheeseLive.map((r) => r.name)].some((n) =>
           specImportNamedRecipeNamesEqual(n, c.oldName),
         );
@@ -3541,9 +3551,9 @@ export async function commitSpecImport(
       }
       if (c.kind === "cheeseIngredient") {
         // Cheese-kind imported recipes can be routed to EITHER the cheese
-        // pool or the Mixes pool, so the old ingredient must be checked
-        // against BOTH universes; if either is unknown, liveness is unknown.
-        if (cheeseLive === null || mixesLive === null) return null;
+        // pool or the Mixes pool. Mixes are a required preflight snapshot; if
+        // the Cheese pool is unavailable, liveness is unknown.
+        if (cheeseLive === null) return null;
         return (
           cheeseLive.some((r) => (r.components ?? []).some((row) => ciEq(row.ingredient ?? "", c.oldName))) ||
           mixesLive.some((m) => (m.components ?? []).some((row) => ciEq(row.ingredient ?? "", c.oldName)))
@@ -3605,12 +3615,6 @@ export async function commitSpecImport(
   // for the manager to fill in the editor.
   let mixesAdded = 0;
   let atomicMixes: Mix[] = [];
-  let existingMixes: Mix[];
-  try {
-    existingMixes = await fetchMixes();
-  } catch {
-    existingMixes = [];
-  }
   try {
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
     const candidates = collectSpecImportMixes(scopedParsed, userMixNamesLower)
@@ -3721,14 +3725,8 @@ export async function commitSpecImport(
   let atomicCheeseRecipes: CheeseRecipe[] = [];
 
   let cheeseRecipesAdded = 0;
-  let existingMixesForCheese: Mix[];
   try {
-    existingMixesForCheese = await fetchMixes();
-  } catch {
-    existingMixesForCheese = [];
-  }
-  try {
-    const userMixNamesLower = new Set(existingMixesForCheese.map((m) => m.name.trim().toLowerCase()));
+    const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
     const drafts = collectSpecImportCheeseRecipes(scopedParsed, userMixNamesLower);
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))

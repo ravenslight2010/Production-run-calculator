@@ -88,6 +88,120 @@ describe("buildSpecExportGrids", () => {
     expect(row[13]).toBe("1.5");
   });
 
+  it("folds only identical case-only rows and retains same-key conflicts and recipe variants", () => {
+    const conflicted: SpecExportInput = {
+      profiles: [
+        {
+          brand: "Acme",
+          flavor: "Cheese",
+          applicators: [
+            { type: "Shared Cheese", ozPerPizza: 2 },
+            { type: "Shared Cheese", ozPerPizza: 3 },
+          ],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+          targetDoughballWeight: 10,
+          doughballsPerTray: 24,
+          cheeseRecipeNames: ["Shared Cheese", "Shared Cheese"],
+        },
+        {
+          brand: "ACME",
+          flavor: "CHEESE",
+          applicators: [
+            { type: "shared cheese", ozPerPizza: 2 },
+            { type: "shared cheese", ozPerPizza: 3 },
+          ],
+          pepperonis: [],
+          doughRecipeName: "shared dough",
+          targetDoughballWeight: 10,
+          doughballsPerTray: 24,
+          cheeseRecipeNames: ["shared cheese", "shared cheese"],
+        },
+        {
+          brand: "Acme",
+          flavor: "Cheese",
+          applicators: [
+            { type: "Shared Cheese", ozPerPizza: 2 },
+            { type: "Shared Cheese", ozPerPizza: 3 },
+          ],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+          targetDoughballWeight: 11,
+          doughballsPerTray: 24,
+          cheeseRecipeNames: ["Shared Cheese", "Shared Cheese"],
+        },
+        {
+          brand: "Beta",
+          flavor: "Other",
+          applicators: [],
+          pepperonis: [],
+          doughRecipeName: "Shared Dough",
+          cheeseRecipeNames: ["Shared Cheese"],
+        },
+      ],
+      doughRecipes: [
+        {
+          name: "Shared Dough",
+          rows: [
+            { ingredient: "Flour", lbs: 50 },
+            { ingredient: "Flour", lbs: 0 },
+          ],
+        },
+        {
+          name: "shared dough",
+          rows: [
+            { ingredient: "flour", lbs: 50 },
+            { ingredient: "flour", lbs: 0 },
+          ],
+        },
+        { name: "SHARED DOUGH", rows: [{ ingredient: "Flour", lbs: 55 }] },
+        { name: "Other Dough", rows: [{ ingredient: "Flour", lbs: 5 }] },
+      ],
+      sauceRecipes: [],
+      cheeseRecipes: [
+        {
+          name: "Shared Cheese",
+          rows: [
+            { ingredient: "Mozzarella", lbs: 20 },
+            { ingredient: "Mozzarella", lbs: 0 },
+          ],
+        },
+        {
+          name: "shared cheese",
+          rows: [
+            { ingredient: "mozzarella", lbs: 20 },
+            { ingredient: "mozzarella", lbs: 0 },
+          ],
+        },
+        { name: "SHARED CHEESE", rows: [{ ingredient: "Mozzarella", lbs: 21 }] },
+      ],
+    };
+    const profiles = buildSpecsExportGrids(conflicted);
+    expect(profiles.map((grid) => grid.name.toLowerCase())).toEqual(["acme", "beta"]);
+    expect(profiles[0]!.rows).toHaveLength(3); // header + exact duplicate collapsed + conflict retained
+
+    const dough = buildDoughExportGrids(conflicted);
+    expect(dough.map((grid) => grid.name.toLowerCase())).toEqual([
+      "dough — other dough",
+      "dough — shared dough",
+      "dough — shared dough (2)",
+    ]);
+    const sharedSheets = dough.slice(1);
+    expect(sharedSheets.some((grid) => grid.rows.some((row) => row[0]?.toLowerCase() === "flour" && row[1] === "50"))).toBe(true);
+    expect(sharedSheets.some((grid) => grid.rows.some((row) => row[0]?.toLowerCase() === "flour" && row[1] === "0"))).toBe(true);
+    expect(sharedSheets.some((grid) => grid.rows.some((row) => row[0]?.toLowerCase() === "flour" && row[1] === "55"))).toBe(true);
+    expect(sharedSheets.flatMap((grid) => grid.rows).filter((row) => row[0]?.toLowerCase() === "acme: cheese")).toHaveLength(2);
+    expect(sharedSheets.flatMap((grid) => grid.rows).some((row) => row[0] === "Beta: Other")).toBe(true);
+
+    const cheese = buildCheeseExportGrids(conflicted);
+    const acme = cheese.find((grid) => grid.name.toLowerCase() === "acme")!;
+    expect(acme).toBeDefined();
+    expect(acme.rows.filter((row) => row[0]?.toLowerCase() === "recipe: shared cheese")).toHaveLength(2);
+    expect(acme.rows.some((row) => row[0]?.toLowerCase() === "mozzarella" && row[1] === "20")).toBe(true);
+    expect(acme.rows.some((row) => row[0]?.toLowerCase() === "mozzarella" && row[1] === "0")).toBe(true);
+    expect(findSheet(cheese, "Beta").rows.some((row) => row[0]?.toLowerCase() === "recipe: shared cheese")).toBe(true);
+  });
+
   it("uses spelled-out column headers (Applicator, Pepperoni, oz/pizza)", () => {
     const header = findSheet(buildSpecsExportGrids(input), "Bobo's Original").rows[0]!;
     // No "App" abbreviation — must say "Applicator"
@@ -235,6 +349,75 @@ describe("buildSpecExportGrids", () => {
     expect(findSheet(grids, "Unassigned").rows).toContainEqual(["Recipe: Library Only"]);
   });
 
+  it("keeps Mix-only recipe links in Specs but excludes them from Cheese targets", () => {
+    const mixLinked: SpecExportInput = {
+      profiles: [{
+        brand: "Sample Food",
+        flavor: "Veggie",
+        applicators: [{ type: "Whole Mozzarella", ozPerPizza: 1 }],
+        pepperonis: [],
+        cheeseRecipeNames: ["Garden Mix"],
+      }],
+      doughRecipes: [],
+      sauceRecipes: [],
+      cheeseRecipes: [{ name: "Garden Mix", rows: [{ ingredient: "Onion", lbs: 2 }] }],
+      mixOnlyRecipeNames: ["Garden Mix"],
+    };
+
+    const profileRow = findSheet(buildSpecsExportGrids(mixLinked), "Sample Food")
+      .rows.find((row) => row[1] === "Veggie")!;
+    expect(profileRow).toContain("Whole Mozzarella");
+    expect(profileRow).toContain("Garden Mix");
+
+    const cheeseSheets = buildCheeseExportGrids(mixLinked);
+    expect(cheeseSheets.map((grid) => grid.name)).toEqual(["Unassigned"]);
+    const cheeseRows = cheeseSheets.flatMap((grid) => grid.rows);
+    expect(cheeseRows).toContainEqual(["Recipe: Garden Mix"]);
+    expect(cheeseRows).not.toContainEqual(["Sample Food: Veggie"]);
+  });
+
+  it("keeps explicit Mix assignments out of Cheese targets even for shared pool names", () => {
+    const shared: SpecExportInput = {
+      profiles: [{
+        brand: "Sample Food",
+        flavor: "Veggie",
+        applicators: [{ type: "Mix", ozPerPizza: 1 }],
+        pepperonis: [],
+        cheeseRecipeNames: ["Garden Mix"],
+      }],
+      doughRecipes: [],
+      sauceRecipes: [],
+      cheeseRecipes: [{ name: "Garden Mix", rows: [{ ingredient: "Onion", lbs: 2 }] }],
+      // The same display name exists in both pools, so it is not Mix-only.
+      mixOnlyRecipeNames: [],
+    };
+
+    const cheeseSheets = buildCheeseExportGrids(shared);
+    expect(cheeseSheets.map((grid) => grid.name)).toEqual(["Unassigned"]);
+    expect(cheeseSheets[0]!.rows).not.toContainEqual(["Sample Food: Veggie"]);
+  });
+
+  it("preserves a shared cross-pool Cheese target when the profile uses a Cheese type", () => {
+    const shared: SpecExportInput = {
+      profiles: [{
+        brand: "Sample Food",
+        flavor: "Cheese",
+        applicators: [{ type: "Cheese Blend", ozPerPizza: 1 }],
+        pepperonis: [],
+        cheeseRecipeNames: ["Shared Blend"],
+      }],
+      doughRecipes: [],
+      sauceRecipes: [],
+      cheeseRecipes: [{ name: "Shared Blend", rows: [{ ingredient: "Mozzarella", lbs: 10 }] }],
+      // A same-name Mix entry is not Mix-only when a canonical Cheese entry exists.
+      mixOnlyRecipeNames: [],
+    };
+
+    const cheeseRows = findSheet(buildCheeseExportGrids(shared), "Sample Food").rows;
+    expect(cheeseRows).toContainEqual(["Recipe: Shared Blend"]);
+    expect(cheeseRows).toContainEqual(["Sample Food: Cheese"]);
+  });
+
   it("emits one dough and sauce worksheet per recipe, including unreferenced recipes", () => {
     const extra: SpecExportInput = {
       ...input,
@@ -365,6 +548,38 @@ describe("mix export round-trips through the deterministic premix importer", () 
     expect(p.components).toEqual([
       { ingredient: "Onions", perPizza: 0.5, perBatch: 0 },
       { ingredient: "Peppers", perPizza: 0.25, perBatch: 0 },
+    ]);
+  });
+
+  it("uses explicit units and preserves per-batch lbs separately from per-pizza oz", () => {
+    const mix: Mix = {
+      ...mixes[0]!,
+      components: [
+        { ingredient: "Onions", perPizza: 0.5, perBatchLbs: 2.75 },
+        { ingredient: "Peppers", perPizza: 0, perBatchLbs: 1.25 },
+      ],
+    };
+    const grid = buildMixExportGrids([mix])[0]!;
+    expect(grid.rows).toContainEqual(["Ingredient", "Per Pizza (oz)", "Per Batch (lbs)"]);
+    expect(grid.rows).toContainEqual(["Onions", "0.5", "2.75"]);
+    expect(grid.rows).toContainEqual(["Peppers", "0", "1.25"]);
+    const parsed = parsePremixWorkbook(grid ? [grid] : []);
+    expect(parsed[0]?.components).toEqual([
+      { ingredient: "Onions", perPizza: 0.5, perBatch: 2.75 },
+      { ingredient: "Peppers", perPizza: 0, perBatch: 1.25 },
+    ]);
+  });
+
+  it("groups case-only brand spellings on one Mixes tab without dropping distinct blocks", () => {
+    const grids = buildMixExportGrids([
+      mixes[0]!,
+      { ...mixes[0]!, id: "case-only", brand: "bobo's original", name: "Distinct Mix", flavor: "Cheese" },
+    ]);
+    expect(grids).toHaveLength(1);
+    const parsed = parsePremixWorkbook(grids);
+    expect(parsed.map((mix) => mix.name).sort()).toEqual([
+      "Bobo's Veggie Mix",
+      "Distinct Mix",
     ]);
   });
 
