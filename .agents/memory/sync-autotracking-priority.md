@@ -8,3 +8,9 @@ Sync is the app's second-most-important feature. The user wants Sauce, Dough, Fr
 **Why:** The user reported declining sync reliability and inconsistent tracker behavior, while each department represents different production work.
 
 **How to apply:** Prioritize cross-system reliability audits and fixes. Do not equate consistency with one universal timer or formula; ask before changing production rules.
+
+Canonical wake recovery may run independently of best-effort background refreshes; making every background operation share one serialized lane is not a safety requirement.
+
+**Why:** The approved speed objective preserves canonical acknowledgement and conflict fences, but unrelated slow master-data reads must not determine operational recovery latency. Faster polling or weaker acknowledgement would hide the problem rather than solve it.
+
+**How to apply:** Keep single ownership and write/adoption barriers for recovery itself. Treat ordinary refresh concurrency separately, and distinguish duplicate signals within one wake from a genuinely later sleep/offline boundary.

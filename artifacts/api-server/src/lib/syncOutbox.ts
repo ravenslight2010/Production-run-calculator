@@ -305,6 +305,7 @@ export function startSyncOutboxListener(
   let drainTimer: NodeJS.Timeout | undefined;
   let retentionTimer: NodeJS.Timeout | undefined;
   let draining = false;
+  let drainRequested = false;
   let retryDelayMs = 500;
   const drainBackoff = createBackgroundOperationBackoff();
   const cursors = processCursors;
@@ -318,11 +319,14 @@ export function startSyncOutboxListener(
   };
 
   const scheduleDrain = () => {
-    if (stopped || drainTimer || !drainBackoff.isReady()) return;
+    if (stopped) return;
+    drainRequested = true;
+    if (draining || drainTimer) return;
+    const delay = Math.max(0, (drainBackoff.nextRetryAt() ?? Date.now()) - Date.now());
     drainTimer = setTimeout(() => {
       drainTimer = undefined;
       void drainAll();
-    }, 0);
+    }, delay);
     drainTimer.unref();
   };
 
@@ -401,6 +405,7 @@ export function startSyncOutboxListener(
 
   async function drainAll(): Promise<void> {
     if (stopped || draining) return;
+    drainRequested = false;
     draining = true;
     try {
       await runBackgroundOperation("sync-outbox-drain", async () => {
@@ -423,11 +428,19 @@ export function startSyncOutboxListener(
         }
       });
       drainBackoff.recordSuccess();
-    } catch {
+    } catch (error) {
       drainBackoff.recordFailure();
-      logger.warn({ event: "sync_outbox_drain", outcome: "retry" }, "Sync outbox drain failed; cursor retained for retry");
+      drainRequested = true;
+      logger.warn({
+        event: "sync_outbox_drain",
+        outcome: "retry",
+        reason: syncOutboxFailureReason(error),
+      }, "Sync outbox drain failed; cursor retained for retry");
     } finally {
       draining = false;
+      // A NOTIFY arriving during an active pass must survive that pass.
+      // Failed delivery likewise schedules its own bounded backoff retry.
+      if (drainRequested) scheduleDrain();
     }
   }
 
@@ -527,4 +540,19 @@ export function startSyncOutboxListener(
     }
     listener = undefined;
   };
+}
+
+/** Fixed cardinality only: never expose messages, SQL, or arbitrary codes. */
+export function syncOutboxFailureReason(error: unknown): string {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+    const { code, cause } = current as { code?: unknown; cause?: unknown };
+    if (code === "42501") return "database-permission";
+    if (code === "42P01" || code === "42703") return "database-schema";
+    if (code === "53300") return "database-capacity";
+    if (code === "57014" || code === "ETIMEDOUT") return "database-timeout";
+    if (code === "08006" || code === "ECONNRESET" || code === "57P01") return "database-connection";
+    current = cause;
+  }
+  return "delivery-failed";
 }

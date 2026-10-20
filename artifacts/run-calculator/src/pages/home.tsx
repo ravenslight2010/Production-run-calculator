@@ -17,7 +17,7 @@ import {
   releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
-import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
+import { consumeForegroundRecoveryResponse, isRetryableRecoveryStatus } from "../foregroundRecoveryResponse";
 import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
 import {
   clearPendingSyncIntent,
@@ -8680,12 +8680,12 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify }): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify, isCurrent }): Promise<boolean> => {
       if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       const isCurrentRecovery = () =>
-        !cancelled && foregroundRecoveryOwnerRef.current === recoveryOwner;
+        !cancelled && isCurrent() && foregroundRecoveryOwnerRef.current === recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
       showForegroundRecoveryNotice(
@@ -8727,6 +8727,7 @@ export default function Home() {
 
       return (async () => {
         let reconciled = false;
+        let permanentHttpFailure = false;
         try {
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
@@ -8739,7 +8740,8 @@ export default function Home() {
             syncTodayRequest.init,
             10_000,
           );
-          if (!res.ok) classify("non-retryable-http");
+          permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
+          if (permanentHttpFailure) classify("non-retryable-http");
           const recovery = await consumeForegroundRecoveryResponse({
             response: res,
             expectedDate: clientDate,
@@ -8865,7 +8867,7 @@ export default function Home() {
           return true;
          } catch (error) {
             classify(
-              error instanceof Error && error.message.startsWith("foreground sync GET failed:")
+              permanentHttpFailure
                 ? "non-retryable-http"
                 : "connectivity-retry",
             );

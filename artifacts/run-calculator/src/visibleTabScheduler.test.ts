@@ -117,4 +117,29 @@ describe("VisibleTabScheduler", () => {
     expect(run).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("starts canonical wake recovery while an unrelated refresh is stalled", async () => {
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => { release = resolve; });
+    const refresh = vi.fn(() => stalled);
+    const recover = vi.fn();
+    const scheduler = new VisibleTabScheduler();
+    scheduler.register({ id: "profiles", cadenceMs: 60_000, runOnStart: true, order: 10, run: refresh });
+    scheduler.register({ id: "canonical", runOnForeground: true, foregroundPriority: true, order: 0, run: recover });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    setHidden(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(501);
+    setHidden(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledTimes(1);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledTimes(1);
+    scheduler.stop();
+  });
 });

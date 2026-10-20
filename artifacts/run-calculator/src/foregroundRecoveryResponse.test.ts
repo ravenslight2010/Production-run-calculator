@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeForegroundRecoveryResponse } from "./foregroundRecoveryResponse";
+import { consumeForegroundRecoveryResponse, isRetryableRecoveryStatus } from "./foregroundRecoveryResponse";
 import { syncPayloadSnapshotId } from "./syncWriteResponse";
 import type { SyncPayload } from "./types";
 
 const DATE = "2026-09-15";
+
+it("retries transient wake HTTP failures but not authentication, validation or conflict failures", () => {
+  for (const status of [408, 429, 500, 502, 503, 504]) expect(isRetryableRecoveryStatus(status)).toBe(true);
+  for (const status of [200, 400, 401, 403, 404, 409, 422]) expect(isRetryableRecoveryStatus(status)).toBe(false);
+});
 
 function canonicalPayload(): SyncPayload {
   return {

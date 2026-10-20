@@ -5597,6 +5597,10 @@ paths:
       responses:
         "200":
           description: Canonical merge, authoritative stale-base fallback, unchanged acknowledgement, or stale reset rejection
+          headers:
+            Server-Timing:
+              description: Optional bounded numeric sync acquisition, lock-read, transaction, and handler durations in milliseconds. Acquisition includes BEGIN; lock-read includes SQL round trips, not pure lock wait.
+              schema: { type: string }
           content:
             application/json:
               schema:

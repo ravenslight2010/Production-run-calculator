@@ -1406,6 +1406,7 @@ async function upsertProtected(
   expectedEpoch: number,
   clientIp?: string,
   rejectLegacyComplete = false,
+  timings?: { acquisitionMs: number; lockReadMs: number; transactionMs: number },
 ): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -1414,6 +1415,8 @@ async function upsertProtected(
       let merged: ProtectedUpsertResult;
       try {
         merged = await db.transaction(async (tx) => {
+        const acquiredAt = performance.now();
+        if (timings) timings.acquisitionMs += acquiredAt - transactionStartedAt;
         const serverTime = Date.now();
         // Scope reset fence is always acquired before the daily document,
         // matching /sync/reset and operational intents.
@@ -1437,6 +1440,7 @@ async function upsertProtected(
           .from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
+        if (timings) timings.lockReadMs += performance.now() - acquiredAt;
         const canonicalExisting = completeSyncData(existing?.data);
         existingData = canonicalExisting;
         const currentSnapshotId = canonicalExisting === undefined
@@ -1592,7 +1596,9 @@ async function upsertProtected(
         };
         });
       } finally {
-        recordSyncTransaction(performance.now() - transactionStartedAt);
+        const durationMs = performance.now() - transactionStartedAt;
+        if (timings) timings.transactionMs += durationMs;
+        recordSyncTransaction(durationMs);
       }
       if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
@@ -1739,6 +1745,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
+  const timings = { acquisitionMs: 0, lockReadMs: 0, transactionMs: 0 };
   const result = await upsertProtected(
     today,
     scope,
@@ -1748,6 +1755,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     expectedEpoch,
     req.ip,
     legacyCompleteWritesRejected(),
+    timings,
   );
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
@@ -1804,6 +1812,15 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const liveState = merged
     ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
     : null;
+  // Fixed names, numeric durations, no document identities or payload values.
+  // acquisition includes BEGIN; lock-read includes its SQL round trips.
+  const boundedDuration = (ms: number) => Math.min(600_000, Math.max(0, ms)).toFixed(1);
+  res.setHeader("Server-Timing", [
+    `sync_acquire;dur=${boundedDuration(timings.acquisitionMs)}`,
+    `sync_lock_read;dur=${boundedDuration(timings.lockReadMs)}`,
+    `sync_transaction;dur=${boundedDuration(timings.transactionMs)}`,
+    `sync_handler;dur=${boundedDuration(performance.now() - telemetryStartedAt)}`,
+  ].join(", "));
   res.json({
     ...responseBody,
     operationalProjection: liveState?.operationalProjection ?? null,
