@@ -21,6 +21,10 @@ import { startAuthRetentionScheduler } from "./lib/authRetention";
 import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
 import { db, pool } from "@workspace/db";
 import { startDatabaseCapacityCollection } from "./lib/databaseCapacity";
+import {
+  installPoolTelemetry,
+  reportCapacityTelemetry,
+} from "./lib/capacityTelemetry";
 import { getBuildInfo } from "./lib/buildInfo";
 import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
@@ -72,6 +76,7 @@ let stopDailyRolloverScheduler: (() => void) | undefined;
 let stopAuthRetentionScheduler: (() => void) | undefined;
 let stopImportSourceRetentionScheduler: (() => void) | undefined;
 let stopDatabaseCapacityCollection: (() => void) | undefined;
+let stopCapacityTelemetryHeartbeat: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -120,6 +125,8 @@ async function startServer(): Promise<void> {
     stopImportSourceRetentionScheduler = undefined;
     stopDatabaseCapacityCollection?.();
     stopDatabaseCapacityCollection = undefined;
+    stopCapacityTelemetryHeartbeat?.();
+    stopCapacityTelemetryHeartbeat = undefined;
     stopSyncOutboxFanout();
 
     const forceExit = setTimeout(() => {
@@ -226,6 +233,20 @@ async function initializeStartup(startedAt: number): Promise<void> {
   startAutoTrackServerTicks();
   if (process.env.DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS !== "1") {
     stopDatabaseCapacityCollection = startDatabaseCapacityCollection(pool, logger, getBuildInfo).stop;
+    // Surface database-checkout and server-delay signals in the live logs.
+    // installPoolTelemetry wraps pool.connect so every checkout records its
+    // acquisition latency, queue depth, and acquisition failures into the
+    // bounded capacity snapshot; until now only unit tests installed it, so
+    // db.pool.acquisition_ms never reached production logs. The heartbeat
+    // emits the minutely capacity_telemetry report unconditionally — the
+    // sync-traffic-driven maybeReport() alone goes silent whenever no sync
+    // writes flow, hiding the always-collected event-loop delay histogram.
+    installPoolTelemetry(pool);
+    const capacityTelemetryTimer = setInterval(() => {
+      reportCapacityTelemetry(logger);
+    }, 60_000);
+    capacityTelemetryTimer.unref();
+    stopCapacityTelemetryHeartbeat = () => clearInterval(capacityTelemetryTimer);
     stopDailyRolloverScheduler = startDailyRolloverScheduler(
       sandboxAllowed() ? ["live", "sandbox"] : ["live"],
     ).stop;
