@@ -152,6 +152,7 @@ import type {
   ListQualityChecksParams,
   ManagerActionItemUpdate,
   ManagerActionQueue,
+  ManualSectionEditError,
   ManualSectionEditRequest,
   ManualSectionEditResponse,
   ManualSectionLockEvent,
@@ -290,6 +291,7 @@ import type {
   SyncUnchangedResponse,
   SyncUpgradeRequiredResponse,
   SyncWriteRequest,
+  SyncWriteValidationError,
   TransferInput,
   UnreviewedIncidentCount,
   UpdateIngredientAllergenMappingInput,
@@ -17804,7 +17806,7 @@ export const getSubmitFieldCheckObservationsUrl = () => {
 }
 
 /**
- * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence. Version 3 sync-acknowledgment failures require only failureCode (integer 1 login/permission rejection, 2 stale/reset write, 3 exhausted retries); successful sync observations have empty metrics. Version 3 performance observations require only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API network failure). Stale-deployment-recovery accepts no metrics; an incomplete outcome is an attempt without confirmation, and success is emitted only after authenticated startup on a different build. Versions 1 and 2 remain accepted for queued evidence; unsupported diagnostic versions are rejected.
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence. Version 3 sync-acknowledgment failures require only failureCode (integer 1 login/permission rejection, 2 stale/reset write, 3 exhausted retries); version 4 also allows 4 for a permanent sync request rejection. Successful sync observations have empty metrics. Version 3 performance observations require only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API network failure). Stale-deployment-recovery accepts no metrics; an incomplete outcome is an attempt without confirmation, and success is emitted only after authenticated startup on a different build. Versions 1 and 2 remain accepted for queued evidence; unsupported diagnostic versions are rejected.
  * @summary Submit passive browser field-check observations
  */
 export const submitFieldCheckObservations = async (fieldCheckObservationBatch: FieldCheckObservationBatch, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {
@@ -21231,7 +21233,7 @@ return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
 
 export const getPutSyncTodayMutationKey = () => ['putSyncToday'] as const;
 
-export const getPutSyncTodayMutationOptions = <TError = ErrorType<SyncUpgradeRequiredResponse>,
+export const getPutSyncTodayMutationOptions = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext> => {
 
@@ -21260,13 +21262,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PutSyncTodayMutationResult = NonNullable<Awaited<ReturnType<typeof putSyncToday>>>
     export type PutSyncTodayMutationBody = BodyType<SyncWriteRequest>
-    export type PutSyncTodayMutationError = ErrorType<SyncUpgradeRequiredResponse>
+    export type PutSyncTodayMutationError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse>
     export type PutSyncTodayMutationVariables = {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}
 
     /**
  * @summary Merge the client-local current-day sync snapshot
  */
-export const usePutSyncToday = <TError = ErrorType<SyncUpgradeRequiredResponse>,
+export const usePutSyncToday = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof putSyncToday>>,
@@ -21532,7 +21534,7 @@ return customFetch<ManualSectionEditResponse>(getSubmitManualSectionEditUrl(para
 
 export const getSubmitManualSectionEditMutationKey = () => ['submitManualSectionEdit'] as const;
 
-export const getSubmitManualSectionEditMutationOptions = <TError = ErrorType<void | ManualSectionEditResponse>,
+export const getSubmitManualSectionEditMutationOptions = <TError = ErrorType<ManualSectionEditError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext> => {
 
@@ -21561,13 +21563,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SubmitManualSectionEditMutationResult = NonNullable<Awaited<ReturnType<typeof submitManualSectionEdit>>>
     export type SubmitManualSectionEditMutationBody = BodyType<ManualSectionEditRequest>
-    export type SubmitManualSectionEditMutationError = ErrorType<void | ManualSectionEditResponse>
+    export type SubmitManualSectionEditMutationError = ErrorType<ManualSectionEditError>
     export type SubmitManualSectionEditMutationVariables = {data: BodyType<ManualSectionEditRequest>;params?: SubmitManualSectionEditParams}
 
     /**
  * @summary Apply one atomic run-and-section correction
  */
-export const useSubmitManualSectionEdit = <TError = ErrorType<void | ManualSectionEditResponse>,
+export const useSubmitManualSectionEdit = <TError = ErrorType<ManualSectionEditError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof submitManualSectionEdit>>,

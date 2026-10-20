@@ -130,6 +130,7 @@ import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
 import {
   MANUAL_SECTION_FIELDS,
   isManualSection,
+  type ManualSectionRejectionCode,
   isSyncRecord,
   type ManualSection,
 } from "@workspace/sync-contract";
@@ -1405,6 +1406,7 @@ async function upsertProtected(
   expectedEpoch: number,
   clientIp?: string,
   rejectLegacyComplete = false,
+  timings?: { acquisitionMs: number; lockReadMs: number; transactionMs: number },
 ): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -1413,6 +1415,8 @@ async function upsertProtected(
       let merged: ProtectedUpsertResult;
       try {
         merged = await db.transaction(async (tx) => {
+        const acquiredAt = performance.now();
+        if (timings) timings.acquisitionMs += acquiredAt - transactionStartedAt;
         const serverTime = Date.now();
         // Scope reset fence is always acquired before the daily document,
         // matching /sync/reset and operational intents.
@@ -1436,6 +1440,7 @@ async function upsertProtected(
           .from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
+        if (timings) timings.lockReadMs += performance.now() - acquiredAt;
         const canonicalExisting = completeSyncData(existing?.data);
         existingData = canonicalExisting;
         const currentSnapshotId = canonicalExisting === undefined
@@ -1591,7 +1596,9 @@ async function upsertProtected(
         };
         });
       } finally {
-        recordSyncTransaction(performance.now() - transactionStartedAt);
+        const durationMs = performance.now() - transactionStartedAt;
+        if (timings) timings.transactionMs += durationMs;
+        recordSyncTransaction(durationMs);
       }
       if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
@@ -1711,7 +1718,10 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       durationMs: performance.now() - telemetryStartedAt,
       parserRejected: true,
     });
-    res.status(400).json({ error: "payload must be a JSON object" }); return;
+    res.status(400).json({
+      error: "payload must be a JSON object",
+      reasonCode: "SYNC_PAYLOAD_NOT_OBJECT",
+    }); return;
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) {
@@ -1724,7 +1734,10 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       durationMs: performance.now() - telemetryStartedAt,
       parserRejected: true,
     });
-    res.status(400).json({ error: "Payload too large" }); return;
+    res.status(400).json({
+      error: "Payload too large",
+      reasonCode: "SYNC_PAYLOAD_TOO_LARGE",
+    }); return;
   }
   const sanitizedBytes = Buffer.byteLength(JSON.stringify(sanitized));
   const legacyUnversionedComplete = isLegacyUnversionedComplete(sanitized);
@@ -1732,6 +1745,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
+  const timings = { acquisitionMs: 0, lockReadMs: 0, transactionMs: 0 };
   const result = await upsertProtected(
     today,
     scope,
@@ -1741,6 +1755,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     expectedEpoch,
     req.ip,
     legacyCompleteWritesRejected(),
+    timings,
   );
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
@@ -1797,6 +1812,15 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const liveState = merged
     ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
     : null;
+  // Fixed names, numeric durations, no document identities or payload values.
+  // acquisition includes BEGIN; lock-read includes its SQL round trips.
+  const boundedDuration = (ms: number) => Math.min(600_000, Math.max(0, ms)).toFixed(1);
+  res.setHeader("Server-Timing", [
+    `sync_acquire;dur=${boundedDuration(timings.acquisitionMs)}`,
+    `sync_lock_read;dur=${boundedDuration(timings.lockReadMs)}`,
+    `sync_transaction;dur=${boundedDuration(timings.transactionMs)}`,
+    `sync_handler;dur=${boundedDuration(performance.now() - telemetryStartedAt)}`,
+  ].join(", "));
   res.json({
     ...responseBody,
     operationalProjection: liveState?.operationalProjection ?? null,
@@ -1808,6 +1832,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 // Atomic, section-scoped correction. The daily row is the serialization point;
 // the operational ledger makes retries return the original canonical answer.
 router.post("/sync/manual-section", async (req: Request, res: Response): Promise<void> => {
+  const reject = (status: 400 | 409, code: ManualSectionRejectionCode) => {
+    res.status(status).json({ error: "Manual section edit was rejected", code });
+  };
   let requestAborted = false;
   req.once("aborted", () => { requestAborted = true; });
   req.once("close", () => { if (req.aborted) requestAborted = true; });
@@ -1833,26 +1860,26 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     || !Number.isSafeInteger(resetEpoch) || (resetEpoch as number) < 0
     || typeof observedGeneration !== "string" || observedGeneration.length < 1 || observedGeneration.length > 160
     || typeof deviceId !== "string" || !/^[A-Za-z0-9:_-]{1,160}$/.test(deviceId)) {
-    res.status(400).json({ error: "Invalid manual section edit" }); return;
+    reject(400, "invalid_edit"); return;
   }
   const allowed = new Set<string>(MANUAL_SECTION_FIELDS[section as ManualSection]);
   const entries = Object.entries(values as Record<string, unknown>);
   const baseValues = body?.baseValues;
   if (!baseValues || typeof baseValues !== "object" || Array.isArray(baseValues)) {
-    res.status(400).json({ error: "Section baseline is required" }); return;
+    reject(400, "invalid_baseline"); return;
   }
   if (!entries.length || entries.some(([key, value]) =>
     !allowed.has(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000)) {
-    res.status(400).json({ error: "Values do not match the requested section" }); return;
+    reject(400, "invalid_values"); return;
   }
   if (Object.entries(baseValues as Record<string, unknown>).some(([key, value]) =>
     !allowed.has(key) || (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000)))) {
-    res.status(400).json({ error: "Section baseline does not match the requested section" }); return;
+    reject(400, "invalid_baseline"); return;
   }
   if (MANUAL_SECTION_FIELDS[section as ManualSection].some((field) =>
     !Object.prototype.hasOwnProperty.call(baseValues, field)
     || typeof (baseValues as Record<string, unknown>)[field] !== "number")) {
-    res.status(400).json({ error: "Complete section baseline is required" }); return;
+    reject(400, "invalid_baseline"); return;
   }
   const ownerId = String(deviceId ?? req.userId ?? "unknown");
   await recordSyncOutboxEvent({
@@ -1868,7 +1895,14 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     logger.error({ event: "sync_outbox_write", kind: "manual-section" }, "Manual-section notice could not be retained");
   });
   broadcastManualSectionEvent("acquired", runId as string, section as ManualSection, ownerId, scope, date);
-  let result: { status: number; data: Record<string, any>; revision: number; duplicate: boolean; serverTime: number };
+  let result: {
+    status: 200 | 400 | 409;
+    data: Record<string, any>;
+    revision: number;
+    duplicate: boolean;
+    serverTime: number;
+    rejectionCode?: ManualSectionRejectionCode;
+  };
   try {
     result = await db.transaction(async (tx) => {
     const serverTime = Date.now();
@@ -1881,7 +1915,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     const currentRevision = existing?.canonicalRevision ?? 0;
     const current = (existing?.data ?? emptySyncData(date)) as Record<string, any>;
     if ((reset?.epoch ?? 0) !== resetEpoch) {
-      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "reset_changed" };
     }
     const [seen] = await tx.select().from(operationalIntentLedgerTable)
       .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, date),
@@ -1889,7 +1923,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     if (seen) return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
     const run = (current.dayState?.runs as Array<Record<string, any>> | undefined)?.find((candidate) => candidate.id === runId);
     if (!run || `${runId}:${String(run.metaUpdatedAt ?? run.startedAt ?? 0)}` !== observedGeneration) {
-      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "run_changed" };
     }
     const currentValues = current.runValues?.[runId] ?? {};
     const stockRegisters = section === "app1" || section === "app2" || section === "app3" || section === "app4"
@@ -1905,7 +1939,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       if (!hasStockField) continue;
       if (![fields.stock, fields.anchor, fields.correctionGeneration]
         .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       const onHand = Number((values as Record<string, unknown>)[fields.stock]);
       const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
@@ -1933,7 +1967,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         || !Number.isSafeInteger(correctionGeneration)
         || correctionGeneration !== previousGeneration + 1
       ) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       stockUpdates.push({ register, stock: onHand, anchor, generation: correctionGeneration });
     }
@@ -1944,7 +1978,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       Object.prototype.hasOwnProperty.call(values, field));
     if (hasSauceStockUpdate) {
       if (!sauceStockFields.every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
       const onHand = Number((values as Record<string, unknown>).sauceStockBarrels);
       const anchor = Number((values as Record<string, unknown>).sauceStockAnchorNetSec);
@@ -1970,13 +2004,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         || !Number.isSafeInteger(correctionGeneration)
         || correctionGeneration !== previousGeneration + 1
       ) {
-        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
     }
     for (const key of allowed) {
       const expected = (baseValues as Record<string, unknown>)[key];
       if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
-        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
       }
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
@@ -2053,6 +2087,10 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     broadcastManualSectionEvent("released", runId as string, section as ManualSection, ownerId, scope, date);
   }
   if (requestAborted) return;
+  if (result.status !== 200) {
+    reject(result.status, result.rejectionCode ?? "invalid_edit");
+    return;
+  }
   res.status(result.status).json({
     ok: result.status === 200,
     outcome: result.status === 200 ? "accepted" : "conflicted",
@@ -2852,9 +2890,29 @@ const SERVER_TICK_DEFAULT_MS = 15_000;
 const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
 const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
+const sauceConfigurationWarningAt = new Map<string, number>();
+const SAUCE_CONFIGURATION_WARNING_INTERVAL_MS = 5 * 60_000;
+
+function warnSauceConfigurationBlocked(scope: Scope, date: string, runId: string, nowMs: number): void {
+  const key = `${scope}:${date}:${createHash("sha256").update(runId).digest("hex").slice(0, 12)}`;
+  const lastWarningAt = sauceConfigurationWarningAt.get(key) ?? 0;
+  if (nowMs - lastWarningAt < SAUCE_CONFIGURATION_WARNING_INTERVAL_MS) return;
+  sauceConfigurationWarningAt.set(key, nowMs);
+  if (sauceConfigurationWarningAt.size > 500) {
+    const oldestKey = sauceConfigurationWarningAt.keys().next().value;
+    if (oldestKey) sauceConfigurationWarningAt.delete(oldestKey);
+  }
+  logger.warn({
+    event: "server_auto_track_sauce_configuration_blocked",
+    scope,
+    date,
+    runIdHash: key.slice(key.lastIndexOf(":") + 1),
+  }, "Sauce auto-track is waiting for a valid inventory mapping; unrelated production counts continue");
+}
 
 export function clearServerTickDateBackoffsForTests(): void {
   serverTickDateBackoffs.clear();
+  sauceConfigurationWarningAt.clear();
 }
 
 function serverTickBackoffKey(scope: Scope, date: string): string {
@@ -2964,6 +3022,28 @@ export async function runAutoTrackServerTicks(opts: {
             continue;
           }
           const applied = applyAutoTrackClaim(data, claim, nowMs);
+          if (applied.outcome === "accepted" && applied.inventoryConsumption?.kind === "sauce-barrel") {
+            const consumption = applied.inventoryConsumption;
+            try {
+              await consumeSauceBarrelInTransaction(
+                tx,
+                consumption.runId,
+                consumption.barrelIndex,
+                consumption.itemKey,
+                consumption.qty,
+                true,
+                consumption.eventId,
+              );
+            } catch (error) {
+              if (!(error instanceof SauceInventoryConfigurationError)) throw error;
+              outcomesHere.sauceConfigurationBlocked = (outcomesHere.sauceConfigurationBlocked ?? 0) + 1;
+              warnSauceConfigurationBlocked(scope, row.date, claim.runId, nowMs);
+              // Do not persist the sauce claim or its coordination advance. It
+              // remains due for retry after setup is repaired, while later
+              // independent case/applicator claims can still commit.
+              continue;
+            }
+          }
           outcomesHere[applied.outcome] = (outcomesHere[applied.outcome] ?? 0) + 1;
           canonicalRevision++;
           await tx.insert(operationalIntentLedgerTable).values({
@@ -2993,10 +3073,6 @@ export async function runAutoTrackServerTicks(opts: {
             serverReceivedAt: new Date(serverTime),
           });
           if (applied.outcome !== "accepted") continue;
-          if (applied.inventoryConsumption?.kind === "sauce-barrel") {
-            const consumption = applied.inventoryConsumption;
-            await consumeSauceBarrelInTransaction(tx, consumption.runId, consumption.barrelIndex, consumption.itemKey, consumption.qty, true, consumption.eventId);
-          }
           data = applied.data;
           if (/^app[1-4]-batch$/.test(claim.channel)) {
             const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));

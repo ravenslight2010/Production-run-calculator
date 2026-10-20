@@ -15,6 +15,7 @@ import { todayStr } from "../utils";
 import type { AutoTrackWakeRebaseReason } from "./useAutoTrack";
 import { claimManualSectionLock, clearManualSectionLocks, releaseManualSectionLock } from "../manualSectionLocks";
 import { isManualSection } from "@workspace/sync-contract";
+import { syncRetryDelay } from "../syncRetry";
 
 type SyncWork = {
   payload: SyncPayload;
@@ -55,6 +56,7 @@ type ForegroundScheduler = {
     id: string;
     cadenceMs?: number;
     runOnForeground?: boolean;
+    foregroundPriority?: boolean;
     order: number;
     run: () => boolean | Promise<boolean>;
   }) => () => void;
@@ -62,6 +64,8 @@ type ForegroundScheduler = {
 
 export type ForegroundRecoveryAttemptContext = {
   trigger: WakeRecoveryTrigger;
+  /** False if another sleep/offline boundary superseded this request. */
+  isCurrent: () => boolean;
   classify: (outcome: Extract<
     WakeRecoveryOutcome,
     "connectivity-retry" | "non-retryable-http" | "cancelled"
@@ -168,8 +172,8 @@ export function initialResetRequiresReload(messageEpoch: number, storedEpoch: nu
  * Owns Home's narrow sync transport coordination boundary. Home supplies
  * canonical state/form merge callbacks; this hook owns mutable coordination,
  * queue lifetime, and EventSource baseline/reconnect fencing. Keeping the
- * protocol callbacks injected makes the ownership boundary explicit without
- * changing any sync timing or merge policy.
+ * protocol callbacks injected keeps transport/recovery scheduling separate
+ * from Home's existing canonical merge policy.
  */
 export function useHomeSyncCoordination() {
   const synchronizationStateMachineRef = useRef(new SynchronizationStateMachine<any>());
@@ -344,6 +348,21 @@ export function useHomeSyncCoordination() {
     let unreconciled = false;
     let disposed = false;
     let retryConnectivity = false;
+    let boundaryGeneration = 0;
+    let wasHidden = document.hidden;
+    const invalidateBoundary = () => { boundaryGeneration += 1; };
+    const onVisibilityBoundary = () => {
+      if (wasHidden !== document.hidden) {
+        wasHidden = document.hidden;
+        invalidateBoundary();
+      }
+    };
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retries = 0;
+    const clearRetry = () => {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
     const finishEpisode = (outcome: WakeRecoveryOutcome) => {
       if (!episode) return;
       recordDiagnostic?.({
@@ -362,10 +381,18 @@ export function useHomeSyncCoordination() {
         WakeRecoveryOutcome,
         "connectivity-retry" | "non-retryable-http" | "cancelled"
       > = "connectivity-retry";
+      const attemptBoundary = boundaryGeneration;
       const recovered = await recover({
         trigger,
+        isCurrent: () => !disposed && attemptBoundary === boundaryGeneration,
         classify: (outcome) => { classified = outcome; },
       });
+      // A successful response from BEFORE a second sleep/offline transition
+      // cannot settle the next wake. Let the coalesced signal pull again.
+      if (!disposed && attemptBoundary !== boundaryGeneration) {
+        retryConnectivity = true;
+        return false;
+      }
       if (episode !== attemptEpisode) return recovered;
       retryConnectivity = !recovered && classified === "connectivity-retry";
       if (disposed) finishEpisode("background-stop");
@@ -378,10 +405,22 @@ export function useHomeSyncCoordination() {
       episode ? "retry" : nextTrigger,
     ));
     const requestRecovery = async (trigger: WakeRecoveryTrigger): Promise<boolean> => {
+      if (disposed) return false;
+      clearRetry();
+      if (trigger !== "retry") retries = 0;
       unreconciled = true;
       if (!episode) nextTrigger = trigger;
       const recovered = await reconcile();
       if (recovered || !retryConnectivity) unreconciled = false;
+      // Retry from completion, not from a shared periodic job that may itself
+      // be blocked by profile/factory requests. All signals share one guard.
+      if (!disposed && unreconciled && retries < 3 && retryTimer === null) {
+        const delay = syncRetryDelay(retries++);
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          if (!document.hidden) void requestRecovery("retry");
+        }, delay);
+      }
       return recovered;
     };
     const requestManualRecovery = () => requestRecovery("manual");
@@ -399,29 +438,30 @@ export function useHomeSyncCoordination() {
       void requestRecovery("online");
     };
     window.addEventListener("online", onOnline);
+    window.addEventListener("offline", invalidateBoundary);
+    // Capture the boundary before the scheduler's foreground listener starts
+    // a request, regardless of effect-registration order.
+    document.addEventListener("visibilitychange", onVisibilityBoundary, true);
     const unregister = scheduler.register({
       id: "foreground-reconcile",
       runOnForeground: true,
+      foregroundPriority: true,
       order: 0,
       run: () => requestRecovery("foreground"),
-    });
-    const unregisterRetry = scheduler.register({
-      id: "foreground-reconcile-retry",
-      cadenceMs: 5_000,
-      order: 0,
-      run: async () => unreconciled ? requestRecovery("retry") : false,
     });
     return {
       reconcile: requestManualRecovery,
       dispose: () => {
         disposed = true;
+        clearRetry();
         unreconciled = false;
         finishEpisode("background-stop");
         if (foregroundRecoveryRequestRef.current === requestSseRecovery) {
           foregroundRecoveryRequestRef.current = null;
         }
         window.removeEventListener("online", onOnline);
-        unregisterRetry();
+        window.removeEventListener("offline", invalidateBoundary);
+        document.removeEventListener("visibilitychange", onVisibilityBoundary, true);
         unregister();
       },
     };

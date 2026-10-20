@@ -225,8 +225,9 @@ const observationSchema = z.object({
   }
   if (["3", "4"].includes(value.checkVersion) && value.checkName === "sync-acknowledgment") {
     const keys = Object.keys(value.metrics);
+    const allowedFailureCodes = value.checkVersion === "4" ? [1, 2, 3, 4] : [1, 2, 3];
     const valid = value.outcome === "failure"
-      ? keys.length === 1 && Number.isInteger(value.metrics.failureCode) && [1, 2, 3].includes(value.metrics.failureCode!)
+      ? keys.length === 1 && Number.isInteger(value.metrics.failureCode) && allowedFailureCodes.includes(value.metrics.failureCode!)
       : keys.length === 0;
     if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics"], message: "Expected an approved sync failure category only" });
   }

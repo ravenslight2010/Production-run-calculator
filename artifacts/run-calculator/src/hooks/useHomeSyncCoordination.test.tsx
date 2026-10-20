@@ -258,6 +258,68 @@ describe("useHomeSyncCoordination", () => {
     expect(result.current.registerForegroundRecovery).toBe(operations.registerForegroundRecovery);
   });
 
+  it("retries failed recovery promptly without a periodic scheduler and stops after three retries", async () => {
+    vi.useFakeTimers();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const recover = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+    const register = vi.fn(() => vi.fn());
+    const registration = result.current.registerForegroundRecovery({ register }, recover);
+    await registration.reconcile();
+    expect(recover).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(recover).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(recover).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(recover).toHaveBeenCalledTimes(4);
+    registration.dispose();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("does not let an older successful pull settle a new offline/wake boundary", async () => {
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    let finish!: (value: boolean) => void;
+    let firstIsCurrent!: () => boolean;
+    const recover = vi.fn()
+      .mockImplementationOnce(({ isCurrent }) => {
+        firstIsCurrent = isCurrent;
+        return new Promise<boolean>((resolve) => { finish = resolve; });
+      })
+      .mockResolvedValue(true);
+    const registration = result.current.registerForegroundRecovery({ register: () => () => {} }, recover);
+    const first = registration.reconcile();
+    expect(firstIsCurrent()).toBe(true);
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+    expect(firstIsCurrent()).toBe(false);
+    finish(true);
+    await first;
+    expect(recover).toHaveBeenCalledTimes(2);
+    registration.dispose();
+    unmount();
+  });
+
+  it("coalesces duplicate wakes, clears retries on success and never retries permanent failures", async () => {
+    vi.useFakeTimers();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const register = vi.fn(() => vi.fn());
+    const recover = vi.fn<() => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const registration = result.current.registerForegroundRecovery({ register }, recover);
+    await Promise.all([registration.reconcile(), registration.reconcile(), registration.reconcile()]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(recover).toHaveBeenCalledTimes(2);
+    registration.dispose();
+    const permanent = vi.fn(async ({ classify }) => { classify("non-retryable-http"); return false; });
+    const rejected = result.current.registerForegroundRecovery({ register }, permanent);
+    await rejected.reconcile();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(permanent).toHaveBeenCalledTimes(1);
+    rejected.dispose();
+    unmount();
+    vi.useRealTimers();
+  });
+
   it("serializes today writes with epoch, snapshot, and queue age", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

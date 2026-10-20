@@ -102,7 +102,9 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
         signalKind: "api_failure" as const,
         correlationId: "018f3a8b-1b2c-4d3e-8f90-123456789abc",
         requestOperationCategory: "sync" as const,
+        requestRoute: "sync_today_write" as const,
         requestOutcome: "http_server_error" as const,
+        requestReasonCode: "SYNC_PAYLOAD_TOO_LARGE" as const,
         requestElapsedMs: 4_023_360,
         requestObservedAt: new Date("2026-10-16T22:48:00.000Z"),
         requestBackgroundInvolvement: "not_observed" as const,
@@ -113,7 +115,9 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
     expect(context).toMatchObject({
       relatedCorrelationId: data.diagnostics.correlationId,
       requestOperationCategory: "sync",
+      requestRoute: "sync_today_write",
       requestOutcome: "http_server_error",
+      requestReasonCode: "SYNC_PAYLOAD_TOO_LARGE",
       requestElapsedMs: 4_023_360,
       requestObservedAt: "2026-10-16T22:48:00.000Z",
       requestBackgroundInvolvement: "not_observed",
@@ -131,14 +135,18 @@ describe("buildIncidentContext — privacy-safe bounded evidence", () => {
       ...data,
       diagnostics: {
         ...data.diagnostics,
+        requestRoute: "private-record",
+        requestReasonCode: "private-user-data",
         correlationId: "private-record-id",
         requestElapsedMs: 90_000_000,
         requestObservedAt: new Date("2001-01-01T00:00:00.000Z"),
-      },
+      } as any,
     });
     expect(forged.relatedCorrelationId).toBeUndefined();
     expect(forged.requestElapsedMs).toBe(10_000_000);
     expect(forged.requestObservedAt).toBeUndefined();
+    expect(forged.requestRoute).toBeUndefined();
+    expect(forged.requestReasonCode).toBeUndefined();
   });
 });
 describe("sanitizeUserInput — strips prompt-injection override lines", () => {

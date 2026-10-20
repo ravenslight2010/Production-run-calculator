@@ -52,6 +52,58 @@ describe("data-safe update coordinator", () => {
     expect(c.reload).not.toHaveBeenCalled();
     expect(c.snapshot().phase).toBe("blocked");
   });
+  it("queues a manual update until work is safe, then performs the normal verified handoff", async () => {
+    let safe = false;
+    let notifySafetyChange: (() => void) | undefined;
+    const c = setup({
+      safe: () => safe,
+      subscribeSafe: (notify: () => void) => {
+        notifySafetyChange = notify;
+        return () => { notifySafetyChange = undefined; };
+      },
+    });
+
+    await c.check();
+    await c.requestUpdate();
+    expect(c.snapshot()).toMatchObject({ phase: "waiting", target: "new-build" });
+    expect(c.reload).not.toHaveBeenCalled();
+
+    safe = true;
+    notifySafetyChange?.();
+    await vi.waitFor(() => expect(c.reload).toHaveBeenCalledOnce());
+    expect(c.snapshot().phase).toBe("updating");
+    expect(confirmUpdateStartup("new-build")).toBe("confirmed");
+  });
+  it("lets the user cancel a queued update without changing the running page", async () => {
+    let safe = false;
+    const c = setup({
+      safe: () => safe,
+      subscribeSafe: () => () => undefined,
+    });
+    await c.check();
+    await c.requestUpdate();
+
+    c.cancelQueuedUpdate();
+
+    expect(c.snapshot().phase).toBe("deferred");
+    expect(c.reload).not.toHaveBeenCalled();
+  });
+  it("allows a deferred manual update to be explicitly resumed", async () => {
+    let safe = false;
+    const c = setup({
+      safe: () => safe,
+      subscribeSafe: () => () => undefined,
+    });
+    await c.check();
+    await c.requestUpdate();
+    c.cancelQueuedUpdate();
+    safe = true;
+
+    await c.requestUpdate();
+
+    expect(c.reload).toHaveBeenCalledOnce();
+    expect(c.snapshot().phase).toBe("updating");
+  });
   it("does not report completion when startup is interrupted or the target changed", async () => {
     const c = setup({ identity: vi.fn().mockResolvedValueOnce("new-build").mockResolvedValue("newer-build") });
     await c.update();

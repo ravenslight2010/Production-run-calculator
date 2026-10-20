@@ -7223,7 +7223,7 @@ export const SavePhotoAliasesResponse = zod.object({
 
 
 /**
- * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence. Version 3 sync-acknowledgment failures require only failureCode (integer 1 login/permission rejection, 2 stale/reset write, 3 exhausted retries); successful sync observations have empty metrics. Version 3 performance observations require only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API network failure). Stale-deployment-recovery accepts no metrics; an incomplete outcome is an attempt without confirmation, and success is emitted only after authenticated startup on a different build. Versions 1 and 2 remain accepted for queued evidence; unsupported diagnostic versions are rejected.
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence. Version 3 sync-acknowledgment failures require only failureCode (integer 1 login/permission rejection, 2 stale/reset write, 3 exhausted retries); version 4 also allows 4 for a permanent sync request rejection. Successful sync observations have empty metrics. Version 3 performance observations require only durationMs (0 to 10000000) and sourceCode (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API network failure). Stale-deployment-recovery accepts no metrics; an incomplete outcome is an attempt without confirmation, and success is emitted only after authenticated startup on a different build. Versions 1 and 2 remain accepted for queued evidence; unsupported diagnostic versions are rejected.
  * @summary Submit passive browser field-check observations
  */
 
@@ -7242,7 +7242,7 @@ export const SubmitFieldCheckObservationsBody = zod.object({
   "observedAt": zod.coerce.date(),
   "appBuild": zod.string().min(1).max(submitFieldCheckObservationsBodyObservationsItemAppBuildMax),
   "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'other-browser']),
-  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.'),
+  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require failureCode (integer 1 through 3). Version 4 also allows 4 for a permanent sync request rejection; other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.'),
   "reportedRequestCorrelationId": zod.uuid().optional().describe('Opaque request correlation reference received by the browser from a server response; client-reported and not used for authorization.')
 })).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
 })
@@ -7418,7 +7418,9 @@ export const ReportIncidentBody = zod.object({
   "signalKind": zod.enum(['user_report', 'crash', 'rejected_promise', 'api_failure', 'startup', 'update', 'sync']).optional(),
   "correlationId": zod.string().max(reportIncidentBodyDiagnosticsCorrelationIdMax).optional(),
   "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestRoute": zod.enum(['authentication', 'sync_today_read', 'sync_today_write', 'sync_dated', 'sync_auto_track_claim', 'sync_manual_section', 'sync_operational_intents', 'sync_events', 'sync_scheduled', 'sync_other', 'other']).optional().describe('Fixed route-family label; never a raw URL or path parameter.'),
   "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestReasonCode": zod.enum(['SYNC_VALIDATION_FAILED', 'SYNC_PAYLOAD_NOT_OBJECT', 'SYNC_PAYLOAD_TOO_LARGE']).optional().describe('Allowlisted server validation code; no response message or body is retained.'),
   "requestElapsedMs": zod.number().min(reportIncidentBodyDiagnosticsRequestElapsedMsMin).max(reportIncidentBodyDiagnosticsRequestElapsedMsMax).optional(),
   "requestObservedAt": zod.coerce.date().optional(),
   "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
@@ -7471,7 +7473,9 @@ export const ListIncidentsResponseItem = zod.object({
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional(),
   "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestRoute": zod.enum(['authentication', 'sync_today_read', 'sync_today_write', 'sync_dated', 'sync_auto_track_claim', 'sync_manual_section', 'sync_operational_intents', 'sync_events', 'sync_scheduled', 'sync_other', 'other']).optional().describe('Fixed route-family label; never a raw URL or path parameter.'),
   "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestReasonCode": zod.enum(['SYNC_VALIDATION_FAILED', 'SYNC_PAYLOAD_NOT_OBJECT', 'SYNC_PAYLOAD_TOO_LARGE']).optional().describe('Allowlisted server validation code; no response message or body is retained.'),
   "requestElapsedMs": zod.number().min(listIncidentsResponseContextRequestElapsedMsMin).max(listIncidentsResponseContextRequestElapsedMsMax).optional(),
   "requestObservedAt": zod.coerce.date().optional(),
   "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
@@ -7571,7 +7575,9 @@ export const GetIncidentResponse = zod.object({
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional(),
   "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestRoute": zod.enum(['authentication', 'sync_today_read', 'sync_today_write', 'sync_dated', 'sync_auto_track_claim', 'sync_manual_section', 'sync_operational_intents', 'sync_events', 'sync_scheduled', 'sync_other', 'other']).optional().describe('Fixed route-family label; never a raw URL or path parameter.'),
   "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestReasonCode": zod.enum(['SYNC_VALIDATION_FAILED', 'SYNC_PAYLOAD_NOT_OBJECT', 'SYNC_PAYLOAD_TOO_LARGE']).optional().describe('Allowlisted server validation code; no response message or body is retained.'),
   "requestElapsedMs": zod.number().min(getIncidentResponseContextRequestElapsedMsMin).max(getIncidentResponseContextRequestElapsedMsMax).optional(),
   "requestObservedAt": zod.coerce.date().optional(),
   "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
@@ -7642,7 +7648,9 @@ export const ReviewIncidentResponse = zod.object({
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional(),
   "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestRoute": zod.enum(['authentication', 'sync_today_read', 'sync_today_write', 'sync_dated', 'sync_auto_track_claim', 'sync_manual_section', 'sync_operational_intents', 'sync_events', 'sync_scheduled', 'sync_other', 'other']).optional().describe('Fixed route-family label; never a raw URL or path parameter.'),
   "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestReasonCode": zod.enum(['SYNC_VALIDATION_FAILED', 'SYNC_PAYLOAD_NOT_OBJECT', 'SYNC_PAYLOAD_TOO_LARGE']).optional().describe('Allowlisted server validation code; no response message or body is retained.'),
   "requestElapsedMs": zod.number().min(reviewIncidentResponseContextRequestElapsedMsMin).max(reviewIncidentResponseContextRequestElapsedMsMax).optional(),
   "requestObservedAt": zod.coerce.date().optional(),
   "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
@@ -7714,7 +7722,9 @@ export const ResolveIncidentResponse = zod.object({
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional(),
   "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestRoute": zod.enum(['authentication', 'sync_today_read', 'sync_today_write', 'sync_dated', 'sync_auto_track_claim', 'sync_manual_section', 'sync_operational_intents', 'sync_events', 'sync_scheduled', 'sync_other', 'other']).optional().describe('Fixed route-family label; never a raw URL or path parameter.'),
   "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestReasonCode": zod.enum(['SYNC_VALIDATION_FAILED', 'SYNC_PAYLOAD_NOT_OBJECT', 'SYNC_PAYLOAD_TOO_LARGE']).optional().describe('Allowlisted server validation code; no response message or body is retained.'),
   "requestElapsedMs": zod.number().min(resolveIncidentResponseContextRequestElapsedMsMin).max(resolveIncidentResponseContextRequestElapsedMsMax).optional(),
   "requestObservedAt": zod.coerce.date().optional(),
   "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
@@ -7895,7 +7905,9 @@ export const UpdateIncidentWorkflowResponse = zod.object({
   "syncState": zod.string().optional(),
   "signalKind": zod.string().optional(),
   "requestOperationCategory": zod.enum(['authentication', 'diagnostics', 'import', 'inventory', 'master_data', 'sync', 'other']).optional(),
+  "requestRoute": zod.enum(['authentication', 'sync_today_read', 'sync_today_write', 'sync_dated', 'sync_auto_track_claim', 'sync_manual_section', 'sync_operational_intents', 'sync_events', 'sync_scheduled', 'sync_other', 'other']).optional().describe('Fixed route-family label; never a raw URL or path parameter.'),
   "requestOutcome": zod.enum(['http_server_error', 'http_client_error', 'authentication_rejected', 'transport_failure', 'offline_failure', 'timeout', 'cancelled']).optional(),
+  "requestReasonCode": zod.enum(['SYNC_VALIDATION_FAILED', 'SYNC_PAYLOAD_NOT_OBJECT', 'SYNC_PAYLOAD_TOO_LARGE']).optional().describe('Allowlisted server validation code; no response message or body is retained.'),
   "requestElapsedMs": zod.number().min(updateIncidentWorkflowResponseContextRequestElapsedMsMin).max(updateIncidentWorkflowResponseContextRequestElapsedMsMax).optional(),
   "requestObservedAt": zod.coerce.date().optional(),
   "requestBackgroundInvolvement": zod.enum(['observed', 'not_observed']).optional(),
@@ -8927,7 +8939,7 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
 
 export const SubmitManualSectionEditResponse = zod.object({
   "ok": zod.boolean(),
-  "outcome": zod.enum(['accepted', 'conflicted']),
+  "outcome": zod.enum(['accepted']),
   "duplicate": zod.boolean(),
   "canonicalRevision": zod.int().min(submitManualSectionEditResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitManualSectionEditResponseServerTimeMin),

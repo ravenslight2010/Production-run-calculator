@@ -3,6 +3,8 @@ export type VisibleTabJob = {
   cadenceMs?: number;
   runOnStart?: boolean;
   runOnForeground?: boolean;
+  /** Canonical recovery must not wait behind unrelated network refreshes. */
+  foregroundPriority?: boolean;
   order: number;
   run: () => unknown | Promise<unknown>;
 };
@@ -68,6 +70,19 @@ export class VisibleTabScheduler {
     if (now - this.lastForegroundAt < 500) return;
     this.lastForegroundAt = now;
     this.foregroundQueued = true;
+    for (const job of this.jobs.values()) {
+      if (job.runOnForeground && job.foregroundPriority) {
+        // The domain's single-flight guard owns coalescing and adoption.
+        // Independent background refreshes keep their existing serialized lane.
+        try {
+          void Promise.resolve(job.run()).catch(() => {
+            // Recovery owns its visible failure and bounded retry.
+          });
+        } catch {
+          // A synchronous domain failure must not prevent other wake jobs.
+        }
+      }
+    }
     void this.drain();
   }
 
@@ -96,7 +111,7 @@ export class VisibleTabScheduler {
     this.foregroundQueued = false;
     const now = Date.now();
     const due = [...this.jobs.values()]
-      .filter((job) => (foreground && job.runOnForeground) || (job.cadenceMs != null && job.nextDueAt <= now))
+      .filter((job) => (foreground && job.runOnForeground && !job.foregroundPriority) || (job.cadenceMs != null && job.nextDueAt <= now))
       .sort((a, b) => a.order - b.order);
     this.running = (async () => {
       for (const job of due) {

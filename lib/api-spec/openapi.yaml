@@ -4748,7 +4748,8 @@ paths:
         acknowledgment or persistence.
         Version 3 sync-acknowledgment failures require only failureCode (integer
         1 login/permission rejection, 2 stale/reset write, 3 exhausted retries);
-        successful sync observations have empty metrics. Version 3 performance
+        version 4 also allows 4 for a permanent sync request rejection.
+        Successful sync observations have empty metrics. Version 3 performance
         observations require only durationMs (0 to 10000000) and sourceCode
         (integer 1 home bundle load, 2 navigation load, 3 API timeout/abort, 4 API
         network failure). Stale-deployment-recovery accepts no metrics; an
@@ -5596,6 +5597,10 @@ paths:
       responses:
         "200":
           description: Canonical merge, authoritative stale-base fallback, unchanged acknowledgement, or stale reset rejection
+          headers:
+            Server-Timing:
+              description: Optional bounded numeric sync acquisition, lock-read, transaction, and handler durations in milliseconds. Acquisition includes BEGIN; lock-read includes SQL round trips, not pure lock wait.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -5622,6 +5627,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SyncUpgradeRequiredResponse"
+        "400":
+          description: The sync write payload is malformed or exceeds the sanitized payload limit; no payload content is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncWriteValidationError"
 
   /sync/events:
     get:
@@ -5703,12 +5714,15 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ManualSectionEditResponse" }
         "400":
-          description: Invalid section, field, identity, or baseline shape
-        "409":
-          description: Another canonical section baseline won the race
+          description: Invalid section edit, value, or baseline shape
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ManualSectionEditResponse" }
+              schema: { $ref: "#/components/schemas/ManualSectionEditError" }
+        "409":
+          description: Section reset, run identity, or baseline changed before the edit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualSectionEditError" }
 
   /sync/operational-intents:
     post:
@@ -6607,12 +6621,22 @@ components:
       required: [ok, outcome, duplicate, canonicalRevision, serverTime, data, snapshotId]
       properties:
         ok: { type: boolean }
-        outcome: { type: string, enum: [accepted, conflicted] }
+        outcome: { type: string, enum: [accepted] }
         duplicate: { type: boolean }
         canonicalRevision: { type: integer, minimum: 0 }
         serverTime: { type: integer, minimum: 0 }
         data: { $ref: "#/components/schemas/SyncPayload" }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+    ManualSectionEditError:
+      type: object
+      description: Safe rejection only; never includes submitted values or canonical recipe data.
+      required: [error, code]
+      properties:
+        error: { type: string, maxLength: 64 }
+        code:
+          type: string
+          enum: [invalid_edit, invalid_values, invalid_baseline, reset_changed, run_changed, section_changed]
+      additionalProperties: false
     OperationalIntentResponse:
       type: object
       required: [ok, outcome, duplicate, cursor, canonicalRevision, serverTime, data, snapshotId]
@@ -6952,6 +6976,16 @@ components:
                 syncVersion: { type: integer, enum: [1] }
                 completeness: { type: string, enum: [complete, partial] }
                 baseSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+
+    SyncWriteValidationError:
+      type: object
+      required: [error, reasonCode]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        reasonCode:
+          type: string
+          enum: [SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
 
     SyncUpgradeRequiredResponse:
       type: object
@@ -13277,8 +13311,9 @@ components:
             Workflow categories require durationMs from 0 to 900000. Only a
             production-run-save-sync failure may additionally include failureCode
             as integer 1 through 4; other workflow metrics are rejected.
-            In versions 3 and 4, sync-acknowledgment failures require only failureCode
-            (integer 1 through 3); other sync outcomes have empty metrics.
+            In version 3, sync-acknowledgment failures require failureCode
+            (integer 1 through 3). Version 4 also allows 4 for a permanent
+            sync request rejection; other sync outcomes have empty metrics.
             Version 3 performance allows durationMs and sourceCode (1 home bundle,
             2 navigation load, 3 API timeout/abort, 4 API network). Version 4
             API request failures additionally require fixed outcome, operation, and
@@ -13455,9 +13490,17 @@ components:
         requestOperationCategory:
           type: string
           enum: [authentication, diagnostics, import, inventory, master_data, sync, other]
+        requestRoute:
+          type: string
+          description: Fixed route-family label; never a raw URL or path parameter.
+          enum: [authentication, sync_today_read, sync_today_write, sync_dated, sync_auto_track_claim, sync_manual_section, sync_operational_intents, sync_events, sync_scheduled, sync_other, other]
         requestOutcome:
           type: string
           enum: [http_server_error, http_client_error, authentication_rejected, transport_failure, offline_failure, timeout, cancelled]
+        requestReasonCode:
+          type: string
+          description: Allowlisted server validation code; no response message or body is retained.
+          enum: [SYNC_VALIDATION_FAILED, SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
         requestElapsedMs: { type: number, minimum: 0, maximum: 10000000 }
         requestObservedAt: { type: string, format: date-time }
         requestBackgroundInvolvement:
@@ -13514,9 +13557,17 @@ components:
             requestOperationCategory:
               type: string
               enum: [authentication, diagnostics, import, inventory, master_data, sync, other]
+            requestRoute:
+              type: string
+              description: Fixed route-family label; never a raw URL or path parameter.
+              enum: [authentication, sync_today_read, sync_today_write, sync_dated, sync_auto_track_claim, sync_manual_section, sync_operational_intents, sync_events, sync_scheduled, sync_other, other]
             requestOutcome:
               type: string
               enum: [http_server_error, http_client_error, authentication_rejected, transport_failure, offline_failure, timeout, cancelled]
+            requestReasonCode:
+              type: string
+              description: Allowlisted server validation code; no response message or body is retained.
+              enum: [SYNC_VALIDATION_FAILED, SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
             requestElapsedMs: { type: number, minimum: 0, maximum: 10000000 }
             requestObservedAt: { type: string, format: date-time }
             requestBackgroundInvolvement:

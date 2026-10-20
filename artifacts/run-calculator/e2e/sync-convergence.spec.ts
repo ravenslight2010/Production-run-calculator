@@ -325,6 +325,173 @@ function seededPayload(runId: string): SyncPayload {
   };
 }
 
+test("measures canonical edit and foreground recovery latency", async ({ page, browser }, testInfo) => {
+  const username = uid();
+  users.add(username);
+  await signUp(page, username);
+  const runId = `latency-${Date.now()}`;
+  expect((await putToday(page, seededPayload(runId))).responseStatus).toBe(200);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").click();
+  await expect(page.getByTestId("input-casesNeeded")).toHaveValue("24");
+  const peerContext = await browser.newContext({
+    storageState: await page.context().storageState(),
+    viewport: { width: 390, height: 844 },
+    serviceWorkers: "block",
+  });
+  const peer = await peerContext.newPage();
+  const browserSignals = {
+    ownerConsoleErrors: 0,
+    ownerConsoleWarnings: 0,
+    ownerPageErrors: 0,
+    peerConsoleErrors: 0,
+    peerConsoleWarnings: 0,
+    peerPageErrors: 0,
+  };
+  page.on("console", (message) => {
+    if (message.type() === "error") browserSignals.ownerConsoleErrors++;
+    if (message.type() === "warning") browserSignals.ownerConsoleWarnings++;
+  });
+  page.on("pageerror", () => { browserSignals.ownerPageErrors++; });
+  peer.on("console", (message) => {
+    if (message.type() === "error") browserSignals.peerConsoleErrors++;
+    if (message.type() === "warning") browserSignals.peerConsoleWarnings++;
+  });
+  peer.on("pageerror", () => { browserSignals.peerPageErrors++; });
+  await peer.addInitScript(() => {
+    const sources: EventSource[] = [];
+    const Original = window.EventSource;
+    window.EventSource = class extends Original {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        sources.push(this);
+      }
+    };
+    (window as unknown as { fixtureSyncSources: EventSource[] }).fixtureSyncSources = sources;
+  });
+  const samples: Array<Record<string, number | string>> = [];
+  const wakeSamples: Array<Record<string, number | string>> = [];
+  const timings: string[] = [];
+  let injectedDelayMs = 0;
+  let failNextPull = false;
+  let timeoutNextPull = false;
+  let timedOutPulls = 0;
+  let failedPulls = 0;
+  let peerPulls = 0;
+  let peerWrites = 0;
+  await page.route("**/api/sync/today**", async (route) => {
+    if (injectedDelayMs) await new Promise((resolve) => setTimeout(resolve, injectedDelayMs));
+    await route.continue();
+  });
+  await peer.route("**/api/sync/today**", async (route) => {
+    if (route.request().method() === "GET") peerPulls++;
+    if (route.request().method() === "PUT") peerWrites++;
+    if (route.request().method() === "GET" && timeoutNextPull) {
+      timeoutNextPull = false;
+      timedOutPulls++;
+      // Retain the fixture route beyond the existing 10s CLIENT deadline.
+      // The next request is not stalled, so canonical recovery can succeed.
+      await new Promise((resolve) => setTimeout(resolve, 11_000));
+      await route.abort().catch(() => {});
+    } else if (route.request().method() === "GET" && failNextPull) {
+      failNextPull = false;
+      failedPulls++;
+      await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Temporary fixture outage"}' });
+    } else await route.continue();
+  });
+  const isWriteFor = (response: import("@playwright/test").Response, value: number) => {
+    if (!response.url().includes("/api/sync/today") || response.request().method() !== "PUT" || !response.ok()) return false;
+    const body = response.request().postDataJSON() as { payload?: SyncPayload };
+    return body.payload?.runValues?.[runId]?.casesNeeded === value;
+  };
+  try {
+    await peer.goto(new URL("/", page.url()).href);
+    await dismissOnboardingIfPresent(peer);
+    await peer.getByTestId("tab-run").click();
+    await expect(peer.getByTestId("input-casesNeeded")).toHaveValue("24");
+    // Warm cache and first edit after document reload are labeled separately.
+    for (let sample = 0; sample < 6; sample++) {
+      injectedDelayMs = sample >= 3 ? 40 : 0;
+      const value = 31 + sample;
+      const ack = page.waitForResponse((response) => isWriteFor(response, value));
+      const start = Date.now();
+      await page.getByTestId("input-casesNeeded").fill(String(value));
+      const response = await ack;
+      const canonical = await response.json() as { data?: SyncPayload };
+      expect(canonical.data?.runValues?.[runId]?.casesNeeded).toBe(value);
+      const ackMs = Date.now() - start;
+      await expect(peer.getByTestId("input-casesNeeded")).toHaveValue(String(value), { timeout: 10_000 });
+      const peerMs = Date.now() - start;
+      timings.push(response.headers()["server-timing"] ?? "");
+      samples.push({
+        ackMs, peerMs,
+        requestBytes: Buffer.byteLength(response.request().postData() ?? ""),
+        injectedRequestDelayMs: injectedDelayMs,
+        condition: sample === 0 ? "document-cold-server-warm" : "warm",
+      });
+    }
+    injectedDelayMs = 0;
+    const wakeCount = testInfo.project.name === "desktop-chromium" ? 5 : 4;
+    for (let sample = 0; sample < wakeCount; sample++) {
+      await peer.evaluate(() => {
+        // Playwright offline mode does not terminate existing SSE sockets.
+        // Close the owned fixture streams so wake MUST adopt the HTTP row.
+        (window as unknown as { fixtureSyncSources: EventSource[] })
+          .fixtureSyncSources.forEach((source) => source.close());
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await peerContext.setOffline(true);
+      const value = 61 + sample;
+      const ack = page.waitForResponse((response) => isWriteFor(response, value));
+      await page.getByTestId("input-casesNeeded").fill(String(value));
+      await (await ack).finished();
+      failNextPull = sample === 1;
+      timeoutNextPull = sample === 4;
+      const startedAt = Date.now();
+      await peerContext.setOffline(false);
+      await peer.evaluate(() => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+        document.dispatchEvent(new Event("visibilitychange"));
+        window.dispatchEvent(new Event("online"));
+        window.dispatchEvent(new Event("focus"));
+      });
+      if (sample === 4) {
+        await expect.poll(() => timedOutPulls).toBe(1);
+        const notice = peer.getByTestId("foreground-recovery-status");
+        await expect(notice).toHaveAttribute("data-foreground-recovery-state", "recovering");
+        await expect(peer.getByTestId("input-casesNeeded")).not.toHaveValue(String(value));
+      }
+      await expect(peer.getByTestId("input-casesNeeded")).toHaveValue(String(value), { timeout: sample === 4 ? 18_000 : 12_000 });
+      // A displayed value is not enough: the recovery owner must finish.
+      await expect(peer.getByTestId("foreground-recovery-status")).toHaveAttribute("data-foreground-recovery-state", "outcome");
+      wakeSamples.push({ durationMs: Date.now() - startedAt, condition: sample === 4 ? "one-client-timeout-then-retry" : sample === 1 ? "one-503-then-retry" : "healthy-duplicate-wake" });
+    }
+    const stageMeasurements = await page.evaluate((date) =>
+      JSON.parse(localStorage.getItem(`run-calc-sync-measurements:${date}`) ?? "[]"), today());
+    // Measurements are fixed numeric fields; never attach cookies or payloads.
+    const evidence = { environment: "isolated-browser", project: testInfo.project.name,
+      network: "loopback, 0/40ms injected request delay, no bandwidth cap",
+      samples, wakeSamples, serverTiming: timings, stageMeasurements, failedPulls, peerPulls, peerWrites, timedOutPulls, browserSignals };
+    console.info(`sync-browser-latency ${JSON.stringify(evidence)}`);
+    await testInfo.attach("sync-latency.json", { body: JSON.stringify(evidence), contentType: "application/json" });
+    await testInfo.attach("authenticated-peer-converged.png", {
+      body: await peer.getByTestId("input-casesNeeded").screenshot(),
+      contentType: "image/png",
+    });
+    expect(failedPulls).toBe(1);
+    expect(Math.max(...samples.map((sample) => Number(sample.ackMs)))).toBeLessThan(2000);
+    expect(Math.max(...samples.map((sample) => Number(sample.peerMs)))).toBeLessThan(2000);
+    expect(Math.max(...wakeSamples.filter((sample) => sample.condition !== "one-client-timeout-then-retry").map((sample) => Number(sample.durationMs)))).toBeLessThan(5000);
+    expect(peerPulls).toBeLessThan(20);
+    expect(peerWrites).toBeLessThan(20);
+  } finally {
+    await peerContext.close();
+  }
+});
+
 test(
   "temporarily failed sync write retries automatically after the network recovers",
   async ({ page }: { page: Page }) => {

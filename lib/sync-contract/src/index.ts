@@ -21,6 +21,23 @@ export const MANUAL_SECTION_FIELDS = {
 } as const;
 export type ManualSection = keyof typeof MANUAL_SECTION_FIELDS;
 export type ManualSectionField = (typeof MANUAL_SECTION_FIELDS)[ManualSection][number];
+
+/** Safe, bounded reasons returned when a manual section edit is rejected. */
+export const MANUAL_SECTION_REJECTION_CODES = [
+  "invalid_edit",
+  "invalid_values",
+  "invalid_baseline",
+  "reset_changed",
+  "run_changed",
+  "section_changed",
+] as const;
+export type ManualSectionRejectionCode = (typeof MANUAL_SECTION_REJECTION_CODES)[number];
+const MANUAL_SECTION_REJECTION_CODE_SET = new Set<string>(MANUAL_SECTION_REJECTION_CODES);
+
+export function isManualSectionRejectionCode(value: unknown): value is ManualSectionRejectionCode {
+  return typeof value === "string" && MANUAL_SECTION_REJECTION_CODE_SET.has(value);
+}
+
 const MANUAL_SECTION_SET = new Set<string>(Object.keys(MANUAL_SECTION_FIELDS));
 const MANUAL_SECTION_FIELD_SET = new Set<string>(
   Object.values(MANUAL_SECTION_FIELDS).flat(),

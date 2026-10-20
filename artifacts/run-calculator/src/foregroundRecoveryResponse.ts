@@ -7,6 +7,10 @@ import {
   syncPayloadMatchesSnapshot,
 } from "./syncWriteResponse";
 
+export function isRetryableRecoveryStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 export type ForegroundRecoveryResponseResult =
   | { accepted: true; kind: "unchanged"; snapshotId: string }
   | { accepted: true; kind: "canonical"; snapshotId: string; payload: SyncPayload }

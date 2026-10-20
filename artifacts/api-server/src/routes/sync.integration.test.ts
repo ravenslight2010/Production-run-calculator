@@ -886,6 +886,43 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
   });
 
+  it.each([
+    ["invalid section", { ...edit("error-invalid-section"), section: "unknown" }, 400, "invalid_edit", undefined],
+    ["invalid submitted values", { ...edit("error-invalid-values"), values: { skidsCompleted: 7654321 } }, 400, "invalid_values", "7654321"],
+    ["incomplete baseline", { ...edit("error-invalid-baseline"), baseValues: { skidsCompleted: 1 } }, 400, "invalid_baseline", undefined],
+    ["changed reset epoch", { ...edit("error-reset"), resetEpoch: 1 }, 409, "reset_changed", undefined],
+    ["changed run generation", { ...edit("error-run"), observedGeneration: "manual-run:2" }, 409, "run_changed", undefined],
+    ["stale section baseline", {
+      ...edit("error-section"),
+      values: { skidsCompleted: 876543 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 2 },
+    }, 409, "section_changed", "876543"],
+  ] as const)("returns a safe %s rejection without submitted values", async (_label, body, status, code, marker) => {
+    const response = await request(body as Record<string, unknown>);
+    const responseText = await response.text();
+    const payload = JSON.parse(responseText) as Record<string, unknown>;
+    expect(response.status).toBe(status);
+    expect(payload).toEqual({ error: "Manual section edit was rejected", code });
+    expect(payload).not.toHaveProperty("data");
+    expect(payload).not.toHaveProperty("values");
+    if (marker) expect(responseText).not.toContain(marker);
+  });
+
+  it("does not change canonical values when a section baseline is stale", async () => {
+    const response = await request({
+      ...edit("stale-section-state"),
+      values: { skidsCompleted: 876543 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 2 },
+    });
+    expect(response.status).toBe(409);
+    const [stored] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect((stored.data as any).runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 2,
+    });
+  });
+
   it("same-section concurrent race has one winner and one 409", async () => {
     const [a, b] = await Promise.all([request(edit("race-a")), request(edit("race-b"))]);
     expect([a.status, b.status].sort()).toEqual([200, 409]);
@@ -943,6 +980,7 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     await seedStockRun();
     const response = await request(stockEdit("stock-over-cap", 100.01));
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_values" });
     const [stored] = await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
     expect((stored.data as any).runValues["stock-run"].app1StockLbs).toBe(40);
@@ -1068,7 +1106,6 @@ describe("POST /sync/manual-section — section ownership contract", () => {
   it("same accepted id conflicts after reset epoch bump", async () => {
     const body = edit("post-reset-retry");
     const accepted = await request(body);
-    const acceptedPayload = await accepted.json() as { data: unknown };
     expect(accepted.status).toBe(200);
     await db.update(dailySyncTable).set({
       data: { dayState: { date: DATE, runs: [{ id: "manual-run", startedAt: 1, metaUpdatedAt: 1 }] }, runValues: { "manual-run": { skidsCompleted: 88, casesOnCurrentSkid: 77 } } },
@@ -1076,10 +1113,16 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     await db.update(dataResetTable).set({ epoch: 9 }).where(eq(dataResetTable.scope, "live"));
     const retry = await request(body);
     expect(retry.status).toBe(409);
-    const payload = await retry.json() as { data?: unknown; outcome?: string };
-    expect(payload.outcome).toBe("conflicted");
-    expect((payload.data as any).runValues["manual-run"].skidsCompleted).toBe(88);
-    expect(payload.data).not.toEqual(acceptedPayload.data);
+    expect(await retry.json()).toEqual({
+      error: "Manual section edit was rejected",
+      code: "reset_changed",
+    });
+    const [stored] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect((stored.data as any).runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 88,
+      casesOnCurrentSkid: 77,
+    });
   });
 
   it("rejects stale reset epochs and incomplete baselines", async () => {
@@ -1594,6 +1637,49 @@ describe("server auto-track tick recovery under database pressure", () => {
       },
     }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, scope)));
   }
+
+  it("keeps packaging progress committed while an unconfigured Sauce barrel remains retryable", async () => {
+    await seedTickRun();
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = before.data as any;
+    data.dayState.runs[0] = {
+      ...data.dayState.runs[0],
+      startedAt: TICK_NOW - 30 * 60_000,
+      metaUpdatedAt: TICK_NOW - 30 * 60_000,
+    };
+    data.runValues[TICK_RUN] = {
+      ...data.runValues[TICK_RUN],
+      freezerTime: 0,
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 2,
+      frontlineRecipeName: "Unmapped Sauce",
+      frontlineRecipe: [],
+      sauceBarrelLbs: 10,
+    };
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 24, scope: "live", date: TICK_DATE,
+    });
+
+    expect(result.outcomes.sauceConfigurationBlocked).toBeGreaterThan(0);
+    expect(result.accepted).toBeGreaterThan(0);
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const finalData = after.data as any;
+    expect(finalData.runValues[TICK_RUN].sauceBarrelsMade).toBe(0);
+    expect(finalData.runValues[TICK_RUN].skidsCompleted + finalData.runValues[TICK_RUN].casesOnCurrentSkid)
+      .toBeGreaterThan(0);
+    const tickLedger = (await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track");
+    expect(tickLedger.some((entry) => (entry.actionData as any)?.channel === "sauce-barrel")).toBe(false);
+    expect(tickLedger.some((entry) => (entry.actionData as any)?.channel === "case")).toBe(true);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+  });
 
   async function removeTickFailureTrigger() {
     await db.execute(sql`
@@ -7687,8 +7773,10 @@ describe("PUT /sync — payload sanitizer", () => {
       body: JSON.stringify({ senderId: "attacker", payload: { history: bigHistory, dayState: { runs: [], resetAt: 0 } } }),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
+    const body = (await res.json()) as { error: string; reasonCode?: string };
     expect(body.error).toMatch(/too large/i);
+    expect(body.reasonCode).toBe("SYNC_PAYLOAD_TOO_LARGE");
+    expect(JSON.stringify(body)).not.toContain("attacker");
   });
 
   it("returns 400 when the payload is not a JSON object (string, array, null)", async () => {
@@ -7699,6 +7787,9 @@ describe("PUT /sync — payload sanitizer", () => {
         body: JSON.stringify({ senderId: "x", payload: JSON.parse(nonObject) }),
       });
       expect(res.status).toBe(400);
+      const body = await res.json() as { error?: string; reasonCode?: string };
+      expect(body.reasonCode).toBe("SYNC_PAYLOAD_NOT_OBJECT");
+      expect(JSON.stringify(body)).not.toContain(nonObject);
     }
   });
 

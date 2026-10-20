@@ -30,13 +30,17 @@ describe("Home sync manager boundary", () => {
         home.indexOf("// Record the synced signature ONLY after a successful PUT"),
       ),
       home.slice(
+        home.indexOf("if (isPermanentSyncWriteRejection(responseStatus))"),
+        home.indexOf("syncPushQueueRef.current.finish({ drainQueued: false });", home.indexOf("if (isPermanentSyncWriteRejection(responseStatus))")),
+      ),
+      home.slice(
         home.indexOf("// All retries exhausted"),
         home.indexOf("syncPushQueueRef.current.finish({ drainQueued: false });", home.indexOf("// All retries exhausted")),
       ),
     ];
 
     expect(terminalWriteSections.every((section) => section.includes("syncWriteFieldCheck"))).toBe(true);
-    expect(home.match(/syncWriteFieldCheck/g)).toHaveLength(5);
+    expect(home.match(/syncWriteFieldCheck/g)).toHaveLength(6);
   });
 
   it("keeps scheduled profile propagation on the causally fenced write contract", () => {

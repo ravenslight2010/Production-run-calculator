@@ -20,6 +20,8 @@ describe("automatic update reload safety", () => {
       hasUnsavedForm: false,
       hasBlockingDialog: false,
       hasBlockingOperation: false,
+      hasPendingSync: false,
+      hasFailedSync: false,
     })).toBe(true);
 
     for (const unsafeField of [
@@ -27,12 +29,16 @@ describe("automatic update reload safety", () => {
       "hasUnsavedForm",
       "hasBlockingDialog",
       "hasBlockingOperation",
+      "hasPendingSync",
+      "hasFailedSync",
     ] as const) {
       expect(isAutomaticUpdateReloadSafe({
         hasActiveRun: false,
         hasUnsavedForm: false,
         hasBlockingDialog: false,
         hasBlockingOperation: false,
+        hasPendingSync: false,
+        hasFailedSync: false,
         [unsafeField]: true,
       })).toBe(false);
     }
@@ -44,12 +50,16 @@ describe("automatic update reload safety", () => {
     ["dirty form", { hasUnsavedForm: true }],
     ["open dialog", { hasBlockingDialog: true }],
     ["active import", { hasBlockingOperation: true }],
+    ["pending sync", { hasPendingSync: true }],
+    ["failed sync", { hasFailedSync: true }],
   ])("blocks %s", (_label, unsafe) => {
     expect(isAutomaticUpdateReloadSafe({
       hasActiveRun: false,
       hasUnsavedForm: false,
       hasBlockingDialog: false,
       hasBlockingOperation: false,
+      hasPendingSync: false,
+      hasFailedSync: false,
       ...unsafe,
     })).toBe(false);
   });

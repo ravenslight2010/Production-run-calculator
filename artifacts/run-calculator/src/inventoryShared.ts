@@ -1442,7 +1442,9 @@ export type IncidentContext = {
   syncState?: string;
   signalKind?: string;
   requestOperationCategory?: "authentication" | "diagnostics" | "import" | "inventory" | "master_data" | "sync" | "other";
+  requestRoute?: "authentication" | "sync_today_read" | "sync_today_write" | "sync_dated" | "sync_auto_track_claim" | "sync_manual_section" | "sync_operational_intents" | "sync_events" | "sync_scheduled" | "sync_other" | "other";
   requestOutcome?: "http_server_error" | "http_client_error" | "authentication_rejected" | "transport_failure" | "offline_failure" | "timeout" | "cancelled";
+  requestReasonCode?: "SYNC_VALIDATION_FAILED" | "SYNC_PAYLOAD_NOT_OBJECT" | "SYNC_PAYLOAD_TOO_LARGE";
   requestElapsedMs?: number;
   requestObservedAt?: string;
   requestBackgroundInvolvement?: "observed" | "not_observed";
@@ -1466,7 +1468,9 @@ export type ReportIncidentBody = {
     signalKind?: "user_report" | "crash" | "rejected_promise" | "api_failure" | "startup" | "update" | "sync";
     correlationId?: string;
     requestOperationCategory?: IncidentContext["requestOperationCategory"];
+    requestRoute?: IncidentContext["requestRoute"];
     requestOutcome?: IncidentContext["requestOutcome"];
+    requestReasonCode?: IncidentContext["requestReasonCode"];
     requestElapsedMs?: number;
     requestObservedAt?: string;
     requestBackgroundInvolvement?: IncidentContext["requestBackgroundInvolvement"];

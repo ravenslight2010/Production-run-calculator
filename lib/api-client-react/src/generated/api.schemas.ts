@@ -1607,7 +1607,6 @@ export type ManualSectionEditResponseOutcome = typeof ManualSectionEditResponseO
 
 export const ManualSectionEditResponseOutcome = {
   accepted: 'accepted',
-  conflicted: 'conflicted',
 } as const;
 
 export interface ManualSectionEditResponse {
@@ -1621,6 +1620,27 @@ export interface ManualSectionEditResponse {
   data: SyncPayload;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId: string;
+}
+
+export type ManualSectionEditErrorCode = typeof ManualSectionEditErrorCode[keyof typeof ManualSectionEditErrorCode];
+
+
+export const ManualSectionEditErrorCode = {
+  invalid_edit: 'invalid_edit',
+  invalid_values: 'invalid_values',
+  invalid_baseline: 'invalid_baseline',
+  reset_changed: 'reset_changed',
+  run_changed: 'run_changed',
+  section_changed: 'section_changed',
+} as const;
+
+/**
+ * Safe rejection only; never includes submitted values or canonical recipe data.
+ */
+export interface ManualSectionEditError {
+  /** @maxLength 64 */
+  error: string;
+  code: ManualSectionEditErrorCode;
 }
 
 export type OperationalIntentResponseOutcome = typeof OperationalIntentResponseOutcome[keyof typeof OperationalIntentResponseOutcome];
@@ -2126,6 +2146,19 @@ export interface SyncWriteRequest {
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId?: string;
   payload: SyncWriteRequestPayload;
+}
+
+export type SyncWriteValidationErrorReasonCode = typeof SyncWriteValidationErrorReasonCode[keyof typeof SyncWriteValidationErrorReasonCode];
+
+
+export const SyncWriteValidationErrorReasonCode = {
+  SYNC_PAYLOAD_NOT_OBJECT: 'SYNC_PAYLOAD_NOT_OBJECT',
+  SYNC_PAYLOAD_TOO_LARGE: 'SYNC_PAYLOAD_TOO_LARGE',
+} as const;
+
+export interface SyncWriteValidationError {
+  error: string;
+  reasonCode: SyncWriteValidationErrorReasonCode;
 }
 
 export interface SyncUpgradeRequiredResponse {
@@ -7054,7 +7087,7 @@ export const FieldCheckObservationInputDeviceCategory = {
 } as const;
 
 /**
- * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.
+ * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require failureCode (integer 1 through 3). Version 4 also allows 4 for a permanent sync request rejection; other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics.
  */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};
 
@@ -7075,7 +7108,7 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
-  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In versions 3 and 4, sync-acknowledgment failures require only failureCode (integer 1 through 3); other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics. */
+  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. In version 3, sync-acknowledgment failures require failureCode (integer 1 through 3). Version 4 also allows 4 for a permanent sync request rejection; other sync outcomes have empty metrics. Version 3 performance allows durationMs and sourceCode (1 home bundle, 2 navigation load, 3 API timeout/abort, 4 API network). Version 4 API request failures additionally require fixed outcome, operation, and background codes, with HTTP status only for HTTP outcomes. Durations are client-observed elapsed wait, not server processing time. Stale-deployment-recovery accepts no metrics. */
   metrics: FieldCheckObservationInputMetrics;
   /** Opaque request correlation reference received by the browser from a server response; client-reported and not used for authorization. */
   reportedRequestCorrelationId?: string;
@@ -7305,6 +7338,26 @@ export const IncidentContextRequestOperationCategory = {
   other: 'other',
 } as const;
 
+/**
+ * Fixed route-family label; never a raw URL or path parameter.
+ */
+export type IncidentContextRequestRoute = typeof IncidentContextRequestRoute[keyof typeof IncidentContextRequestRoute];
+
+
+export const IncidentContextRequestRoute = {
+  authentication: 'authentication',
+  sync_today_read: 'sync_today_read',
+  sync_today_write: 'sync_today_write',
+  sync_dated: 'sync_dated',
+  sync_auto_track_claim: 'sync_auto_track_claim',
+  sync_manual_section: 'sync_manual_section',
+  sync_operational_intents: 'sync_operational_intents',
+  sync_events: 'sync_events',
+  sync_scheduled: 'sync_scheduled',
+  sync_other: 'sync_other',
+  other: 'other',
+} as const;
+
 export type IncidentContextRequestOutcome = typeof IncidentContextRequestOutcome[keyof typeof IncidentContextRequestOutcome];
 
 
@@ -7316,6 +7369,18 @@ export const IncidentContextRequestOutcome = {
   offline_failure: 'offline_failure',
   timeout: 'timeout',
   cancelled: 'cancelled',
+} as const;
+
+/**
+ * Allowlisted server validation code; no response message or body is retained.
+ */
+export type IncidentContextRequestReasonCode = typeof IncidentContextRequestReasonCode[keyof typeof IncidentContextRequestReasonCode];
+
+
+export const IncidentContextRequestReasonCode = {
+  SYNC_VALIDATION_FAILED: 'SYNC_VALIDATION_FAILED',
+  SYNC_PAYLOAD_NOT_OBJECT: 'SYNC_PAYLOAD_NOT_OBJECT',
+  SYNC_PAYLOAD_TOO_LARGE: 'SYNC_PAYLOAD_TOO_LARGE',
 } as const;
 
 export type IncidentContextRequestBackgroundInvolvement = typeof IncidentContextRequestBackgroundInvolvement[keyof typeof IncidentContextRequestBackgroundInvolvement];
@@ -7347,7 +7412,11 @@ export interface IncidentContext {
   syncState?: string;
   signalKind?: string;
   requestOperationCategory?: IncidentContextRequestOperationCategory;
+  /** Fixed route-family label; never a raw URL or path parameter. */
+  requestRoute?: IncidentContextRequestRoute;
   requestOutcome?: IncidentContextRequestOutcome;
+  /** Allowlisted server validation code; no response message or body is retained. */
+  requestReasonCode?: IncidentContextRequestReasonCode;
   /**
      * @minimum 0
      * @maximum 10000000
@@ -7434,6 +7503,26 @@ export const ReportIncidentInputDiagnosticsRequestOperationCategory = {
   other: 'other',
 } as const;
 
+/**
+ * Fixed route-family label; never a raw URL or path parameter.
+ */
+export type ReportIncidentInputDiagnosticsRequestRoute = typeof ReportIncidentInputDiagnosticsRequestRoute[keyof typeof ReportIncidentInputDiagnosticsRequestRoute];
+
+
+export const ReportIncidentInputDiagnosticsRequestRoute = {
+  authentication: 'authentication',
+  sync_today_read: 'sync_today_read',
+  sync_today_write: 'sync_today_write',
+  sync_dated: 'sync_dated',
+  sync_auto_track_claim: 'sync_auto_track_claim',
+  sync_manual_section: 'sync_manual_section',
+  sync_operational_intents: 'sync_operational_intents',
+  sync_events: 'sync_events',
+  sync_scheduled: 'sync_scheduled',
+  sync_other: 'sync_other',
+  other: 'other',
+} as const;
+
 export type ReportIncidentInputDiagnosticsRequestOutcome = typeof ReportIncidentInputDiagnosticsRequestOutcome[keyof typeof ReportIncidentInputDiagnosticsRequestOutcome];
 
 
@@ -7445,6 +7534,18 @@ export const ReportIncidentInputDiagnosticsRequestOutcome = {
   offline_failure: 'offline_failure',
   timeout: 'timeout',
   cancelled: 'cancelled',
+} as const;
+
+/**
+ * Allowlisted server validation code; no response message or body is retained.
+ */
+export type ReportIncidentInputDiagnosticsRequestReasonCode = typeof ReportIncidentInputDiagnosticsRequestReasonCode[keyof typeof ReportIncidentInputDiagnosticsRequestReasonCode];
+
+
+export const ReportIncidentInputDiagnosticsRequestReasonCode = {
+  SYNC_VALIDATION_FAILED: 'SYNC_VALIDATION_FAILED',
+  SYNC_PAYLOAD_NOT_OBJECT: 'SYNC_PAYLOAD_NOT_OBJECT',
+  SYNC_PAYLOAD_TOO_LARGE: 'SYNC_PAYLOAD_TOO_LARGE',
 } as const;
 
 export type ReportIncidentInputDiagnosticsRequestBackgroundInvolvement = typeof ReportIncidentInputDiagnosticsRequestBackgroundInvolvement[keyof typeof ReportIncidentInputDiagnosticsRequestBackgroundInvolvement];
@@ -7470,7 +7571,11 @@ export type ReportIncidentInputDiagnostics = {
   /** @maxLength 128 */
   correlationId?: string;
   requestOperationCategory?: ReportIncidentInputDiagnosticsRequestOperationCategory;
+  /** Fixed route-family label; never a raw URL or path parameter. */
+  requestRoute?: ReportIncidentInputDiagnosticsRequestRoute;
   requestOutcome?: ReportIncidentInputDiagnosticsRequestOutcome;
+  /** Allowlisted server validation code; no response message or body is retained. */
+  requestReasonCode?: ReportIncidentInputDiagnosticsRequestReasonCode;
   /**
      * @minimum 0
      * @maximum 10000000

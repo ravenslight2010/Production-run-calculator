@@ -241,6 +241,7 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
     coordinatorRef.current = createUpdateCoordinator({
       registration: () => registrationRef.current,
       safe: getAutomaticUpdateReloadSafety,
+      subscribeSafe: subscribeAutomaticUpdateReloadSafety,
       reload: () => window.location.reload(),
       changed: setUpdateState,
     });
@@ -397,7 +398,8 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
     }}>
       <AppUpdateControl state={updateState}
         check={() => void coordinator.check()}
-        update={() => void handleUpdateAndReload()} />
+        update={() => void coordinator.requestUpdate()}
+        cancelUpdate={() => coordinator.cancelQueuedUpdate()} />
       {children}
     </AppUpdateContext.Provider>
   );

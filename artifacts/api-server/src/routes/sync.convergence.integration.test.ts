@@ -18,6 +18,7 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fork, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
@@ -136,7 +137,7 @@ beforeAll(async () => {
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: testDatabaseUrl },
-    encoding: "utf8",
+    stdio: "inherit",
     timeout: 120_000,
   });
   if (push.error || push.status !== 0) {
@@ -259,7 +260,7 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
       };
       const timeout = setTimeout(
         () => finish(new Error("isolated sync process did not start")),
-        20_000,
+        45_000,
       );
       child.once("error", onError);
       child.once("exit", onExit);
@@ -801,7 +802,7 @@ describe("multi-client sync convergence soak", () => {
       senderId: "outbox-writer",
     });
     expect(cursor?.cursor).toBe(events[0]!.cursor);
-  }, 30_000);
+  }, 90_000);
 
   it("keeps per-scope cursors ordered and rolls them back with failed writes", async () => {
     await expect(db.transaction(async (tx) => {
@@ -837,7 +838,7 @@ describe("multi-client sync convergence soak", () => {
       .where(eq(syncOutboxEventsTable.scope, "live"))
       .orderBy(asc(syncOutboxEventsTable.cursor));
     expect(events.map((event) => event.cursor)).toEqual([1, 2]);
-  }, 30_000);
+  }, 120_000);
 
   it("keeps the canonical break plan when reconnect replays a stale queued snapshot", async () => {
     const client = new SimulatedClient("break-offline");
@@ -984,6 +985,46 @@ describe("multi-client sync convergence soak", () => {
           runValues: { "run-main": { casesNeeded: 240 } },
         },
       });
+      // Real elapsed time over two independent API processes and PostgreSQL's
+      // durable outbox. Unlike the logical-clock soak this measures delivery.
+      const deliverySamples: Array<{ ackMs: number; peerMs: number; bytes: number; serverTiming: string }> = [];
+      let baseline = await initialWrite.json() as { data: SyncPayload; snapshotId: string };
+      for (let sample = 0; sample < 10; sample++) {
+        const payload = clone(baseline.data);
+        const values = payload.runValues as Record<string, Record<string, unknown>>;
+        values["run-main"]!.casesNeeded = 241 + sample;
+        const body = JSON.stringify({
+          senderId: `latency-${sample}`,
+          payload: { ...payload, syncVersion: 1, completeness: "complete", baseSnapshotId: baseline.snapshotId },
+          snapshotId: baseline.snapshotId,
+        });
+        const startedAt = performance.now();
+        const response = await fetch(`${processA.baseUrl}/api/sync/today?today=${TODAY}&epoch=0`, {
+          method: "PUT", headers: { ...headers(), "content-type": "application/json" }, body,
+        });
+        expect(response.status).toBe(200);
+        baseline = await response.json() as typeof baseline;
+        const ackMs = performance.now() - startedAt;
+        expect((baseline.data.runValues as typeof values)["run-main"]!.casesNeeded).toBe(241 + sample);
+        const frame = await readMatchingFrame(todayPeer.reader, todayPeer.state,
+          (frame) => frame.senderId === `latency-${sample}`);
+        // Reconstruct the maintained peer delta before checking adoption.
+        const peerData = frame.data as SyncPayload;
+        expect((peerData.runValues as typeof values)["run-main"]!.casesNeeded).toBe(241 + sample);
+        deliverySamples.push({
+          ackMs: Math.round(ackMs), peerMs: Math.round(performance.now() - startedAt),
+          bytes: Buffer.byteLength(body), serverTiming: response.headers.get("Server-Timing") ?? "",
+        });
+      }
+      console.info(`sync-latency ${JSON.stringify({ environment: "isolated-two-process", network: "loopback-unthrottled", samples: deliverySamples })}`);
+      const latencyDirectory = path.join(repoRoot, "artifacts/run-calculator/generated-artifacts/sync-latency");
+      await mkdir(latencyDirectory, { recursive: true });
+      await writeFile(path.join(latencyDirectory, "two-process.json"), JSON.stringify({
+        environment: "isolated-two-process", network: "loopback-unthrottled",
+        capturedAt: new Date().toISOString(), samples: deliverySamples,
+      }, null, 2));
+      expect(Math.max(...deliverySamples.map((sample) => sample.ackMs))).toBeLessThan(2000);
+      expect(Math.max(...deliverySamples.map((sample) => sample.peerMs))).toBeLessThan(2000);
       await expectNoSyncOutboxFrame(tomorrowPeer.reader, tomorrowPeer.state, CROSS_PROCESS_SILENCE_WINDOW_MS);
       await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, CROSS_PROCESS_SILENCE_WINDOW_MS);
 

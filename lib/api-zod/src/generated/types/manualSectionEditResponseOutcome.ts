@@ -11,5 +11,4 @@ export type ManualSectionEditResponseOutcome = typeof ManualSectionEditResponseO
 
 export const ManualSectionEditResponseOutcome = {
   accepted: 'accepted',
-  conflicted: 'conflicted',
 } as const;

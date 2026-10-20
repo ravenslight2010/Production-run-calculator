@@ -407,15 +407,15 @@ describe("field-check observer", () => {
     stopNextBuild();
     const sync = submit.mock.calls.flatMap((call) => call[0])
       .filter((item: { checkName: string }) => item.checkName === "sync-acknowledgment");
-    expect(sync).toHaveLength(6);
-    expect(sync.slice(0, 3).map((item: { metrics: unknown }) => item.metrics)).toEqual([
-      { failureCode: 1 }, { failureCode: 2 }, { failureCode: 3 },
+    expect(sync).toHaveLength(7);
+    expect(sync.slice(0, 4).map((item: { metrics: unknown }) => item.metrics)).toEqual([
+      { failureCode: 1 }, { failureCode: 2 }, { failureCode: 3 }, { failureCode: 4 },
     ]);
-    expect(sync[3].outcome).toBe("success");
-    expect(sync[4].metrics).toEqual({ failureCode: 3 });
-    expect(sync[4].observationId).not.toBe(sync[2].observationId);
-    expect(sync[5].appBuild).toBe("identified-build");
-    expect(new Set(sync.map((item: { observationId: string }) => item.observationId)).size).toBe(6);
+    expect(sync[4].outcome).toBe("success");
+    expect(sync[5].metrics).toEqual({ failureCode: 3 });
+    expect(sync[5].observationId).not.toBe(sync[2].observationId);
+    expect(sync[6].appBuild).toBe("identified-build");
+    expect(new Set(sync.map((item: { observationId: string }) => item.observationId)).size).toBe(7);
     expect(JSON.stringify(sync)).not.toMatch(/runId|response/);
   });
 
@@ -439,6 +439,7 @@ describe("field-check observer", () => {
     ]);
     expect(fieldCheckDiagnosticLabel("performance", {})).toContain("older evidence");
     expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 2 })).toContain("stale/reset");
+    expect(fieldCheckDiagnosticLabel("sync-acknowledgment", { failureCode: 4 })).toContain("rejected the sync request");
   });
 
   it("queues a quick HTTP 500 with operation, elapsed time, observation, background and correlation evidence", async () => {

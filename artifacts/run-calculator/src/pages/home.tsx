@@ -17,7 +17,7 @@ import {
   releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
-import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
+import { consumeForegroundRecoveryResponse, isRetryableRecoveryStatus } from "../foregroundRecoveryResponse";
 import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
 import {
   clearPendingSyncIntent,
@@ -321,6 +321,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   consumeSyncWriteResponse,
+  isPermanentSyncWriteRejection,
   shouldReplaySyncWrite,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
@@ -328,8 +329,10 @@ import {
   mergeSparseServerRunMap,
   persistedSyncPayload,
   reconstructPartialSyncPayload,
+  readSyncWriteRejectionCode,
   syncPayloadMatchesSnapshot,
   syncWriteFieldCheck,
+  type SyncWriteRejectionCode,
 } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -621,7 +624,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
@@ -4402,7 +4405,11 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
-  useEffect(() => subscribeToManualSectionErrors(setWriteError), []);
+  useEffect(() => {
+    const unsubscribe = subscribeToManualSectionErrors(setWriteError);
+    reportRejectedManualSectionErrors();
+    return unsubscribe;
+  }, []);
   const [sauceAutoTrackFailure, setSauceAutoTrackFailure] = useState<SauceAutoTrackFailure | null>(null);
   const reportSauceAutoTrackFailure = useCallback((
     claim: AutoTrackEventClaim,
@@ -8673,12 +8680,12 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify }): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify, isCurrent }): Promise<boolean> => {
       if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       const isCurrentRecovery = () =>
-        !cancelled && foregroundRecoveryOwnerRef.current === recoveryOwner;
+        !cancelled && isCurrent() && foregroundRecoveryOwnerRef.current === recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
       showForegroundRecoveryNotice(
@@ -8720,6 +8727,7 @@ export default function Home() {
 
       return (async () => {
         let reconciled = false;
+        let permanentHttpFailure = false;
         try {
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
@@ -8732,7 +8740,8 @@ export default function Home() {
             syncTodayRequest.init,
             10_000,
           );
-          if (!res.ok) classify("non-retryable-http");
+          permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
+          if (permanentHttpFailure) classify("non-retryable-http");
           const recovery = await consumeForegroundRecoveryResponse({
             response: res,
             expectedDate: clientDate,
@@ -8858,7 +8867,7 @@ export default function Home() {
           return true;
          } catch (error) {
             classify(
-              error instanceof Error && error.message.startsWith("foreground sync GET failed:")
+              permanentHttpFailure
                 ? "non-retryable-http"
                 : "connectivity-retry",
             );
@@ -9432,6 +9441,7 @@ export default function Home() {
     });
     const requestBytes = new Blob([requestBody]).size;
     let responseStatus = 0;
+    let writeFailureReasonCode: SyncWriteRejectionCode | null = null;
     let recoverableConflictResponse = false;
     writeToday({
       payload,
@@ -9469,10 +9479,14 @@ export default function Home() {
       // Any non-success response other than the documented canonical 409
       // fallback must follow the retry path below.
       // consumeCanonicalSyncWriteResponse intentionally does not throw for
-      // HTTP errors so callers can safely inspect their response bodies; a
-      // sync write must not be recorded as acknowledged just because the
-      // server returned parseable JSON with a 5xx status.
-      if (!res.ok && res.status !== 409) throw new Error(`Sync write failed: ${res.status}`);
+      // HTTP errors so callers can inspect only allowlisted validation codes;
+      // non-success responses are never sync acknowledgements.
+      if (!res.ok && res.status !== 409) {
+        if (isPermanentSyncWriteRejection(res.status)) {
+          writeFailureReasonCode = await readSyncWriteRejectionCode(res);
+        }
+        throw new Error(`Sync write failed: ${res.status}`);
+      }
       const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
@@ -9703,6 +9717,25 @@ export default function Home() {
           "Stale sync change was retained locally because it could not be safely rebased",
           "stale-base-unrecoverable",
           currentRunId,
+        );
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
+      if (isPermanentSyncWriteRejection(responseStatus)) {
+        // A validation rejection cannot succeed by retrying the same payload.
+        // Keep the local intent and expose only its safe reason code.
+        emitProductionRunSaveOutcome("failure", requestStartedAt);
+        pushAcknowledgedRef.current = true;
+        setSyncRetryWaiting(false);
+        setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent(
+          "failure",
+          "Server rejected the sync request; local change is retained",
+          `${responseStatus} · ${writeFailureReasonCode ?? "SYNC_REQUEST_REJECTED"}`,
+          currentRunId,
+          syncWriteFieldCheck({ ok: false, status: responseStatus }),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         return;
@@ -14564,6 +14597,10 @@ export default function Home() {
     || undoBusy
     || exporting
     || freezerSurplusBusy
+    || syncPendingCount > 0
+    || syncPushFailed
+    || syncRetryWaiting
+    || !pushAcknowledgedRef.current
     || foregroundRecoveryNotice?.kind === "recovering"
   );
   const automaticUpdateReloadSafe = isAutomaticUpdateReloadSafe({
@@ -14571,6 +14608,8 @@ export default function Home() {
     hasUnsavedForm,
     hasBlockingDialog,
     hasBlockingOperation,
+    hasPendingSync: syncPendingCount > 0 || !pushAcknowledgedRef.current,
+    hasFailedSync: syncPushFailed || syncRetryWaiting,
   });
 
   useEffect(() => {

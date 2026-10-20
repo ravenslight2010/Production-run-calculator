@@ -251,7 +251,7 @@ describe("foreground wake sync barrier", () => {
     expect(pullClientDateRow).toHaveBeenCalledTimes(2);
   });
 
-  it("retries every five seconds while visible and stops after canonical recovery", async () => {
+  it("retries with bounded completion-driven backoff while visible and stops after canonical recovery", async () => {
     vi.useFakeTimers();
     let hidden = false;
     Object.defineProperty(document, "hidden", {
@@ -271,9 +271,9 @@ describe("foreground wake sync barrier", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(recover).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1_200);
       expect(recover).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(2_400);
       expect(recover).toHaveBeenCalledTimes(3);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(recover).toHaveBeenCalledTimes(3);

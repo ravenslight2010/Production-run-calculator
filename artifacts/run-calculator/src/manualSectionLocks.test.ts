@@ -13,7 +13,13 @@ import {
   sectionForManualControl,
 } from "./manualSectionLocks";
 import { fencePendingOperationalValues, fenceActiveManualSectionValues, retryPendingManualSections, retryPendingManualSection } from "./operationalIntentOutbox";
-import { setOperationalIntentIdentity, submitManualSection, setOperationalIntentCanonicalAdopter } from "./operationalIntentOutbox";
+import {
+  reportRejectedManualSectionErrors,
+  setOperationalIntentIdentity,
+  submitManualSection,
+  setOperationalIntentCanonicalAdopter,
+} from "./operationalIntentOutbox";
+import { subscribeToManualSectionErrors } from "./manualSectionErrors";
 
 describe("manual section locks", () => {
   afterEach(() => clearManualSectionLocks());
@@ -119,28 +125,51 @@ describe("manual section locks", () => {
     expect(USED_MANUAL_SECTION_CONTROL_IDS).toEqual(Object.values(MANUAL_SECTION_CONTROLS).flat());
   });
 
-  it("submitManualSection invokes canonical adopter with all conflict fields", async () => {
+  it("manual section conflicts do not adopt canonical data and retain the edited section safely", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const originalFetch = globalThis.fetch;
-    let adopted: any;
-    setOperationalIntentCanonicalAdopter((_data, intent, outcome) => { adopted = { intent, outcome }; });
+    const adopter = vi.fn();
+    const errors: string[] = [];
+    const unsubscribe = subscribeToManualSectionErrors((message) => errors.push(message));
+    setOperationalIntentIdentity({ scope: "live", userId: "manual-conflict" });
+    setOperationalIntentCanonicalAdopter(adopter);
     globalThis.fetch = (async () => new Response(JSON.stringify({
-      outcome: "conflicted",
-      canonicalRevision: 7,
-      serverTime: Date.now(),
-      snapshotId: "a".repeat(64),
-      data: { runValues: { "run-conflict": { skidsCompleted: 9, casesOnCurrentSkid: 8 } } },
+      error: "Manual section edit was rejected",
+      code: "section_changed",
+      data: { runValues: { "run-conflict": { skidsCompleted: 876543, casesOnCurrentSkid: 8 } } },
     }), { status: 409, headers: { "content-type": "application/json" } })) as typeof fetch;
-    await submitManualSection({
+    const result = await submitManualSection({
       runId: "run-conflict", section: "packaging",
-      values: { skidsCompleted: 2 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
+      values: { skidsCompleted: 876543 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
       observedGeneration: "run-conflict:1", date: "2030-01-01", resetEpoch: 0,
     });
     globalThis.fetch = originalFetch;
     setOperationalIntentCanonicalAdopter(undefined);
-    expect(adopted.outcome).toBe("conflicted");
-    expect(adopted.intent.values).toEqual({ skidsCompleted: 9, casesOnCurrentSkid: 8 });
-    expect(getManualSectionConflict("run-conflict", "packaging")).toContain("saved this section first");
+    unsubscribe();
+    expect(result).toBe("conflicted");
+    expect(adopter).not.toHaveBeenCalled();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Your edits are still here");
+    expect(errors[0]).not.toContain("876543");
+    const pendingPrefix = "run-calculator:manual-section-pending:v1:live:manual-conflict:";
+    const rejectedRecord = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((key): key is string => !!key?.startsWith(pendingPrefix))
+      .map((key) => JSON.parse(localStorage.getItem(key)!))
+      .find((record) => record.runId === "run-conflict");
+    expect(rejectedRecord).toMatchObject({
+      deliveryState: "rejected",
+      values: { skidsCompleted: 876543 },
+    });
+    expect(fencePendingOperationalValues({
+      "run-conflict": { skidsCompleted: 876543, casesOnCurrentSkid: 8 },
+    })).toEqual({});
+    expect(getManualSectionConflict("run-conflict", "packaging")).toBeUndefined();
+    expect(JSON.stringify(errors)).not.toContain("Manual section edit was rejected");
+    const reloadedErrors: string[] = [];
+    const unsubscribeReloaded = subscribeToManualSectionErrors((message) => reloadedErrors.push(message));
+    reportRejectedManualSectionErrors();
+    unsubscribeReloaded();
+    expect(reloadedErrors).toEqual(errors);
   });
 
   it.each([400, 422])("rejects manual validation status %s without retrying or adopting failed data", async (status) => {
@@ -160,7 +189,7 @@ describe("manual section locks", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(adopter).not.toHaveBeenCalled();
     expect(fencePendingOperationalValues({ "manual-validation": { skidsCompleted: 2, casesOnCurrentSkid: 4 } })["manual-validation"])
-      .toEqual({ skidsCompleted: 2, casesOnCurrentSkid: 4 });
+      .toBeUndefined();
   });
 
   it.each([

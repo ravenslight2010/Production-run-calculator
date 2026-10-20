@@ -26,7 +26,7 @@ describe("operational intent outbox", () => {
     vi.useRealTimers();
   });
 
-  it("rebases queued same-section deltas from a conflict response without a canonical adopter", async () => {
+  it("does not rebase queued same-section deltas from rejected conflict data", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const requests: Array<Record<string, any>> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
@@ -38,7 +38,7 @@ describe("operational intent outbox", () => {
         ok: requests.length > 1,
         status: requests.length === 1 ? 409 : 200,
         json: async () => ({
-          outcome: requests.length === 1 ? "conflicted" : "accepted",
+          ...(requests.length === 1 ? { code: "section_changed" } : { outcome: "accepted" }),
           data: {
             runValues: {
               "run-1": { skidsCompleted: 0, casesOnCurrentSkid: canonicalCases },
@@ -65,8 +65,8 @@ describe("operational intent outbox", () => {
         observedGeneration: "run-1:1",
       }),
     ]);
-    expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 23, 22]);
-    expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 24, 23]);
+    expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 28, 27]);
+    expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 29, 28]);
   });
 
   it("preserves untouched Dough fields when a manual edit supplies only one field", async () => {

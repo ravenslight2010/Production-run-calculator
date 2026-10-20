@@ -188,7 +188,7 @@ describe("mounted foreground recovery lifecycle", () => {
         registrations += 1;
         // React Strict Mode runs the first effect setup, cleans it up, then
         // runs the live setup. Complete only that cancelled first recovery.
-        if (registrations === 1 && task.runOnForeground) queueMicrotask(() => void task.run());
+        if (registrations === 1 && task.runOnForeground) void task.run();
         return () => undefined;
       },
     };

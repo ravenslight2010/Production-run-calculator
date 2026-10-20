@@ -10,6 +10,8 @@ import type { ReportIncidentInputDiagnosticsOutcome } from './reportIncidentInpu
 import type { ReportIncidentInputDiagnosticsRequestBackgroundInvolvement } from './reportIncidentInputDiagnosticsRequestBackgroundInvolvement';
 import type { ReportIncidentInputDiagnosticsRequestOperationCategory } from './reportIncidentInputDiagnosticsRequestOperationCategory';
 import type { ReportIncidentInputDiagnosticsRequestOutcome } from './reportIncidentInputDiagnosticsRequestOutcome';
+import type { ReportIncidentInputDiagnosticsRequestReasonCode } from './reportIncidentInputDiagnosticsRequestReasonCode';
+import type { ReportIncidentInputDiagnosticsRequestRoute } from './reportIncidentInputDiagnosticsRequestRoute';
 import type { ReportIncidentInputDiagnosticsSignalKind } from './reportIncidentInputDiagnosticsSignalKind';
 import type { ReportIncidentInputDiagnosticsSyncState } from './reportIncidentInputDiagnosticsSyncState';
 
@@ -28,7 +30,11 @@ export type ReportIncidentInputDiagnostics = {
   /** @maxLength 128 */
   correlationId?: string;
   requestOperationCategory?: ReportIncidentInputDiagnosticsRequestOperationCategory;
+  /** Fixed route-family label; never a raw URL or path parameter. */
+  requestRoute?: ReportIncidentInputDiagnosticsRequestRoute;
   requestOutcome?: ReportIncidentInputDiagnosticsRequestOutcome;
+  /** Allowlisted server validation code; no response message or body is retained. */
+  requestReasonCode?: ReportIncidentInputDiagnosticsRequestReasonCode;
   /**
      * @minimum 0
      * @maximum 10000000
