@@ -58,8 +58,6 @@ describe("factory data durable write queue", () => {
     expect(localStorage.getItem(QUEUE_KEY)).toBe("[]");
     expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
       "api:other:503",
-      // The plain-object fetch mock lacks Response.headers, so correlation-id
-      // extraction falls into the transport-failure path after the 503 entry.
       "api-request-failure:other:transport_failure",
       "api:other:200",
     ]);
