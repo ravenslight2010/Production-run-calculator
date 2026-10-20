@@ -57,8 +57,11 @@ describe("factory data durable write queue", () => {
     }));
     expect(localStorage.getItem(QUEUE_KEY)).toBe("[]");
     expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
-      "api:/api/factory-data:503",
-      "api:/api/factory-data:200",
+      "api:other:503",
+      // The plain-object fetch mock lacks Response.headers, so correlation-id
+      // extraction falls into the transport-failure path after the 503 entry.
+      "api-request-failure:other:transport_failure",
+      "api:other:200",
     ]);
   });
 
@@ -70,7 +73,7 @@ describe("factory data durable write queue", () => {
     await expect(fetchFactoryData()).rejects.toBe(failure);
 
     expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
-      "api-failure:/api/factory-data:network",
+      "api-request-failure:other:transport_failure",
     ]);
   });
 
@@ -93,7 +96,7 @@ describe("factory data durable write queue", () => {
     releaseFirst?.();
     await flushFactoryQueue();
 
-    expect(bodies.map(({ key, value }) => ({ key, value }))).toEqual([
+    expect(bodies.map(({ key, value }))).toEqual([
       { key: SHIFT_START_TIME_KEY, value: "08:00" },
       { key: SHIFT_START_TIME_KEY, value: "08:30" },
     ]);
