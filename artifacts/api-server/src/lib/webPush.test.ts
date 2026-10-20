@@ -44,8 +44,64 @@ const {
   freezerCandidates,
   pendingFreezerArms,
   scheduledEvaluationIdempotencyKey,
+  sendPushNotification,
   startWebPushAlertScheduler,
+  validPushEndpoint,
+  validSubscription,
 } = await import("./webPush");
+
+describe("web-push endpoint validation", () => {
+  const subscription = (endpoint: unknown) => ({
+    endpoint,
+    keys: { p256dh: "a".repeat(32), auth: "b".repeat(16) },
+  });
+
+  it.each([
+    "https://fcm.googleapis.com/fcm/send/registration-token",
+    "https://updates.push.services.mozilla.com/wpush/v2/endpoint-token",
+    "https://push.services.mozilla.com/wpush/v2/endpoint-token",
+    "https://web.push.apple.com/endpoint-token",
+  ])("accepts supported browser push endpoint %s", (endpoint) => {
+    expect(validPushEndpoint(endpoint)).toBe(true);
+    expect(validSubscription(subscription(endpoint))).toBe(true);
+  });
+
+  it.each([
+    "not a url",
+    "http://fcm.googleapis.com/fcm/send/token",
+    "https://user:password@fcm.googleapis.com/fcm/send/token",
+    "https://@fcm.googleapis.com/fcm/send/token",
+    "https://fcm.googleapis.com:8443/fcm/send/token",
+    "https://127.0.0.1/fcm/send/token",
+    "https://[::1]/fcm/send/token",
+    "https://10.1.2.3/fcm/send/token",
+    "https://localhost/fcm/send/token",
+    "https://fcm.googleapis.com.attacker.example/fcm/send/token",
+    "https://attackerfcm.googleapis.com/fcm/send/token",
+    "https://push.services.mozilla.com.attacker.example/wpush/v2/token",
+    "https://example.com/push/token",
+  ])("rejects unsupported or unsafe endpoint %s", (endpoint) => {
+    expect(validPushEndpoint(endpoint)).toBe(false);
+    expect(validSubscription(subscription(endpoint))).toBe(false);
+  });
+
+  it("permits only the default HTTPS port and enforces the endpoint size cap", () => {
+    expect(validPushEndpoint("https://fcm.googleapis.com:443/fcm/send/token")).toBe(true);
+    expect(validPushEndpoint(`https://fcm.googleapis.com/${"a".repeat(2048)}`)).toBe(false);
+  });
+
+  it("never sends to an endpoint that is not in the supported service set", async () => {
+    const { default: webpushMock } = await import("web-push");
+    vi.mocked(webpushMock.sendNotification).mockClear();
+
+    await expect(sendPushNotification({
+      endpoint: "https://fcm.googleapis.com.attacker.example/push/token",
+      keys: { p256dh: "a".repeat(32), auth: "b".repeat(16) },
+    }, "payload")).rejects.toThrow("Invalid push endpoint");
+
+    expect(webpushMock.sendNotification).not.toHaveBeenCalled();
+  });
+});
 
 describe("server web-push alert candidates", () => {
   it("uses jittered retry timing for scheduled alert enqueue", async () => {

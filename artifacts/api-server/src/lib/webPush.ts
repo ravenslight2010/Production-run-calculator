@@ -33,6 +33,12 @@ const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_ENDPOINT = 2048;
 const DEFAULT_ALERT_INTERVAL_MS = 60_000;
 const SLOW_QUEUE_SAMPLE_WARNING_MS = 1_000;
+const SUPPORTED_PUSH_ENDPOINT_HOSTS = new Set([
+  "fcm.googleapis.com",
+  "updates.push.services.mozilla.com",
+  "push.services.mozilla.com",
+  "web.push.apple.com",
+]);
 
 export function vapidPublicKey(): string | null {
   const key = process.env.WEB_PUSH_VAPID_PUBLIC_KEY;
@@ -53,13 +59,37 @@ function configuredSender(): boolean {
   }
 }
 
+export function validPushEndpoint(endpoint: unknown): endpoint is string {
+  if (typeof endpoint !== "string" || endpoint.length === 0 || endpoint.length > MAX_ENDPOINT) return false;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+  // URL.username/password do not expose an empty userinfo section ("https://@host").
+  const authority = /^https:\/\/([^/?#]*)/i.exec(endpoint)?.[1];
+  if (!authority || authority.includes("@")) return false;
+  // The exact host set intentionally rejects IP literals and lookalike suffixes.
+  return SUPPORTED_PUSH_ENDPOINT_HOSTS.has(url.hostname);
+}
+
 export function validSubscription(input: unknown): input is { endpoint: string; keys: { p256dh: string; auth: string }; expirationTime?: number | null } {
   if (!input || typeof input !== "object") return false;
   const s = input as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; expirationTime?: unknown };
-  return typeof s.endpoint === "string" && s.endpoint.startsWith("https://") && s.endpoint.length <= MAX_ENDPOINT
+  return validPushEndpoint(s.endpoint)
     && typeof s.keys?.p256dh === "string" && s.keys.p256dh.length > 15 && s.keys.p256dh.length <= 512
     && typeof s.keys?.auth === "string" && s.keys.auth.length > 7 && s.keys.auth.length <= 256
     && (s.expirationTime == null || (typeof s.expirationTime === "number" && Number.isFinite(s.expirationTime)));
+}
+
+export async function sendPushNotification(
+  subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
+  payload: string,
+): Promise<void> {
+  if (!validPushEndpoint(subscription.endpoint)) throw new Error("Invalid push endpoint");
+  await webpush.sendNotification(subscription, payload, { TTL: 300, urgency: "high" });
 }
 
 type Candidate = {
@@ -186,6 +216,9 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number, signal
   const capabilities = new Map<string, boolean>();
   for (const s of rows) {
     if (signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
+    // Protect delivery as well as registration: legacy or manually altered rows
+    // must never become signed requests to an unapproved destination.
+    if (!validPushEndpoint(s.endpoint)) continue;
     if (candidate.dueAt && s.createdAt.getTime() > candidate.dueAt) continue;
     // A missing preference means enabled, matching /me/notification-prefs.
     if (s.notificationPrefs?.[candidate.kind] === false) continue;
@@ -214,7 +247,7 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number, signal
     try {
       // Intentionally generic: no recipe, customer, run label, or inventory data.
       const payload = JSON.stringify({ id: candidate.id.slice(0, 96), kind: candidate.kind, title: "Production alert", body: "A production timing alert needs attention." });
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 300, urgency: "high" });
+      await sendPushNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
       await db.update(webPushDeliveriesTable).set({ status: "delivered", attempts: 1, deliveredAt: new Date() }).where(eq(webPushDeliveriesTable.id, claim.id));
       delivered++;
     } catch (error) {
