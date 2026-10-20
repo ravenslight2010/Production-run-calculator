@@ -18,6 +18,95 @@ async function openManagerAttention(page: Page): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Manager attention" })).toBeVisible();
 }
 
+async function expectSmallTextContrast(locator: Locator, label: string): Promise<void> {
+  const colors = await locator.evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    const parseRgb = (value: string) => {
+      const channels = value.match(/[\d.]+/g)?.map(Number);
+      if (!channels || channels.length < 3) {
+        throw new Error(`Cannot parse rendered color: ${value}`);
+      }
+      return {
+        red: channels[0],
+        green: channels[1],
+        blue: channels[2],
+        alpha: channels[3] ?? 1,
+      };
+    };
+    const luminance = ({ red, green, blue }: ReturnType<typeof parseRgb>) => {
+      const linearize = (channel: number) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045
+          ? normalized / 12.92
+          : ((normalized + 0.055) / 1.055) ** 2.4;
+      };
+      return (
+        0.2126 * linearize(red)
+        + 0.7152 * linearize(green)
+        + 0.0722 * linearize(blue)
+      );
+    };
+    const foreground = parseRgb(styles.color);
+    const background = parseRgb(styles.backgroundColor);
+    if (background.alpha !== 1) {
+      throw new Error(`Expected an opaque badge background, got ${styles.backgroundColor}`);
+    }
+    const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+    return {
+      foreground: styles.color,
+      background: styles.backgroundColor,
+      ratio: (values[0] + 0.05) / (values[1] + 0.05),
+    };
+  });
+
+  expect(
+    colors.ratio,
+    `${label} contrast (${colors.foreground} on ${colors.background})`,
+  ).toBeGreaterThanOrEqual(4.5);
+}
+
+test("manager-attention header and More-menu badges meet small-text contrast", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(60_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_manager_attention_contrast"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    await page.route("**/api/incidents/actionable-count", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ count: 1 }),
+      }));
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const headerBadge = page.getByLabel("1 manager actions need attention", { exact: true });
+    await expect(headerBadge).toBeVisible();
+    await expect(headerBadge).toHaveText("1");
+    await expectSmallTextContrast(headerBadge, "Header manager-attention badge");
+
+    await page.getByRole("button", { name: /^More/ }).click();
+    const menuItem = page.getByRole("menuitem", { name: "Manager attention", exact: true });
+    await expect(menuItem).toBeVisible();
+    const menuBadge = menuItem.locator('span[aria-hidden="true"]');
+    await expect(menuBadge).toBeVisible();
+    await expect(menuBadge).toHaveText("1");
+    await expectSmallTextContrast(menuBadge, "More-menu manager-attention badge");
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
 test("manager setup stays usable when recipe names are incomplete", async ({
   page,
   playwright,
