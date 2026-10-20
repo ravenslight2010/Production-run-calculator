@@ -480,7 +480,13 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
-import { createImportOperationId } from "../importOperations";
+import {
+  clearPendingImportOperation,
+  createImportOperationId,
+  ImportOperationError,
+  listPendingImportOperations,
+  retryPendingImportOperation,
+} from "../importOperations";
 import {
   emitFieldCheckSignal,
   FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
@@ -6154,6 +6160,10 @@ export default function Home() {
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [specImportAiRetryCount, setSpecImportAiRetryCount] = useState(0);
+  const [specImportReviewNotice, setSpecImportReviewNotice] = useState<string | null>(null);
+  const [specImportRetryPending, setSpecImportRetryPending] = useState(false);
+  const [specImportRetryBlocked, setSpecImportRetryBlocked] = useState(false);
+  const [specImportRetryingPending, setSpecImportRetryingPending] = useState(false);
   const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
   const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
   const specPhotoPreviews = useMemo(
@@ -12680,6 +12690,55 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(selectedFiles.length > 0 ? `spec import: ${selectedFiles.length} file(s) selected` : "spec import: picker canceled");
     if (selectedFiles.length === 0) return;
+    if (specImportRetryPending) {
+      toast({
+        title: "Previous import needs recovery",
+        description: "Retry the exact saved operation before starting another import.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const interruptedSpec = listPendingImportOperations().find((pending) =>
+      !!pending.payload &&
+      typeof pending.payload === "object" &&
+      (pending.payload as Record<string, unknown>).importType === "spec",
+    );
+    if (interruptedSpec) {
+      toast({
+        title: "Checking the previous spec import",
+        description: "The exact saved request will be retried under its original ID before a new import can start.",
+      });
+      try {
+        await retryPendingImportOperation(interruptedSpec.operationId);
+        await cycleCountQc.invalidateQueries();
+        toast({
+          title: "Previous spec import confirmed",
+          description: "The exact earlier request was safely retried under its original operation ID. Select the new workbook again to start a separate import.",
+        });
+        return;
+      } catch (err) {
+        if (
+          err instanceof ImportOperationError &&
+          err.status === 409 &&
+          err.message === "STALE_REVIEWED_STATE"
+        ) {
+          clearPendingImportOperation(interruptedSpec.operationId);
+          toast({
+            title: "Previous spec import was not applied",
+            description: "The server rejected the stale review before writing. The selected workbook will now be reviewed as a new import.",
+          });
+        } else {
+          toast({
+            title: "Previous spec import needs recovery",
+            description: err instanceof Error
+              ? `${err.message} No new import was started.`
+              : "The previous save could not be confirmed. No new import was started.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+    }
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     if (!canImportSpec) {
       toast({
@@ -12706,6 +12765,9 @@ export default function Home() {
     setSpecImportAiRetryCount(0);
     specImportOperationRef.current = null;
     setSpecImportError(null);
+    setSpecImportReviewNotice(null);
+    setSpecImportRetryPending(false);
+    setSpecImportRetryBlocked(false);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
     setShowSpecImport(true);
@@ -12960,6 +13022,9 @@ export default function Home() {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
         await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
       finishSpecImportOutcome("success");
+      setSpecImportReviewNotice(null);
+      setSpecImportRetryPending(false);
+      setSpecImportRetryBlocked(false);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -13352,11 +13417,9 @@ export default function Home() {
           ? ` Auto-linked ${autoLinkedRecipes} near-duplicate recipe name${autoLinkedRecipes === 1 ? "" : "s"} (word order or minor typo) to an existing recipe.`
           : "";
       toast({
-        title: "Spec sheet imported",
+        title: "Import saved and confirmed",
         description:
-          (importedRecipes
-            ? "Brands, flavors, and recipes have been added."
-            : "Brands and flavors have been added.") +
+          "The server confirmed the reviewed changes." +
           mixNote +
           cheeseNote +
           updatedNote +
@@ -13365,6 +13428,14 @@ export default function Home() {
       specImportOperationRef.current = null;
     } catch (err) {
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
+        if (specImportRetryPending) {
+          setSpecImportRetryBlocked(true);
+          setSpecImportReviewNotice(
+          "The earlier save is still unconfirmed, and the recipe library changed. No new request was sent. Retry the exact earlier save before starting another import.",
+          );
+          setSpecImportError(null);
+          return;
+        }
         const reconfirmation = err as Error & {
           importReview: NonNullable<SpecImportPrepared["importReview"]>;
         };
@@ -13381,7 +13452,42 @@ export default function Home() {
             : current,
         );
         setSpecImportError(null);
-        toast({ title: "Import review updated", description: err.message, variant: "destructive" });
+        setSpecImportReviewNotice(
+          "Nothing was saved. The current recipe library changed this review; check the updated changes below and confirm again.",
+        );
+        toast({
+          title: "Review updated — not saved",
+          description: "Nothing was written. Review the refreshed changes before confirming again.",
+        });
+        return;
+      }
+      if (err instanceof ImportOperationError && err.status === 409 && err.message === "STALE_REVIEWED_STATE") {
+        // The API rejects a stale reviewed-state hash before any domain write.
+        // Retire this unused operation identity so the refreshed review starts
+        // as a new, auditable operation rather than reusing an old payload.
+        clearPendingImportOperation(operationId);
+        specImportOperationRef.current = null;
+        setSpecImportRetryPending(false);
+        setSpecImportRetryBlocked(false);
+        setSpecImportError(null);
+        setSpecImportReviewNotice(
+          "Nothing was saved because the server data changed during review. Confirm again to refresh the review before applying.",
+        );
+        return;
+      }
+      if (
+        err instanceof ImportOperationError &&
+        (err.status === undefined || err.status >= 500)
+      ) {
+        const changedPendingReview = err.message.includes("earlier attempt");
+        setSpecImportRetryPending(true);
+        setSpecImportRetryBlocked(changedPendingReview);
+        setSpecImportReviewNotice(
+          changedPendingReview
+            ? err.message
+            : "The server did not confirm the save. Keep this review unchanged and retry the same save; do not start a new import until its status is known.",
+        );
+        setSpecImportError(null);
         return;
       }
       void recordImportHistory({
@@ -13401,6 +13507,53 @@ export default function Home() {
       );
     } finally {
       setSpecImportApplying(false);
+    }
+  }
+
+  async function handleRetryPendingSpecImport() {
+    const operationId = specImportOperationRef.current;
+    if (!operationId || !specImportRetryBlocked || specImportRetryingPending) return;
+    setSpecImportRetryingPending(true);
+    try {
+      await retryPendingImportOperation(operationId);
+      clearPendingImportOperation(operationId);
+      specImportOperationRef.current = null;
+      await cycleCountQc.invalidateQueries();
+      finishSpecImportOutcome("success");
+      setShowSpecImport(false);
+      setSpecImportPrepared(null);
+      specImportBuffersRef.current = [];
+      specImportSourceNamesRef.current = [];
+      setSpecImportError(null);
+      setSpecImportReviewNotice(null);
+      setSpecImportRetryPending(false);
+      setSpecImportRetryBlocked(false);
+      toast({
+        title: "Import saved and confirmed",
+        description: "The server confirmed the exact earlier request. Current app data is being refreshed.",
+      });
+    } catch (err) {
+      if (
+        err instanceof ImportOperationError &&
+        err.status === 409 &&
+        err.message === "STALE_REVIEWED_STATE"
+      ) {
+        clearPendingImportOperation(operationId);
+        specImportOperationRef.current = null;
+        setSpecImportRetryPending(false);
+        setSpecImportRetryBlocked(false);
+        setSpecImportReviewNotice(
+          "The server rejected the earlier review before writing because its source data had changed. Review the refreshed changes before confirming again.",
+        );
+        return;
+      }
+      setSpecImportReviewNotice(
+        err instanceof Error
+          ? `The exact earlier save could not be confirmed: ${err.message}`
+          : "The exact earlier save could not be confirmed. Keep the reviewed changes unchanged and try again.",
+      );
+    } finally {
+      setSpecImportRetryingPending(false);
     }
   }
 
@@ -17961,6 +18114,14 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (specImportRetryPending) {
+              toast({
+                title: "Import status not confirmed",
+                description: "Check the saved operation before closing this review or starting another import.",
+                variant: "destructive",
+              });
+              return;
+            }
             finishSpecImportOutcome("incomplete");
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
@@ -17981,6 +18142,9 @@ export default function Home() {
             specImportBuffersRef.current = [];
             specImportSourceNamesRef.current = [];
             setSpecImportError(null);
+            setSpecImportReviewNotice(null);
+            setSpecImportRetryPending(false);
+            setSpecImportRetryBlocked(false);
             setSpecImportLoading(false);
             setSpecImportProgress(null);
             setSpecPhotoFiles([]);
@@ -17991,6 +18155,11 @@ export default function Home() {
               error: specImportError,
               prepared: specImportPrepared,
               applying: specImportApplying,
+              reviewNotice: specImportReviewNotice,
+              retryPending: specImportRetryPending,
+              retryBlocked: specImportRetryBlocked,
+              retryingPending: specImportRetryingPending,
+              onRetryPending: () => void handleRetryPendingSpecImport(),
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
               aiRetryAvailable: specImportAiRetryCount === 0 &&

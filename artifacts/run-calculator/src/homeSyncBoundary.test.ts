@@ -36,7 +36,7 @@ describe("Home sync manager boundary", () => {
     ];
 
     expect(terminalWriteSections.every((section) => section.includes("syncWriteFieldCheck"))).toBe(true);
-    expect(home.match(/syncWriteFieldCheck/g)).toHaveLength(5);
+    expect(home.match(/syncWriteFieldCheck\(/g)).toHaveLength(5);
   });
 
   it("keeps scheduled profile propagation on the causally fenced write contract", () => {

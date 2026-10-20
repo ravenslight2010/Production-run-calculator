@@ -38,7 +38,7 @@ describe("incident build identity", () => {
       source: "user_report",
     });
     expect(getPerformanceDiagnostics()).toEqual([
-      expect.objectContaining({ name: "api:/api/incidents:200", kind: "api" }),
+      expect.objectContaining({ name: "api:diagnostics:200", kind: "api" }),
     ]);
   });
 });

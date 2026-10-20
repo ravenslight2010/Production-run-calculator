@@ -3,6 +3,8 @@ import {
   applyImportOperation,
   createImportOperationId,
   ImportOperationError,
+  listPendingImportOperations,
+  retryPendingImportOperation,
   undoImportOperation,
 } from "./importOperations";
 import { buildSpecImportChanges } from "./specImport";
@@ -58,7 +60,7 @@ describe("import operation client boundary", () => {
     });
   });
 
-  it("retries the persisted byte-equivalent payload under the same operation ID", async () => {
+  it("recovers the exact pending payload under the same ID and rejects changed reviews", async () => {
     const id = "import-operation-retry-004";
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error("connection reset"))
@@ -75,7 +77,11 @@ describe("import operation client boundary", () => {
     await expect(applyImportOperation(id, {
       ...payload,
       changes: { brandProfiles: { upsert: [{ key: "changed", brand: "Changed", flavor: "Review" }] } },
-    })).resolves.toMatchObject({ operationId: id, resultHash: "hash-4" });
+    })).rejects.toThrow(/reviewed changes differ/u);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(listPendingImportOperations()).toContainEqual({ operationId: id, payload });
+    await expect(retryPendingImportOperation(id))
+      .resolves.toMatchObject({ operationId: id, resultHash: "hash-4" });
     const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(secondBody).toEqual(firstBody);
@@ -87,5 +93,30 @@ describe("import operation client boundary", () => {
     ));
     await expect(undoImportOperation("import-operation-003", "hash-1"))
       .rejects.toBeInstanceOf(ImportOperationError);
+  });
+
+  it("does not send an import when the exact request cannot be stored for recovery", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      get sessionStorage() {
+        throw new Error("session storage unavailable");
+      },
+    });
+
+    try {
+      await expect(applyImportOperation("import-operation-no-storage-007", {
+        importType: "spec",
+        sourceLabel: "Spec workbook",
+        changes: { brandProfiles: { upsert: [] } },
+      })).rejects.toMatchObject({
+        name: "ImportOperationError",
+        status: 0,
+        message: expect.stringContaining("no import was sent"),
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -55,6 +55,14 @@ type Props = {
   error: string | null;
   prepared: SpecImportPrepared | null;
   applying: boolean;
+  /** Persistent explanation when the review changed before any write. */
+  reviewNotice?: string | null;
+  /** Only the exact same reviewed save may be retried after an ambiguous response. */
+  retryPending?: boolean;
+  /** A retry was blocked because the pending review no longer matches. */
+  retryBlocked?: boolean;
+  retryingPending?: boolean;
+  onRetryPending?: () => void;
   canUseAiTools: boolean;
   onUseAiFallback: () => void;
   aiRetryAvailable?: boolean;
@@ -786,6 +794,11 @@ export default function SpecImportDialog({
   error,
   prepared,
   applying,
+  reviewNotice = null,
+  retryPending = false,
+  retryBlocked = false,
+  retryingPending = false,
+  onRetryPending = () => {},
   canUseAiTools,
   onUseAiFallback,
   aiRetryAvailable = false,
@@ -1387,7 +1400,7 @@ export default function SpecImportDialog({
             onClick={onClose}
             // While the commit is writing profiles/recipes, closing would let the
             // user navigate mid-apply — keep the dialog up until it finishes.
-            disabled={applying}
+            disabled={applying || retryPending}
             className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
             aria-label="Close"
           >
@@ -1395,7 +1408,35 @@ export default function SpecImportDialog({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <fieldset
+          disabled={retryPending}
+          className="m-0 min-w-0 flex-1 overflow-y-auto border-0 p-4 space-y-4"
+        >
+          <legend className="sr-only">Spec import review</legend>
+          {reviewNotice && (
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                retryPending
+                  ? "border-amber-400/60 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+                  : "border-primary/40 bg-primary/5 text-foreground"
+              }`}
+              role="status"
+              data-testid="spec-import-review-notice"
+            >
+              {reviewNotice}
+            </div>
+          )}
+          {retryPending && (
+            <div
+              className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200"
+              role="status"
+              data-testid="spec-import-retry-pending"
+            >
+              {retryBlocked
+                ? "This review differs from the earlier request. Apply is blocked; retry the exact earlier save to resolve it safely."
+                : "The earlier save may have reached the server. Review controls are locked so retrying cannot change the request."}
+            </div>
+          )}
           {loading && (
             <div className="flex flex-col items-center gap-3 py-8 text-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -2039,13 +2080,23 @@ export default function SpecImportDialog({
               )}
             </>
           )}
-        </div>
+        </fieldset>
 
         <div className="flex items-center justify-end gap-2 border-t border-border p-4">
+          {retryBlocked && (
+            <button
+              type="button"
+              onClick={onRetryPending}
+              disabled={retryingPending}
+              className="mr-auto rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {retryingPending ? "Retrying exact save…" : "Retry exact save"}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
-            disabled={applying}
+            disabled={applying || retryPending}
             className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
           >
             Cancel
@@ -2054,7 +2105,7 @@ export default function SpecImportDialog({
             <button
               type="button"
               onClick={() => setStep(1)}
-              disabled={applying}
+              disabled={applying || retryPending}
               className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
               Back
@@ -2103,7 +2154,8 @@ export default function SpecImportDialog({
                 ((nothingParsed || includedCount === 0) && !anyRemovalsChecked) ||
                 attentionCount > 0 ||
                 hasInvalidManualFormulaValues ||
-                (requiresDestructiveConfirmation && !destructiveChangesConfirmed)
+                (requiresDestructiveConfirmation && !destructiveChangesConfirmed) ||
+                retryBlocked
               }
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
@@ -2112,7 +2164,9 @@ export default function SpecImportDialog({
               ) : (
                 <CheckCircle2 className="h-4 w-4" />
               )}
-              {includedCount > 0
+              {retryPending
+                ? "Retry same save"
+                : includedCount > 0
                 ? `Apply ${includedCount} item${includedCount === 1 ? "" : "s"}`
                 : `Remove ${removedProfiles.filter((p) => p.remove).length} profile${removedProfiles.filter((p) => p.remove).length === 1 ? "" : "s"}`}
             </button>

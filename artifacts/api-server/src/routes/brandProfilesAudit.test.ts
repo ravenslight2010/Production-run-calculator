@@ -214,7 +214,7 @@ describe("computeApplicatorAudit — Signal 3: orphaned-type", () => {
     });
   });
 
-  it("flags app4 when app4Type is set but app4CheeseRecipeName is blank", () => {
+  it("does not flag a direct ingredient type when no recipe is needed", () => {
     const profiles = [
       profile("Craft", "Supreme", {
         app4Type: "Pepperoni",
@@ -223,12 +223,37 @@ describe("computeApplicatorAudit — Signal 3: orphaned-type", () => {
     ];
 
     const items = computeApplicatorAudit(profiles);
+    expect(items).toHaveLength(0);
+  });
+
+  it("flags a Cheese applicator when its required recipe link is blank", () => {
+    const profiles = [
+      profile("Craft", "Supreme", {
+        app4Type: "Cheese",
+        app4CheeseRecipeName: "",
+      }),
+    ];
+
+    const items = computeApplicatorAudit(profiles);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       slot: "app4",
-      appType: "Pepperoni",
+      appType: "Cheese",
       reason: "orphaned-type",
     });
+  });
+
+  it("does not flag direct ingredients including Olive Oil or a customer-specific topping", () => {
+    const profiles = [
+      profile("Craft", "Supreme", {
+        app3Type: "Olive Oil",
+        app3CheeseRecipeName: "",
+        app4Type: "Honey G Pepper Relish (Mauro)",
+        app4CheeseRecipeName: "",
+      }),
+    ];
+
+    expect(computeApplicatorAudit(profiles)).toHaveLength(0);
   });
 
   it("does NOT flag when app3Type is 'none' (explicit empty slot)", () => {
@@ -341,12 +366,12 @@ describe("computeApplicatorAudit — multiple signals coexist", () => {
       profile("Hannaford", "Classic", {
         app1CheeseRecipeName: "Hannaford Mozz",
       }),
-      // Profile B: cross-profile at app3, orphaned-type at app4.
+      // Profile B: cross-profile at app3, missing required Cheese link at app4.
       profile("Craft", "Supreme", {
         app3CheeseRecipeName: "Hannaford Mozz",
         app3Type: "cheese",
         app4CheeseRecipeName: "",
-        app4Type: "Pepperoni",
+        app4Type: "Cheese",
       }),
       // Profile C: cross-brand at app3 (Hannaford recipe on non-Hannaford profile).
       profile("BrandXYZ", "Deluxe", {

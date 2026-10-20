@@ -36,6 +36,7 @@ const MAX_PAYLOAD_BYTES = 512_000;
 const PENDING_KEY = "run-calculator.pending-import-operations.v1";
 
 type PendingOperation = { operationId: string; payload: unknown };
+let nonBrowserPending: PendingOperation[] = [];
 
 function pendingStore(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -43,6 +44,7 @@ function pendingStore(): Storage | null {
 }
 
 function readPending(): PendingOperation[] {
+  if (typeof window === "undefined") return [...nonBrowserPending];
   const store = pendingStore();
   if (!store) return [];
   try {
@@ -53,17 +55,47 @@ function readPending(): PendingOperation[] {
 }
 
 function writePending(items: PendingOperation[]): void {
+  if (typeof window === "undefined") {
+    nonBrowserPending = items.slice(-12);
+    return;
+  }
   const store = pendingStore();
   if (!store) return;
   try { store.setItem(PENDING_KEY, JSON.stringify(items.slice(-12))); } catch {}
 }
 
-function rememberPending(operationId: string, payload: unknown): void {
-  writePending([...readPending().filter((x) => x.operationId !== operationId), { operationId, payload }]);
+function rememberPending(operationId: string, payload: unknown): boolean {
+  if (typeof window === "undefined") {
+    writePending([
+      ...readPending().filter((x) => x.operationId !== operationId),
+      { operationId, payload },
+    ]);
+    return readPending().some((item) =>
+      item.operationId === operationId && sameJson(item.payload, payload),
+    );
+  }
+  const store = pendingStore();
+  if (!store) return false;
+  try {
+    const items = [
+      ...readPending().filter((x) => x.operationId !== operationId),
+      { operationId, payload },
+    ].slice(-12);
+    store.setItem(PENDING_KEY, JSON.stringify(items));
+    return readPending().some((item) =>
+      item.operationId === operationId && sameJson(item.payload, payload),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function clearPendingImportOperation(operationId: string): void {
   writePending(readPending().filter((x) => x.operationId !== operationId));
+}
+
+export function listPendingImportOperations(): PendingOperation[] {
+  return readPending().map((operation) => ({ ...operation }));
 }
 
 function pendingPayload(operationId: string): unknown {
@@ -72,6 +104,10 @@ function pendingPayload(operationId: string): unknown {
 
 function jsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function assertOperationId(operationId: string): string {
@@ -125,13 +161,29 @@ async function postOperation<T>(
   expectedStatus: "applied" | "undone",
 ): Promise<ImportOperationResult<T>> {
   const id = assertOperationId(operationId);
-  // A retry must use the exact bytes reviewed on the first attempt. This also
-  // protects against a caller rebuilding a payload from a now-mutated cache.
-  const retryBody = action === "apply" ? (pendingPayload(id) ?? body) : body;
+  // A retry must use the exact bytes reviewed on the first attempt. Do not
+  // silently substitute the old request if the caller has rebuilt a different
+  // review: the server may already have committed the first request, and
+  // adopting a projection for a different payload would lose the user's edits.
+  const pending = action === "apply" ? pendingPayload(id) : undefined;
+  if (pending !== undefined && !sameJson(pending, body)) {
+    throw new ImportOperationError(
+      "An earlier attempt for this import is still unconfirmed. The reviewed changes differ, so no new request was sent. Retry the exact earlier request before starting another import.",
+      undefined,
+      id,
+    );
+  }
+  const retryBody = pending ?? body;
   if (jsonBytes(retryBody) > MAX_PAYLOAD_BYTES) {
     throw new ImportOperationError("This reviewed import is too large to commit.", 413, id);
   }
-  if (action === "apply") rememberPending(id, retryBody);
+  if (action === "apply" && pending === undefined && !rememberPending(id, retryBody)) {
+    throw new ImportOperationError(
+      "This browser could not save the exact reviewed request for safe recovery, so no import was sent. Enable session storage and review again.",
+      0,
+      id,
+    );
+  }
   let response: Response;
   try {
     response = await fetch(`/api/import-operations/${encodeURIComponent(id)}/${action}`, {
@@ -165,6 +217,21 @@ async function postOperation<T>(
   const result = validateResponse<T>(payload, id, expectedStatus);
   if (action === "apply") clearPendingImportOperation(id);
   return result;
+}
+
+export async function retryPendingImportOperation<T = unknown>(
+  operationId: string,
+): Promise<ImportOperationResult<T>> {
+  const id = assertOperationId(operationId);
+  const payload = pendingPayload(id);
+  if (payload === undefined) {
+    throw new ImportOperationError(
+      "The exact earlier import request is not available in this browser session.",
+      undefined,
+      id,
+    );
+  }
+  return postOperation<T>(id, "apply", payload, "applied");
 }
 
 export function applyImportOperation<T>(

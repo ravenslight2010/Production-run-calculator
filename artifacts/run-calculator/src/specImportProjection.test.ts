@@ -101,4 +101,34 @@ describe("spec import projection", () => {
 
     expect(JSON.parse(localStorage.getItem(key) ?? "{}")).toEqual(interveningEdit);
   });
+
+  it("applies the source sauce name but does not overwrite a local edit made after review", () => {
+    const mauroSpec: ParsedSpecImport = {
+      profiles: [{
+        brand: "Acme",
+        flavor: "Cheese",
+        sauceName: "Gravy (Mauro)",
+        sauceOzPerPizza: 0.3,
+        applicators: [{ type: "Gravy (Mauro)", ozPerPizza: 0.3 }],
+        pepperonis: [],
+      }],
+      recipes: [],
+    };
+    const key = "run-calc-profile-acme__cheese";
+    localStorage.setItem(key, JSON.stringify({
+      frontlineRecipeName: "Olive Oil",
+      sauceOzPerPizza: 0.2,
+    }));
+
+    const projection = projectSpecImport(mauroSpec);
+    expect(projection.profileRows[0]?.values).toMatchObject({
+      frontlineRecipeName: "Gravy (Mauro)",
+      sauceOzPerPizza: 0.3,
+    });
+
+    const laterEdit = { frontlineRecipeName: "Olive Oil", sauceOzPerPizza: 0.45 };
+    localStorage.setItem(key, JSON.stringify(laterEdit));
+    adoptSpecImportProjection(projection);
+    expect(JSON.parse(localStorage.getItem(key) ?? "{}")).toEqual(laterEdit);
+  });
 });

@@ -32,6 +32,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let brandProfilesTable: DbModule["brandProfilesTable"];
+let sauceRecipesTable: DbModule["sauceRecipesTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -80,6 +81,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   brandProfilesTable = dbMod.brandProfilesTable;
+  sauceRecipesTable = dbMod.sauceRecipesTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -119,7 +121,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${brandProfilesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${brandProfilesTable}, ${sauceRecipesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([
@@ -498,6 +500,50 @@ describe("brand-profiles applicator-audit route", () => {
     expect(audit.status).toBe(200);
     const auditBody = (await audit.json()) as { items: Array<Record<string, unknown>> };
     expect(auditBody.items.map((item) => item.slot)).toEqual(["app3", "app4"]);
+  });
+});
+
+describe("brand-profiles stale-sauce-name route", () => {
+  it("does not warn when a shared generic Alfredo sauce recipe exists, but keeps missing recipes visible", async () => {
+    await db.insert(sauceRecipesTable).values([
+      {
+        id: "shared-alfredo",
+        scope: "live",
+        name: "Alfredo Sauce",
+      },
+      {
+        id: "sandbox-ranch",
+        scope: "sandbox",
+        name: "Ranch",
+      },
+    ]);
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [
+        profile({
+          key: "brand-a__alfredo",
+          brand: "Brand A",
+          flavor: "Alfredo",
+          values: { frontlineRecipeName: "Alfredo Sauce" },
+        }),
+        profile({
+          key: "brand-b__alfredo",
+          brand: "Brand B",
+          flavor: "Alfredo",
+          values: { frontlineRecipeName: "alfredo sauce" },
+        }),
+        profile({
+          key: "brand-c__ranch",
+          brand: "Brand C",
+          flavor: "Ranch",
+          values: { frontlineRecipeName: "Ranch" },
+        }),
+      ],
+    });
+
+    const response = await req(OPERATOR, "GET", "/api/brand-profiles/stale-sauce-names");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { items: Array<{ key: string; sauceName: string }> };
+    expect(body.items).toEqual([{ key: "brand-c__ranch", sauceName: "Ranch" }]);
   });
 });
 
