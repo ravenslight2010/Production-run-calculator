@@ -94,7 +94,7 @@ describe("factory data durable write queue", () => {
     releaseFirst?.();
     await flushFactoryQueue();
 
-    expect(bodies.map(({ key, value }))).toEqual([
+    expect(bodies.map(({ key, value }) => ({ key, value }))).toEqual([
       { key: SHIFT_START_TIME_KEY, value: "08:00" },
       { key: SHIFT_START_TIME_KEY, value: "08:30" },
     ]);
