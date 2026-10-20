@@ -484,7 +484,7 @@ import {
   clearPendingImportOperation,
   createImportOperationId,
   ImportOperationError,
-  listPendingImportOperations,
+  readPendingImportOperations,
   retryPendingImportOperation,
 } from "../importOperations";
 import {
@@ -12682,6 +12682,94 @@ export default function Home() {
     }).catch(() => {});
   }
 
+  async function recoverPendingImportBeforeNew(): Promise<boolean> {
+    const pendingState = readPendingImportOperations();
+    if (!pendingState.available) {
+      toast({
+        title: "Import recovery is unavailable",
+        description: "Browser storage is blocked or damaged, so the app cannot verify whether an earlier import is waiting. No new import was started. Enable site storage and reload. If the exact saved request cannot be restored, have a manager compare the server data before starting a new reviewed import.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const pending = pendingState.operations[0];
+    if (!pending) return true;
+
+    const payload = pending.payload && typeof pending.payload === "object"
+      ? pending.payload as Record<string, unknown>
+      : {};
+    const importType = payload.importType;
+    toast({
+      title: "Checking the previous import",
+      description: "The exact saved request will be retried under its original ID before another import can start.",
+    });
+    try {
+      await retryPendingImportOperation(pending.operationId);
+    } catch (err) {
+      if (
+        err instanceof ImportOperationError &&
+        err.status === 409 &&
+        err.message === "STALE_REVIEWED_STATE"
+      ) {
+        clearPendingImportOperation(pending.operationId);
+        const afterClear = readPendingImportOperations();
+        if (!afterClear.available || afterClear.operations.length > 0) {
+          toast({
+            title: "Previous import needs recovery",
+            description: "The server rejected the old review before writing, but the saved recovery record could not be safely cleared. No new import was started. Restore browser storage and retry recovery.",
+            variant: "destructive",
+          });
+          return false;
+        }
+        toast({
+          title: "Previous import was not applied",
+          description: "The server rejected the old review before writing. The selected workbook can now be reviewed as a new import.",
+        });
+        return true;
+      }
+      toast({
+        title: "Previous import needs recovery",
+        description: err instanceof Error
+          ? `${err.message} No new import was started. Keep this browser's storage intact, resolve any access or connection issue, and retry the same saved request.`
+          : "The previous save could not be confirmed. No new import was started.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    let cheeseRefreshFailed = false;
+    if (importType === "cheese") {
+      const changes = payload.changes && typeof payload.changes === "object"
+        ? payload.changes as Record<string, unknown>
+        : {};
+      const cheeseChanges = changes.cheeseRecipes && typeof changes.cheeseRecipes === "object"
+        ? changes.cheeseRecipes as Record<string, unknown>
+        : {};
+      const savedRecipes = Array.isArray(cheeseChanges.upsert)
+        ? cheeseChanges.upsert as CheeseRecipe[]
+        : [];
+      try {
+        await propagateCheeseRecipeUpdates(savedRecipes);
+      } catch {
+        cheeseRefreshFailed = true;
+      }
+    }
+    await Promise.allSettled([
+      cycleCountQc.invalidateQueries(),
+      invalidateMasterDataSlice(cycleCountQc, "mixes"),
+      invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes"),
+    ]);
+    toast({
+      title: "Previous import confirmed",
+      description: cheeseRefreshFailed
+        ? "The server confirmed the exact earlier request. Reload the app before starting another import."
+        : "The server confirmed the exact earlier request. Select the workbook again to start a separate import.",
+      ...(cheeseRefreshFailed ? { variant: "destructive" as const } : {}),
+    });
+    return false;
+  }
+
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
@@ -12698,47 +12786,7 @@ export default function Home() {
       });
       return;
     }
-    const interruptedSpec = listPendingImportOperations().find((pending) =>
-      !!pending.payload &&
-      typeof pending.payload === "object" &&
-      (pending.payload as Record<string, unknown>).importType === "spec",
-    );
-    if (interruptedSpec) {
-      toast({
-        title: "Checking the previous spec import",
-        description: "The exact saved request will be retried under its original ID before a new import can start.",
-      });
-      try {
-        await retryPendingImportOperation(interruptedSpec.operationId);
-        await cycleCountQc.invalidateQueries();
-        toast({
-          title: "Previous spec import confirmed",
-          description: "The exact earlier request was safely retried under its original operation ID. Select the new workbook again to start a separate import.",
-        });
-        return;
-      } catch (err) {
-        if (
-          err instanceof ImportOperationError &&
-          err.status === 409 &&
-          err.message === "STALE_REVIEWED_STATE"
-        ) {
-          clearPendingImportOperation(interruptedSpec.operationId);
-          toast({
-            title: "Previous spec import was not applied",
-            description: "The server rejected the stale review before writing. The selected workbook will now be reviewed as a new import.",
-          });
-        } else {
-          toast({
-            title: "Previous spec import needs recovery",
-            description: err instanceof Error
-              ? `${err.message} No new import was started.`
-              : "The previous save could not be confirmed. No new import was started.",
-            variant: "destructive",
-          });
-          return;
-        }
-      }
-    }
+    if (!(await recoverPendingImportBeforeNew())) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     if (!canImportSpec) {
       toast({
@@ -13567,6 +13615,7 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
+    if (!(await recoverPendingImportBeforeNew())) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
@@ -14053,6 +14102,7 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
     if (files.length === 0) return;
+    if (!(await recoverPendingImportBeforeNew())) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.

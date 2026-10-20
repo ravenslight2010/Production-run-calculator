@@ -35,33 +35,60 @@ export class ImportOperationError extends Error {
 const MAX_PAYLOAD_BYTES = 512_000;
 const PENDING_KEY = "run-calculator.pending-import-operations.v1";
 
-type PendingOperation = { operationId: string; payload: unknown };
-let nonBrowserPending: PendingOperation[] = [];
+export type PendingImportOperation = { operationId: string; payload: unknown };
+export type PendingImportOperationsRead = {
+  available: boolean;
+  operations: PendingImportOperation[];
+};
+let nonBrowserPending: PendingImportOperation[] = [];
 
 function pendingStore(): Storage | null {
   if (typeof window === "undefined") return null;
   try { return window.sessionStorage; } catch { return null; }
 }
 
-function readPending(): PendingOperation[] {
-  if (typeof window === "undefined") return [...nonBrowserPending];
+function readPendingState(): PendingImportOperationsRead {
+  if (typeof window === "undefined") {
+    return { available: true, operations: [...nonBrowserPending] };
+  }
   const store = pendingStore();
-  if (!store) return [];
+  if (!store) return { available: false, operations: [] };
   try {
-    const value = JSON.parse(store.getItem(PENDING_KEY) ?? "[]");
-    return Array.isArray(value) ? value.filter((x): x is PendingOperation =>
-      !!x && typeof x.operationId === "string" && "payload" in x).slice(-12) : [];
-  } catch { return []; }
+    const raw = store.getItem(PENDING_KEY);
+    if (raw === null) return { available: true, operations: [] };
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value)) return { available: false, operations: [] };
+    const valid = value.every((item) =>
+      !!item &&
+      typeof item === "object" &&
+      typeof item.operationId === "string" &&
+      "payload" in item,
+    );
+    if (!valid) return { available: false, operations: [] };
+    return {
+      available: true,
+      operations: (value as PendingImportOperation[]).slice(-12),
+    };
+  } catch {
+    return { available: false, operations: [] };
+  }
 }
 
-function writePending(items: PendingOperation[]): void {
+function readPending(): PendingImportOperation[] {
+  return readPendingState().operations;
+}
+
+function writePending(items: PendingImportOperation[]): void {
   if (typeof window === "undefined") {
     nonBrowserPending = items.slice(-12);
     return;
   }
   const store = pendingStore();
   if (!store) return;
-  try { store.setItem(PENDING_KEY, JSON.stringify(items.slice(-12))); } catch {}
+  try {
+    if (!readPendingState().available) return;
+    store.setItem(PENDING_KEY, JSON.stringify(items.slice(-12)));
+  } catch {}
 }
 
 function rememberPending(operationId: string, payload: unknown): boolean {
@@ -77,8 +104,10 @@ function rememberPending(operationId: string, payload: unknown): boolean {
   const store = pendingStore();
   if (!store) return false;
   try {
+    const state = readPendingState();
+    if (!state.available) return false;
     const items = [
-      ...readPending().filter((x) => x.operationId !== operationId),
+      ...state.operations.filter((x) => x.operationId !== operationId),
       { operationId, payload },
     ].slice(-12);
     store.setItem(PENDING_KEY, JSON.stringify(items));
@@ -94,8 +123,16 @@ export function clearPendingImportOperation(operationId: string): void {
   writePending(readPending().filter((x) => x.operationId !== operationId));
 }
 
-export function listPendingImportOperations(): PendingOperation[] {
+export function listPendingImportOperations(): PendingImportOperation[] {
   return readPending().map((operation) => ({ ...operation }));
+}
+
+export function readPendingImportOperations(): PendingImportOperationsRead {
+  const state = readPendingState();
+  return {
+    available: state.available,
+    operations: state.operations.map((operation) => ({ ...operation })),
+  };
 }
 
 function pendingPayload(operationId: string): unknown {
@@ -165,7 +202,27 @@ async function postOperation<T>(
   // silently substitute the old request if the caller has rebuilt a different
   // review: the server may already have committed the first request, and
   // adopting a projection for a different payload would lose the user's edits.
-  const pending = action === "apply" ? pendingPayload(id) : undefined;
+  const pendingState = action === "apply" ? readPendingState() : null;
+  if (pendingState && !pendingState.available) {
+    throw new ImportOperationError(
+      "Browser storage is unavailable or damaged, so the exact reviewed request cannot be checked. No new import was sent. Enable site storage and reload before recovering or starting another import.",
+      0,
+      id,
+    );
+  }
+  const pending = action === "apply"
+    ? pendingState?.operations.find((item) => item.operationId === id)?.payload
+    : undefined;
+  const earlier = action === "apply"
+    ? pendingState?.operations.find((item) => item.operationId !== id)
+    : undefined;
+  if (action === "apply" && pending === undefined && earlier) {
+    throw new ImportOperationError(
+      "An earlier import is still unconfirmed. Recover its exact saved request before starting another import; no new request was sent.",
+      undefined,
+      earlier.operationId,
+    );
+  }
   if (pending !== undefined && !sameJson(pending, body)) {
     throw new ImportOperationError(
       "An earlier attempt for this import is still unconfirmed. The reviewed changes differ, so no new request was sent. Retry the exact earlier request before starting another import.",
