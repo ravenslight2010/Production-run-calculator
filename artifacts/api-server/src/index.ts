@@ -10,6 +10,7 @@ import {
 } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
+import { classifyBackgroundFailure } from "./lib/backgroundOperations";
 import {
   startAutoTrackServerTicks,
   startDailyRolloverScheduler,
@@ -231,9 +232,17 @@ async function initializeStartup(startedAt: number): Promise<void> {
     ).stop;
     stopWebPushAlertScheduler = startWebPushAlertScheduler().stop;
     stopServerJobWorker = startServerJobWorkerLoop({
-      onError(error, operation) {
+      onError(error, operation, durationMs) {
         logger.error(
-          { err: error, operation, outcome: "degraded", errorCode: `server_job_${operation}_failed` },
+          {
+            err: error,
+            operation,
+            outcome: "degraded",
+            errorCode: `server_job_${operation}_failed`,
+            failureStage: operation,
+            failureReason: classifyBackgroundFailure(error),
+            durationMs,
+          },
           "Server job background task failed",
         );
       },

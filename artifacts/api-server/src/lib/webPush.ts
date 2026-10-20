@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import webpush from "web-push";
 import {
+  boundedDurationMs,
+  classifyBackgroundFailure,
   createBackgroundOperationBackoff,
   runBackgroundOperation,
 } from "./backgroundOperations";
@@ -19,6 +21,7 @@ import {
   markScheduledEvaluationQueueSampleUnavailable,
   registerServerJob,
   sampleScheduledEvaluationQueue,
+  ScheduledEvaluationQueueReadError,
   SCHEDULED_EVALUATION_CANONICAL_ACTOR,
   SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS,
   type ScheduledEvaluationQueueTransition,
@@ -29,6 +32,7 @@ export type WebPushKind = (typeof WEB_PUSH_KINDS)[number];
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_ENDPOINT = 2048;
 const DEFAULT_ALERT_INTERVAL_MS = 60_000;
+const SLOW_QUEUE_SAMPLE_WARNING_MS = 1_000;
 
 export function vapidPublicKey(): string | null {
   const key = process.env.WEB_PUSH_VAPID_PUBLIC_KEY;
@@ -503,11 +507,13 @@ function logScheduledEvaluationQueueTransitions(
 
 export function startWebPushAlertScheduler(options: {
   now?: () => number;
+  monotonicNow?: () => number;
   enqueue?: typeof enqueueScheduledWebPushAlerts;
   sampleQueue?: () => Promise<ScheduledEvaluationQueueTransition>;
 } = {}): WebPushAlertScheduler {
   const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
   const now = options.now ?? Date.now;
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
   const sampleQueue = options.sampleQueue ?? sampleScheduledEvaluationQueue;
   const backoff = createBackgroundOperationBackoff();
@@ -518,6 +524,7 @@ export function startWebPushAlertScheduler(options: {
   const sample = () => {
     if (stopped || monitoring) return;
     monitoring = true;
+    const startedAt = monotonicNow();
     void sampleQueue()
       .then((transition) => {
         if (monitorUnavailable) {
@@ -527,17 +534,33 @@ export function startWebPushAlertScheduler(options: {
           }, "Scheduled evaluation queue monitor recovered");
           monitorUnavailable = false;
         }
-        logScheduledEvaluationQueueTransitions(transition);
-      })
-      .catch(() => {
-        markScheduledEvaluationQueueSampleUnavailable();
-        if (!monitorUnavailable) {
+        const durationMs = transition.sampleTiming?.durationMs ??
+          boundedDurationMs(monotonicNow() - startedAt);
+        if (durationMs >= SLOW_QUEUE_SAMPLE_WARNING_MS) {
           logger.warn({
             event: "scheduled_evaluation_queue_monitor",
-            outcome: "sample_unavailable",
-          }, "Scheduled evaluation queue monitor sample unavailable");
-          monitorUnavailable = true;
+            outcome: "slow_sample",
+            failureStage: "snapshot",
+            durationMs,
+            ...(transition.sampleTiming
+              ? { queryDurationsMs: transition.sampleTiming.queryDurationsMs }
+              : {}),
+          }, "Scheduled evaluation queue monitor sample was slow");
         }
+        logScheduledEvaluationQueueTransitions(transition);
+      })
+      .catch((error: unknown) => {
+        markScheduledEvaluationQueueSampleUnavailable();
+        const readError = error instanceof ScheduledEvaluationQueueReadError ? error : undefined;
+        logger.warn({
+          event: "scheduled_evaluation_queue_monitor",
+          outcome: "sample_unavailable",
+          failureStage: readError?.failureStage ?? "snapshot",
+          failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
+          durationMs: readError?.totalDurationMs ?? boundedDurationMs(monotonicNow() - startedAt),
+          ...(readError ? { queryDurationMs: readError.queryDurationMs } : {}),
+        }, "Scheduled evaluation queue monitor sample unavailable");
+        monitorUnavailable = true;
       })
       .finally(() => { monitoring = false; });
   };
@@ -546,6 +569,7 @@ export function startWebPushAlertScheduler(options: {
     const currentTime = now();
     if (!backoff.isReady(currentTime)) return;
     scheduling = true;
+    const startedAt = monotonicNow();
     // Freeze the bucket input across the retry. A partial first insert near a
     // bucket boundary must converge on the same idempotency keys.
     const scheduledAt = currentTime;
@@ -554,9 +578,15 @@ export function startWebPushAlertScheduler(options: {
       () => enqueue(scheduledAt, interval),
     )
       .then(() => backoff.recordSuccess())
-      .catch(() => {
+      .catch((error: unknown) => {
         backoff.recordFailure(now());
-        logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed");
+        logger.error({
+          event: "web_push_alert_scheduler",
+          outcome: "failed",
+          failureStage: "enqueue",
+          failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
+          durationMs: boundedDurationMs(monotonicNow() - startedAt),
+        }, "Web push alert scheduling failed");
       })
       .finally(() => { scheduling = false; });
   };

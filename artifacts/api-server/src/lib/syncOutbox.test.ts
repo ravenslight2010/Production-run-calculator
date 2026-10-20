@@ -12,15 +12,19 @@ vi.mock("@workspace/db", () => ({
   syncOutboxCursorsTable: {},
   syncOutboxEventsTable: {},
 }));
-vi.mock("./backgroundOperations", () => ({
-  createBackgroundOperationBackoff: () => ({
-    isReady: () => Date.now() >= mocks.backoffUntil,
-    nextRetryAt: () => mocks.backoffUntil,
-    recordSuccess: () => { mocks.backoffUntil = 0; },
-    recordFailure: () => { mocks.backoffUntil = Date.now() + 1000; },
-  }),
-  runBackgroundOperation: async (_name: string, run: () => Promise<void>) => run(),
-}));
+vi.mock("./backgroundOperations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./backgroundOperations")>();
+  return {
+    ...actual,
+    createBackgroundOperationBackoff: () => ({
+      isReady: () => Date.now() >= mocks.backoffUntil,
+      nextRetryAt: () => mocks.backoffUntil,
+      recordSuccess: () => { mocks.backoffUntil = 0; },
+      recordFailure: () => { mocks.backoffUntil = Date.now() + 1000; },
+    }),
+    runBackgroundOperation: async (_name: string, run: () => Promise<void>) => run(),
+  };
+});
 vi.mock("./logger", () => ({ logger: { info: vi.fn(), warn: vi.fn() } }));
 import { clearSyncOutboxProcessCursorsForTests, startSyncOutboxListener, syncOutboxFailureReason } from "./syncOutbox";
 
@@ -58,6 +62,8 @@ describe("durable outbox wake scheduling", () => {
 
   it("schedules a failed pass at its backoff deadline without another notification", async () => {
     let calls = 0;
+    const { logger } = await import("./logger");
+    vi.mocked(logger.warn).mockClear();
     mocks.query.mockImplementation(async () => {
       calls++;
       if (calls === 2) throw Object.assign(new Error("private SQL"), { code: "42501" });
@@ -66,6 +72,17 @@ describe("durable outbox wake scheduling", () => {
     const stop = startSyncOutboxListener(async () => {}, async () => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toBe(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sync_outbox_drain",
+        outcome: "retry",
+        reason: "database-permission",
+        failureStage: "scope-list",
+        durationMs: expect.any(Number),
+      }),
+      expect.any(String),
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("private SQL");
     await vi.advanceTimersByTimeAsync(999);
     expect(calls).toBe(2);
     await vi.advanceTimersByTimeAsync(2);
@@ -78,6 +95,9 @@ describe("durable outbox wake scheduling", () => {
   it("classifies only fixed reasons, including nested database errors", () => {
     expect(syncOutboxFailureReason({ cause: { code: "42501" } })).toBe("database-permission");
     expect(syncOutboxFailureReason({ code: "53300" })).toBe("database-capacity");
+    expect(syncOutboxFailureReason({ code: "57014" })).toBe("database-timeout");
+    expect(syncOutboxFailureReason({ code: "ECONNRESET" })).toBe("database-connection");
+    expect(syncOutboxFailureReason({ code: "40P01" })).toBe("database-conflict");
     expect(syncOutboxFailureReason({ code: "private-user-data" })).toBe("delivery-failed");
     expect(syncOutboxFailureReason(new Error("private SQL"))).toBe("delivery-failed");
   });

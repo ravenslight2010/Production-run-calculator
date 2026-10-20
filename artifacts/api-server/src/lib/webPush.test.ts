@@ -3,6 +3,7 @@ import {
   clearScheduledEvaluationQueueMonitorForTests,
   getScheduledEvaluationQueueDiagnostics,
   getServerJobDefinition,
+  ScheduledEvaluationQueueReadError,
 } from "./serverJobs";
 
 const mocks = vi.hoisted(() => ({
@@ -118,6 +119,79 @@ describe("server web-push alert candidates", () => {
     } finally {
       scheduler.stop();
       clearScheduledEvaluationQueueMonitorForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs a bounded queue-sample stage and timeout class without the error message", async () => {
+    vi.useFakeTimers();
+    clearScheduledEvaluationQueueMonitorForTests();
+    const { logger } = await import("../lib/logger");
+    vi.mocked(logger.warn).mockClear();
+    const sampleQueue = vi.fn().mockRejectedValue(new ScheduledEvaluationQueueReadError(
+      "duplicate_group_scan",
+      80,
+      125,
+      Object.assign(new Error("private query details"), { code: "57014" }),
+    ));
+    const scheduler = startWebPushAlertScheduler({
+      enqueue: async () => ({ examined: 0, enqueued: 0 }),
+      sampleQueue,
+      monotonicNow: () => 500,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "scheduled_evaluation_queue_monitor",
+          outcome: "sample_unavailable",
+          failureStage: "duplicate_group_scan",
+          failureReason: "database-timeout",
+          durationMs: 125,
+          queryDurationMs: 80,
+        }),
+        expect.any(String),
+      );
+      expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("private query details");
+    } finally {
+      scheduler.stop();
+      clearScheduledEvaluationQueueMonitorForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs slow queue samples with per-query timing only", async () => {
+    vi.useFakeTimers();
+    const { logger } = await import("../lib/logger");
+    vi.mocked(logger.warn).mockClear();
+    const sampleQueue = vi.fn().mockResolvedValue({
+      started: [],
+      cleared: [],
+      diagnostics: getScheduledEvaluationQueueDiagnostics(),
+      sampleTiming: {
+        durationMs: 1_250,
+        queryDurationsMs: { status_aggregate: 100, duplicate_group_scan: 1_100 },
+      },
+    });
+    const scheduler = startWebPushAlertScheduler({
+      enqueue: async () => ({ examined: 0, enqueued: 0 }),
+      sampleQueue,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "scheduled_evaluation_queue_monitor",
+          outcome: "slow_sample",
+          durationMs: 1_250,
+          queryDurationsMs: { status_aggregate: 100, duplicate_group_scan: 1_100 },
+        }),
+        expect.any(String),
+      );
+    } finally {
+      scheduler.stop();
       vi.useRealTimers();
     }
   });

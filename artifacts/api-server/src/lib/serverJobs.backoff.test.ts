@@ -42,4 +42,31 @@ describe("server job scheduler backoff", () => {
       loop.stop();
     }
   });
+
+  it("reports the failed worker stage with bounded elapsed time", async () => {
+    vi.useFakeTimers();
+    const failure = new Error("private database details");
+    const onError = vi.fn();
+    const monotonicNow = vi.fn()
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(2_600);
+    backgroundMocks.runBackgroundOperation.mockRejectedValue(failure);
+    const loop = startServerJobWorkerLoop({
+      worker: { runOnce: vi.fn(async () => false) },
+      prune: vi.fn(async () => 0),
+      concurrency: 1,
+      intervalMs: 60_000,
+      pruneIntervalMs: 60_000,
+      now: () => 0,
+      monotonicNow,
+      onError,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onError).toHaveBeenCalledWith(failure, "run", 2_500);
+    } finally {
+      loop.stop();
+    }
+  });
 });
