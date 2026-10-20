@@ -8,8 +8,7 @@ background shell task, with metrics written to a temporary file and read only
 after completion. Keep the observation windows real rather than shortening them
 to fit the command timeout.
 
-**Why:** The master-data idle threshold is three minutes, so a complete
-active → idle → hidden → resumed trace can exceed the five-minute foreground
+**Why:** A complete lifecycle trace can exceed the five-minute foreground
 execution limit even when the app and browser are healthy.
 
 **How to apply:** Start the disposable Playwright harness in the background,
