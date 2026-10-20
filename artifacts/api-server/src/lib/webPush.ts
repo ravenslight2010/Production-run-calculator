@@ -516,7 +516,7 @@ export function startWebPushAlertScheduler(options: {
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
   const sampleQueue = options.sampleQueue ?? sampleScheduledEvaluationQueue;
-  const backoff = createBackgroundOperationBackoff();
+  const backoff = createBackgroundOperationBackoff({ jitter: true });
   let stopped = false;
   let scheduling = false;
   let monitoring = false;

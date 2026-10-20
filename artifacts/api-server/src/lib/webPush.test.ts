@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   elapsed: vi.fn(),
   dbSelect: vi.fn(),
   enqueueServerJob: vi.fn(),
+  backoffOptions: [] as Array<{ jitter?: boolean }>,
 }));
 
 vi.mock("@workspace/db", () => ({
@@ -25,6 +26,16 @@ vi.mock("./serverJobs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./serverJobs")>();
   return { ...actual, enqueueServerJob: mocks.enqueueServerJob };
 });
+vi.mock("./backgroundOperations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./backgroundOperations")>();
+  return {
+    ...actual,
+    createBackgroundOperationBackoff: (options: { jitter?: boolean } = {}) => {
+      mocks.backoffOptions.push(options);
+      return actual.createBackgroundOperationBackoff(options);
+    },
+  };
+});
 
 const {
   alertCandidates,
@@ -37,6 +48,26 @@ const {
 } = await import("./webPush");
 
 describe("server web-push alert candidates", () => {
+  it("uses jittered retry timing for scheduled alert enqueue", async () => {
+    vi.useFakeTimers();
+    mocks.backoffOptions = [];
+    const scheduler = startWebPushAlertScheduler({
+      enqueue: async () => ({ examined: 0, enqueued: 0 }),
+      sampleQueue: async () => ({
+        started: [],
+        cleared: [],
+        diagnostics: getScheduledEvaluationQueueDiagnostics(),
+      }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.backoffOptions).toContainEqual({ jitter: true });
+    } finally {
+      scheduler.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps one scheduling timestamp across a transient connection retry", async () => {
     vi.useFakeTimers();
     const now = vi.fn()

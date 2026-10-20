@@ -10,14 +10,13 @@ import {
 } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
-import { classifyBackgroundFailure } from "./lib/backgroundOperations";
 import {
   startAutoTrackServerTicks,
   startDailyRolloverScheduler,
   stopSyncOutboxFanout,
 } from "./routes/sync";
 import { startWebPushAlertScheduler } from "./lib/webPush";
-import { startServerJobWorkerLoop } from "./lib/serverJobs";
+import { serverJobBackgroundFailureFields, startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
 import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
 import { db, pool } from "@workspace/db";
@@ -234,15 +233,7 @@ async function initializeStartup(startedAt: number): Promise<void> {
     stopServerJobWorker = startServerJobWorkerLoop({
       onError(error, operation, durationMs) {
         logger.error(
-          {
-            err: error,
-            operation,
-            outcome: "degraded",
-            errorCode: `server_job_${operation}_failed`,
-            failureStage: operation,
-            failureReason: classifyBackgroundFailure(error),
-            durationMs,
-          },
+          serverJobBackgroundFailureFields(error, operation, durationMs),
           "Server job background task failed",
         );
       },

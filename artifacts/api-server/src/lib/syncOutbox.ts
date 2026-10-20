@@ -312,7 +312,7 @@ export function startSyncOutboxListener(
   let draining = false;
   let drainRequested = false;
   let retryDelayMs = 500;
-  const drainBackoff = createBackgroundOperationBackoff();
+  const drainBackoff = createBackgroundOperationBackoff({ jitter: true });
   const cursors = processCursors;
   const observeListenerLag = (
     scope: string,
@@ -444,7 +444,7 @@ export function startSyncOutboxListener(
       logger.warn({
         event: "sync_outbox_drain",
         outcome: "retry",
-        reason: syncOutboxFailureReason(error),
+        failureReason: syncOutboxFailureReason(error),
         failureStage,
         durationMs: boundedDurationMs(performance.now() - startedAt),
       }, "Sync outbox drain failed; cursor retained for retry");

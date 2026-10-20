@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   handlers: new Map<string, Function>(),
   client: { on: vi.fn(), removeListener: vi.fn(), release: vi.fn(), query: vi.fn() },
   backoffUntil: 0,
+  backoffOptions: [] as Array<{ jitter?: boolean }>,
 }));
 vi.mock("@workspace/db", () => ({
   pool: { query: mocks.query, connect: async () => mocks.client },
@@ -16,12 +17,15 @@ vi.mock("./backgroundOperations", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./backgroundOperations")>();
   return {
     ...actual,
-    createBackgroundOperationBackoff: () => ({
-      isReady: () => Date.now() >= mocks.backoffUntil,
-      nextRetryAt: () => mocks.backoffUntil,
-      recordSuccess: () => { mocks.backoffUntil = 0; },
-      recordFailure: () => { mocks.backoffUntil = Date.now() + 1000; },
-    }),
+    createBackgroundOperationBackoff: (options: { jitter?: boolean } = {}) => {
+      mocks.backoffOptions.push(options);
+      return {
+        isReady: () => Date.now() >= mocks.backoffUntil,
+        nextRetryAt: () => mocks.backoffUntil,
+        recordSuccess: () => { mocks.backoffUntil = 0; },
+        recordFailure: () => { mocks.backoffUntil = Date.now() + 1000; },
+      };
+    },
     runBackgroundOperation: async (_name: string, run: () => Promise<void>) => run(),
   };
 });
@@ -33,6 +37,7 @@ describe("durable outbox wake scheduling", () => {
     vi.useFakeTimers();
     vi.stubEnv("SYNC_OUTBOX_LISTENER_TEST_ENABLED", "1");
     mocks.backoffUntil = 0;
+    mocks.backoffOptions = [];
     clearSyncOutboxProcessCursorsForTests();
     mocks.handlers.clear();
     mocks.client.on.mockImplementation((name, handler) => { mocks.handlers.set(name, handler); });
@@ -76,7 +81,7 @@ describe("durable outbox wake scheduling", () => {
       expect.objectContaining({
         event: "sync_outbox_drain",
         outcome: "retry",
-        reason: "database-permission",
+        failureReason: "database-permission",
         failureStage: "scope-list",
         durationMs: expect.any(Number),
       }),
@@ -90,6 +95,17 @@ describe("durable outbox wake scheduling", () => {
     stop();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(calls).toBe(3);
+  });
+
+  it("enables bounded jitter for outbox recovery retries", async () => {
+    mocks.query.mockResolvedValue({ rows: [] });
+    const stop = startSyncOutboxListener(async () => {}, async () => {});
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.backoffOptions).toContainEqual({ jitter: true });
+    } finally {
+      stop();
+    }
   });
 
   it("classifies only fixed reasons, including nested database errors", () => {

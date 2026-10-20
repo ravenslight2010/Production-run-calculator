@@ -11,6 +11,7 @@ import type { Scope } from "./requestScope";
 import { pruneServerJobArtifacts } from "./serverJobArtifactCache";
 import {
   boundedDurationMs,
+  classifyBackgroundFailure,
   createBackgroundOperationBackoff,
   isTransientDatabaseConnectionError,
   recordBackgroundOperationFailure,
@@ -855,6 +856,28 @@ export type ServerJobLoop = { stop(): void };
 const boundedInteger = (value: number | undefined, fallback: number, min: number, max: number): number =>
   Number.isFinite(value) ? Math.min(max, Math.max(min, Math.floor(value!))) : fallback;
 
+export function serverJobBackgroundFailureFields(
+  error: unknown,
+  operation: "run" | "prune",
+  durationMs: number,
+): {
+  operation: "run" | "prune";
+  outcome: "degraded";
+  errorCode: string;
+  failureStage: "run" | "prune";
+  failureReason: ReturnType<typeof classifyBackgroundFailure>;
+  durationMs: number;
+} {
+  return {
+    operation,
+    outcome: "degraded",
+    errorCode: `server_job_${operation}_failed`,
+    failureStage: operation,
+    failureReason: classifyBackgroundFailure(error),
+    durationMs: boundedDurationMs(durationMs),
+  };
+}
+
 /**
  * Starts only when the entrypoint calls it after readiness. Timers are unref'd
  * and each tick fills only free slots, so work cannot hold shutdown open or
@@ -868,8 +891,8 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
   const prune = options.prune ?? (() => pruneExpiredServerJobs());
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
-  const runBackoff = createBackgroundOperationBackoff();
-  const pruneBackoff = createBackgroundOperationBackoff();
+  const runBackoff = createBackgroundOperationBackoff({ jitter: true });
+  const pruneBackoff = createBackgroundOperationBackoff({ jitter: true });
   let active = 0;
   let stopped = false;
   let lastPruneAt = 0;
