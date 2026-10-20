@@ -13,6 +13,7 @@ import {
   hashHumanApplyRecord,
   sha256,
 } from "@workspace/distill-dataset";
+import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 
 const systemPrompt = "Synthetic pinned production prompt";
 const contract = {
@@ -31,8 +32,14 @@ const checkedDecision = JSON.parse(
     path.join(workspaceRoot, "docs/evidence/distillation-backfill-decision-2026-10-02.json"),
     "utf8",
   ),
-) as { decision: string; productionSystemPromptSha256: string };
+) as {
+  decision: string;
+  currentParseVersion: string;
+  productionSystemPromptSha256: string;
+};
 assert.equal(checkedDecision.productionSystemPromptSha256, currentProductionContract.systemPromptSha256);
+assert.equal(checkedDecision.currentParseVersion, SPEC_IMPORT_PARSE_VERSION);
+assert.equal(checkedDecision.currentParseVersion, currentProductionContract.currentParseVersion);
 assert.equal(checkedDecision.decision, "no-go");
 
 function makeDecision(decision: "go" | "no-go") {
