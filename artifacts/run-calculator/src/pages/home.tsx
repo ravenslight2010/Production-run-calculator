@@ -17012,7 +17012,7 @@ export default function Home() {
                   {managerAttentionTotal > 0 && (
                     <span
                       aria-label={`${managerAttentionTotal} manager actions need attention`}
-                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-700 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
+                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-800 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
                     >
                       {managerAttentionTotal}
                     </span>
@@ -17029,7 +17029,7 @@ export default function Home() {
                     {managerAttentionTotal > 0 && (
                       <span
                         aria-hidden="true"
-                        className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+                        className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-800 text-white text-[10px] font-bold flex items-center justify-center leading-none"
                       >
                         {managerAttentionTotal}
                       </span>
