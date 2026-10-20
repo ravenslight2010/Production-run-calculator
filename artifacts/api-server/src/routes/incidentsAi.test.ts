@@ -15,6 +15,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  FALLBACK_DIAGNOSIS,
+  sanitizeDiagnosis,
   sanitizeUserInput,
   buildDiagnosisPrompt,
   appendIncidentHistoryBlock,
@@ -23,6 +25,16 @@ import {
   safeIncidentLogMetadata,
 } from "./incidentsAi";
 import type { SimilarIncident } from "./incidentsAi";
+
+describe("legacy diagnosis fallback wording", () => {
+  it("states that the report is logged for manager review without claiming notification", () => {
+    expect(FALLBACK_DIAGNOSIS).toBe(
+      "We couldn't generate an automatic explanation right now, but your report has been logged and is available for manager review.",
+    );
+    expect(FALLBACK_DIAGNOSIS).not.toMatch(/notified|notification/i);
+    expect(sanitizeDiagnosis({}).diagnosis).toBe(FALLBACK_DIAGNOSIS);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // sanitizeUserInput
@@ -356,7 +368,7 @@ describe("incident route rate-limit keys are namespaced independently", () => {
     return { next, status };
   }
 
-  it("exhausting the incident-diagnosis quota does not block the incident-clusters quota", async () => {
+  it("exhausting the incident-report quota does not block the incident-clusters quota", async () => {
     const { MemoryRateLimitStore, rateLimit } = await import("../middlewares/rateLimit");
     const windowMs = 60_000;
     const max = 2;

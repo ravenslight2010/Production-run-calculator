@@ -58,10 +58,9 @@ export async function loadFacilityKnowledge(log: ContextLogger): Promise<Facilit
 // error message/description verbatim) is the only such domain today; a
 // low-privilege user could otherwise use a crash/issue report to plant
 // prompt-injection-style text into every other AI feature's grounding.
-// Incidents.ts already surfaces the same information appropriately — scoped,
-// ranked, and explicitly framed as "similar past reports" rather than
-// confirmed fact — via appendIncidentHistoryBlock, so no functionality is
-// lost by excluding it here.
+// The current incident-report route does not use incident-memory history.
+// Excluding this domain keeps unreviewed report text out of every other AI
+// feature's trusted, general-purpose knowledge block.
 const UNTRUSTED_FREEFORM_DOMAINS = new Set([INCIDENT_MEMORY_DOMAIN]);
 
 // Domains that hold data the raw REST surface (GET /ai-memory/facility)

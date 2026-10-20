@@ -9,12 +9,11 @@ import type { IncidentContext, IncidentRecurrence, IncidentSource } from "../lib
 export const MAX_DIAGNOSIS_CHARS = 1500;
 export const MAX_WORKAROUND_CHARS = 1500;
 
-// Shown to the user (and stored on the incident) when the AI can't be reached or
-// returns something unusable. The incident is still recorded either way, so a
-// manager always sees it — this just keeps the reporter from getting an error on
-// top of an error.
+// Legacy helper copy used when sanitizeDiagnosis receives unusable output. The
+// current POST /incidents route does not generate a diagnosis or call this
+// fallback; it records the report with diagnosis and workaround set to null.
 export const FALLBACK_DIAGNOSIS =
-  "We couldn't generate an automatic explanation right now, but your report has been logged and a manager has been notified.";
+  "We couldn't generate an automatic explanation right now, but your report has been logged and is available for manager review.";
 export const FALLBACK_WORKAROUND =
   "Try the action again. If it keeps happening, refresh or restart the app, check your connection, and let your manager know.";
 
@@ -329,13 +328,8 @@ export function sanitizeDiagnosis(raw: unknown): {
 }
 
 // ---------------------------------------------------------------------------
-// History-aware diagnosis: recurring incidents get better, "we've seen this
-// before" recovery steps. Each diagnosed incident is distilled into a stable
-// signature and written into the shared facility-memory pool (domain below); a
-// new report is matched against that pool so the prompt can be grounded in what
-// resolved the same problem last time, and the reporter/manager get a "seen
-// before" signal. All of this is PURE (no DB / network) so it's easy to unit
-// test; the route owns the actual memory read/write.
+// Legacy history-aware diagnosis helpers. They remain pure and unit-tested, but
+// the current incident-report route does not read or write this history.
 // ---------------------------------------------------------------------------
 
 // Facility-memory domain incidents are recorded under. Distinct from the AI
