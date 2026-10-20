@@ -23,8 +23,58 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/GlanceOverlay.tsx",
 ];
 
+const DEFERRED_HOME_PANEL_NAMES = [
+  "SetupContent",
+  "WarehouseTabContent",
+  "MixesTabContent",
+  "SummaryToolsContent",
+];
+
 function normalize(value) {
   return value.replaceAll("\\", "/");
+}
+
+function staticImportSpecifiers(source) {
+  const specifiers = [];
+  const importPattern =
+    /^\s*import\s+(?!type\b)[\s\S]*?\sfrom\s+["']([^"']+)["']\s*;?/gm;
+  for (const match of source.matchAll(importPattern)) {
+    specifiers.push(match[1]);
+  }
+  return specifiers;
+}
+
+export function checkHomeDeferredSourceBoundary({ homeSource, liveRunSource }) {
+  const liveRunImports = staticImportSpecifiers(liveRunSource);
+  const eagerPanels = DEFERRED_HOME_PANEL_NAMES.filter((name) =>
+    liveRunImports.some(
+      (specifier) =>
+        specifier.split("/").at(-1)?.replace(/\.tsx?$/, "") === name,
+    ),
+  );
+  if (eagerPanels.length > 0) {
+    throw new Error(
+      `LiveRunTabContent statically imports deferred Home panel(s):\n${eagerPanels
+        .map((name) => `- ${name}`)
+        .join("\n")}`,
+    );
+  }
+
+  const missingLoaders = DEFERRED_HOME_PANEL_NAMES.filter((name) => {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return !new RegExp(
+      `\\bimport\\s*\\(\\s*["']\\.\\./components/${escapedName}(?:\\.tsx?)?["']\\s*\\)`,
+    ).test(homeSource);
+  });
+  if (missingLoaders.length > 0) {
+    throw new Error(
+      `Home is missing dynamic imports for deferred panel(s):\n${missingLoaders
+        .map((name) => `- ${name}`)
+        .join("\n")}`,
+    );
+  }
+
+  return { deferredHomePanels: DEFERRED_HOME_PANEL_NAMES.length };
 }
 
 function visitChunks(startFiles, byFile, includeDynamicImports) {

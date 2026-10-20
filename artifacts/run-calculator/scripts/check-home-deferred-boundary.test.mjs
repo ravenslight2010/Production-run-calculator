@@ -1,9 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
+  checkHomeDeferredSourceBoundary,
   checkHomeDeferredBoundary,
   DEFERRED_HOME_MODULE_SUFFIXES,
 } from "./check-home-deferred-boundary.mjs";
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+
+function sourceHome() {
+  return DEFERRED_HOME_MODULE_SUFFIXES.slice(0, 4)
+    .map((suffix) => {
+      const name = path.basename(suffix, ".tsx");
+      return `const load${name} = () => import("../components/${name}");`;
+    })
+    .join("\n");
+}
 
 function validManifest() {
   return {
@@ -32,6 +47,53 @@ function validManifest() {
     },
   };
 }
+
+test("source keeps optional panels dynamically loaded and outside LiveRunTabContent static imports", () => {
+  const homeSource = fs.readFileSync(
+    path.resolve(scriptDir, "../src/pages/home.tsx"),
+    "utf8",
+  );
+  const liveRunSource = fs.readFileSync(
+    path.resolve(
+      scriptDir,
+      "../src/components/live-stations/LiveRunTabContent.tsx",
+    ),
+    "utf8",
+  );
+
+  const result = checkHomeDeferredSourceBoundary({ homeSource, liveRunSource });
+  assert.equal(result.deferredHomePanels, 4);
+});
+
+test("source boundary rejects a deferred panel statically imported by LiveRunTabContent", () => {
+  const liveRunSource =
+    'import SetupContent from "../../components/SetupContent";';
+
+  assert.throws(
+    () =>
+      checkHomeDeferredSourceBoundary({
+        homeSource: sourceHome(),
+        liveRunSource,
+      }),
+    /LiveRunTabContent statically imports deferred Home panel/,
+  );
+});
+
+test("source boundary rejects removal of an existing Home dynamic loader", () => {
+  const homeSource = sourceHome().replace(
+    'const loadMixesTabContent = () => import("../components/MixesTabContent");\n',
+    "",
+  );
+
+  assert.throws(
+    () =>
+      checkHomeDeferredSourceBoundary({
+        homeSource,
+        liveRunSource: "",
+      }),
+    /Home is missing dynamic imports for deferred panel/,
+  );
+});
 
 test("accepts optional Home surfaces reachable only through a dynamic import", () => {
   const result = checkHomeDeferredBoundary(validManifest());
