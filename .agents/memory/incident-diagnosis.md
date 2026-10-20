@@ -1,14 +1,13 @@
 ---
-name: AI incident diagnosis & manager alerts
-description: How report-an-issue + crash capture, server incidents, AI diagnosis, and manager review fit together across web+mobile.
+name: Incident reporting & manager review
+description: How report-an-issue and crash capture are recorded and reviewed across web+mobile.
 ---
 
-# AI incident diagnosis & manager alerts
+# Incident reporting & manager review
 
-Any authed user reports an issue (or an uncaught crash is auto-captured) → a server
-"incident" is persisted → OpenAI returns a plain-language diagnosis + safe workaround
-shown back to the reporter → managers see an incident list + an unreviewed-count nav
-badge and can mark reviewed.
+Any authenticated user can report an issue (or an uncaught crash can be auto-captured).
+The server records the report for managers; it does not generate a diagnosis or
+workaround and does not send a notification. Managers can review and manage incidents.
 
 **Source of truth / where things live:**
 - DB: `incidents` table in lib/db.
@@ -16,7 +15,7 @@ badge and can mark reviewed.
   `IncidentContext`, `UnreviewedCount`; paths POST/GET `/incidents`,
   GET `/incidents/{id}`, POST `/incidents/{id}/review`, POST `/incidents/{id}/resolve`,
   GET `/incidents/unreviewed-count`.
-- Server: src/lib/incidents.ts (CRUD), routes/incidentsAi.ts (prompt + sanitize),
+- Server: src/lib/incidents.ts (CRUD), routes/incidentsAi.ts (validation, redaction),
   routes/incidents.ts (mount + auth/rate-limit).
 
 **Status model (new → reviewed → resolved):** status is `new` | `reviewed` | `resolved`.
@@ -32,8 +31,9 @@ tab components — no server query params. Keep web (IncidentsTab.tsx) + mobile
   + a per-user rate limit. Auto-crash capture also posts here.
 - Manager endpoints (list / get / review / unreviewed-count) are `requireRole` *manager*.
 
-**The AI cannot edit code.** "Fix" = explanation + safe-recovery steps only
-(e.g. restart). Out of scope: email/SMS/push, third-party monitoring.
+New reports are record-first and return null diagnosis, workaround, and recurrence
+fields. Preserve the nullable historical fields and manager review behavior for
+older persisted incidents.
 
 **Crash capture:** both apps wrap the root in an ErrorBoundary whose `onError(error,
 stackTrace)` fires a fire-and-forget `reportIncident({source:"auto_crash", ...})`.
@@ -56,25 +56,7 @@ For tests that MUST go through the rate-limited POST, mint a fresh disposable us
 per test (insert user+role, clearUserValidityCache) so each one's single POST lands
 within its own budget.
 
-**History-aware diagnosis (grounding + write-back):** each report's diagnosis is now
-grounded in recent SIMILAR past incidents pulled from shared facility memory
-(domain `"incidents"`), and every diagnosed incident is written BACK to that memory.
-- Matching is signature-based, NOT free-text: `incidentSignature` = `platform|screen|<sorted-deduped-content-tokens>`; tokens drop stopwords + len<3. So "does"/"the"/"when" never appear in a signature — a seeded memory key must use the *real* signature (e.g. `web|run|button-nothing-save-tap`, not `...button-does-nothing...`) to be an EXACT match. Similarity uses jaccard over signature tokens with `SIMILARITY_THRESHOLD` (~0.34), top `MAX_SIMILAR_INCIDENTS` (3).
-- Recurrence surfaced to reporter + manager: `IncidentRecurrence {count, lastWorkaround}`. `count` = priorExactCount+1 on an exact-key hit, else similar-match count; null when nothing matched. Lives on the Incident DTO + a nullable `recurrence` jsonb column (oneOf w/ `type:"null"` in OpenAPI for both `IncidentDiagnosis` + `Incident`).
-- Write-back is best-effort `recordFacilityKnowledge` (key=signature, source `"incident-diagnosis"`, `.catch` warn) — fire-and-forget, NOT awaited.
-- The general facility-memory block passed to the prompt EXCLUDES the `incidents`
-  domain; that domain is injected separately as a focused "SIMILAR PAST INCIDENTS"
-  history block so prior incidents don't double-appear. This exclusion is now
-  enforced centrally in `aiMemoryContext.ts` (`UNTRUSTED_FREEFORM_DOMAINS`, applied
-  whenever `appendFacilityMemoryBlock`/`groundPromptWithMemory` is called without an
-  explicit `domains` list) rather than per-callsite — it's a security boundary, not
-  just de-duplication: the incident fact embeds up to 200 chars of a reporter's own
-  free text, so folding it into the generic "treat as trusted fact" block used by
-  every OTHER AI route (ask/optimize/forecast/anomalies/schedule-optimize) would let
-  any signed-in user plant prompt-injection text into unrelated AI features. Any
-  future untrusted-freeform domain should be added to that same set.
-- **Test isolation trap:** because write-back is async + unawaited, a prior test's
-  write can land AFTER the next test's `beforeEach` truncate and leak a matching
-  memory row. Don't assert "facility table empty before" or rely on a shared report
-  body for a "no precedent" test — give that test a UNIQUE description (unique tokens →
-  unique signature) so no other test's write-back can match it.
+**Historical AI-memory privacy boundary:** older `"incidents"` facility-memory rows
+may contain reporter-authored free text. Keep that domain excluded from every
+general AI prompt, even for an explicit domain allowlist; do not add a writer or
+history-based diagnosis path without a separate privacy and product review.

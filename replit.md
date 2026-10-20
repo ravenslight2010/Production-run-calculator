@@ -58,7 +58,7 @@
 ## Product
 
 - Pizza production line planning, scheduling, and inventory for floor staff in responsive desktop, phone, and tablet browsers.
-- **AI issue diagnosis & manager alerts:** any signed-in user can report an issue and get an immediate plain-language AI diagnosis plus a safe workaround; uncaught crashes are auto-captured. Each becomes a server-side "incident" with an AI diagnosis. Managers get an incident list, an unreviewed-count nav badge, and can mark incidents reviewed. The AI never edits code — a "fix" is an explanation plus safe-recovery steps. See `.agents/memory/incident-diagnosis.md`.
+- **Issue reporting & manager review:** any signed-in user can submit an issue report, and uncaught crashes are captured as incidents. Reports are recorded for manager review without generated diagnoses, workarounds, or notification delivery. Managers can review and manage incident workflow. See `.agents/memory/incident-diagnosis.md`.
 
 ## User preferences
 

@@ -63,7 +63,7 @@ router.post(
   rateLimit({
     windowMs: REPORT_RATE_WINDOW_MS,
     max: REPORT_RATE_MAX,
-    keyGenerator: (req) => `ai-incident-diagnosis:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) => `incident-report:${req.userId ?? req.ip ?? "unknown"}`,
     store: reportRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -101,12 +101,11 @@ router.post(
       }
     }
 
-    // Generated diagnosis and recurrence were retired. Keep reporting
-    // record-first: persist the incident without invoking an AI provider or
-    // triggering notification delivery.
-    const history = { recurrence: null as null };
+    // Keep reporting record-first: persist null generated fields without
+    // invoking an AI provider or triggering notification delivery.
     const diagnosis = null;
     const workaround = null;
+    const recurrence = null;
 
     const incident = await createIncident({
       source: data.source,
@@ -119,7 +118,7 @@ router.post(
       context,
       diagnosis,
       workaround,
-      recurrence: history.recurrence,
+      recurrence,
     });
     logger.info({
       event: "incident_captured",
@@ -134,7 +133,7 @@ router.post(
       correlationId,
       diagnosis,
       workaround,
-      recurrence: history.recurrence,
+      recurrence,
       aiGenerated: false,
     });
   },

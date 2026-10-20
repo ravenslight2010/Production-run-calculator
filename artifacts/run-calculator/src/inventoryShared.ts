@@ -1477,8 +1477,8 @@ export type ReportIncidentBody = {
     requestHttpStatus?: number;
   };
 };
-// "Seen before" signal: how many prior similar incidents were found and the
-// recovery step that helped previously. Null when the problem has no precedent.
+// Historical recurrence detail retained in the incident API shape. New reports
+// return null for this field because recurrence matching is retired.
 export type IncidentRecurrence = {
   count: number;
   lastWorkaround: string | null;
@@ -1516,8 +1516,8 @@ export type Incident = {
   activity: Array<{ id: string; action: string; detail: string; actorName: string; createdAt: string }>;
 };
 
-// Report a problem (or auto-submit a crash) and get back a plain-language
-// diagnosis + workaround. Allowed for any signed-in user.
+// Report a problem (or auto-submit a crash) and receive the record-first
+// incident receipt. Allowed for any signed-in user.
 export const reportIncident = (body: ReportIncidentBody) =>
   diagnosticIngestionApi<IncidentDiagnosis>("incidents", {
     method: "POST",

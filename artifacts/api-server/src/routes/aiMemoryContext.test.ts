@@ -1,4 +1,4 @@
-// Unit tests for appendFacilityMemoryBlock's privileged-domain gating.
+// Unit tests for privileged-domain gating and historical incident-text privacy.
 //
 // GET /ai-memory/facility gates its response behind `use-ai-tools`, but several
 // AI-prompt routes (ask-the-day chat, end-of-day summary, anomaly narration) are
@@ -18,6 +18,7 @@ const knowledge: FacilityKnowledge[] = [
   fact("forecast", "plan:2026-06-20", "Predicted 300 cases of Tony's Pepperoni"),
   fact("proactive-alerts", "last:pace-stall", "Pace stall nudged twice this week"),
   fact("quality", "note:1", "Cheese moisture ran high on Tuesday"),
+  fact("incidents", "web|run|private", "Reporter-authored text must not reach other AI prompts"),
 ];
 
 describe("appendFacilityMemoryBlock privileged-domain gating", () => {
@@ -33,6 +34,11 @@ describe("appendFacilityMemoryBlock privileged-domain gating", () => {
     expect(out).toContain("Pace stall");
   });
 
+  it("keeps historical free-text incident memory out of generic prompts", () => {
+    const out = appendFacilityMemoryBlock("prompt", knowledge);
+    expect(out).not.toContain("Reporter-authored text");
+  });
+
   it("strips forecast and proactive-alert domains when allowPrivileged is false", () => {
     const out = appendFacilityMemoryBlock("prompt", knowledge, undefined, false);
     expect(out).not.toContain("Tony's Pepperoni");
@@ -41,11 +47,15 @@ describe("appendFacilityMemoryBlock privileged-domain gating", () => {
   });
 
   it("does not gate an explicit domains allowlist even when allowPrivileged is false", () => {
-    // An explicit `domains` filter is an opt-in by the caller (e.g. a route
-    // building its own scoped block), so allowPrivileged only governs the
-    // whole-pool fallback path, not an explicit allowlist.
+    // An explicit allowlist includes privileged facts, but still cannot opt
+    // historical reporter-authored incident text back into an AI prompt.
     const out = appendFacilityMemoryBlock("prompt", knowledge, ["forecast"], false);
     expect(out).toContain("Tony's Pepperoni");
+  });
+
+  it("never includes incident free text through an explicit domain allowlist", () => {
+    const out = appendFacilityMemoryBlock("prompt", knowledge, ["incidents"]);
+    expect(out).toBe("prompt");
   });
 
   it("returns the prompt unchanged when nothing survives filtering", () => {
