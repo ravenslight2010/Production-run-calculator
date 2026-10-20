@@ -42,8 +42,15 @@ type DecisionFile = {
   benchmark: { outcome: string; evidenceSha256: string };
   trainingEvaluation: { outcome: string; evidenceSha256: string };
   datasetSafety: { outcome: string; evidenceSha256: string };
+  maintenanceHistory?: MetadataMaintenanceEntry[];
   reasonCodes?: string[];
   approver?: { role: string; actorIdSha256: string; approvedAt: string };
+};
+
+type MetadataMaintenanceEntry = {
+  date: string;
+  changeType: "metadata-only";
+  note: string;
 };
 
 type RunOptions = {
@@ -127,6 +134,21 @@ function isoDate(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value));
 }
 
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function validateMetadataMaintenanceEntry(value: unknown): value is MetadataMaintenanceEntry {
+  return isRecord(value)
+    && Object.keys(value).length === 3
+    && isCalendarDate(value.date)
+    && value.changeType === "metadata-only"
+    && typeof value.note === "string"
+    && value.note.trim().length > 0;
+}
+
 function isWithin(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
@@ -180,6 +202,13 @@ function validateDecision(value: unknown): DecisionFile {
   if (!isRecord(value) || value.format !== "distill-backfill-decision" || value.version !== 1) {
     throw new Error("decision file must use distill-backfill-decision version 1");
   }
+  if (
+    Object.hasOwn(value, "maintenanceHistory")
+    && (!Array.isArray(value.maintenanceHistory)
+      || !value.maintenanceHistory.every(validateMetadataMaintenanceEntry))
+  ) {
+    throw new Error("decision file maintenanceHistory must contain only dated metadata-only entries");
+  }
   if (value.decision !== "go" && value.decision !== "no-go") {
     throw new Error("decision file must explicitly say go or no-go");
   }
@@ -197,6 +226,20 @@ function validateDecision(value: unknown): DecisionFile {
     throw new Error("decision file is missing pinned evaluation and safety metadata");
   }
   return value as unknown as DecisionFile;
+}
+
+export function appendMetadataMaintenanceEntry(
+  value: unknown,
+  entry: unknown,
+): DecisionFile {
+  const decision = validateDecision(value);
+  if (!validateMetadataMaintenanceEntry(entry)) {
+    throw new Error("metadata maintenance entry must have a date, metadata-only change type, and note");
+  }
+  return {
+    ...decision,
+    maintenanceHistory: [...(decision.maintenanceHistory ?? []), entry],
+  };
 }
 
 function validateGoDecision(
