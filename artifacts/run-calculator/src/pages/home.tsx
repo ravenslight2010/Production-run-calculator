@@ -573,7 +573,7 @@ import {
   collectStaleRecipeLinkNames,
   buildStaleCleanupSuggestions,
 } from "../mergeRecipeNames";
-import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
+import type { MergeSuggestion } from "@workspace/merge-suggest";
 import {
   allergenMeta,
   allergenOptions,
@@ -585,7 +585,7 @@ import {
 } from "@workspace/allergen";
 import {
   suggestMerges,
-  saveMergeAliases,
+  saveConfirmedMergeAliasesBestEffort,
   denyMerge,
   fetchMergedAwayNames,
   saveMergedAwayNames,
@@ -5485,14 +5485,9 @@ export default function Home() {
         const tombSources = Object.keys(map).filter(s => !tombTargets.has(s.trim().toLowerCase()));
         void saveMergedAwayNames(tombSources).catch(() => {});
       }
-      // Persist the confirmed merge as factory-wide learned aliases (best
-      // effort): feeds the AI suggester next time and powers "previously
-      // merged" suggestions. Awaited so the POST completes before we push.
-      try {
-        await saveMergeAliases(collectMergeAliases(srcs, tgt));
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      // Retarget prior ingredient aliases and save direct mappings in the
+      // background; alias persistence must not delay the confirmed merge.
+      void saveConfirmedMergeAliasesBestEffort(srcs, tgt);
       // Also learn spec-import INGREDIENT aliases (all three kinds — the
       // Ingredients merge tab is category-agnostic and the same physical
       // ingredient can appear in dough, sauce and cheese recipe rows) so a
@@ -5698,19 +5693,16 @@ export default function Home() {
             toText: tgt,
           })),
       );
-      // Persist the confirmed merge as a learned alias, scoped to this
+      // Persist the confirmed merge as learned aliases, scoped to this
       // category ("brand", or "flavor" scoped to the one brand it happened
       // within) so it feeds the AI suggester and "previously merged" list for
       // this tab only — never leaking into another brand's flavor pool.
-      try {
-        await saveMergeAliases(
-          collectMergeAliases(srcs, tgt),
-          mergeBfMode === "brands" ? "brand" : "flavor",
-          mergeBfMode === "flavors" ? mergeBfBrand : undefined,
-        );
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      void saveConfirmedMergeAliasesBestEffort(
+        srcs,
+        tgt,
+        mergeBfMode === "brands" ? "brand" : "flavor",
+        mergeBfMode === "flavors" ? mergeBfBrand : undefined,
+      );
       // ALSO learn a spec-import alias: the Excel importers (spec, premix,
       // cheese) canonicalize through the spec-import alias store, not the merge
       // suggester's — without this, re-importing an old workbook resurrects the
@@ -5818,14 +5810,10 @@ export default function Home() {
           .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
           .map((src) => ({ domain: "recipe", fromText: src, toText: tgt })),
       );
-      // Persist the confirmed merge as a learned alias scoped to this recipe-
+      // Persist the confirmed merge as learned aliases scoped to this recipe-
       // name category so it feeds the AI suggester and "previously merged"
       // list for this tab's own pool only.
-      try {
-        await saveMergeAliases(collectMergeAliases(Object.keys(map), tgt), category);
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      void saveConfirmedMergeAliasesBestEffort(Object.keys(map), tgt, category);
       // Advance the edit stamp on every run the merge re-pointed, so the push
       // below strictly wins the per-run lost-update guard on the server and every
       // peer. Without this, a stale remote payload carrying the pre-merge recipe

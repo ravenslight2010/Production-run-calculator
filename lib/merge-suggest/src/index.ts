@@ -81,6 +81,48 @@ export function collectMergeAliases(sources: string[], target: string): MergeAli
 }
 
 /**
+ * Build the alias writes implied by a confirmed merge, including prior aliases
+ * that currently point at one of the names being retired. Direct source aliases
+ * take precedence when an external name already has a mapping.
+ */
+export function retargetMergeAliases(
+  existing: MergeAlias[],
+  sources: string[],
+  target: string,
+): MergeAlias[] {
+  const canonical = (target ?? "").trim();
+  if (!canonical) return [];
+
+  const mergedNames = new Set(
+    (sources ?? [])
+      .map((source) => norm(source ?? ""))
+      .filter((source) => source && source !== norm(canonical)),
+  );
+  const byExternalName = new Map<string, MergeAlias>();
+
+  for (const alias of existing ?? []) {
+    const externalName = (alias?.externalName ?? "").trim();
+    const canonicalName = (alias?.canonicalName ?? "").trim();
+    const externalKey = norm(externalName);
+    if (
+      !externalKey
+      || !canonicalName
+      || externalKey === norm(canonical)
+      || externalKey === norm(canonicalName)
+      || !mergedNames.has(norm(canonicalName))
+    ) {
+      continue;
+    }
+    byExternalName.set(externalKey, { externalName, canonicalName: canonical });
+  }
+
+  for (const alias of collectMergeAliases(sources, canonical)) {
+    byExternalName.set(norm(alias.externalName), alias);
+  }
+  return [...byExternalName.values()];
+}
+
+/**
  * Re-derive "previously merged" suggestions purely from learned aliases and the
  * CURRENT set of names. A remembered source still present in `names` is proposed
  * for merge into its canonical target ONLY when that target also still exists
