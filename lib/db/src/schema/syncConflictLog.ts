@@ -1,6 +1,5 @@
 import {
   pgTable,
-  serial,
   text,
   timestamp,
   jsonb,
@@ -21,7 +20,7 @@ import { z } from "zod/v4";
 export const syncConflictLogsTable = pgTable(
   "sync_conflict_logs",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     date: text("date").notNull(), // YYYY-MM-DD (the day the sync occurred)
     fieldsWithConflicts: jsonb("fields_with_conflicts")

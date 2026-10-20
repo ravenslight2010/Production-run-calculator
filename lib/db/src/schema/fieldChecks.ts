@@ -3,7 +3,6 @@ import {
   jsonb,
   integer,
   pgTable,
-  serial,
   text,
   timestamp,
   uniqueIndex,
@@ -17,7 +16,7 @@ import {
 export const fieldCheckObservationsTable = pgTable(
   "field_check_observations",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     observationId: text("observation_id").notNull(),
     checkName: text("check_name").notNull(),
@@ -50,7 +49,7 @@ export const fieldCheckObservationsTable = pgTable(
 export const fieldCheckIssuesTable = pgTable(
   "field_check_issues",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     checkName: text("check_name").notNull(),
     status: text("status").notNull().default("open"),

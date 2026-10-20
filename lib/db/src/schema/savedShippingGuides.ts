@@ -1,4 +1,4 @@
-import { pgTable, serial, text, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
 
 // Saved shipping & palletizing guides. When the deterministic Shipping &
 // Palletizing Guide importer commits, a snapshot of the REVIEWED rows (each a
@@ -11,7 +11,7 @@ import { pgTable, serial, text, jsonb, timestamp } from "drizzle-orm/pg-core";
 // Shared factory-wide across all signed-in users, like saved spec sheets.
 // `scope` isolates the sandbox account from live.
 export const savedShippingGuidesTable = pgTable("saved_shipping_guides", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   label: text("label").notNull(),
   // Stable per-file identity (normalized uploaded filename) so retention keeps

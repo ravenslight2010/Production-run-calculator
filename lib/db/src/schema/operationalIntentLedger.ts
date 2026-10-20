@@ -2,11 +2,11 @@ import {
   jsonb,
   numeric,
   pgTable,
-  serial,
   text,
   timestamp,
   uniqueIndex,
   index,
+  integer,
 } from "drizzle-orm/pg-core";
 
 /** Non-expiring idempotency fence for offline production commands. */
@@ -18,7 +18,7 @@ export const operationalIntentLedgerTable = pgTable("operational_intent_ledger",
   // with its idempotency unique key. Do not replace/add a primary key during a
   // rolling schema update. PostgreSQL's serial sequence supplies increasing
   // values for newly compacted receipts.
-  sequence: serial("sequence").notNull(),
+  sequence: integer("sequence").notNull().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull(),
   date: text("date").notNull(),
   intentId: text("intent_id").notNull(),

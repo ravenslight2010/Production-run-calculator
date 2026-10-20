@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -13,7 +13,7 @@ import { z } from "zod/v4";
 // case-insensitively) and `itemKey` is the inventory item key it resolves to.
 // `scope` isolates the sandbox account's aliases from live.
 export const photoAliasesTable = pgTable("photo_aliases", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   guessName: text("guess_name").notNull(),
   itemKey: text("item_key").notNull(),

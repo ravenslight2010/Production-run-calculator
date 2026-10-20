@@ -1,6 +1,5 @@
 import {
   pgTable,
-  serial,
   text,
   integer,
   timestamp,
@@ -12,7 +11,7 @@ import {
 export const actionItemsTable = pgTable(
   "action_items",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     dedupKey: text("dedup_key").notNull(),
     category: text("category").notNull(),

@@ -1,4 +1,4 @@
-import { index, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { index, pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 
 // Bounded, payload-free events used to aggregate cache maintenance failures
 // across API instances. Retention and the per-scope event cap are enforced by
@@ -6,7 +6,7 @@ import { index, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 export const cacheMaintenanceEventsTable = pgTable(
   "cache_maintenance_events",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull(),
     operation: text("operation").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
