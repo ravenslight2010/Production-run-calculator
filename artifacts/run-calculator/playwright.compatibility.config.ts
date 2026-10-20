@@ -84,6 +84,15 @@ export default defineConfig({
       },
     },
     {
+      name: "desktop-webkit",
+      testMatch: "release-webkit-smoke.spec.ts",
+      grepInvert: /recovers a failed sync pull/,
+      use: {
+        ...devices["Desktop Safari"],
+        launchOptions: webkitLaunchOptions(),
+      },
+    },
+    {
       name: "phone-webkit",
       testMatch: "release-webkit-smoke.spec.ts",
       // The dedicated WebKit command owns the full sync-recovery contract.
@@ -103,6 +112,16 @@ export default defineConfig({
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 810, height: 1080 },
+        launchOptions: webkitLaunchOptions(),
+      },
+    },
+    {
+      name: "tablet-landscape-webkit",
+      testMatch: "release-webkit-smoke.spec.ts",
+      grepInvert: /recovers a failed sync pull/,
+      use: {
+        ...devices["Desktop Safari"],
+        viewport: { width: 1024, height: 768 },
         launchOptions: webkitLaunchOptions(),
       },
     },
