@@ -119,6 +119,43 @@ describe("browser incident capture", () => {
     uninstall();
   });
 
+  it("filters only classified auth lifecycle cancellations and keeps unexplained cancellations actionable", () => {
+    const uninstall = installBrowserFailureCapture();
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
+        operationCategory: "authentication",
+        requestRoute: "authentication",
+        requestOutcome: "cancelled",
+        cancellationClassification: "expected_auth_lifecycle",
+        elapsedMs: 46,
+        observedAt: "2026-10-20T15:27:52.000Z",
+        backgroundObserved: false,
+        connectivity: "online",
+      },
+    }));
+    expect(reportIncident).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
+        operationCategory: "authentication",
+        requestRoute: "authentication",
+        requestOutcome: "cancelled",
+        elapsedMs: 47,
+        observedAt: "2026-10-20T15:27:53.000Z",
+        backgroundObserved: false,
+        connectivity: "online",
+      },
+    }));
+    expect(reportIncident).toHaveBeenCalledOnce();
+    expect(reportIncident).toHaveBeenCalledWith(expect.objectContaining({
+      errorMessage: "API request cancelled",
+      diagnostics: expect.objectContaining({ requestOutcome: "cancelled" }),
+    }));
+    expect(reportIncident.mock.calls[0]?.[0].diagnostics).not.toHaveProperty("correlationId");
+    expect(JSON.stringify(reportIncident.mock.calls)).not.toMatch(/private|abort reason/);
+    uninstall();
+  });
+
   it("does not submit browser incidents from read-only station displays", async () => {
     window.history.replaceState({}, "", "/?screen=dashboard");
     await reportBrowserFailure("api_failure", new Error("sync unavailable"));

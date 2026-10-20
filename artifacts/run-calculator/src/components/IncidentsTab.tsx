@@ -168,7 +168,7 @@ function IncidentRow({
             </div>
           )}
           <div className="rounded-md border border-border bg-muted/20 p-2 text-xs text-muted-foreground">
-            <p><span className="font-semibold text-foreground">Diagnostic reference:</span>{" "}
+            <p><span className="font-semibold text-foreground">Incident reference:</span>{" "}
               <code className="select-all">{ctx.correlationId ?? "Unavailable for older reports"}</code>
             </p>
             {ctx.relatedCorrelationId && (
@@ -213,7 +213,11 @@ function IncidentRow({
               {" "}{ctx.connectivity ?? "unknown connection"} · {ctx.syncState ?? "unknown sync"} ·
               {" "}{ctx.browserFamily ?? incident.appPlatform}/{ctx.deviceClass ?? "unknown device"} · build {incident.appVersion ?? "unknown"}
             </p>
-            <p className="mt-1">Next step: retry once; if it repeats, reload or update the app, then give this reference to a developer.</p>
+            <p className="mt-1">
+              {ctx.requestOutcome === "cancelled"
+                ? "Next step: this request ended before a response, so it does not show that the server rejected the session. If it happened during sign-in, sign-out, or an account switch, no action is needed. Otherwise, review the available diagnostics if it recurs; the cancellation source is unknown."
+                : "Next step: retry once; if it repeats, reload or update the app, then give this reference to a developer."}
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">
             <label className="text-xs text-muted-foreground">Priority

@@ -69,6 +69,7 @@ export function installBrowserFailureCapture(): () => void {
   const apiFailure = (event: Event) => {
     const detail = (event as CustomEvent<ApiFailureEvent>).detail;
     if (!detail?.requestOutcome || !detail.operationCategory) return;
+    if (detail.cancellationClassification === "expected_auth_lifecycle") return;
     const kind = detail.operationCategory === "sync" ? "sync" : "api_failure";
     const errorMessage = detail.httpStatus !== undefined
       ? `API ${detail.httpStatus}`

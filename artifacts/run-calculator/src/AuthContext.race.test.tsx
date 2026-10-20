@@ -50,6 +50,7 @@ vi.mock("./masterData", async (importOriginal) => {
 
 import { AuthProvider } from "./AuthContext";
 import { InventoryApiError } from "./inventoryShared";
+import { fetchWithDiagnostics } from "./performanceDiagnostics";
 import { useAuth } from "./useAuth";
 
 const manager: StaffMember = {
@@ -207,6 +208,99 @@ describe("AuthProvider session transition", () => {
     );
     expect(screen.getByTestId("identity").textContent).not.toBe("manager-1");
     expect(readCachedProfileBlobs(PROFILE_KEY).dough).toBe('{"lineSpeed":20}');
+  });
+
+  it("classifies a probe cancelled by the auth cache reset as expected lifecycle work", async () => {
+    const failures: CustomEvent[] = [];
+    const listener = (event: Event) => failures.push(event as CustomEvent);
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })) as unknown as typeof fetch);
+    mocks.fetchMe.mockImplementation((signal?: AbortSignal) =>
+      fetchWithDiagnostics("/api/me", { signal }),
+    );
+    mocks.signInRequest.mockResolvedValue({ token: "ignored", user: manager });
+
+    try {
+      renderAuth();
+      await waitFor(() => expect(mocks.fetchMe).toHaveBeenCalledTimes(1));
+      await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      await screen.findByText("manager-1");
+      await waitFor(() => expect(failures).toHaveLength(1));
+
+      expect(failures[0]?.detail).toMatchObject({
+        requestRoute: "authentication",
+        requestOutcome: "cancelled",
+        cancellationClassification: "expected_auth_lifecycle",
+      });
+      expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("identity").textContent).toBe("manager-1");
+    } finally {
+      window.removeEventListener("app:api-failure", listener);
+    }
+  });
+
+  it("classifies the session-probe deadline as timeout", async () => {
+    vi.useFakeTimers();
+    const failures: CustomEvent[] = [];
+    const listener = (event: Event) => failures.push(event as CustomEvent);
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })) as unknown as typeof fetch);
+    mocks.fetchMe.mockImplementation((signal?: AbortSignal) =>
+      fetchWithDiagnostics("/api/me", { signal }),
+    );
+
+    try {
+      renderAuth();
+      await vi.waitFor(() => expect(mocks.fetchMe).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(8_000);
+      await Promise.resolve();
+
+      expect(failures).toHaveLength(1);
+      expect(failures[0]?.detail).toMatchObject({
+        requestRoute: "authentication",
+        requestOutcome: "timeout",
+      });
+      expect(failures[0]?.detail).not.toHaveProperty("cancellationClassification");
+    } finally {
+      cleanup();
+      window.removeEventListener("app:api-failure", listener);
+      vi.useRealTimers();
+    }
+  });
+
+  it("classifies an auth-probe cancellation on provider unmount as expected lifecycle work", async () => {
+    const failures: CustomEvent[] = [];
+    const listener = (event: Event) => failures.push(event as CustomEvent);
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })) as unknown as typeof fetch);
+    mocks.fetchMe.mockImplementation((signal?: AbortSignal) =>
+      fetchWithDiagnostics("/api/me", { signal }),
+    );
+
+    try {
+      renderAuth();
+      await waitFor(() => expect(mocks.fetchMe).toHaveBeenCalledTimes(1));
+      cleanup();
+      await waitFor(() => expect(failures).toHaveLength(1));
+
+      expect(failures[0]?.detail).toMatchObject({
+        requestRoute: "authentication",
+        requestOutcome: "cancelled",
+        cancellationClassification: "expected_auth_lifecycle",
+      });
+      expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("app:api-failure", listener);
+    }
   });
 
   it("retries a transient startup probe and reaches the authenticated shell", async () => {
