@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "kind": "prepared-build-source",
-  "appBuildId": "app-build:7149f21d-11f1-49c2-97c3-47a810b9519d",
+  "appBuildId": "app-build:c2bb2bab-e959-489a-a67a-79ad2523e8ab",
   "sourcePolicy": "production-source-v3",
-  "sourceFingerprintSha256": "68c2f8d6cda8435c2898ea305c492b0b271ae8bebde16507dd3060798caeba09",
-  "gitRevision": "5b314ab30e3f80bafffb0d753a4c9a050d409470",
+  "sourceFingerprintSha256": "0da05f84d1cedabd691bf3e2208ce88f1bb6081392dcfd00fa8b4d0bffd837d9",
+  "gitRevision": "2470e95e9c1dc2d72b1cd2b970e5081c821506c8",
   "gitBinding": "verified",
-  "preparedAt": "2026-10-20T17:11:03.949Z",
+  "preparedAt": "2026-10-20T17:13:45.950Z",
   "mode": "publish"
 }
