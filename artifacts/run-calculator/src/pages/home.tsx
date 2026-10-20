@@ -17251,7 +17251,11 @@ export default function Home() {
               <DropdownMenuContent align="end">
                 {canViewManagerAttention && (
                   <DropdownMenuItem
-                    aria-label="Manager attention"
+                    aria-label={
+                      managerAttentionTotal > 0
+                        ? `Manager attention — ${managerAttentionTotal} manager actions need attention`
+                        : "Manager attention"
+                    }
                     onClick={() => setShowManagerAttention(true)}
                   >
                     <AlertTriangle className="w-4 h-4 mr-2" /> Manager attention

@@ -107,6 +107,110 @@ test("manager-attention header and More-menu badges meet small-text contrast", a
   }
 });
 
+test("manager-attention badges show full counts at desktop, phone, and tablet widths", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(120_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  let mockedAttentionCount = 1;
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_manager_attention_counts"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    await page.route("**/api/incidents/actionable-count", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ count: mockedAttentionCount }),
+      }));
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+
+    const viewports = [
+      { name: "desktop", width: 1440, height: 1000 },
+      { name: "phone", width: 390, height: 844 },
+      { name: "tablet portrait", width: 768, height: 1024 },
+      { name: "tablet landscape", width: 1024, height: 768 },
+    ] as const;
+
+    for (const count of [1, 42, 123]) {
+      mockedAttentionCount = count;
+      const countResponse = page.waitForResponse(
+        (response) => response.url().includes("/api/incidents/actionable-count"),
+        { timeout: 25_000 },
+      );
+      if (page.url() === "about:blank") {
+        await page.goto("/", { waitUntil: "domcontentloaded" });
+      } else {
+        await page.reload({ waitUntil: "domcontentloaded" });
+      }
+      const response = await countResponse;
+      expect(response.ok(), `mocked count endpoint for ${count}`).toBe(true);
+      expect(await response.json()).toEqual({ count });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+      for (const viewport of viewports) {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        const headerBadge = page.getByLabel(
+          `${count} manager actions need attention`,
+          { exact: true },
+        );
+        await expect(headerBadge, `header badge at ${viewport.name}`).toBeVisible();
+        await expect(headerBadge).toHaveText(String(count));
+        await expectBadgeFitsViewport(headerBadge, `header badge at ${viewport.name}`);
+
+        await page.getByRole("button", { name: /^More/ }).click();
+        const accessibleMenuName =
+          `Manager attention — ${count} manager actions need attention`;
+        const menuItem = page.getByRole("menuitem", {
+          name: accessibleMenuName,
+          exact: true,
+        });
+        await expect(menuItem, `accessible menu item at ${viewport.name}`).toBeVisible();
+        const menuBadge = menuItem.locator('span[aria-hidden="true"]');
+        await expect(menuBadge, `visual menu badge at ${viewport.name}`).toBeVisible();
+        await expect(menuBadge).toHaveText(String(count));
+        await expectBadgeFitsViewport(menuBadge, `menu badge at ${viewport.name}`);
+        await page.keyboard.press("Escape");
+      }
+    }
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
+async function expectBadgeFitsViewport(locator: Locator, label: string): Promise<void> {
+  const bounds = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: rect.x,
+      y: rect.y,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(bounds.width, `${label} has a rendered width`).toBeGreaterThan(0);
+  expect(bounds.height, `${label} has a rendered height`).toBeGreaterThan(0);
+  expect(bounds.scrollWidth, `${label} text is not clipped horizontally`)
+    .toBeLessThanOrEqual(bounds.clientWidth);
+  expect(bounds.x, `${label} remains inside the left viewport edge`).toBeGreaterThanOrEqual(0);
+  expect(bounds.y, `${label} remains inside the top viewport edge`).toBeGreaterThanOrEqual(0);
+  expect(bounds.right, `${label} remains inside the right viewport edge`)
+    .toBeLessThanOrEqual(bounds.viewportWidth);
+  expect(bounds.bottom, `${label} remains inside the bottom viewport edge`)
+    .toBeLessThanOrEqual(bounds.viewportHeight);
+}
+
 test("manager setup stays usable when recipe names are incomplete", async ({
   page,
   playwright,
