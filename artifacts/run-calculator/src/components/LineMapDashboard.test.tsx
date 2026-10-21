@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import type { ScheduledDay } from "../scheduledDays";
+import { todayStr } from "../utils";
 
 const mocks = vi.hoisted(() => ({
   useHomeTabCtx: vi.fn(),
@@ -20,7 +22,11 @@ type Lifecycle = "pending" | "running" | "paused" | "ended";
 
 function renderLineMap(
   runStatus: Lifecycle,
-  options: { currentRun?: object | null; active?: boolean } = {},
+  options: {
+    currentRun?: object | null;
+    active?: boolean;
+    scheduledDays?: ScheduledDay[];
+  } = {},
 ) {
   const active = options.active ?? false;
   mocks.useHomeTabCtx.mockReturnValue({
@@ -44,6 +50,7 @@ function renderLineMap(
     currentRun: options.currentRun === undefined ? {} : options.currentRun,
     dayState: {},
     runStatus,
+    scheduledDays: options.scheduledDays ?? [],
     activePackagingRows: [],
     activeWarehouseRows: [],
     navigate: vi.fn(),
@@ -66,6 +73,16 @@ function renderLineMap(
   });
 
   return render(<LineMapDashboard />);
+}
+
+function dateOffset(days: number): string {
+  const date = new Date(`${todayStr()}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function expectZoneStatus(zoneName: RegExp, label: string) {
@@ -133,8 +150,73 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     renderLineMap("pending", { currentRun: null });
 
     expect(screen.getByText("NO ACTIVE RUN")).toBeTruthy();
+    expect(screen.getByText("Start a run to see the line map")).toBeTruthy();
     expectZoneStatus(/Press \/ Oven/, "Idle");
     expectZoneStatus(/Freeze Tunnel/, "Idle");
     expectZoneStatus(/Packaging/, "Idle");
+  });
+
+  it("previews the earliest named run in the upcoming schedule", () => {
+    renderLineMap("pending", {
+      currentRun: null,
+      scheduledDays: [
+        {
+          date: dateOffset(4),
+          runCount: 1,
+          runs: [{
+            id: "later-run",
+            brand: "Later Brand",
+            flavor: "Later Flavor",
+            casesNeeded: 100,
+            dieType: "",
+          }],
+        },
+        {
+          date: dateOffset(-1),
+          runCount: 1,
+          runs: [{
+            id: "past-run",
+            brand: "Past Brand",
+            flavor: "Past Flavor",
+            casesNeeded: 100,
+            dieType: "",
+          }],
+        },
+        {
+          date: dateOffset(1),
+          runCount: 2,
+          runs: [
+            {
+              id: "next-run",
+              brand: "Next Brand",
+              flavor: "Classic",
+              casesNeeded: 100,
+              dieType: "",
+            },
+            {
+              id: "same-day-later-run",
+              brand: "Same Day Later",
+              flavor: "Flavor",
+              casesNeeded: 100,
+              dieType: "",
+            },
+          ],
+        },
+      ],
+    });
+
+    const preview = screen.getByTestId("line-map-next-scheduled-run");
+    expect(preview.textContent).toContain("Next scheduled run: Next Brand – Classic");
+    expect(preview.textContent).not.toContain("Past Brand");
+    expect(preview.textContent).not.toContain("Later Brand");
+    expect(preview.textContent).not.toContain("Same Day Later");
+    expect(screen.getByText("Start a run to see the line map")).toBeTruthy();
+  });
+
+  it("keeps the empty-state guidance when no schedule is available", () => {
+    renderLineMap("pending", { currentRun: null, scheduledDays: [] });
+
+    expect(screen.getByText("Start a run to see the line map")).toBeTruthy();
+    expect(screen.queryByTestId("line-map-next-scheduled-run")).toBeNull();
   });
 });

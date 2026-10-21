@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
-import { fmtCountdownParts, fmtNum } from "../utils";
+import { fmtCountdownParts, fmtNum, todayStr } from "../utils";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import type { HomeTab } from "../hooks/useHomeNavigation";
+import type { ScheduledDay, ScheduledRun } from "../scheduledDays";
 import {
   Layers, Droplets, Flame, Boxes, Snowflake, Package, Warehouse,
   ArrowRight, Play, Pause, Square, Clock, AlertTriangle,
@@ -21,6 +22,48 @@ const ZONE_COLORS = {
 } as const;
 
 type ZoneId = keyof typeof ZONE_COLORS;
+type ScheduledRunPreview = { date: string; run: ScheduledRun };
+
+function isValidScheduleDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
+function findNextScheduledRun(
+  days: ScheduledDay[] | undefined,
+  today: string,
+): ScheduledRunPreview | null {
+  if (!Array.isArray(days)) return null;
+
+  const orderedDays = [...days]
+    .filter((day) => isValidScheduleDate(day.date) && day.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  for (const day of orderedDays) {
+    const run = day.runs.find(
+      (candidate) => candidate.brand.trim() || candidate.flavor.trim(),
+    );
+    if (run) return { date: day.date, run };
+  }
+
+  return null;
+}
+
+function formatScheduleDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(year, month - 1, day, 12));
+}
+
+function scheduledRunLabel(run: ScheduledRun): string {
+  return [run.brand.trim(), run.flavor.trim()].filter(Boolean).join(" – ");
+}
 
 interface ZoneStatus {
   id: ZoneId;
@@ -62,7 +105,10 @@ function statusBadge(status: ZoneStatus["status"]) {
 }
 
 export default function LineMapDashboard() {
-  const { v, ve, currentRun, dayState, runStatus, activePackagingRows, activeWarehouseRows } = useHomeTabCtx();
+  const {
+    v, ve, currentRun, dayState, runStatus, activePackagingRows,
+    activeWarehouseRows, scheduledDays, navigate,
+  } = useHomeTabCtx();
   const {
     calc, nowTime, elapsedBatchSec,
     liveFreezerMin, casesPct, casesFreezerPct, casesPctWithFreezer,
@@ -70,7 +116,10 @@ export default function LineMapDashboard() {
     autoTrackProgress, autoTrackSuggestion,
   } = useLiveRun();
 
-  const navigate = useHomeTabCtx().navigate ?? (() => {});
+  const goToTab = navigate ?? (() => {});
+  const nextScheduledRun = !currentRun
+    ? findNextScheduledRun(scheduledDays, todayStr())
+    : null;
 
   const zones = useMemo<ZoneStatus[]>(() => {
     const isRunning = runStatus === "running";
@@ -205,8 +254,8 @@ export default function LineMapDashboard() {
       <div className="relative">
         {/* Top row: Dough → Sauce → Press/Oven → Frontline */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-0">
-          {zones.slice(0, 4).map((zone, i) => (
-            <ZoneCard key={zone.id} zone={zone} onClick={() => navigate(zone.navTab)} />
+          {zones.slice(0, 4).map((zone) => (
+            <ZoneCard key={zone.id} zone={zone} onClick={() => goToTab(zone.navTab)} />
           ))}
         </div>
 
@@ -220,7 +269,7 @@ export default function LineMapDashboard() {
         {/* Bottom row: Warehouse ← Packaging ← Freeze Tunnel */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {zones.slice(4).map((zone) => (
-            <ZoneCard key={zone.id} zone={zone} onClick={() => navigate(zone.navTab)} />
+            <ZoneCard key={zone.id} zone={zone} onClick={() => goToTab(zone.navTab)} />
           ))}
         </div>
       </div>
@@ -247,6 +296,15 @@ export default function LineMapDashboard() {
         <div className="text-center py-8 text-muted-foreground">
           <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-sm">Start a run to see the line map</p>
+          {nextScheduledRun && (
+            <p
+              className="mt-2 text-sm font-medium text-foreground"
+              data-testid="line-map-next-scheduled-run"
+            >
+              Next scheduled run: {scheduledRunLabel(nextScheduledRun.run)} ·{" "}
+              {formatScheduleDate(nextScheduledRun.date)}
+            </p>
+          )}
         </div>
       )}
     </div>
