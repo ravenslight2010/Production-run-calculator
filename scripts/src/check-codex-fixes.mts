@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 export type FixHistoryFindingCategory =
   | "infrastructure identifier"
   | "deployment image tag"
-  | "actionable operational watch detail";
+  | "actionable operational watch detail"
+  | "contact detail";
 
 export type FixHistoryFinding = {
   line: number;
@@ -22,6 +23,10 @@ const deploymentImageReference =
   /\b(?:FROM|(?:container\s+)?image)\s*(?:=|:)?\s*([a-z0-9][a-z0-9._/-]*:[a-z0-9][a-z0-9._-]*)/gi;
 const actionableWatchDetail =
   /\b(?:monitor(?:ing)?|watch(?:dog|er|ing)?|alert(?:ing)?|pager)\b.{0,180}\b(?:\d+\s*(?:ms|s|sec(?:ond)?s?|min(?:ute)?s?|h(?:our)?s?)|threshold|cutoff|limit|trigger|table|row|scope|queue|metric)\b/i;
+const emailAddress =
+  /(?<![\w.+-])[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\b/i;
+const phoneNumber =
+  /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?!\w)|(?<!\w)\d{3}[-.]\d{4}(?!\w)/;
 
 function isPrivateOrLocalIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
@@ -69,13 +74,17 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
         category: "actionable operational watch detail",
       });
     }
+
+    if (emailAddress.test(line) || phoneNumber.test(line)) {
+      findings.push({ line: index + 1, category: "contact detail" });
+    }
   }
 
   return findings;
 }
 
 export async function main(): Promise<void> {
-  // This deliberately reads one current file. It does not inspect Git history.
+  // This deliberately reads one current file. It does not inspect or remove Git history.
   const targetPath = resolve(
     import.meta.dirname,
     "../..",
@@ -86,7 +95,7 @@ export async function main(): Promise<void> {
 
   if (findings.length > 0) {
     console.error(
-      "Fix-history check failed (current text only; Git history is not scanned):",
+      "Fix-history check failed (current text only; Git history is not inspected or removed):",
     );
     for (const finding of findings) {
       console.error(formatFixHistoryFinding(finding));
@@ -96,14 +105,14 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "Fix-history check passed (current text only; Git history is not scanned).",
+    "Fix-history check passed (current text only; Git history is not inspected or removed).",
   );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
   main().catch(() => {
     console.error(
-      "Fix-history check failed: could not read the current fix-history note.",
+      "Fix-history check failed: could not read the current fix-history note (current text only; Git history is not inspected or removed).",
     );
     process.exitCode = 1;
   });

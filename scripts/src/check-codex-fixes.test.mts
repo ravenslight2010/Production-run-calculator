@@ -49,12 +49,40 @@ test("flags private infrastructure, deployment image tags, and actionable watch 
   }
 });
 
+test("flags email addresses and phone numbers by category and line without echoing values", () => {
+  const email = "staff.member@example.invalid";
+  const secondEmail = "ops@example.test";
+  const phone = "+1 (202) 555-0147";
+  const localPhone = "555-0147";
+  const content = [
+    `Contact the team at ${email}.`,
+    `Send an update to ${secondEmail}.`,
+    `Call ${phone} if the station is unavailable.`,
+    `The local contact number is ${localPhone}.`,
+  ].join("\n");
+
+  const findings = findFixHistoryDetails(content);
+  assert.deepEqual(findings, [
+    { line: 1, category: "contact detail" },
+    { line: 2, category: "contact detail" },
+    { line: 3, category: "contact detail" },
+    { line: 4, category: "contact detail" },
+  ]);
+
+  const diagnostic = findings.map(formatFixHistoryFinding).join("\n");
+  for (const matchedValue of [email, secondEmail, phone, localPhone]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
 test("allows generic lessons and the known harmless public API endpoint", () => {
   const content = [
     "A bounded retry preserves the original error for diagnosis.",
     "The public endpoint is https://generativelanguage.googleapis.com.",
     "A container build uses a supported runtime image.",
     "Operational checks should report a category and line, not matched text.",
+    "Node 22.4.1 supports API v2; the local development server uses port 8080.",
+    "The review date is 2026-10-21, and the parser recognizes RFC 5322 syntax.",
   ].join("\n");
 
   assert.deepEqual(findFixHistoryDetails(content), []);
