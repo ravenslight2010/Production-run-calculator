@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "pretest": "pnpm run test:publication-authority",
     "sse-capacity-report": "tsx ./src/sse-capacity-report.mts",
     "audit:source-snapshot": "tsx ./src/capture-source-audit-snapshot.mts",
     "audit:source-compare": "tsx ./src/compare-source-audit.mts",
@@ -48,6 +49,8 @@
     "test:operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.test.mts",
     "check:audit-protection-config": "node ./src/check-audit-protection-config.mjs",
     "test:audit-protection-config": "node --test ./src/check-audit-protection-config.test.mjs",
+    "check:publication-authority": "tsx ./src/check-release-publication-authority.mts",
+    "test:publication-authority": "tsx --test ./src/check-release-publication-authority.test.mts && pnpm run check:publication-authority",
     "check:app-dependencies": "node ./src/check-app-dependencies.mjs",
     "check:app-dependencies:strict": "node ./src/check-app-dependencies.mjs --strict",
     "test:app-dependencies": "node --test ./src/check-app-dependencies.test.mjs && pnpm run check:app-dependencies:strict",
