@@ -718,7 +718,6 @@ export const undoImportOperationPathOperationIdMax = 120;
 export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
-
 /**
  * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
  * @summary Immutable application build version
@@ -754,7 +753,7 @@ export const HealthCheckResponse = zod.object({
   "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
   "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
   "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
-}).catchall(zod.enum(['ok', 'warning', 'error', 'pending'])).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
   "capabilities": zod.object({
   "ai": zod.object({
   "status": zod.enum(['configured', 'not_configured', 'pending']),
@@ -786,7 +785,7 @@ export const ReadinessCheckResponse = zod.object({
   "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
   "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
   "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
-}).catchall(zod.enum(['ok', 'warning', 'error', 'pending'])).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
   "capabilities": zod.object({
   "ai": zod.object({
   "status": zod.enum(['configured', 'not_configured', 'pending']),
@@ -809,9 +808,6 @@ export const ReadinessCheckResponse = zod.object({
  * Creates a new username + password account. Requires a facility access code (configured server-side out of band and shared only with legitimate staff) — sign-up is otherwise closed to the public internet. The very first account ever created becomes a manager; all later accounts default to operator.
  * @summary Create a staff account and start a session
  */
-
-
-
 
 
 export const SignUpBody = zod.object({
@@ -846,9 +842,6 @@ export const SignUpResponse = zod.object({
  */
 
 
-
-
-
 export const AcceptStaffInvitationBody = zod.object({
   "invitation": zod.string().min(acceptStaffInvitationBodyInvitationMin).max(acceptStaffInvitationBodyInvitationMax),
   "username": zod.string().min(acceptStaffInvitationBodyUsernameMin).max(acceptStaffInvitationBodyUsernameMax),
@@ -881,7 +874,6 @@ export const AcceptStaffInvitationResponse = zod.object({
  */
 
 
-
 export const CheckUsernameAvailableQueryParams = zod.object({
   "username": zod.coerce.string().min(1).max(checkUsernameAvailableQueryUsernameMax)
 })
@@ -894,8 +886,6 @@ export const CheckUsernameAvailableResponse = zod.object({
 /**
  * @summary Sign in with username and password
  */
-
-
 
 
 export const SignInBody = zod.object({
@@ -935,8 +925,6 @@ export const SignOutResponse = zod.void()
  */
 
 
-
-
 export const ChangePasswordBody = zod.object({
   "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
   "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
@@ -968,7 +956,6 @@ export const ChangePasswordResponse = zod.object({
  */
 
 
-
 export const ForgotPasswordBody = zod.object({
   "username": zod.string().min(1).max(forgotPasswordBodyUsernameMax)
 })
@@ -982,9 +969,6 @@ export const ForgotPasswordResponse = zod.object({
  * Verifies the single-use, short-lived code a manager issued for the account and, if valid and unexpired, replaces the password. The code is consumed on success so it can never be reused.
  * @summary Complete a password reset using a manager-issued code
  */
-
-
-
 
 
 export const ResetPasswordBody = zod.object({
@@ -1595,10 +1579,6 @@ export const UpdateInventorySettingsResponse = zod.object({
  */
 
 
-
-
-
-
 export const IdentifyInventoryPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
   "mimeType": zod.string().optional().describe('Image MIME type, e.g. image/jpeg'),
@@ -1677,7 +1657,6 @@ export const ProductionSheetPhotoResponse = zod.object({
  * Transcribes one or more photographed spec-sheet or recipe pages into bounded workbook-style text. The result is advisory and must be sent through the existing spec import review before anything is changed.
  * @summary Read photographed spec sheets into workbook text (AI vision); read-only
  */
-
 
 
 export const ParseSpecImagesBody = zod.object({
@@ -1801,7 +1780,6 @@ export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem
  */
 
 
-
 export const GetQcTargetsQueryParams = zod.object({
   "profileKey": zod.coerce.string().min(1).max(getQcTargetsQueryProfileKeyMax)
 })
@@ -1826,11 +1804,6 @@ export const GetQcTargetsResponse = zod.object({
  * Manager-only, append-only target setting. A null target, unit, and tolerance together clear the override and restore spec-import resolution.
  * @summary Add a reviewed QC target override or clear an existing override
  */
-
-
-
-
-
 
 
 export const SetQcTargetBody = zod.object({
@@ -1870,10 +1843,6 @@ export const SetQcTargetResponse = zod.object({
  */
 
 
-
-
-
-
 export const RecordQcLotBody = zod.object({
   "operationId": zod.uuid(),
   "runId": zod.string().min(1).max(recordQcLotBodyRunIdMax),
@@ -1908,11 +1877,6 @@ export const RecordQcLotResponse = zod.object({
  * The server resolves and snapshots the target. Missing, conflicting, or unit-mismatched targets produce not-evaluated, never an inferred result. Out-of-tolerance results require a note.
  * @summary Record a pre-run or 30-minute ingredient weight check
  */
-
-
-
-
-
 
 
 export const RecordQcWeightCheckBody = zod.object({
@@ -1953,10 +1917,6 @@ export const RecordQcWeightCheckResponse = zod.object({
  */
 
 
-
-
-
-
 export const RecordQcComponentCheckBody = zod.object({
   "operationId": zod.uuid(),
   "runId": zod.string().min(1).max(recordQcComponentCheckBodyRunIdMax),
@@ -1995,14 +1955,9 @@ export const RecordQcComponentCheckResponse = zod.object({
  */
 
 
-
 export const GetQcRunParams = zod.object({
   "runId": zod.coerce.string().min(1).max(getQcRunPathRunIdMax)
 })
-
-
-
-
 
 
 export const GetQcRunResponse = zod.object({
@@ -2152,17 +2107,6 @@ export const GetQcAllergenActivityResponse = zod.object({
  */
 
 
-
-
-
-
-
-
-
-
-
-
-
 export const RecordQcAllergenReviewBody = zod.object({
   "operationId": zod.uuid(),
   "runId": zod.string().min(1).max(recordQcAllergenReviewBodyRunIdMax),
@@ -2212,8 +2156,6 @@ export const RecordQcAllergenReviewResponse = zod.object({
  */
 
 
-
-
 export const RecordQcCleaningBody = zod.object({
   "operationId": zod.uuid(),
   "runId": zod.string().min(1).max(recordQcCleaningBodyRunIdMax),
@@ -2249,12 +2191,9 @@ export const RecordQcCleaningResponse = zod.object({
  */
 
 
-
 export const VerifyQcCleaningParams = zod.object({
   "eventId": zod.coerce.number().int().min(1)
 })
-
-
 
 
 export const VerifyQcCleaningBody = zod.object({
@@ -2289,8 +2228,6 @@ export const VerifyQcCleaningResponse = zod.object({
  */
 
 
-
-
 export const SignoffQcRunBody = zod.object({
   "operationId": zod.uuid(),
   "runId": zod.string().min(1).max(signoffQcRunBodyRunIdMax),
@@ -2322,10 +2259,6 @@ export const SignoffQcRunResponse = zod.object({
  * QC staff see corrected/redacted record markers, but correction and redaction action rows omit their actor IDs and payloads. Live-scope QC managers may inspect the recorded actor and reason only; replacement values and redacted source values remain hidden.
  * @summary Read bounded, facility-scoped QC history
  */
-
-
-
-
 
 
 export const GetQcHistoryQueryParams = zod.object({
@@ -2367,8 +2300,6 @@ export const GetQcHistoryResponse = zod.object({
  */
 
 
-
-
 export const ExportQcHistoryCsvQueryParams = zod.object({
   "from": zod.coerce.string().optional(),
   "to": zod.coerce.string().optional(),
@@ -2385,12 +2316,9 @@ export const ExportQcHistoryCsvResponse = zod.unknown()
  */
 
 
-
 export const CorrectQcEventParams = zod.object({
   "eventId": zod.coerce.number().int().min(1)
 })
-
-
 
 
 export const CorrectQcEventBody = zod.object({
@@ -2425,13 +2353,9 @@ export const CorrectQcEventResponse = zod.object({
  */
 
 
-
 export const RedactQcEventParams = zod.object({
   "eventId": zod.coerce.number().int().min(1)
 })
-
-
-
 
 
 export const RedactQcEventBody = zod.object({
@@ -2467,10 +2391,6 @@ export const RedactQcEventResponse = zod.object({
  */
 
 
-
-
-
-
 export const WasteInsightBody = zod.object({
   "plannedItems": zod.array(zod.object({
   "key": zod.string().max(wasteInsightBodyPlannedItemsItemKeyMax),
@@ -2503,7 +2423,7 @@ export const WasteInsightResponse = zod.object({
  */
 export const OperationsSpecReconciliationBody = zod.object({
   "specSheetId": zod.int().describe('The id of the saved spec sheet to check against'),
-  "currentRecipes": zod.array(zod.looseObject({
+  "currentRecipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
   "name": zod.string(),
   "rows": zod.array(zod.object({
@@ -2511,7 +2431,7 @@ export const OperationsSpecReconciliationBody = zod.object({
   "lbs": zod.number()
 }))
 }).describe('A single recipe (dough/sauce/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough/sauce/cheese)'),
-  "currentProfiles": zod.array(zod.looseObject({
+  "currentProfiles": zod.array(zod.object({
   "brand": zod.string(),
   "flavor": zod.string(),
   "dieType": zod.string().optional(),
@@ -2630,7 +2550,6 @@ export const OperationsRecapResponse = zod.object({
  */
 
 
-
 export const ExportOperationalReportBody = zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string().describe('ISO date, or week-ending date for a weekly report'),
@@ -2644,8 +2563,6 @@ export const ExportOperationalReportBody = zod.object({
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
-
-
 
 
 export const ExportOperationalReportResponse = zod.object({
@@ -2723,7 +2640,6 @@ export const ExportOperationalReportResponse = zod.object({
  */
 
 
-
 export const FinalizeOperationalReportBody = zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string().describe('ISO date, or week-ending date for a weekly report'),
@@ -2737,8 +2653,6 @@ export const FinalizeOperationalReportBody = zod.object({
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
-
-
 
 
 export const FinalizeOperationalReportResponse = zod.object({
@@ -2861,7 +2775,6 @@ export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOp
  */
 
 
-
 export const SearchFinalizedOperationalReportsQueryParams = zod.object({
   "startDate": zod.date(),
   "endDate": zod.date(),
@@ -2893,8 +2806,6 @@ export const SearchFinalizedOperationalReportsResponse = zod.array(SearchFinaliz
 export const GetFinalizedOperationalReportParams = zod.object({
   "id": zod.uuid()
 })
-
-
 
 
 export const GetFinalizedOperationalReportResponse = zod.object({
@@ -3374,10 +3285,6 @@ export const AiParseSpecSheetBody = zod.object({
 })
 
 
-
-
-
-
 export const AiParseSpecSheetResponse = zod.object({
   "profiles": zod.array(zod.object({
   "brand": zod.string(),
@@ -3539,10 +3446,6 @@ export const DeleteDeniedMergesResponse = zod.object({
  */
 
 
-
-
-
-
 export const ListDuplicateReviewsResponse = zod.object({
   "groups": zod.array(zod.object({
   "groupKey": zod.string().min(1).max(listDuplicateReviewsResponseGroupsItemGroupKeyMax),
@@ -3562,10 +3465,6 @@ export const ListDuplicateReviewsResponse = zod.object({
  */
 
 
-
-
-
-
 export const SaveDuplicateReviewsBody = zod.object({
   "groups": zod.array(zod.object({
   "groupKey": zod.string().min(1).max(saveDuplicateReviewsBodyGroupsItemGroupKeyMax),
@@ -3576,11 +3475,6 @@ export const SaveDuplicateReviewsBody = zod.object({
   "status": zod.enum(['pending', 'resolved', 'ignored'])
 })).max(saveDuplicateReviewsBodyGroupsMax)
 })
-
-
-
-
-
 
 
 export const SaveDuplicateReviewsResponse = zod.object({
@@ -3602,16 +3496,10 @@ export const SaveDuplicateReviewsResponse = zod.object({
  */
 
 
-
 export const ResolveDuplicateReviewBody = zod.object({
   "groupKey": zod.string().min(1).max(resolveDuplicateReviewBodyGroupKeyMax),
   "outcome": zod.enum(['resolved', 'ignored'])
 })
-
-
-
-
-
 
 
 export const ResolveDuplicateReviewResponse = zod.object({
@@ -3826,9 +3714,6 @@ export const DeleteFreezerPullItemsResponse = zod.object({
  */
 
 
-
-
-
 export const ListFreezerSurplusResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.string(),
@@ -3857,23 +3742,12 @@ export const ListFreezerSurplusResponse = zod.object({
  */
 
 
-
-
-
 export const ConfirmFreezerSurplusBody = zod.object({
   "brand": zod.string().min(1).max(confirmFreezerSurplusBodyBrandMax),
   "flavor": zod.string().max(confirmFreezerSurplusBodyFlavorMax),
   "productionDate": zod.coerce.date(),
   "cases": zod.int().min(1).max(confirmFreezerSurplusBodyCasesMax)
 })
-
-
-
-
-
-
-
-
 
 
 export const ConfirmFreezerSurplusResponse = zod.object({
@@ -3925,8 +3799,6 @@ export const ConfirmFreezerSurplusResponse = zod.object({
  */
 
 
-
-
 export const ListFreezerSurplusAdjustmentsResponse = zod.object({
   "adjustments": zod.array(zod.object({
   "eventId": zod.uuid(),
@@ -3947,16 +3819,9 @@ export const ListFreezerSurplusAdjustmentsResponse = zod.object({
  */
 
 
-
 export const ReplaceFreezerSurplusAllocationParams = zod.object({
   "runId": zod.coerce.string().min(1).max(replaceFreezerSurplusAllocationPathRunIdMax)
 })
-
-
-
-
-
-
 
 
 export const ReplaceFreezerSurplusAllocationBody = zod.object({
@@ -3968,14 +3833,6 @@ export const ReplaceFreezerSurplusAllocationBody = zod.object({
   "cases": zod.int().min(1).max(replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax)
 })).max(replaceFreezerSurplusAllocationBodyAllocationsMax)
 })
-
-
-
-
-
-
-
-
 
 
 export const ReplaceFreezerSurplusAllocationResponse = zod.object({
@@ -4027,14 +3884,9 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
  */
 
 
-
 export const RecordFreezerSurplusAdjustmentParams = zod.object({
   "lotId": zod.coerce.string().min(1).max(recordFreezerSurplusAdjustmentPathLotIdMax)
 })
-
-
-
-
 
 
 export const RecordFreezerSurplusAdjustmentBody = zod.object({
@@ -4045,14 +3897,6 @@ export const RecordFreezerSurplusAdjustmentBody = zod.object({
   "runId": zod.string().min(1).max(recordFreezerSurplusAdjustmentBodyRunIdMax).optional(),
   "correctsEventId": zod.uuid().optional()
 }).describe('runId is required only for eventType=return. correctsEventId is required only for eventType=correction. Both are rejected for incompatible event types.')
-
-
-
-
-
-
-
-
 
 
 export const RecordFreezerSurplusAdjustmentResponse = zod.object({
@@ -4104,11 +3948,6 @@ export const RecordFreezerSurplusAdjustmentResponse = zod.object({
  */
 
 
-
-
-
-
-
 export const ListMixSurplusResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.string(),
@@ -4149,22 +3988,11 @@ export const ListMixSurplusResponse = zod.object({
  */
 
 
-
-
 export const RecordMixSurplusBody = zod.object({
   "mixId": zod.string().min(1).max(recordMixSurplusBodyMixIdMax),
   "productionDate": zod.coerce.date(),
   "amountMade": zod.number().gt(recordMixSurplusBodyAmountMadeExclusiveMin)
 })
-
-
-
-
-
-
-
-
-
 
 
 export const RecordMixSurplusResponse = zod.object({
@@ -4223,10 +4051,6 @@ export const ReplaceMixSurplusAllocationsParams = zod.object({
 })
 
 
-
-
-
-
 export const ReplaceMixSurplusAllocationsBody = zod.object({
   "runDate": zod.coerce.date(),
   "allocations": zod.array(zod.object({
@@ -4234,15 +4058,6 @@ export const ReplaceMixSurplusAllocationsBody = zod.object({
   "amount": zod.number().min(replaceMixSurplusAllocationsBodyAllocationsItemAmountMin)
 })).max(replaceMixSurplusAllocationsBodyAllocationsMax)
 })
-
-
-
-
-
-
-
-
-
 
 
 export const ReplaceMixSurplusAllocationsResponse = zod.object({
@@ -4298,19 +4113,9 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
  */
 
 
-
 export const VoidMixSurplusLotParams = zod.object({
   "id": zod.coerce.string().min(1).max(voidMixSurplusLotPathIdMax)
 })
-
-
-
-
-
-
-
-
-
 
 
 export const VoidMixSurplusLotResponse = zod.object({
@@ -4621,7 +4426,6 @@ export const SaveRunTemplatesBody = zod.object({
 })
 
 
-
 export const SaveRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -4640,9 +4444,6 @@ export const SaveRunTemplatesResponse = zod.object({
  * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
  * @summary Tombstone run templates by id and revision
  */
-
-
-
 
 
 export const DeleteRunTemplatesBody = zod.union([zod.object({
@@ -4664,7 +4465,6 @@ export const DeleteRunTemplatesBody = zod.union([zod.object({
 })).optional().describe('Deletion tombstones to apply by id and revision'),
   "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
 })).describe('Revisioned deletion tombstones and/or legacy template ids. At least one of `items` or `ids` must be supplied.')
-
 
 
 export const DeleteRunTemplatesResponse = zod.object({
@@ -5674,45 +5474,6 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
  */
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export const GetPublishedSourceLibraryReconciliationCaptureResponse = zod.object({
   "verifier": zod.enum(['source-library-reconciliation']),
   "environment": zod.enum(['release']),
@@ -5805,13 +5566,8 @@ export const GetPublishedSourceLibraryReconciliationCaptureResponse = zod.object
  */
 
 
-
-
-
-
-
 export const CaptureSourceLibraryReconciliationBody = zod.object({
-  "deploymentHandoff": zod.looseObject({
+  "deploymentHandoff": zod.object({
   "schemaVersion": zod.literal(2),
   "kind": zod.enum(['published-source-deployment-handoff']),
   "deploymentId": zod.string().min(1).max(captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax),
@@ -5828,46 +5584,6 @@ export const CaptureSourceLibraryReconciliationBody = zod.object({
 }).describe('Fresh published schema-v2 source deployment handoff, independently validated by the server.'),
   "expectedDatabaseOwner": zod.string().min(1).max(captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerMax).regex(captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerRegExp)
 })
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const CaptureSourceLibraryReconciliationResponse = zod.object({
@@ -5962,20 +5678,6 @@ export const CaptureSourceLibraryReconciliationResponse = zod.object({
  */
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export const GetPublishedSourceLibraryReconciliationDiagnosticsResponse = zod.object({
   "verifier": zod.enum(['source-library-reconciliation-diagnostics']),
   "environment": zod.enum(['release']),
@@ -6017,34 +5719,6 @@ export const GetPublishedSourceLibraryReconciliationDiagnosticsResponse = zod.ob
 /**
  * @summary Read the manager data-health workspace
  */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const GetProfileDataHealthWorkspaceResponse = zod.object({
@@ -6190,17 +5864,6 @@ export const ListAuditLogsQueryParams = zod.object({
   "limit": zod.coerce.number().int().optional().describe('Maximum 200 rows per page; defaults to 100.'),
   "cursor": zod.coerce.string().optional().describe('Opaque stable cursor, limited to 200 characters.')
 })
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const ListAuditLogsResponse = zod.object({
@@ -6385,7 +6048,7 @@ export const ListSpecSheetsResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6402,7 +6065,7 @@ export const SaveSpecSheetBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older/mobile clients (they share a legacy bucket).'),
   "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot\'s parse instead of re-running the AI. Omitted by older/mobile clients.'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6416,7 +6079,7 @@ export const SaveSpecSheetResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6439,7 +6102,7 @@ export const DeleteSpecSheetResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6459,7 +6122,7 @@ export const ListShippingGuidesResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6485,7 +6148,7 @@ export const SaveShippingGuideBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct guide.'),
   "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes.'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6508,7 +6171,7 @@ export const SaveShippingGuideResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6540,7 +6203,7 @@ export const DeleteShippingGuideResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.looseObject({
+  "data": zod.object({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6568,7 +6231,7 @@ export const ListPremixSheetsResponse = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.array(zod.looseObject({
+  "data": zod.array(zod.object({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6597,7 +6260,7 @@ export const ListPremixSheetsResponse = zod.object({
 export const SavePremixSheetBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older/mobile clients (they share a legacy bucket).'),
-  "data": zod.array(zod.looseObject({
+  "data": zod.array(zod.object({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6623,7 +6286,7 @@ export const SavePremixSheetResponse = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.array(zod.looseObject({
+  "data": zod.array(zod.object({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6775,7 +6438,7 @@ export const DeletePremixSheetResponse = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.array(zod.looseObject({
+  "data": zod.array(zod.object({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6800,7 +6463,6 @@ export const DeletePremixSheetResponse = zod.object({
 /**
  * @summary List the authenticated user's retained server jobs
  */
-
 
 
 export const ListServerJobsResponseItem = zod.object({
@@ -6831,16 +6493,12 @@ export const ListServerJobsResponse = zod.array(ListServerJobsResponseItem)
  */
 
 
-
-
 export const CreateServerJobBody = zod.object({
   "type": zod.string().regex(createServerJobBodyTypeRegExp),
   "idempotencyKey": zod.string().min(createServerJobBodyIdempotencyKeyMin).max(createServerJobBodyIdempotencyKeyMax),
   "input": zod.unknown().optional(),
   "snapshotId": zod.string().max(createServerJobBodySnapshotIdMax).optional()
 })
-
-
 
 
 export const CreateServerJobResponse = zod.object({
@@ -6873,8 +6531,6 @@ export const GetServerJobParams = zod.object({
 })
 
 
-
-
 export const GetServerJobResponse = zod.object({
   "id": zod.uuid(),
   "type": zod.string(),
@@ -6901,16 +6557,6 @@ export const GetServerJobResponse = zod.object({
  * Manager-only and live-scope only. Creating a plan does not alter server jobs. The returned digest must be explicitly approved by a manager before any deletion.
  * @summary Create a bounded, read-only manifest for exact duplicate scheduled jobs
  */
-
-
-
-
-
-
-
-
-
-
 
 
 export const CreateScheduledJobCleanupPlanResponse = zod.object({
@@ -6952,15 +6598,10 @@ export const ApplyScheduledJobCleanupPlanParams = zod.object({
 })
 
 
-
-
 export const ApplyScheduledJobCleanupPlanBody = zod.object({
   "manifestDigest": zod.string().regex(applyScheduledJobCleanupPlanBodyManifestDigestRegExp),
   "reason": zod.string().min(applyScheduledJobCleanupPlanBodyReasonMin).max(applyScheduledJobCleanupPlanBodyReasonMax)
 })
-
-
-
 
 
 export const ApplyScheduledJobCleanupPlanResponse = zod.object({
@@ -6976,8 +6617,6 @@ export const ApplyScheduledJobCleanupPlanResponse = zod.object({
 export const CancelServerJobParams = zod.object({
   "id": zod.uuid()
 })
-
-
 
 
 export const CancelServerJobResponse = zod.object({
@@ -7012,8 +6651,6 @@ export const ListImportHistoryQueryParams = zod.object({
 })
 
 
-
-
 export const ListImportHistoryResponse = zod.object({
   "imports": zod.array(zod.object({
   "id": zod.int(),
@@ -7022,7 +6659,7 @@ export const ListImportHistoryResponse = zod.object({
   "sourceLabel": zod.string(),
   "customerScope": zod.string().nullish(),
   "status": zod.enum(['complete', 'partial', 'failed']),
-  "summary": zod.looseObject({
+  "summary": zod.object({
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(listImportHistoryResponseImportsItemSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7043,7 +6680,6 @@ export const ListImportHistoryResponse = zod.object({
  */
 
 
-
 export const RecordImportHistoryBody = zod.object({
   "importType": zod.enum(['spec', 'premix', 'cheese', 'sauce', 'dough', 'schedule', 'shipping', 'recipe']),
   "sourceKey": zod.string().optional(),
@@ -7051,7 +6687,7 @@ export const RecordImportHistoryBody = zod.object({
   "customerScope": zod.string().optional(),
   "status": zod.enum(['complete', 'partial', 'failed']),
   "operationId": zod.string().describe('Client-generated idempotency key for safely retrying an audit write.'),
-  "summary": zod.looseObject({
+  "summary": zod.object({
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryBodySummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7063,8 +6699,6 @@ export const RecordImportHistoryBody = zod.object({
 })
 
 
-
-
 export const RecordImportHistoryResponse = zod.object({
   "import": zod.object({
   "id": zod.int(),
@@ -7073,7 +6707,7 @@ export const RecordImportHistoryResponse = zod.object({
   "sourceLabel": zod.string(),
   "customerScope": zod.string().nullish(),
   "status": zod.enum(['complete', 'partial', 'failed']),
-  "summary": zod.looseObject({
+  "summary": zod.object({
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryResponseImportSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7231,11 +6865,6 @@ export const SavePhotoAliasesResponse = zod.object({
  */
 
 
-
-
-
-
-
 export const SubmitFieldCheckObservationsBody = zod.object({
   "observations": zod.array(zod.object({
   "observationId": zod.string().min(submitFieldCheckObservationsBodyObservationsItemObservationIdMin).max(submitFieldCheckObservationsBodyObservationsItemObservationIdMax),
@@ -7251,9 +6880,6 @@ export const SubmitFieldCheckObservationsBody = zod.object({
 })
 
 
-
-
-
 export const SubmitFieldCheckObservationsResponse = zod.object({
   "accepted": zod.int().min(submitFieldCheckObservationsResponseAcceptedMin),
   "duplicate": zod.int().min(submitFieldCheckObservationsResponseDuplicateMin)
@@ -7266,14 +6892,10 @@ export const SubmitFieldCheckObservationsResponse = zod.object({
  */
 
 
-
 export const GetFieldChecksQueryParams = zod.object({
   "appBuild": zod.coerce.string().min(1).max(getFieldChecksQueryAppBuildMax).optional().describe('Exact build identifier; use local for unknown builds. Omit for all builds.'),
   "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'android-phone', 'android-tablet', 'ipad', 'iphone', 'other-browser']).optional().describe('Exact retained browser/device category. Omit for all categories.')
 })
-
-
-
 
 
 export const GetFieldChecksResponse = zod.object({
@@ -7329,9 +6951,6 @@ export const ConfirmHardwareFieldCheckBody = zod.object({
 })
 
 
-
-
-
 export const ConfirmHardwareFieldCheckResponse = zod.object({
   "accepted": zod.int().min(confirmHardwareFieldCheckResponseAcceptedMin),
   "duplicate": zod.int().min(confirmHardwareFieldCheckResponseDuplicateMin)
@@ -7342,16 +6961,6 @@ export const ConfirmHardwareFieldCheckResponse = zod.object({
  * Manager-only, scope-aware cleanup. Returns the dry-run-compatible report, records a bounded per-run audit marker, and can be repeated as retained operational records age into the policy cutoffs.
  * @summary Apply the bounded retired-AI retention cleanup
  */
-
-
-
-
-
-
-
-
-
-
 
 
 export const ApplyAiRetentionCleanupResponse = zod.object({
@@ -7390,17 +6999,6 @@ export const ApplyAiRetentionCleanupResponse = zod.object({
  * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
  * @summary Report an issue or a crash for manager review
  */
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const ReportIncidentBody = zod.object({
@@ -7448,8 +7046,6 @@ export const ReportIncidentResponse = zod.object({
  * Returns visible incidents newest-first for a manager to review: unresolved incidents and incidents resolved within the previous 14 days. Older resolved incidents remain stored but are omitted from this collection; they remain available through the manager-only single-incident endpoint. Included records contain captured context and any stored diagnosis.
  * @summary List incidents (manager only)
  */
-
-
 
 
 export const ListIncidentsResponseItem = zod.object({
@@ -7551,9 +7147,6 @@ export const GetIncidentParams = zod.object({
 })
 
 
-
-
-
 export const GetIncidentResponse = zod.object({
   "id": zod.string(),
   "source": zod.enum(['user_report', 'auto_crash']),
@@ -7622,9 +7215,6 @@ export const GetIncidentResponse = zod.object({
 export const ReviewIncidentParams = zod.object({
   "id": zod.coerce.string()
 })
-
-
-
 
 
 export const ReviewIncidentResponse = zod.object({
@@ -7696,9 +7286,6 @@ export const ReviewIncidentResponse = zod.object({
 export const ResolveIncidentParams = zod.object({
   "id": zod.coerce.string()
 })
-
-
-
 
 
 export const ResolveIncidentResponse = zod.object({
@@ -7803,9 +7390,6 @@ export const ListManagerActionQueueResponse = zod.object({
  */
 
 
-
-
-
 export const GetBackgroundOperationDiagnosticsResponse = zod.object({
   "warnings": zod.array(zod.object({
   "operation": zod.enum(['daily-rollover', 'server-job-run', 'server-job-prune', 'web-push-schedule']),
@@ -7826,9 +7410,6 @@ export const GetBackgroundOperationDiagnosticsResponse = zod.object({
 export const UpdateManagerActionItemParams = zod.object({
   "id": zod.coerce.number().int()
 })
-
-
-
 
 
 export const UpdateManagerActionItemBody = zod.object({
@@ -7871,17 +7452,12 @@ export const UpdateIncidentWorkflowParams = zod.object({
 })
 
 
-
-
 export const UpdateIncidentWorkflowBody = zod.object({
   "priority": zod.enum(['low', 'normal', 'high', 'urgent']).optional(),
   "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']).optional(),
   "assigneeId": zod.string().nullish(),
   "note": zod.string().max(updateIncidentWorkflowBodyNoteMax).optional()
 })
-
-
-
 
 
 export const UpdateIncidentWorkflowResponse = zod.object({
@@ -8074,7 +7650,6 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
  */
 
 
-
 export const CreateRoleBody = zod.object({
   "name": zod.string().min(1).max(createRoleBodyNameMax),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
@@ -8093,8 +7668,6 @@ export const CreateRoleResponse = zod.object({
 export const UpdateRoleParams = zod.object({
   "name": zod.coerce.string()
 })
-
-
 
 
 export const UpdateRoleBody = zod.object({
@@ -8176,8 +7749,6 @@ export const ResetStaffPasswordParams = zod.object({
 })
 
 
-
-
 export const ResetStaffPasswordBody = zod.object({
   "newPassword": zod.string().min(resetStaffPasswordBodyNewPasswordMin).max(resetStaffPasswordBodyNewPasswordMax)
 })
@@ -8230,9 +7801,6 @@ export const ListCompletedHistoryQueryParams = zod.object({
 })
 
 
-
-
-
 export const ListCompletedHistoryResponse = zod.object({
   "history": zod.array(zod.object({
   "operationId": zod.string().max(listCompletedHistoryResponseHistoryItemOneOperationIdMax),
@@ -8251,8 +7819,6 @@ export const ListCompletedHistoryResponse = zod.object({
  */
 
 
-
-
 export const FinalizeCompletedRunBody = zod.object({
   "operationId": zod.string().max(finalizeCompletedRunBodyOperationIdMax),
   "runId": zod.string().max(finalizeCompletedRunBodyRunIdMax),
@@ -8269,10 +7835,6 @@ export const FinalizeCompletedRunResponse = zod.unknown()
  */
 
 
-
-
-
-
 export const ListApplicatorBatchEvidenceQueryParams = zod.object({
   "from": zod.date().optional(),
   "to": zod.date().optional(),
@@ -8280,10 +7842,6 @@ export const ListApplicatorBatchEvidenceQueryParams = zod.object({
   "cursor": zod.coerce.string().max(listApplicatorBatchEvidenceQueryCursorMax).regex(listApplicatorBatchEvidenceQueryCursorRegExp).optional(),
   "limit": zod.coerce.number().int().min(1).max(listApplicatorBatchEvidenceQueryLimitMax).default(listApplicatorBatchEvidenceQueryLimitDefault)
 })
-
-
-
-
 
 
 export const ListApplicatorBatchEvidenceResponse = zod.object({
@@ -8311,13 +7869,6 @@ export const ListApplicatorBatchEvidenceResponse = zod.object({
  */
 
 
-
-
-
-
-
-
-
 export const FinalizeApplicatorBatchTotalBody = zod.object({
   "operationId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyOperationIdMax).regex(finalizeApplicatorBatchTotalBodyOperationIdRegExp),
   "date": zod.coerce.date().describe('Valid calendar date (not only YYYY-MM-DD syntax)'),
@@ -8326,10 +7877,6 @@ export const FinalizeApplicatorBatchTotalBody = zod.object({
   "finalTotal": zod.int().min(finalizeApplicatorBatchTotalBodyFinalTotalMin).max(finalizeApplicatorBatchTotalBodyFinalTotalMax),
   "correctionOf": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyCorrectionOfMax).regex(finalizeApplicatorBatchTotalBodyCorrectionOfRegExp).optional()
 })
-
-
-
-
 
 
 export const FinalizeApplicatorBatchTotalResponse = zod.object({
@@ -8365,13 +7912,7 @@ export const GetSyncTodayQueryParams = zod.object({
 })
 
 
-
-
-
-
-
-
-export const GetSyncTodayResponse = zod.union([zod.looseObject({
+export const GetSyncTodayResponse = zod.union([zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
@@ -8441,18 +7982,16 @@ export const GetSyncTodayResponse = zod.union([zod.looseObject({
  */
 
 
-
 export const PutSyncTodayQueryParams = zod.object({
   "today": zod.date().optional(),
   "epoch": zod.coerce.number().int().min(putSyncTodayQueryEpochMin).optional()
 })
 
 
-
 export const PutSyncTodayBody = zod.object({
   "senderId": zod.string().optional(),
   "snapshotId": zod.string().regex(putSyncTodayBodySnapshotIdRegExp).optional(),
-  "payload": zod.looseObject({
+  "payload": zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
@@ -8463,13 +8002,9 @@ export const PutSyncTodayBody = zod.object({
 })
 
 
-
-
-
-
 export const PutSyncTodayResponse = zod.object({
   "ok": zod.boolean().optional(),
-  "data": zod.looseObject({
+  "data": zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).optional().describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -8552,22 +8087,10 @@ export const StreamSyncEventsResponse = zod.unknown()
  */
 
 
-
 export const ClaimAutoTrackEventQueryParams = zod.object({
   "today": zod.date().optional(),
   "epoch": zod.coerce.number().int().min(claimAutoTrackEventQueryEpochMin).optional()
 })
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const ClaimAutoTrackEventBody = zod.object({
@@ -8592,10 +8115,6 @@ export const ClaimAutoTrackEventBody = zod.object({
 })
 
 
-
-
-
-
 export const ClaimAutoTrackEventResponse = zod.object({
   "ok": zod.boolean(),
   "outcome": zod.enum(['accepted', 'duplicate', 'stale', 'conflict']),
@@ -8608,7 +8127,7 @@ export const ClaimAutoTrackEventResponse = zod.object({
   "updatedAt": zod.number()
 }),
   "values": zod.record(zod.string(), zod.unknown()),
-  "data": zod.looseObject({
+  "data": zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -8625,70 +8144,6 @@ export const ClaimAutoTrackEventResponse = zod.object({
 export const SubmitManualSectionEditQueryParams = zod.object({
   "today": zod.date().optional()
 })
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const SubmitManualSectionEditBody = zod.union([zod.object({
@@ -8937,16 +8392,13 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
 }))
 
 
-
-
-
 export const SubmitManualSectionEditResponse = zod.object({
   "ok": zod.boolean(),
   "outcome": zod.enum(['accepted']),
   "duplicate": zod.boolean(),
   "canonicalRevision": zod.int().min(submitManualSectionEditResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitManualSectionEditResponseServerTimeMin),
-  "data": zod.looseObject({
+  "data": zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -8959,24 +8411,10 @@ export const SubmitManualSectionEditResponse = zod.object({
  */
 
 
-
 export const SubmitOperationalIntentQueryParams = zod.object({
   "today": zod.date().optional(),
   "epoch": zod.coerce.number().int().min(submitOperationalIntentQueryEpochMin).optional()
 })
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 export const SubmitOperationalIntentBody = zod.object({
@@ -9003,10 +8441,6 @@ export const SubmitOperationalIntentBody = zod.object({
 })
 
 
-
-
-
-
 export const SubmitOperationalIntentResponse = zod.object({
   "ok": zod.boolean(),
   "outcome": zod.enum(['accepted', 'superseded', 'rebased', 'conflicted', 'review-required']),
@@ -9014,7 +8448,7 @@ export const SubmitOperationalIntentResponse = zod.object({
   "cursor": zod.int().min(1),
   "canonicalRevision": zod.int().min(submitOperationalIntentResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitOperationalIntentResponseServerTimeMin),
-  "data": zod.looseObject({
+  "data": zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -9027,15 +8461,9 @@ export const SubmitOperationalIntentResponse = zod.object({
  */
 
 
-
 export const ListOperationalIntentReceiptsQueryParams = zod.object({
   "after": zod.coerce.number().int().min(listOperationalIntentReceiptsQueryAfterMin).optional()
 })
-
-
-
-
-
 
 
 export const ListOperationalIntentReceiptsResponse = zod.object({
@@ -9052,7 +8480,7 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
   "deviceId": zod.string().optional(),
   "serverReceivedAt": zod.coerce.date().optional(),
   "createdAt": zod.coerce.date(),
-  "snapshot": zod.union([zod.looseObject({
+  "snapshot": zod.union([zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional()
@@ -9075,7 +8503,6 @@ export const GetImportGoldConfigResponse = zod.object({
 /**
  * @summary List bounded, scoped import-gold cases and recent scores
  */
-
 
 
 export const ListImportGoldCasesQueryParams = zod.object({
@@ -9113,7 +8540,6 @@ export const ListImportGoldCasesResponse = zod.object({
  */
 
 
-
 export const SetImportGoldCaseExclusionParams = zod.object({
   "id": zod.coerce.number().int().min(1)
 })
@@ -9128,7 +8554,6 @@ export const SetImportGoldCaseExclusionResponse = zod.unknown()
 /**
  * @summary Permanently delete a case and its score history for retention purposes
  */
-
 
 
 export const DeleteImportGoldCaseParams = zod.object({
@@ -9147,8 +8572,6 @@ export const ExportImportGoldCasesResponse = zod.unknown()
 /**
  * @summary Score up to three active scoped cases with one configured provider
  */
-
-
 
 
 export const ScoreImportGoldCasesBody = zod.object({
@@ -9182,16 +8605,9 @@ export const ScoreImportGoldCasesResponse = zod.object({
  */
 
 
-
 export const ApplyImportOperationParams = zod.object({
   "operationId": zod.coerce.string().min(applyImportOperationPathOperationIdMin).max(applyImportOperationPathOperationIdMax)
 })
-
-
-
-
-
-
 
 
 export const ApplyImportOperationBody = zod.object({
@@ -9235,14 +8651,10 @@ export const ApplyImportOperationResponse = zod.object({
  */
 
 
-
-
 export const ListDistillationApplyEvidenceQueryParams = zod.object({
   "limit": zod.coerce.number().int().min(1).max(listDistillationApplyEvidenceQueryLimitMax).default(listDistillationApplyEvidenceQueryLimitDefault),
   "cursor": zod.coerce.string().max(listDistillationApplyEvidenceQueryCursorMax).optional()
 })
-
-
 
 
 export const ListDistillationApplyEvidenceResponse = zod.object({
@@ -9267,7 +8679,6 @@ export const ListDistillationApplyEvidenceResponse = zod.object({
 /**
  * @summary Read an import operation
  */
-
 
 
 export const GetImportOperationParams = zod.object({
@@ -9297,11 +8708,9 @@ export const GetImportOperationResponse = zod.object({
  */
 
 
-
 export const UndoImportOperationParams = zod.object({
   "operationId": zod.coerce.string().min(undoImportOperationPathOperationIdMin).max(undoImportOperationPathOperationIdMax)
 })
-
 
 
 export const UndoImportOperationBody = zod.object({

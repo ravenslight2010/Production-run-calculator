@@ -9,3 +9,13 @@ description: Pointers for the release runner, pinned Node, local browser transpo
 - [Loopback probes](release-runner-loopback-probes.md) — bypass only local readiness probes, not TLS guards.
 - [Browser routing](local-browser-suite-routing.md) — offline installs and scoped loopback exceptions.
 - [Test CA subjects](openssl-test-ca-subject-uniqueness.md) — certificate subjects must be unique per fixture.
+
+## Workspace-wide typecheck failures
+
+When the full `pnpm run typecheck` fails outside the changed package, isolate the named package before attributing the failure to the current task. A TypeScript 6.0.3 check of `artifacts/mockup-sandbox` has reproduced the compiler assertion `parameter should have errors when reporting errors` even when run alone, while the calculator package typecheck passes. Do not silently skip the root check or treat the isolated calculator result as a full pass.
+
+Generated API checks can fail earlier if Orval output drifts from the OpenAPI source. Compare temporary generated output with the tracked files; regenerate only when the source contract supports the difference, then rerun the full check to reveal later failures.
+
+**Why:** A clean focused check does not close a configured workspace-wide gate, and generated-contract drift can mask a separate compiler failure.
+
+**How to apply:** Preserve the exact failing command and log, isolate the affected package, repair only source-supported generated drift, and leave the root validation unresolved until the full command passes.
