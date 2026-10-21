@@ -3,9 +3,25 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, webPushSubscriptionsTable } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
-import { vapidPublicKey, validSubscription } from "../lib/webPush";
+import {
+  classifyPushSubscription,
+  vapidPublicKey,
+  validSubscription,
+  type PushProviderClassification,
+  type PushRegistrationRejectionReason,
+} from "../lib/webPush";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+function logRegistrationRejection(reason: PushRegistrationRejectionReason, provider: PushProviderClassification): void {
+  logger.info({
+    event: "web_push_registration_rejected",
+    outcome: "rejected",
+    reason,
+    provider,
+  }, "Web push subscription registration rejected");
+}
 
 router.get("/web-push/vapid-public-key", (_req: Request, res: Response): void => {
   const publicKey = vapidPublicKey();
@@ -21,9 +37,18 @@ router.get("/web-push/subscriptions", async (req: Request, res: Response): Promi
 
 router.post("/web-push/subscriptions", async (req: Request, res: Response): Promise<void> => {
   const subscription = (req.body as { subscription?: unknown })?.subscription ?? req.body;
-  if (!validSubscription(subscription)) { res.status(400).json({ error: "Invalid push subscription" }); return; }
+  const classification = classifyPushSubscription(subscription);
+  if (classification.reason || !validSubscription(subscription)) {
+    logRegistrationRejection(classification.reason ?? "invalid_subscription", classification.provider);
+    res.status(400).json({ error: "Invalid push subscription" });
+    return;
+  }
   const expiresAt = subscription.expirationTime ? new Date(subscription.expirationTime) : null;
-  if (expiresAt && expiresAt.getTime() <= Date.now()) { res.status(400).json({ error: "Subscription has expired" }); return; }
+  if (expiresAt && expiresAt.getTime() <= Date.now()) {
+    logRegistrationRejection("expired_subscription", classification.provider);
+    res.status(400).json({ error: "Subscription has expired" });
+    return;
+  }
   const scope = currentScope();
   const [row] = await db.insert(webPushSubscriptionsTable).values({
     id: randomUUID(), scope, userId: req.userId!, endpoint: subscription.endpoint,

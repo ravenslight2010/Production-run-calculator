@@ -40,6 +40,78 @@ const SUPPORTED_PUSH_ENDPOINT_HOSTS = new Set([
   "web.push.apple.com",
 ]);
 
+export type PushProviderClassification = "google" | "mozilla" | "apple" | "other" | "unknown";
+export type PushRegistrationRejectionReason =
+  | "invalid_subscription"
+  | "invalid_endpoint"
+  | "unsafe_endpoint"
+  | "unsupported_provider"
+  | "invalid_keys"
+  | "invalid_expiration"
+  | "expired_subscription";
+
+const PROVIDER_DOMAIN_HINTS: ReadonlyArray<{ provider: Exclude<PushProviderClassification, "other" | "unknown">; domains: readonly string[] }> = [
+  { provider: "google", domains: ["googleapis.com"] },
+  { provider: "mozilla", domains: ["mozilla.com", "mozilla.net"] },
+  { provider: "apple", domains: ["apple.com"] },
+];
+
+function classifyProviderHost(host: string): PushProviderClassification {
+  for (const { provider, domains } of PROVIDER_DOMAIN_HINTS) {
+    if (domains.some((domain) => host === domain || host.endsWith(`.${domain}`))) return provider;
+  }
+  return "other";
+}
+
+function inspectPushEndpoint(endpoint: unknown): {
+  reason: PushRegistrationRejectionReason | null;
+  provider: PushProviderClassification;
+} {
+  if (typeof endpoint !== "string" || endpoint.length === 0 || endpoint.length > MAX_ENDPOINT) {
+    return { reason: "invalid_endpoint", provider: "unknown" };
+  }
+
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return { reason: "invalid_endpoint", provider: "unknown" };
+  }
+
+  const provider = classifyProviderHost(url.hostname);
+  if (url.protocol !== "https:" || url.username || url.password || url.port) {
+    return { reason: "unsafe_endpoint", provider };
+  }
+  // URL.username/password do not expose an empty userinfo section ("https://@host").
+  const authority = /^https:\/\/([^/?#]*)/i.exec(endpoint)?.[1];
+  if (!authority || authority.includes("@")) return { reason: "unsafe_endpoint", provider };
+  // The exact host set intentionally rejects IP literals and lookalike suffixes.
+  if (!SUPPORTED_PUSH_ENDPOINT_HOSTS.has(url.hostname)) return { reason: "unsupported_provider", provider };
+  return { reason: null, provider };
+}
+
+/**
+ * Returns only bounded classification values suitable for operational logs.
+ * Never include the endpoint, keys, or other subscription contents in telemetry.
+ */
+export function classifyPushSubscription(input: unknown): {
+  reason: PushRegistrationRejectionReason | null;
+  provider: PushProviderClassification;
+} {
+  if (!input || typeof input !== "object") return { reason: "invalid_subscription", provider: "unknown" };
+  const s = input as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; expirationTime?: unknown };
+  const endpoint = inspectPushEndpoint(s.endpoint);
+  if (endpoint.reason) return endpoint;
+  if (typeof s.keys?.p256dh !== "string" || s.keys.p256dh.length <= 15 || s.keys.p256dh.length > 512
+    || typeof s.keys?.auth !== "string" || s.keys.auth.length <= 7 || s.keys.auth.length > 256) {
+    return { reason: "invalid_keys", provider: endpoint.provider };
+  }
+  if (s.expirationTime != null && (typeof s.expirationTime !== "number" || !Number.isFinite(s.expirationTime))) {
+    return { reason: "invalid_expiration", provider: endpoint.provider };
+  }
+  return { reason: null, provider: endpoint.provider };
+}
+
 export function vapidPublicKey(): string | null {
   const key = process.env.WEB_PUSH_VAPID_PUBLIC_KEY;
   return key && key.length <= 512 ? key : null;
@@ -60,28 +132,11 @@ function configuredSender(): boolean {
 }
 
 export function validPushEndpoint(endpoint: unknown): endpoint is string {
-  if (typeof endpoint !== "string" || endpoint.length === 0 || endpoint.length > MAX_ENDPOINT) return false;
-  let url: URL;
-  try {
-    url = new URL(endpoint);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
-  // URL.username/password do not expose an empty userinfo section ("https://@host").
-  const authority = /^https:\/\/([^/?#]*)/i.exec(endpoint)?.[1];
-  if (!authority || authority.includes("@")) return false;
-  // The exact host set intentionally rejects IP literals and lookalike suffixes.
-  return SUPPORTED_PUSH_ENDPOINT_HOSTS.has(url.hostname);
+  return inspectPushEndpoint(endpoint).reason === null;
 }
 
 export function validSubscription(input: unknown): input is { endpoint: string; keys: { p256dh: string; auth: string }; expirationTime?: number | null } {
-  if (!input || typeof input !== "object") return false;
-  const s = input as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; expirationTime?: unknown };
-  return validPushEndpoint(s.endpoint)
-    && typeof s.keys?.p256dh === "string" && s.keys.p256dh.length > 15 && s.keys.p256dh.length <= 512
-    && typeof s.keys?.auth === "string" && s.keys.auth.length > 7 && s.keys.auth.length <= 256
-    && (s.expirationTime == null || (typeof s.expirationTime === "number" && Number.isFinite(s.expirationTime)));
+  return classifyPushSubscription(input).reason === null;
 }
 
 export async function sendPushNotification(

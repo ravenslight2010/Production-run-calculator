@@ -39,6 +39,7 @@ vi.mock("./backgroundOperations", async (importOriginal) => {
 
 const {
   alertCandidates,
+  classifyPushSubscription,
   deferredCandidate,
   enqueueScheduledWebPushAlerts,
   freezerCandidates,
@@ -88,6 +89,41 @@ describe("web-push endpoint validation", () => {
   it("permits only the default HTTPS port and enforces the endpoint size cap", () => {
     expect(validPushEndpoint("https://fcm.googleapis.com:443/fcm/send/token")).toBe(true);
     expect(validPushEndpoint(`https://fcm.googleapis.com/${"a".repeat(2048)}`)).toBe(false);
+  });
+
+  it("returns only bounded rejection reasons and provider families", () => {
+    expect(classifyPushSubscription(subscription("https://fcm-eu.googleapis.com/endpoint-token"))).toEqual({
+      reason: "unsupported_provider",
+      provider: "google",
+    });
+    expect(classifyPushSubscription(subscription("https://web.push.apple.com.attacker.example/endpoint-token"))).toEqual({
+      reason: "unsupported_provider",
+      provider: "other",
+    });
+    expect(classifyPushSubscription(subscription("http://fcm.googleapis.com/endpoint-token"))).toEqual({
+      reason: "unsafe_endpoint",
+      provider: "google",
+    });
+    expect(classifyPushSubscription(subscription("not a url"))).toEqual({
+      reason: "invalid_endpoint",
+      provider: "unknown",
+    });
+    expect(classifyPushSubscription(subscription("https://push.apple.com/endpoint-token"))).toEqual({
+      reason: "unsupported_provider",
+      provider: "apple",
+    });
+    expect(classifyPushSubscription({ endpoint: "https://fcm.googleapis.com/token", keys: { p256dh: "short", auth: "short" } })).toEqual({
+      reason: "invalid_keys",
+      provider: "google",
+    });
+    expect(classifyPushSubscription({
+      ...subscription("https://fcm.googleapis.com/token"),
+      expirationTime: "invalid",
+    })).toEqual({
+      reason: "invalid_expiration",
+      provider: "google",
+    });
+    expect(classifyPushSubscription(null)).toEqual({ reason: "invalid_subscription", provider: "unknown" });
   });
 
   it("never sends to an endpoint that is not in the supported service set", async () => {
