@@ -17,6 +17,21 @@ const LEGACY_CLAIM_KEY = "run-calc-templates-legacy-scope-v1";
 // Revisioned writes are safe to reconcile after a client abort, but an
 // unresponsive transport must not hold an outbox flush open indefinitely.
 const RUN_TEMPLATE_WRITE_TIMEOUT_MS = 30_000;
+let writeTimeoutMs = RUN_TEMPLATE_WRITE_TIMEOUT_MS;
+
+/**
+ * Test-only override for the write timeout so integration-style repository
+ * tests can exercise the real abort path in milliseconds instead of mocking
+ * the scheduler with fake timers (which has proven runner-load-sensitive in
+ * CI). Returns a restore function.
+ */
+export function setRunTemplatesWriteTimeoutForTests(ms: number): () => void {
+  const previous = writeTimeoutMs;
+  writeTimeoutMs = ms;
+  return () => {
+    writeTimeoutMs = previous;
+  };
+}
 export type RunTemplateScope = "live" | "sandbox";
 let activeScope: RunTemplateScope = "live";
 const flushes = new Map<RunTemplateScope, Promise<RunTemplate[]>>();
@@ -230,7 +245,7 @@ export async function flushRunTemplates(): Promise<RunTemplate[]> {
         const res = await fetchWithTimeout(
           "/api/run-templates",
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templates: saves }) },
-          RUN_TEMPLATE_WRITE_TIMEOUT_MS,
+          writeTimeoutMs,
         );
         if (!res.ok) throw new Error(`saveRunTemplate failed (${res.status})`);
         response = ((await res.json()) as { templates?: RunTemplateRecord[] }).templates;
@@ -240,7 +255,7 @@ export async function flushRunTemplates(): Promise<RunTemplate[]> {
         const res = await fetchWithTimeout(
           "/api/run-templates",
           { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: deletes }) },
-          RUN_TEMPLATE_WRITE_TIMEOUT_MS,
+          writeTimeoutMs,
         );
         if (!res.ok) throw new Error(`deleteRunTemplates failed (${res.status})`);
         response = ((await res.json()) as { templates?: RunTemplateRecord[] }).templates;
