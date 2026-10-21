@@ -11,8 +11,7 @@
     "push": "drizzle-kit push --config ./drizzle.config.ts && pnpm run apply-audit-log-protection && pnpm run apply-serial-to-identity",
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts && pnpm run apply-audit-log-protection && pnpm run apply-serial-to-identity",
     "apply-audit-log-protection": "node ./migrations/apply-audit-log-protection.mjs",
-    "apply-serial-to-identity": "node ./migrations/apply-serial-to-identity.mjs",
-    "test:serial-to-identity": "node --test ./migrations/serial-to-identity.integration.test.mjs"
+    "apply-serial-to-identity": "node ./migrations/apply-serial-to-identity.mjs"
   },
   "dependencies": {
     "@workspace/factory-constants": "workspace:*",
