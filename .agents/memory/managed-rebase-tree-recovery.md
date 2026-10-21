@@ -11,6 +11,12 @@ Treat a successful rebase as history completion, not proof that the resulting tr
 
 After a conflict-heavy browser-test replay, also run the browser spec inventory/parse check. Package typecheck may exclude end-to-end specs, and a transpile-only check can miss syntax diagnostics; a malformed spec once survived both checks after a rebase.
 
+Treat persisted browser pass summaries as evidence for the tree that produced them, not automatically for the post-sync tree.
+
+**Why:** A saved Playwright pass result remained present after a managed sync malformed the corresponding spec. The old result could not establish that the new source even parsed.
+
+**How to apply:** After a sync changes a spec, inventory/parse that spec and rerun its required matrix before claiming the new tree passes. A saved result without matching source provenance is insufficient.
+
 In managed rebases, an `INDEX_LOCKED` response can occur while the operation is advancing to another conflict. Inspect the managed operation and current conflict state before treating that response alone as a stuck rebase.
 
 **Why:** A continuation reported `INDEX_LOCKED` despite having recorded progress and exposing the next conflict; a blind retry or manual index recovery could disrupt the managed operation.

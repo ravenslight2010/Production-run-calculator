@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
   clearMergeSuggestionCache,
+  denyMerge,
   isCurrentMergeSuggestionRequest,
   saveConfirmedMergeAliasesBestEffort,
   suggestMerges,
@@ -214,6 +215,67 @@ describe("suggestMerges request lifecycle", () => {
         target: "Pepperoni",
         sources: ["Peperoni"],
         reason: "Looks like the same item (spelling or word order)",
+      },
+    ]);
+  });
+
+  it("invalidates cached suggestions after saving a category-scoped denial", async () => {
+    const names = ["Pepperoni", "Peperoni"];
+    let denied = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const json = (body: unknown) =>
+        Promise.resolve({ ok: true, status: 200, json: async () => body }) as Promise<Response>;
+      if (url.includes("/api/merge-aliases")) return json({ aliases: [] });
+      if (url.includes("/api/denied-merges") && init?.method === "POST") {
+        denied = true;
+        return json({ denied: [{ nameA: "peperoni", nameB: "pepperoni" }] });
+      }
+      if (url.includes("/api/denied-merges")) {
+        return json({
+          denied: denied ? [{ nameA: "peperoni", nameB: "pepperoni" }] : [],
+        });
+      }
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const beforeIgnore = await suggestMerges(names, "dough");
+    expect(beforeIgnore.suggestions).toHaveLength(1);
+    await denyMerge("Pepperoni", ["Peperoni"], "dough");
+    const afterIgnore = await suggestMerges(names, "dough");
+
+    expect(afterIgnore.suggestions).toEqual([]);
+    const save = fetchMock.mock.calls.find(([input, init]) =>
+      String(input) === "/api/denied-merges" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(save?.[1]?.body))).toEqual({
+      pairs: [{ nameA: "Pepperoni", nameB: "Peperoni" }],
+      category: "dough",
+    });
+  });
+
+  it("sends the brand only for flavor denials", async () => {
+    const fetchMock = vi.fn(async () =>
+      ({ ok: true, status: 200, json: async () => ({ denied: [] }) }) as Response
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await denyMerge("BBQ", ["Barbecue"], "flavor", "Brand A");
+    await denyMerge("BBQ", ["Barbecue"], "sauce", "Brand B");
+
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body)),
+    );
+    expect(bodies).toEqual([
+      {
+        pairs: [{ nameA: "BBQ", nameB: "Barbecue" }],
+        category: "flavor",
+        brand: "Brand A",
+      },
+      {
+        pairs: [{ nameA: "BBQ", nameB: "Barbecue" }],
+        category: "sauce",
       },
     ]);
   });

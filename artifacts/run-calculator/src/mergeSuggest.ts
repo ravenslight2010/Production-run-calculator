@@ -195,6 +195,9 @@ export async function denyMerge(
     }),
   });
   if (!res.ok) throw new Error(`Save denied merges failed (${res.status})`);
+  // A prior scan may still be cached for this exact scope. Once the server
+  // confirms the denial, force the next scan to reload its denied-pair list.
+  clearMergeSuggestionCache();
 }
 
 export async function fetchPendingDuplicateReviews(
