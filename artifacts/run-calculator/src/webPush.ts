@@ -24,6 +24,7 @@ export interface WebPushStatus {
 const SUBSCRIPTIONS_URL = "/api/web-push/subscriptions";
 const VAPID_URL = "/api/web-push/vapid-public-key";
 const SUBSCRIPTION_ID_KEY = "run-calculator.web-push-subscription-id.v1";
+const REGISTRATION_REJECTED_KEY = "run-calculator.web-push-registration-rejected.v1";
 
 class PushRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -127,6 +128,17 @@ function storeSubscriptionId(id: string | undefined): void {
   } catch { /* private-mode storage is optional */ }
 }
 
+function hasRegistrationRejectionMarker(): boolean {
+  try { return localStorage.getItem(REGISTRATION_REJECTED_KEY) === "1"; } catch { return false; }
+}
+
+function storeRegistrationRejectionMarker(rejected: boolean): void {
+  try {
+    if (rejected) localStorage.setItem(REGISTRATION_REJECTED_KEY, "1");
+    else localStorage.removeItem(REGISTRATION_REJECTED_KEY);
+  } catch { /* private-mode storage is optional */ }
+}
+
 export async function getWebPushStatus(): Promise<WebPushStatus> {
   const support = browserPushSupport();
   if (support.error) return support.error;
@@ -135,9 +147,21 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
     // can actually receive a push and show a notification.
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
-    return subscription
-      ? { state: "enabled", subscription, subscriptionId: storedSubscriptionId() }
-      : { state: "available", subscription: null };
+    if (!subscription) {
+      storeRegistrationRejectionMarker(false);
+      return { state: "available", subscription: null };
+    }
+    if (hasRegistrationRejectionMarker()) {
+      return {
+        state: "error",
+        error: "The server rejected this device’s saved notification subscription.",
+        subscription,
+        subscriptionId: storedSubscriptionId(),
+        registrationRejected: true,
+        subscriptionWasExisting: true,
+      };
+    }
+    return { state: "enabled", subscription, subscriptionId: storedSubscriptionId() };
   } catch {
     return { state: "error", error: "The service worker could not be prepared for alerts." };
   }
@@ -163,14 +187,17 @@ export async function enableWebPush(vapidPublicKey: string): Promise<WebPushStat
     });
     const savedId = await savePushSubscription(subscription);
     storeSubscriptionId(savedId);
+    storeRegistrationRejectionMarker(false);
     return { state: "enabled", subscription, subscriptionId: savedId };
   } catch (error) {
+    const registrationRejected = wasRegistrationRejected(error);
+    if (registrationRejected && subscription) storeRegistrationRejectionMarker(true);
     return {
       state: "error",
       error: error instanceof Error ? error.message : "Could not enable Web Push.",
       subscription,
       subscriptionId,
-      registrationRejected: wasRegistrationRejected(error),
+      registrationRejected,
       subscriptionWasExisting,
     };
   }
@@ -221,14 +248,17 @@ export async function recoverWebPush(
     });
     const replacementId = await savePushSubscription(replacement);
     storeSubscriptionId(replacementId);
+    storeRegistrationRejectionMarker(false);
     return { state: "enabled", subscription: replacement, subscriptionId: replacementId };
   } catch (error) {
+    const registrationRejected = wasRegistrationRejected(error) || (current !== null && subscriptionWasExisting);
+    if (registrationRejected && (replacement ?? current)) storeRegistrationRejectionMarker(true);
     return {
       state: "error",
       error: error instanceof Error ? error.message : "Could not restore Web Push.",
       subscription: replacement ?? current,
       subscriptionId: current ? currentId : undefined,
-      registrationRejected: wasRegistrationRejected(error) || (current !== null && subscriptionWasExisting),
+      registrationRejected,
       subscriptionWasExisting: replacement ? false : subscriptionWasExisting,
     };
   }
@@ -246,6 +276,7 @@ export async function disableWebPush(subscription?: PushSubscription | null, sub
       await current.unsubscribe();
     }
     storeSubscriptionId(undefined);
+    storeRegistrationRejectionMarker(false);
     return { state: "available", subscription: null };
   } catch (error) {
     return { state: "error", error: error instanceof Error ? error.message : "Could not disable Web Push." };
