@@ -26,9 +26,11 @@ function renderLineMap(
     currentRun?: object | null;
     active?: boolean;
     scheduledDays?: ScheduledDay[];
+    configuredApplicator?: 3 | 4;
   } = {},
 ) {
   const active = options.active ?? false;
+  const configuredApplicator = options.configuredApplicator;
   mocks.useHomeTabCtx.mockReturnValue({
     v: {
       traysOnLine: active ? 1 : 0,
@@ -37,6 +39,12 @@ function renderLineMap(
       sauceOzPerPizza: 0,
       app1OzPerPizza: 0,
       app2OzPerPizza: 0,
+      app1Type: "",
+      app2Type: "",
+      app3OzPerPizza: configuredApplicator === 3 ? 2 : 0,
+      app4OzPerPizza: configuredApplicator === 4 ? 2 : 0,
+      app3Type: configuredApplicator === 3 ? "Cheese" : "",
+      app4Type: configuredApplicator === 4 ? "Cheese" : "",
       pep1Type: "",
       pep1TypeB: "",
       pep2Type: "",
@@ -61,6 +69,10 @@ function renderLineMap(
       sauceBatches: active ? 1 : 0,
       sauceDepletionSec: 0,
       sauceEffBarrel: 0,
+      app3Lbs: configuredApplicator === 3 ? 40 : 0,
+      app3Batches: configuredApplicator === 3 ? 2 : 0,
+      app4Lbs: configuredApplicator === 4 ? 40 : 0,
+      app4Batches: configuredApplicator === 4 ? 2 : 0,
       pressCasesLeft: active ? 80 : 0,
       casesCompleted: active ? 20 : 0,
       ppm: 0,
@@ -101,6 +113,17 @@ afterEach(() => {
 });
 
 describe("LineMapDashboard station lifecycle statuses", () => {
+  it.each([3, 4] as const)(
+    "shows the need for applicator %i when it is the only configured Frontline item",
+    (slot) => {
+      renderLineMap("running", { configuredApplicator: slot });
+
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
+      expect(within(frontline).getByText("2.00 batches")).toBeTruthy();
+    },
+  );
+
   it("shows waiting for stations on a pending run", () => {
     renderLineMap("pending");
 
