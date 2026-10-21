@@ -33,6 +33,12 @@ For sequential same-date station scenarios, remove the disposable today snapshot
 
 **How to apply:** Clear browser storage, navigate away from the app, remove the isolated date row, seed the replacement document, then navigate back to the app.
 
+For browser matrices whose projects share one disposable database, reset test-owned operational state between projects instead of relying only on global setup.
+
+**Why:** Global setup runs once for the matrix; an earlier viewport can leave a live run in the shared fixture and make later projects start from the wrong state.
+
+**How to apply:** In each test's setup, remove only the current test's live-day fixture rows from the guarded disposable database, and keep the normal Home hydration path enabled.
+
 For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
 
 **Why:** Starting another run after reload exercises a separate hydration and adoption path, which can obscure whether the cold destination itself restored the expected state.
