@@ -22,23 +22,3 @@ export const httpSecurityHeaders: RequestHandler = (_req, res, next) => {
   res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
   next();
 };
-
-export function createQueryTokenPromotionMiddleware(
-  nodeEnv: string | undefined,
-  optIn: string | undefined,
-): RequestHandler {
-  const production = nodeEnv?.trim().toLowerCase() === "production";
-  const enabled = !production && optIn?.trim().toLowerCase() === "true";
-
-  return (req, _res, next) => {
-    if (
-      enabled &&
-      !req.headers.authorization &&
-      typeof req.query.token === "string" &&
-      req.query.token
-    ) {
-      req.headers.authorization = `Bearer ${req.query.token}`;
-    }
-    next();
-  };
-}
