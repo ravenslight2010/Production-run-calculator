@@ -58,3 +58,17 @@ failure stages; neither established that the existing GitHub credential was bad.
 **How to apply:** Use bounded, noninteractive read-only checks against existing
 routes. Preserve host-key verification, never accept an unverified key to unblock
 completion, and never send a GitHub token to an unrelated Replit SSH endpoint.
+
+When a managed conflict affects a test file, inspect the full file and both
+staged versions before editing. Conflict markers can split related test bodies
+and leave duplicate fragments outside the test suite; broad hunks may fail to
+match the conflict's exact text.
+
+**Why:** A Line Map test conflict combined independent incoming and task-owned
+fixtures, while leaving a trailing test assertion outside the suite. Exact,
+small edits exposed and preserved both behaviors; the post-resolution test run
+then caught fixture values that had to stay distinct.
+
+**How to apply:** Use the exact conflict text from the file and compare both
+staged versions. Resolve one boundary at a time, then scan the entire file for
+markers and trailing fragments and rerun the owning tests before continuing.

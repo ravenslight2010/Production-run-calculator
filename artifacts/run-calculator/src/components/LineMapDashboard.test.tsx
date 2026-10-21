@@ -28,29 +28,32 @@ function renderLineMap(
     scheduledDays?: ScheduledDay[];
     configuredApplicator?: 3 | 4;
     applicatorBatchesAvailable?: boolean;
+    mixedFrontline?: boolean;
   } = {},
 ) {
   const active = options.active ?? false;
   const configuredApplicator = options.configuredApplicator;
   const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
+  const mixedFrontline = options.mixedFrontline ?? false;
   mocks.useHomeTabCtx.mockReturnValue({
     v: {
       traysOnLine: active ? 1 : 0,
       batchesReady: 0,
       sauceBarrelsMade: 0,
-      sauceOzPerPizza: 0,
-      app1OzPerPizza: 0,
-      app2OzPerPizza: 0,
-      app1Type: "",
-      app2Type: "",
-      app3OzPerPizza: configuredApplicator === 3 ? 2 : 0,
-      app4OzPerPizza: configuredApplicator === 4 ? 2 : 0,
-      app3Type: configuredApplicator === 3 ? "Cheese" : "",
-      app4Type: configuredApplicator === 4 ? "Cheese" : "",
-      pep1Type: "",
-      pep1TypeB: "",
+      sauceOzPerPizza: mixedFrontline ? 2 : 0,
+      app1OzPerPizza: mixedFrontline ? 2 : 0,
+      app2OzPerPizza: mixedFrontline ? 2 : 0,
+      app1Type: mixedFrontline ? "Mozzarella" : "",
+      app2Type: mixedFrontline ? "Cheddar" : "",
+      app3OzPerPizza: mixedFrontline || configuredApplicator === 3 ? 2 : 0,
+      app4OzPerPizza: mixedFrontline || configuredApplicator === 4 ? 2 : 0,
+      app3Type: mixedFrontline || configuredApplicator === 3 ? "Cheese" : "",
+      app4Type: mixedFrontline || configuredApplicator === 4 ? "Cheese" : "",
+      pep1Type: mixedFrontline ? "Pepperoni" : "",
+      pep1TypeB: mixedFrontline ? "Sausage" : "",
       pep2Type: "",
       pep2TypeB: "",
+      pep1Combined: false,
       casesNeeded: 100,
       casesPerSkid: 20,
       preTunnelMin: 2.5,
@@ -70,11 +73,28 @@ function renderLineMap(
       doughDepletionSec: 0,
       sauceBatches: active ? 1 : 0,
       sauceDepletionSec: 0,
-      sauceEffBarrel: 0,
-      app3Lbs: configuredApplicator === 3 ? 40 : 0,
-      app3Batches: configuredApplicator === 3 && applicatorBatchesAvailable ? 2 : 0,
-      app4Lbs: configuredApplicator === 4 ? 40 : 0,
-      app4Batches: configuredApplicator === 4 && applicatorBatchesAvailable ? 2 : 0,
+      sauceEffBarrel: mixedFrontline ? 50 : 0,
+      app1Lbs: mixedFrontline ? 20 : 0,
+      app1Batches: mixedFrontline ? 1 : 0,
+      app2Lbs: mixedFrontline ? 30 : 0,
+      app2Batches: mixedFrontline ? 2 : 0,
+      app3Lbs: mixedFrontline || configuredApplicator === 3 ? 40 : 0,
+      app3Batches:
+        (mixedFrontline || configuredApplicator === 3) && applicatorBatchesAvailable
+          ? 2
+          : 0,
+      app4Lbs: mixedFrontline ? 60 : configuredApplicator === 4 ? 40 : 0,
+      app4Batches: mixedFrontline
+        ? applicatorBatchesAvailable ? 3 : 0
+        : configuredApplicator === 4 && applicatorBatchesAvailable ? 2 : 0,
+      pep1Lbs: mixedFrontline ? 12 : 0,
+      pep1Batches: mixedFrontline ? 1 : 0,
+      pep1LbsB: mixedFrontline ? 8 : 0,
+      pep1BatchesB: 0,
+      pep2Lbs: 0,
+      pep2Batches: 0,
+      pep2LbsB: 0,
+      pep2BatchesB: 0,
       pressCasesLeft: active ? 80 : 0,
       casesCompleted: active ? 20 : 0,
       ppm: 0,
@@ -139,6 +159,29 @@ describe("LineMapDashboard station lifecycle statuses", () => {
       expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
     },
   );
+
+  it("shows later applicator needs after Sauce, earlier applicators, and Pepperoni rows", () => {
+    renderLineMap("running", { mixedFrontline: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    for (const label of [
+      "Sauce",
+      "App 1 — Mozzarella",
+      "App 2 — Cheddar",
+      "Pep 1 — Pepperoni",
+      "Pep 1 — Sausage",
+      "App 3 — Cheese",
+      "App 4 — Cheese",
+    ]) {
+      expect(within(frontline).getByText(label)).toBeTruthy();
+    }
+    const app3Label = within(frontline).getByText("App 3 — Cheese");
+    const app4Label = within(frontline).getByText("App 4 — Cheese");
+    expect(app3Label.classList.contains("whitespace-normal")).toBe(true);
+    expect(app3Label.classList.contains("break-words")).toBe(true);
+    expect(app3Label.parentElement?.textContent).toContain("2.00 batches");
+    expect(app4Label.parentElement?.textContent).toContain("3.00 batches");
+  });
 
   it("shows waiting for stations on a pending run", () => {
     renderLineMap("pending");

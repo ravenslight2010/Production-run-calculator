@@ -195,7 +195,7 @@ export default function LineMapDashboard() {
           pep2LbsB: calc.pep2LbsB, pep2BatchesB: calc.pep2BatchesB,
         })
       : [];
-    const frontlineMetrics = frontlineRows.slice(0, 3).map(r => ({
+    const frontlineMetrics = frontlineRows.map(r => ({
       label: r.label,
       value: `${fmtNum(r.amount)} ${r.unit}`,
     }));
@@ -374,11 +374,26 @@ function ZoneCard({ zone, onClick }: { zone: ZoneStatus; onClick: () => void }) 
         </p>
       )}
       {zone.metrics.length > 0 && (
-        <div className="space-y-0.5">
+        <div className={zone.id === "frontline" ? "space-y-1" : "space-y-0.5"}>
           {zone.metrics.map((m) => (
-            <div key={m.label} className="flex justify-between text-xs">
-              <span className="text-muted-foreground truncate">{m.label}</span>
-              <span className="font-medium tabular-nums ml-1">{m.value}</span>
+            <div
+              key={m.label}
+              className={`flex justify-between text-xs ${zone.id === "frontline" ? "items-start gap-x-2" : ""}`}
+            >
+              <span className={
+                zone.id === "frontline"
+                  ? "min-w-0 whitespace-normal break-words text-muted-foreground"
+                  : "text-muted-foreground truncate"
+              }>
+                {m.label}
+              </span>
+              <span className={
+                zone.id === "frontline"
+                  ? "shrink-0 text-right font-medium tabular-nums"
+                  : "font-medium tabular-nums ml-1"
+              }>
+                {m.value}
+              </span>
             </div>
           ))}
         </div>
