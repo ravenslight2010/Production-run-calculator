@@ -126,6 +126,7 @@
 - [Disposable DB startup](disposable-database-test-startup.md) — wait for test schemas and keep local PostgreSQL rehearsals alive across shell calls.
 - [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — Publish owns managed schema changes; direct SQL rehearsals do not prove Publish compatibility.
 - [Container deployment history](container-image-migration.md) + [image provenance](container-image-release-evidence.md) — Render steps are historical; container lessons do not change Replit’s production publishing authority.
+- [Compose env isolation](docker-compose-env-file-overrides.md) — replace base Compose env files with `!override`; assert the resolved database URL stays on disposable Postgres.
 - [Atomic import](atomic-import-operations.md) + [history](completed-history-durability.md) + [undo](data-health-undo-coverage.md) — preserve evidence, enrich history idempotently, retain snapshots.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
@@ -137,7 +138,7 @@
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
-- [Local validation runtime](local-validation-runtime-index.md) — runner locks, pinned Node, loopback-only browser probes, offline installs and unique test certificates.
+- [Local validation runtime](local-validation-runtime-index.md) — runner locks, pinned Node, Docker healthcheck `setns` limits, loopback probes, and offline browser fixtures.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [SSE topology](sse-topology-choice.md) + [publish](production-publish-workflow.md) — derive DB peaks from samples; provider metrics stay manual; peer SSE unsupported.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.

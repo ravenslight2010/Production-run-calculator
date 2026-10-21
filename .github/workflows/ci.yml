@@ -379,9 +379,8 @@ jobs:
   docker:
     name: Docker image
     runs-on: ubuntu-latest
-    # Allows both cached multi-stage image builds while bounding registry or
-    # build-service stalls.
-    timeout-minutes: 30
+    # Includes cached multi-stage image builds and a disposable Compose startup.
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
@@ -399,6 +398,7 @@ jobs:
           context: .
           target: api
           push: false
+          load: true
           platforms: linux/amd64
           tags: |
             runcalc-api:${{ github.sha }}
@@ -411,6 +411,7 @@ jobs:
           context: .
           target: api-migrate
           push: false
+          load: true
           platforms: linux/amd64
           tags: |
             runcalc-api-migrate:${{ github.sha }}
@@ -423,11 +424,17 @@ jobs:
           context: .
           target: web
           push: false
+          load: true
           platforms: linux/amd64
           tags: |
             runcalc-web:${{ github.sha }}
           cache-from: type=gha,scope=docker-build-web-${{ github.run_id }}
           cache-to: type=gha,mode=max,scope=docker-build-web-${{ github.run_id }}
+
+      - name: Start and verify the Docker stack on disposable data
+        env:
+          DOCKER_IMAGE_TAG: ${{ github.sha }}
+        run: bash scripts/src/check-docker-runtime.sh
 
   build:
     name: Build (web + API)
