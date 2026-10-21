@@ -6,6 +6,8 @@ import {
   db,
   importHistoryTable,
   importOperationsTable,
+  importGoldCasesTable,
+  importGoldScoresTable,
   mixesTable,
   cheeseRecipesTable,
   doughRecipesTable,
@@ -23,6 +25,7 @@ import { normalizeNamedRecipe } from "@workspace/named-recipes";
 import { normalizeFreezerPullItem } from "@workspace/freezer-pull";
 import { broadcastMasterDataChanged } from "./sync";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
+import { isGeminiProviderConfigured, openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import {
   writeAuditEvent,
   CHEESE_RECIPE_AUDIT_FIELDS,
@@ -36,6 +39,13 @@ const MAX_ROWS = 500;
 const MAX_BODY = 512 * 1024;
 const MAX_SOURCE_EVIDENCE_BYTES = 100 * 1024;
 const MAX_EXPORT_PAGE_SIZE = 20;
+const MAX_GOLD_INPUT_BYTES = 100 * 1024;
+const MAX_GOLD_EXPECTED_BYTES = 200 * 1024;
+const MAX_GOLD_CASES = 100;
+const MAX_GOLD_SCORE_CASES = 3;
+const MAX_GOLD_DIFFS = 30;
+const MAX_GOLD_DIFF_VALUE_CHARS = 400;
+const GOLD_SOURCE_LABELS = { spec: "Spec import", premix: "Premix import", cheese: "Cheese import" } as const;
 const TABLES = {
   mixes: { table: mixesTable, key: "id" },
   cheeseRecipes: { table: cheeseRecipesTable, key: "id" },
@@ -50,9 +60,20 @@ type ChangeSet = Partial<Record<EntityName, { upsert?: unknown[]; delete?: strin
 };
 
 let failureHook: ((stage: string) => void) | undefined;
+type GoldProviderName = "local" | "gemini";
+type GoldProviderTestOverride = (
+  provider: GoldProviderName,
+  input: Record<string, unknown>,
+  importType: string,
+) => Promise<unknown>;
+let goldProviderTestOverride: GoldProviderTestOverride | undefined;
 /** Test-only failure injection. The hook is never configured by production code. */
 export function setImportOperationFailureHookForTest(hook?: (stage: string) => void): void {
   failureHook = hook;
+}
+/** Test seam: automated tests must never call a real evaluator provider. */
+export function setImportGoldProviderForTest(override?: GoldProviderTestOverride): void {
+  goldProviderTestOverride = override;
 }
 function fail(stage: string): void {
   failureHook?.(stage);
@@ -76,6 +97,217 @@ function objectBody(req: Request): Record<string, unknown> | null {
   if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) return null;
   if (Buffer.byteLength(JSON.stringify(req.body)) > MAX_BODY) return null;
   return req.body as Record<string, unknown>;
+}
+
+function importGoldEnabled(): boolean {
+  return process.env.IMPORT_GOLD_ENABLED === "true" &&
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED === "true" &&
+    process.env.IMPORT_GOLD_RETENTION_APPROVED === "true";
+}
+
+function jsonBytes(value: unknown): number {
+  try { return Buffer.byteLength(JSON.stringify(value), "utf8"); } catch { return Number.POSITIVE_INFINITY; }
+}
+
+function goldInputHasSafeJson(value: unknown, depth = 0, count = { nodes: 0 }): boolean {
+  count.nodes++;
+  if (count.nodes > 20_000 || depth > 24) return false;
+  if (value === null || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "string") return value.length <= 10_000 && !/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/u.test(value);
+  if (Array.isArray(value)) return value.length <= MAX_ROWS && value.every((child) => goldInputHasSafeJson(child, depth + 1, count));
+  if (!value || typeof value !== "object") return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= 200 && entries.every(([key, child]) =>
+    !["__proto__", "constructor", "prototype"].includes(key) &&
+    !/(?:password|token|secret|credential|authorization|api[_-]?key|sourceText|filename|email)/iu.test(key) &&
+    goldInputHasSafeJson(child, depth + 1, count),
+  );
+}
+
+function validateGoldInput(value: unknown, importType: string): { input: Record<string, unknown> | null; error: string | null } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { input: null, error: "Invalid gold input" };
+  const record = value as Record<string, unknown>;
+  const expectedKeys = importType === "spec" ? ["profiles", "recipes"]
+    : importType === "premix" ? ["candidates"] : ["recipes"];
+  if (Object.keys(record).sort().join(",") !== expectedKeys.slice().sort().join(",")) {
+    return { input: null, error: "Invalid gold input shape" };
+  }
+  const arrays = expectedKeys.map((key) => record[key]);
+  if (arrays.some((array) => !Array.isArray(array) || array.length > MAX_ROWS)) {
+    return { input: null, error: "Gold input has too many rows" };
+  }
+  if (!goldInputHasSafeJson(record)) return { input: null, error: "Gold input contains unsupported or sensitive data" };
+  if (jsonBytes(record) > MAX_GOLD_INPUT_BYTES) return { input: null, error: "Gold input is too large" };
+  return { input: jsonSafe(record), error: null };
+}
+
+function goldExpectedSnapshot(after: Record<string, unknown[]>, importType: string): Record<string, unknown[]> {
+  const fields: Record<string, string[]> = {
+    brandProfiles: ["key", "brand", "flavor", "values", "crustValues"],
+    mixes: ["name", "brand", "flavor", "batchSize", "daysEarly", "notes", "amountAlreadyMade", "components", "isPrep", "enabled"],
+    cheeseRecipes: ["name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled"],
+    doughRecipes: ["name", "notes", "components", "enabled", "brand", "flavors", "doughballWeightOz", "doughballsPerTray", "doughballVariants"],
+    sauceRecipes: ["name", "notes", "components", "enabled", "brand", "flavors"],
+    freezerPullItems: ["ingredient", "freezerDaysEarly", "enabled"],
+  };
+  const allowed = importType === "spec"
+    ? ["brandProfiles", "mixes", "cheeseRecipes", "doughRecipes", "sauceRecipes"]
+    : importType === "premix" ? ["mixes", "freezerPullItems"] : ["cheeseRecipes"];
+  return Object.fromEntries(allowed.map((key) => [
+    key,
+    (after[key] ?? []).map((row) => Object.fromEntries(
+      fields[key]!.filter((field) => field in (row as Record<string, unknown>))
+        .map((field) => [field, (row as Record<string, unknown>)[field]]),
+    )),
+  ]));
+}
+
+function flattenFields(value: unknown, prefix = "", result: Map<string, unknown> = new Map()): Map<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0 && prefix) result.set(prefix, {});
+    for (const [key, child] of entries) flattenFields(child, prefix ? `${prefix}.${key}` : key, result);
+  } else if (Array.isArray(value)) {
+    if (value.length === 0 && prefix) result.set(prefix, []);
+    value.forEach((child, index) => flattenFields(child, `${prefix}[${index}]`, result));
+  } else if (prefix) {
+    result.set(prefix, value);
+  }
+  return result;
+}
+
+export function compareImportGoldFields(expected: unknown, predicted: unknown): {
+  comparedFields: number;
+  equalFields: number;
+  accuracy: number;
+  fieldDiffs: Array<{ field: string; expected: unknown; predicted: unknown }>;
+} {
+  const expectedFields = flattenFields(expected);
+  const predictedFields = flattenFields(predicted);
+  const keys = [...new Set([...expectedFields.keys(), ...predictedFields.keys()])].sort();
+  let equalFields = 0;
+  const fieldDiffs: Array<{ field: string; expected: unknown; predicted: unknown }> = [];
+  for (const field of keys) {
+    const hasExpected = expectedFields.has(field);
+    const hasPredicted = predictedFields.has(field);
+    const left = expectedFields.get(field);
+    const right = predictedFields.get(field);
+    if (hasExpected && hasPredicted && isDeepStrictEqual(left, right)) equalFields++;
+    else if (fieldDiffs.length < MAX_GOLD_DIFFS) {
+      fieldDiffs.push({
+        field,
+        expected: hasExpected ? safeDiffValue(left) : null,
+        predicted: hasPredicted ? safeDiffValue(right) : null,
+      });
+    }
+  }
+  return {
+    comparedFields: keys.length,
+    equalFields,
+    accuracy: keys.length ? Math.round((equalFields / keys.length) * 10000) / 100 : 100,
+    fieldDiffs,
+  };
+}
+
+function safeDiffValue(value: unknown): unknown {
+  return typeof value === "string" && value.length > MAX_GOLD_DIFF_VALUE_CHARS
+    ? `${value.slice(0, MAX_GOLD_DIFF_VALUE_CHARS)}…`
+    : value;
+}
+
+function parseGoldPrediction(content: unknown): Record<string, unknown> {
+  if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_GOLD_EXPECTED_BYTES) {
+    throw new Error("invalid_output");
+  }
+  let value: unknown;
+  try { value = JSON.parse(content); } catch { throw new Error("invalid_output"); }
+  if (!value || typeof value !== "object" || Array.isArray(value) || jsonBytes(value) > MAX_GOLD_EXPECTED_BYTES) {
+    throw new Error("invalid_output");
+  }
+  return value as Record<string, unknown>;
+}
+
+function isPredictionShapeValid(actual: unknown, expectedShape: unknown, depth = 0): boolean {
+  if (depth > 24) return false;
+  if (Array.isArray(expectedShape)) {
+    return Array.isArray(actual) && actual.length <= MAX_ROWS &&
+      (expectedShape.length === 0
+        ? goldInputHasSafeJson(actual, depth + 1)
+        : actual.every((child) => isPredictionShapeValid(child, expectedShape[0], depth + 1)));
+  }
+  if (expectedShape && typeof expectedShape === "object") {
+    if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+    const expected = expectedShape as Record<string, unknown>;
+    const candidate = actual as Record<string, unknown>;
+    return Object.keys(candidate).every((key) => key in expected) &&
+      Object.entries(candidate).every(([key, child]) => isPredictionShapeValid(child, expected[key], depth + 1));
+  }
+  if (expectedShape === null) return actual === null;
+  return typeof actual === typeof expectedShape;
+}
+
+function validateGoldPrediction(value: unknown, expected: Record<string, unknown>): Record<string, unknown> {
+  if (
+    !value || typeof value !== "object" || Array.isArray(value) ||
+    jsonBytes(value) > MAX_GOLD_EXPECTED_BYTES ||
+    !goldInputHasSafeJson(value) ||
+    !isPredictionShapeValid(value, expected)
+  ) throw new Error("invalid_output");
+  return value as Record<string, unknown>;
+}
+
+function outputShape(value: unknown): unknown {
+  if (Array.isArray(value)) return value.length ? [outputShape(value[0])] : [];
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, outputShape(child)]));
+  }
+  if (typeof value === "string") return "<string>";
+  if (typeof value === "number") return 0;
+  if (typeof value === "boolean") return false;
+  return null;
+}
+
+async function requestLocalGoldPrediction(input: Record<string, unknown>, importType: string, expected: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const base = process.env.IMPORT_GOLD_LOCAL_BASE_URL ?? "http://127.0.0.1:11434/v1";
+  let endpoint: URL;
+  try { endpoint = new URL(base); } catch { throw new Error("provider_unavailable"); }
+  if (endpoint.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(endpoint.hostname)) {
+    throw new Error("provider_unavailable");
+  }
+  endpoint.pathname = `${endpoint.pathname.replace(/\/+$/u, "")}/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.IMPORT_GOLD_LOCAL_MODEL ?? "qwen3.5-9b-q3_k_m",
+      messages: [
+        { role: "system", content: `Score-only import evaluator. Extract a ${importType} import result from evaluatedInput. Return JSON matching the keys and value types in expectedShape; do not copy placeholder values. No prose, tools, or extra keys.` },
+        { role: "user", content: JSON.stringify({ evaluatedInput: input, expectedShape: outputShape(expected) }) },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 256,
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(175_000),
+  });
+  if (!response.ok) throw new Error("provider_unavailable");
+  const body = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+  return parseGoldPrediction(body.choices?.[0]?.message?.content);
+}
+
+async function requestGeminiGoldPrediction(input: Record<string, unknown>, importType: string, expected: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!isGeminiProviderConfigured()) throw new Error("provider_not_configured");
+  const response = await openai.chat.completions.create({
+    model: pickModel("cheap"),
+    messages: [
+      { role: "system", content: `Score-only import evaluator. Extract a ${importType} import result from evaluatedInput. Return JSON matching the keys and value types in expectedShape; do not copy placeholder values. No prose, tools, or extra keys.` },
+      { role: "user", content: JSON.stringify({ evaluatedInput: input, expectedShape: outputShape(expected) }) },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 256,
+  });
+  return parseGoldPrediction(response.choices[0]?.message?.content);
 }
 function validateSourceEvidence(
   value: unknown,
@@ -495,6 +727,26 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
     res.status(400).json({ error: sourceEvidence.error });
     return;
   }
+  let goldInput: Record<string, unknown> | null = null;
+  if (body.goldCapture !== undefined) {
+    const capture = body.goldCapture as Record<string, unknown> | null;
+    if (
+      !importGoldEnabled() ||
+      !capabilities.includes("manage-staff") ||
+      !["spec", "premix", "cheese"].includes(importType) ||
+      !capture || typeof capture !== "object" || Array.isArray(capture) ||
+      Object.keys(capture).sort().join(",") !== "input"
+    ) {
+      res.status(importGoldEnabled() ? 403 : 404).json({ error: "Import gold capture is unavailable" });
+      return;
+    }
+    const validated = validateGoldInput(capture.input, importType);
+    if (validated.error || !validated.input) {
+      res.status(400).json({ error: validated.error ?? "Invalid gold input" });
+      return;
+    }
+    goldInput = validated.input;
+  }
   try {
     const operation = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"import-operation:" + scope}, 0))`);
@@ -516,6 +768,13 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       await applyRows(tx, changes, scope);
       fail("after-domain-writes");
       const after = await capture(tx, changes, scope);
+      const expectedResult = goldInput ? goldExpectedSnapshot(after, importType) : null;
+      if (expectedResult && jsonBytes(expectedResult) > MAX_GOLD_EXPECTED_BYTES) {
+        const error = new Error("IMPORT_GOLD_EXPECTED_TOO_LARGE"); (error as any).code = "GOLD_TOO_LARGE"; throw error;
+      }
+      if (expectedResult && !goldInputHasSafeJson(expectedResult)) {
+        const error = new Error("IMPORT_GOLD_EXPECTED_UNSAFE"); (error as any).code = "GOLD_UNSAFE"; throw error;
+      }
       await auditImportedRecipeChanges(tx, before, after, requestCorrelationId(req));
       fail("after-recipe-audit");
       const resultHash = hash(after);
@@ -538,6 +797,17 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
         customerScope: null, status: "complete", summary: result,
         snapshotId: null, operationId, actorId: req.userId ?? null,
       });
+      if (goldInput && expectedResult) {
+        await tx.insert(importGoldCasesTable).values({
+          scope,
+          operationId,
+          importType,
+          sourceLabel: GOLD_SOURCE_LABELS[importType as keyof typeof GOLD_SOURCE_LABELS],
+          evaluatedInput: goldInput,
+          expectedResult,
+          createdBy: req.userId ?? null,
+        }).onConflictDoNothing();
+      }
       fail("after-history");
       return inserted[0];
     });
@@ -558,9 +828,159 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
     if (err?.code === "STALE_REVIEW") { res.status(409).json({ error: "STALE_REVIEWED_STATE" }); return; }
     if (err?.code === "REQUEST_CHANGED") { res.status(409).json({ error: "IMPORT_REQUEST_CHANGED" }); return; }
     if (err?.code === "STALE_IMPORT") { res.status(409).json({ error: "STALE_IMPORT_REVISION" }); return; }
+    if (err?.code === "GOLD_TOO_LARGE") { res.status(413).json({ error: "Applied result is too large to save as an evaluation case" }); return; }
+    if (err?.code === "GOLD_UNSAFE") { res.status(422).json({ error: "Applied result contains unsupported or sensitive data for evaluation capture" }); return; }
     req.log.error({ err, operationId }, "atomic import apply failed");
     res.status(500).json({ error: "Import apply failed; no changes were committed" });
   }
+});
+
+router.get("/import-gold/config", requireCapability("manage-staff"), (_req, res) => {
+  res.json({
+    enabled: importGoldEnabled(),
+    localConfigured: importGoldEnabled() && (process.env.IMPORT_GOLD_LOCAL_ENABLED === "true" || !!process.env.IMPORT_GOLD_LOCAL_BASE_URL),
+    geminiConfigured: importGoldEnabled() && isGeminiProviderConfigured(),
+    retention: "Cases remain until a manager deletes them; exclusion only removes them from scoring and export. Source-use and retention approval are required before enablement.",
+    persistsAcrossFactoryPurge: true,
+  });
+});
+
+router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_GOLD_CASES) {
+    res.status(400).json({ error: `Limit must be an integer from 1 to ${MAX_GOLD_CASES}` }); return;
+  }
+  const scope = currentScope();
+  const cases = await db.select().from(importGoldCasesTable)
+    .where(eq(importGoldCasesTable.scope, scope))
+    .orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id))
+    .limit(limit);
+  const scores = cases.length
+    ? await db.selectDistinctOn([importGoldScoresTable.caseId, importGoldScoresTable.provider])
+      .from(importGoldScoresTable)
+      .where(and(eq(importGoldScoresTable.scope, scope), inArray(importGoldScoresTable.caseId, cases.map((row) => row.id))))
+      .orderBy(importGoldScoresTable.caseId, importGoldScoresTable.provider, desc(importGoldScoresTable.createdAt), desc(importGoldScoresTable.id))
+    : [];
+  const recentByCase = new Map<number, typeof scores>();
+  for (const score of scores) {
+    const existing = recentByCase.get(score.caseId) ?? [];
+    recentByCase.set(score.caseId, [...existing, score]);
+  }
+  res.json({
+    cases: cases.map((row) => ({
+      id: row.id,
+      importType: row.importType,
+      sourceLabel: row.sourceLabel,
+      excluded: row.excluded,
+      createdAt: row.createdAt.toISOString(),
+      scores: recentByCase.get(row.id) ?? [],
+    })),
+  });
+});
+
+router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const id = Number(req.params.id);
+  const body = objectBody(req);
+  if (!Number.isSafeInteger(id) || id < 1 || !body || typeof body.excluded !== "boolean") {
+    res.status(400).json({ error: "Invalid exclusion request" }); return;
+  }
+  const scope = currentScope();
+  const [row] = await db.update(importGoldCasesTable)
+    .set({ excluded: body.excluded, excludedAt: body.excluded ? new Date() : null })
+    .where(and(eq(importGoldCasesTable.id, id), eq(importGoldCasesTable.scope, scope)))
+    .returning({ id: importGoldCasesTable.id, excluded: importGoldCasesTable.excluded });
+  if (!row) { res.status(404).json({ error: "Evaluation case not found" }); return; }
+  res.json(row);
+});
+
+router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) { res.status(400).json({ error: "Invalid case identity" }); return; }
+  const deleted = await db.delete(importGoldCasesTable).where(and(
+    eq(importGoldCasesTable.id, id),
+    eq(importGoldCasesTable.scope, currentScope()),
+  )).returning({ id: importGoldCasesTable.id });
+  if (!deleted.length) { res.status(404).json({ error: "Evaluation case not found" }); return; }
+  res.status(204).end();
+});
+
+router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async (_req, res) => {
+  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const cases = await db.select().from(importGoldCasesTable).where(and(
+    eq(importGoldCasesTable.scope, currentScope()),
+    eq(importGoldCasesTable.excluded, false),
+  )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_CASES);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="import-gold-cases.jsonl"');
+  res.send(cases.map((row) => JSON.stringify({
+    id: row.id,
+    importType: row.importType,
+    createdAt: row.createdAt.toISOString(),
+    evaluatedInput: row.evaluatedInput,
+    expectedResult: row.expectedResult,
+  })).join("\n") + (cases.length ? "\n" : ""));
+});
+
+router.post("/import-gold/score", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const body = objectBody(req);
+  const provider = body?.provider;
+  const requestedIds = body?.caseIds;
+  if (
+    !body || (provider !== "local" && provider !== "gemini") ||
+    (requestedIds !== undefined && (!Array.isArray(requestedIds) || requestedIds.length > MAX_GOLD_SCORE_CASES ||
+      requestedIds.some((id) => !Number.isSafeInteger(id) || Number(id) < 1)))
+  ) {
+    res.status(400).json({ error: "Invalid score request" }); return;
+  }
+  if (provider === "local" && process.env.IMPORT_GOLD_LOCAL_ENABLED !== "true" && !process.env.IMPORT_GOLD_LOCAL_BASE_URL) {
+    res.status(503).json({ error: "The local evaluator is not configured" }); return;
+  }
+  if (provider === "gemini" && !isGeminiProviderConfigured()) {
+    res.status(503).json({ error: "Gemini comparison is not configured" }); return;
+  }
+  const scope = currentScope();
+  const ids = requestedIds as number[] | undefined;
+  const eligible = await db.select().from(importGoldCasesTable).where(and(
+    eq(importGoldCasesTable.scope, scope),
+    eq(importGoldCasesTable.excluded, false),
+    ...(ids ? [inArray(importGoldCasesTable.id, ids)] : []),
+  )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_SCORE_CASES);
+  const results = [];
+  for (const goldCase of eligible) {
+    try {
+      const predictionCandidate = goldProviderTestOverride
+        ? await goldProviderTestOverride(provider, goldCase.evaluatedInput, goldCase.importType)
+        : provider === "local"
+          ? await requestLocalGoldPrediction(goldCase.evaluatedInput, goldCase.importType, goldCase.expectedResult)
+          : await requestGeminiGoldPrediction(goldCase.evaluatedInput, goldCase.importType, goldCase.expectedResult);
+      const prediction = validateGoldPrediction(predictionCandidate, goldCase.expectedResult);
+      const comparison = compareImportGoldFields(goldCase.expectedResult, prediction);
+      const [score] = await db.insert(importGoldScoresTable).values({
+        scope,
+        caseId: goldCase.id,
+        provider,
+        status: "scored",
+        accuracy: comparison.accuracy,
+        comparedFields: comparison.comparedFields,
+        equalFields: comparison.equalFields,
+        fieldDiffs: comparison.fieldDiffs,
+      }).returning();
+      results.push({ caseId: goldCase.id, provider, status: "scored", accuracy: comparison.accuracy, comparedFields: comparison.comparedFields, equalFields: comparison.equalFields, fieldDiffs: comparison.fieldDiffs, scoreId: score.id });
+    } catch (error) {
+      const rawCode = error instanceof Error ? error.message : "";
+      const errorCode = rawCode === "provider_not_configured" ? "provider_not_configured"
+        : rawCode === "invalid_output" ? "invalid_output" : "provider_unavailable";
+      const [score] = await db.insert(importGoldScoresTable).values({
+        scope, caseId: goldCase.id, provider, status: "error", errorCode,
+      }).returning();
+      results.push({ caseId: goldCase.id, provider, status: "error", errorCode, scoreId: score.id });
+    }
+  }
+  res.json({ results, scoredCount: results.filter((result) => result.status === "scored").length, errorCount: results.filter((result) => result.status === "error").length });
 });
 
 type ExportCursor = { createdAt: string; id: string };

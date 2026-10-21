@@ -87,6 +87,7 @@ function renderDialog(
     retryingPending?: boolean;
     onRetryPending?: () => void;
   } = {},
+  goldCaptureEnabled = false,
 ) {
   return render(
     <SpecImportDialog
@@ -105,6 +106,7 @@ function renderDialog(
       aiRetryAvailable={ai.retryAvailable ?? false}
       onUseAiFallback={ai.onRetry ?? (() => {})}
       existingRecipeNamesByKind={existingRecipeNamesByKind}
+      goldCaptureEnabled={goldCaptureEnabled}
       onConfirm={onConfirm}
     />,
   );
@@ -226,7 +228,7 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(apply.disabled).toBe(false);
     fireEvent.click(apply);
     expect(onConfirm).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), expect.anything(), expect.anything(), expect.anything(), true, "review-signature",
+      expect.anything(), expect.anything(), expect.anything(), expect.anything(), expect.anything(), true, "review-signature", false,
     );
   });
 
@@ -679,5 +681,22 @@ describe("SpecImportDialog two-step wizard", () => {
 
     expect(screen.queryByRole("button", { name: /Profiles!Z99/ })).toBeNull();
     expect(screen.queryByTestId("spec-source-preview")).toBeNull();
+  });
+
+  it("sends the gold opt-in only after the final reviewed Apply is selected", () => {
+    const onConfirm = vi.fn();
+    renderDialog(
+      makePrepared([{ brand: "Aldo Foods", flavor: "Classic", applicators: [], pepperonis: [] }]),
+      onConfirm,
+      {},
+      undefined,
+      {},
+      true,
+    );
+    expect(screen.queryByTestId("spec-import-gold-opt-in")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByTestId("spec-import-gold-opt-in"));
+    fireEvent.click(screen.getByRole("button", { name: /Apply 1 item/ }));
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(true);
   });
 });

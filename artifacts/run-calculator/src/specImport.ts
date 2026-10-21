@@ -135,7 +135,7 @@ import {
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
-import { applyImportOperation } from "./importOperations";
+import { applyImportOperation, type ImportGoldCapture } from "./importOperations";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { parseDoughCustomerSection, parseDoughVariantTable, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
@@ -3193,6 +3193,7 @@ export async function commitSpecImport(
    */
   acceptedNewMixIngredientNames?: ReadonlySet<string>,
   operationId?: string,
+  goldCapture?: ImportGoldCapture,
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
@@ -3844,6 +3845,7 @@ export async function commitSpecImport(
       sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Spec sheet",
       changes,
       ...(prepared.sourceEvidence ? { sourceEvidence: prepared.sourceEvidence } : {}),
+      ...(goldCapture ? { goldCapture } : {}),
     });
     resultHash = committed.resultHash;
     // The first pass was a side-effect-free projection. Adopt the exact same

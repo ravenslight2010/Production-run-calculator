@@ -533,6 +533,15 @@ export interface SourceLibraryReconciliationDiagnostics {
   mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
 }
 
+export type ImportOperationApplyInputGoldCaptureInput = { [key: string]: unknown };
+
+/**
+ * Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
+ */
+export type ImportOperationApplyInputGoldCapture = {
+  input: ImportOperationApplyInputGoldCaptureInput;
+};
+
 /**
  * Exact bounded source text retained privately with a live spec Apply.
  */
@@ -574,10 +583,139 @@ export interface ImportOperationApplyInput {
      * @pattern ^[a-f0-9]{64}$
      */
   expectedStateHash?: string | null;
+  /** Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot. */
+  goldCapture?: ImportOperationApplyInputGoldCapture;
   /** Exact bounded source text retained privately with a live spec Apply. */
   sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
+}
+
+export interface ImportGoldConfig {
+  enabled: boolean;
+  localConfigured: boolean;
+  geminiConfigured: boolean;
+  retention: string;
+  persistsAcrossFactoryPurge: boolean;
+}
+
+export type ImportGoldScoreRequestProvider = typeof ImportGoldScoreRequestProvider[keyof typeof ImportGoldScoreRequestProvider];
+
+
+export const ImportGoldScoreRequestProvider = {
+  local: 'local',
+  gemini: 'gemini',
+} as const;
+
+export interface ImportGoldScoreRequest {
+  provider: ImportGoldScoreRequestProvider;
+  /**
+     * @maxItems 3
+     * @items.minimum 1
+     */
+  caseIds?: number[];
+}
+
+export interface ImportGoldExclusionRequest {
+  excluded: boolean;
+}
+
+export type ImportGoldCaseImportType = typeof ImportGoldCaseImportType[keyof typeof ImportGoldCaseImportType];
+
+
+export const ImportGoldCaseImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export type ImportGoldScoreProvider = typeof ImportGoldScoreProvider[keyof typeof ImportGoldScoreProvider];
+
+
+export const ImportGoldScoreProvider = {
+  local: 'local',
+  gemini: 'gemini',
+} as const;
+
+export type ImportGoldScoreStatus = typeof ImportGoldScoreStatus[keyof typeof ImportGoldScoreStatus];
+
+
+export const ImportGoldScoreStatus = {
+  scored: 'scored',
+  error: 'error',
+} as const;
+
+export type ImportGoldScoreFieldDiffsItem = {
+  field: string;
+  expected: unknown;
+  predicted: unknown;
+};
+
+export interface ImportGoldScore {
+  id: number;
+  provider: ImportGoldScoreProvider;
+  status: ImportGoldScoreStatus;
+  /** @nullable */
+  accuracy: number | null;
+  comparedFields: number;
+  equalFields: number;
+  /** @nullable */
+  errorCode: string | null;
+  fieldDiffs: ImportGoldScoreFieldDiffsItem[];
+  createdAt: string;
+}
+
+export interface ImportGoldCase {
+  id: number;
+  importType: ImportGoldCaseImportType;
+  sourceLabel: string;
+  excluded: boolean;
+  createdAt: string;
+  scores: ImportGoldScore[];
+}
+
+export interface ImportGoldCasesResponse {
+  cases: ImportGoldCase[];
+}
+
+export type ImportGoldScoreResponseResultsItemProvider = typeof ImportGoldScoreResponseResultsItemProvider[keyof typeof ImportGoldScoreResponseResultsItemProvider];
+
+
+export const ImportGoldScoreResponseResultsItemProvider = {
+  local: 'local',
+  gemini: 'gemini',
+} as const;
+
+export type ImportGoldScoreResponseResultsItemStatus = typeof ImportGoldScoreResponseResultsItemStatus[keyof typeof ImportGoldScoreResponseResultsItemStatus];
+
+
+export const ImportGoldScoreResponseResultsItemStatus = {
+  scored: 'scored',
+  error: 'error',
+} as const;
+
+export type ImportGoldScoreResponseResultsItemFieldDiffsItem = {
+  field: string;
+  expected: unknown;
+  predicted: unknown;
+};
+
+export type ImportGoldScoreResponseResultsItem = {
+  caseId: number;
+  provider: ImportGoldScoreResponseResultsItemProvider;
+  status: ImportGoldScoreResponseResultsItemStatus;
+  accuracy?: number;
+  comparedFields?: number;
+  equalFields?: number;
+  errorCode?: string;
+  scoreId?: number;
+  fieldDiffs?: ImportGoldScoreResponseResultsItemFieldDiffsItem[];
+};
+
+export interface ImportGoldScoreResponse {
+  results: ImportGoldScoreResponseResultsItem[];
+  scoredCount: number;
+  errorCount: number;
 }
 
 export type DistillationApplyEvidenceRecordImportType = typeof DistillationApplyEvidenceRecordImportType[keyof typeof DistillationApplyEvidenceRecordImportType];
@@ -8562,6 +8700,14 @@ export type ListOperationalIntentReceipts200 = {
   cursor: number;
   hasMore: boolean;
   mutations: OperationalIntentReceipt[];
+};
+
+export type ListImportGoldCasesParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
 };
 
 export type ListDistillationApplyEvidenceParams = {

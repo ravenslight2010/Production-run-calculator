@@ -24,6 +24,11 @@ let seedRoles: () => Promise<void>;
 let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
 let observabilityMiddleware: typeof import("../lib/observability")["observabilityMiddleware"];
+const originalGoldEnabled = process.env.IMPORT_GOLD_ENABLED;
+const originalGoldSourceApproved = process.env.IMPORT_GOLD_SOURCE_USE_APPROVED;
+const originalGoldRetentionApproved = process.env.IMPORT_GOLD_RETENTION_APPROVED;
+const originalGoldLocalEnabled = process.env.IMPORT_GOLD_LOCAL_ENABLED;
+const originalGoldLocalBaseUrl = process.env.IMPORT_GOLD_LOCAL_BASE_URL;
 const sessionTokens = new Map<string, string>();
 
 beforeAll(async () => {
@@ -57,19 +62,36 @@ beforeAll(async () => {
     server.once("error", reject);
   });
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   route?.setImportOperationFailureHookForTest();
+  route?.setImportGoldProviderForTest();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   await pool?.end();
   if (adminPool) await adminPool.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
   await adminPool?.end();
   process.env.DATABASE_URL = originalUrl;
+  if (originalGoldEnabled === undefined) delete process.env.IMPORT_GOLD_ENABLED;
+  else process.env.IMPORT_GOLD_ENABLED = originalGoldEnabled;
+  if (originalGoldSourceApproved === undefined) delete process.env.IMPORT_GOLD_SOURCE_USE_APPROVED;
+  else process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = originalGoldSourceApproved;
+  if (originalGoldRetentionApproved === undefined) delete process.env.IMPORT_GOLD_RETENTION_APPROVED;
+  else process.env.IMPORT_GOLD_RETENTION_APPROVED = originalGoldRetentionApproved;
+  if (originalGoldLocalEnabled === undefined) delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
+  else process.env.IMPORT_GOLD_LOCAL_ENABLED = originalGoldLocalEnabled;
+  if (originalGoldLocalBaseUrl === undefined) delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+  else process.env.IMPORT_GOLD_LOCAL_BASE_URL = originalGoldLocalBaseUrl;
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  process.env.IMPORT_GOLD_ENABLED = "true";
+  process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
+  process.env.IMPORT_GOLD_RETENTION_APPROVED = "true";
+  delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
+  delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+  route?.setImportGoldProviderForTest();
+  await db.execute(sql`TRUNCATE ${tables.importGoldScoresTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -745,5 +767,184 @@ describe("atomic import operations", () => {
       (await db.select().from(tables.importOperationsTable))
         .find((row) => row.id === "mixed-capability-undo-0001")?.status,
     ).toBe("applied");
+  });
+
+  it("captures only a successfully applied human result and isolates cases by scope", async () => {
+    const goldCapture = { input: { candidates: [{ name: "Reviewed Mix" }] } };
+    const saved = await apply("gold-capture-success-0001", {
+      ...change("gold-captured-mix"),
+      goldCapture,
+    });
+    expect(saved.status).toBe(200);
+    const liveCases = await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.scope, "live"));
+    expect(liveCases).toHaveLength(1);
+    expect(liveCases[0]?.evaluatedInput).toEqual(goldCapture.input);
+    expect(liveCases[0]?.expectedResult.mixes).toEqual([
+      expect.objectContaining({ name: "Atomic Mix", batchSize: 1 }),
+    ]);
+
+    route.setImportOperationFailureHookForTest((stage) => {
+      if (stage === "after-history") throw new Error("injected apply rollback");
+    });
+    const failed = await apply("gold-capture-failure-0001", {
+      ...change("gold-capture-failed-mix"),
+      goldCapture,
+    });
+    route.setImportOperationFailureHookForTest();
+    expect(failed.status).toBe(500);
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(1);
+    expect(await db.select().from(tables.mixesTable).where(eq(tables.mixesTable.id, "gold-capture-failed-mix"))).toHaveLength(0);
+
+    const sandbox = await apply("gold-capture-sandbox-0001", {
+      ...change("gold-sandbox-mix"),
+      goldCapture,
+    }, "sandbox");
+    expect(sandbox.status).toBe(200);
+    const sandboxList = await fetch(`${baseUrl}/api/import-gold/cases`, { headers: headers("sandbox") });
+    expect(sandboxList.status).toBe(200);
+    expect((await sandboxList.json() as { cases: unknown[] }).cases).toHaveLength(1);
+    expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.scope, "sandbox"))).toHaveLength(1);
+    const crossScopeMutation = await fetch(`${baseUrl}/api/import-gold/cases/${liveCases[0]!.id}/exclusion`, {
+      method: "PATCH",
+      headers: headers("sandbox"),
+      body: JSON.stringify({ excluded: true }),
+    });
+    expect(crossScopeMutation.status).toBe(404);
+  });
+
+  it("lists, excludes, exports, and deletes only manager-visible scoped cases", async () => {
+    const applied = await apply("gold-controls-operation-001", {
+      ...change("gold-controls-mix"),
+      goldCapture: { input: { candidates: [{ name: "Controls" }] } },
+    });
+    expect(applied.status).toBe(200);
+    const listed = await fetch(`${baseUrl}/api/import-gold/cases?limit=5`, { headers: headers() });
+    expect(listed.status).toBe(200);
+    const listBody = await listed.json() as { cases: Array<{ id: number; excluded: boolean; evaluatedInput?: unknown; scores: unknown[] }> };
+    expect(listBody.cases).toHaveLength(1);
+    expect(listBody.cases[0]).toMatchObject({ excluded: false, scores: [] });
+    expect(listBody.cases[0]).not.toHaveProperty("evaluatedInput");
+    const caseId = listBody.cases[0]!.id;
+
+    const invalidLimit = await fetch(`${baseUrl}/api/import-gold/cases?limit=101`, { headers: headers() });
+    expect(invalidLimit.status).toBe(400);
+    const excluded = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}/exclusion`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify({ excluded: true }),
+    });
+    expect(excluded.status).toBe(200);
+    const excludedExport = await fetch(`${baseUrl}/api/import-gold/export.jsonl`, { headers: headers() });
+    expect(await excludedExport.text()).toBe("");
+
+    const restored = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}/exclusion`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify({ excluded: false }),
+    });
+    expect(restored.status).toBe(200);
+    const exported = await fetch(`${baseUrl}/api/import-gold/export.jsonl`, { headers: headers() });
+    expect(exported.headers.get("content-type")).toContain("application/x-ndjson");
+    const jsonl = await exported.text();
+    expect(jsonl.trim().split("\n")).toHaveLength(1);
+    expect(JSON.parse(jsonl)).toMatchObject({ id: caseId, evaluatedInput: { candidates: [{ name: "Controls" }] } });
+
+    const deleted = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}`, { method: "DELETE", headers: headers() });
+    expect(deleted.status).toBe(204);
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+  });
+
+  it("gates capture and manager controls, bounds input, and records provider errors without failing the batch", async () => {
+    const unauthorized = await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers("profiles") });
+    expect(unauthorized.status).toBe(403);
+    expect((await apply("gold-capture-not-manager-001", {
+      ...change("gold-not-manager"),
+      goldCapture: { input: { candidates: [] } },
+    }, "profiles")).status).toBe(403);
+
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    expect((await apply("gold-capture-disabled-001", {
+      ...change("gold-disabled"),
+      goldCapture: { input: { candidates: [] } },
+    })).status).toBe(404);
+    process.env.IMPORT_GOLD_ENABLED = "true";
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
+    expect((await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).status).toBe(200);
+    expect((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json() as { enabled: boolean }).enabled).toBe(false);
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
+
+    const oversized = await apply("gold-capture-oversized-001", {
+      ...change("gold-oversized"),
+      goldCapture: { input: { candidates: [{ detail: "x".repeat(101 * 1024) }] } },
+    });
+    expect(oversized.status).toBe(400);
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+    const sensitiveExpectedBody = change("gold-sensitive-expected");
+    (sensitiveExpectedBody.changes.mixes.upsert[0] as { notes: string }).notes = "contact owner@example.com";
+    const sensitiveExpected = await apply("gold-capture-sensitive-expected-001", {
+      ...sensitiveExpectedBody,
+      goldCapture: { input: { candidates: [{ name: "Safe reviewed input" }] } },
+    });
+    expect(sensitiveExpected.status).toBe(422);
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+    expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+
+    const saved = await apply("gold-soft-error-0001", {
+      ...change("gold-soft-error"),
+      goldCapture: { input: { candidates: [{ name: "Provider outage case" }] } },
+    });
+    const secondSaved = await apply("gold-score-success-0001", {
+      ...change("gold-score-success"),
+      goldCapture: { input: { candidates: [{ name: "Score normally case" }] } },
+    });
+    const cases = await db.select({ id: tables.importGoldCasesTable.id, evaluatedInput: tables.importGoldCasesTable.evaluatedInput })
+      .from(tables.importGoldCasesTable).orderBy(tables.importGoldCasesTable.id);
+    process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+    route.setImportGoldProviderForTest(async (_provider, input) => {
+      const candidate = (input.candidates as Array<{ name?: string }>)[0];
+      if (candidate?.name === "Provider outage case") throw new Error("provider_unavailable");
+      return { mixes: [{ name: "Model prediction" }] };
+    });
+    const scored = await fetch(`${baseUrl}/api/import-gold/score`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ provider: "local", caseIds: cases.map(({ id }) => id) }),
+    });
+    expect(saved.status).toBe(200);
+    expect(secondSaved.status).toBe(200);
+    expect(scored.status).toBe(200);
+    const response = await scored.json() as { scoredCount: number; errorCount: number; results: Array<{ status: string; errorCode?: string; fieldDiffs?: unknown[] }> };
+    expect(response.scoredCount).toBe(1);
+    expect(response.errorCount).toBe(1);
+    expect(response.results.find((result) => result.status === "error")).toMatchObject({ status: "error", errorCode: "provider_unavailable" });
+    expect(response.results.find((result) => result.status === "scored")?.fieldDiffs?.length).toBeGreaterThan(0);
+    expect(await db.select().from(tables.importGoldScoresTable)).toHaveLength(2);
+    const appliedMixes = await db.select().from(tables.mixesTable);
+    expect(appliedMixes).toHaveLength(2);
+    expect(appliedMixes.some((mix) => mix.name === "Model prediction")).toBe(false);
+
+    const successfulCaseId = cases.find(({ evaluatedInput }) =>
+      (evaluatedInput.candidates as Array<{ name?: string }>)[0]?.name === "Score normally case")!.id;
+    route.setImportGoldProviderForTest(async () => ({ mixes: [{ name: "Unexpected shape" }], unexpected: true }));
+    const invalidOutput = await fetch(`${baseUrl}/api/import-gold/score`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ provider: "local", caseIds: [successfulCaseId] }),
+    });
+    expect(invalidOutput.status).toBe(200);
+    expect(await invalidOutput.json()).toMatchObject({
+      errorCount: 1,
+      results: [{ status: "error", errorCode: "invalid_output" }],
+    });
+    expect(await db.select().from(tables.importGoldScoresTable)).toHaveLength(3);
+  });
+
+  it("compares nested values by field without mutating the applied result", () => {
+    const comparison = route.compareImportGoldFields(
+      { recipes: [{ name: "A", rows: [{ ingredient: "Salt", lbs: 1 }] }] },
+      { recipes: [{ name: "A", rows: [{ ingredient: "Salt", lbs: 2 }] }] },
+    );
+    expect(comparison.comparedFields).toBe(3);
+    expect(comparison.equalFields).toBe(2);
+    expect(comparison.accuracy).toBeCloseTo(66.67, 1);
+    expect(comparison.fieldDiffs).toEqual([
+      { field: "recipes[0].rows[0].lbs", expected: 1, predicted: 2 },
+    ]);
   });
 });

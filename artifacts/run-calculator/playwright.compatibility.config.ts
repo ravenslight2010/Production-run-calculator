@@ -25,7 +25,7 @@ const baseURL = releaseBrowserBaseUrl(
 export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
-  testMatch: ["cross-device-smoke.spec.ts", "release-webkit-smoke.spec.ts"],
+  testMatch: ["cross-device-smoke.spec.ts", "release-webkit-smoke.spec.ts", "import-gold-lab-responsive.spec.ts"],
   timeout: 75_000,
   globalTimeout: 15 * 60_000,
   retries: 0,
@@ -56,12 +56,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "phone-chromium",
-      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 390, height: 844 },
@@ -69,7 +69,7 @@ export default defineConfig({
     },
     {
       name: "tablet-portrait-chromium",
-      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 768, height: 1024 },
@@ -77,7 +77,7 @@ export default defineConfig({
     },
     {
       name: "tablet-landscape-chromium",
-      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["cross-device-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1024, height: 768 },
@@ -85,7 +85,7 @@ export default defineConfig({
     },
     {
       name: "desktop-webkit",
-      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       grepInvert: /recovers a failed sync pull/,
       use: {
         ...devices["Desktop Safari"],
@@ -94,7 +94,7 @@ export default defineConfig({
     },
     {
       name: "phone-webkit",
-      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       // The dedicated WebKit command owns the full sync-recovery contract.
       // Keep this bounded compatibility lane focused on the shared lifecycle
       // and report journey at a phone-sized WebKit viewport.
@@ -107,7 +107,7 @@ export default defineConfig({
     },
     {
       name: "tablet-webkit",
-      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       grepInvert: /recovers a failed sync pull/,
       use: {
         ...devices["Desktop Safari"],
@@ -117,7 +117,7 @@ export default defineConfig({
     },
     {
       name: "tablet-landscape-webkit",
-      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts"],
+      testMatch: ["release-webkit-smoke.spec.ts", "report-issue-confirmation.spec.ts", "import-gold-lab-responsive.spec.ts"],
       grepInvert: /recovers a failed sync pull/,
       use: {
         ...devices["Desktop Safari"],

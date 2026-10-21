@@ -50,7 +50,7 @@ import {
 } from "./specImportAliases";
 import { logCorrectionWriteFailure, saveAiCorrections } from "./aiCorrections";
 import { saveCheeseSheet, buildCheeseSheetLabel, deriveSourceKey } from "./savedCheeseSheets";
-import { applyImportOperation } from "./importOperations";
+import { applyImportOperation, type ImportGoldCapture } from "./importOperations";
 import {
   auditedCheeseApprovalFor,
   isAuditedCheeseWorkbook,
@@ -355,6 +355,7 @@ export async function commitCheeseImport(
   newAliases: ReadonlyArray<SpecImportAlias> = [],
   recipesToRemove: ReadonlyArray<string> = [],
   operationId?: string,
+  goldCapture?: ImportGoldCapture,
 ): Promise<CheeseCommitResult> {
   // Commit is a second trust boundary: never write a name-only/empty recipe
   // that could replace a populated server recipe during a re-import.
@@ -396,6 +397,7 @@ export async function commitCheeseImport(
           cheeseRecipes: { upsert: atomicRecipeUpserts, delete: recipesToRemove },
           ...(newAliases.length ? { specImportAliases: { upsert: newAliases } } : {}),
         },
+        ...(goldCapture ? { goldCapture } : {}),
       });
       atomicApplied = true;
       resultHash = committed.resultHash;
@@ -412,6 +414,7 @@ export async function commitCheeseImport(
       changes: {
         ...(newAliases.length ? { specImportAliases: { upsert: newAliases } } : {}),
       },
+      ...(goldCapture ? { goldCapture } : {}),
     });
     atomicApplied = true;
     resultHash = committed.resultHash;

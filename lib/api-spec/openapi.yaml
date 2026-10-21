@@ -5781,6 +5781,97 @@ paths:
         "400":
           description: Invalid cursor
 
+  /import-gold/config:
+    get:
+      operationId: getImportGoldConfig
+      tags: [specImport]
+      summary: Read manager-only import-gold feature and provider configuration
+      responses:
+        "200":
+          description: Current non-secret evaluator configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldConfig" }
+        "403": { description: Manager capability required }
+  /import-gold/cases:
+    get:
+      operationId: listImportGoldCases
+      tags: [specImport]
+      summary: List bounded, scoped import-gold cases and recent scores
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Scoped evaluation cases
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldCasesResponse" }
+        "403": { description: Manager capability required }
+  /import-gold/cases/{id}/exclusion:
+    patch:
+      operationId: setImportGoldCaseExclusion
+      tags: [specImport]
+      summary: Exclude or restore a case for scoring and export
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldExclusionRequest" }
+      responses:
+        "200": { description: Exclusion state updated }
+        "404": { description: Case not found in the current scope }
+        "403": { description: Manager capability required }
+  /import-gold/cases/{id}:
+    delete:
+      operationId: deleteImportGoldCase
+      tags: [specImport]
+      summary: Permanently delete a case and its score history for retention purposes
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "204": { description: Case and score history deleted }
+        "404": { description: Case not found in the current scope }
+        "403": { description: Manager capability required }
+  /import-gold/export.jsonl:
+    get:
+      operationId: exportImportGoldCases
+      tags: [specImport]
+      summary: Export up to 100 active scoped evaluation cases as JSONL
+      responses:
+        "200":
+          description: One JSON evaluation case per line
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        "403": { description: Manager capability required }
+  /import-gold/score:
+    post:
+      operationId: scoreImportGoldCases
+      tags: [specImport]
+      summary: Score up to three active scoped cases with one configured provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldScoreRequest" }
+      responses:
+        "200":
+          description: Per-case score results and provider errors
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldScoreResponse" }
+        "403": { description: Manager capability required }
+        "503": { description: Provider is not configured }
   /import-operations/{operationId}/apply:
     post:
       operationId: applyImportOperation
@@ -6206,6 +6297,13 @@ components:
         sourceLabel: { type: string, maxLength: 300 }
         requestHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
         expectedStateHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        goldCapture:
+          type: object
+          description: Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
+          required: [input]
+          additionalProperties: false
+          properties:
+            input: { type: object, maxProperties: 2 }
         sourceEvidence:
           type: object
           description: Exact bounded source text retained privately with a live spec Apply.
@@ -6218,6 +6316,100 @@ components:
           type: object
           description: Reviewed entity batches keyed by supported master-data domain.
           additionalProperties: true
+    ImportGoldConfig:
+      type: object
+      required: [enabled, localConfigured, geminiConfigured, retention, persistsAcrossFactoryPurge]
+      properties:
+        enabled: { type: boolean }
+        localConfigured: { type: boolean }
+        geminiConfigured: { type: boolean }
+        retention: { type: string }
+        persistsAcrossFactoryPurge: { type: boolean }
+    ImportGoldScoreRequest:
+      type: object
+      required: [provider]
+      additionalProperties: false
+      properties:
+        provider: { type: string, enum: [local, gemini] }
+        caseIds:
+          type: array
+          maxItems: 3
+          items: { type: integer, minimum: 1 }
+    ImportGoldExclusionRequest:
+      type: object
+      required: [excluded]
+      additionalProperties: false
+      properties:
+        excluded: { type: boolean }
+    ImportGoldCase:
+      type: object
+      required: [id, importType, sourceLabel, excluded, createdAt, scores]
+      properties:
+        id: { type: integer }
+        importType: { type: string, enum: [spec, premix, cheese] }
+        sourceLabel: { type: string }
+        excluded: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        scores:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldScore" }
+    ImportGoldScore:
+      type: object
+      required: [id, provider, status, accuracy, comparedFields, equalFields, errorCode, fieldDiffs, createdAt]
+      properties:
+        id: { type: integer }
+        provider: { type: string, enum: [local, gemini] }
+        status: { type: string, enum: [scored, error] }
+        accuracy: { type: number, nullable: true }
+        comparedFields: { type: integer }
+        equalFields: { type: integer }
+        errorCode: { type: string, nullable: true }
+        fieldDiffs:
+          type: array
+          items:
+            type: object
+            required: [field, expected, predicted]
+            properties:
+              field: { type: string }
+              expected: {}
+              predicted: {}
+        createdAt: { type: string, format: date-time }
+    ImportGoldCasesResponse:
+      type: object
+      required: [cases]
+      properties:
+        cases:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldCase" }
+    ImportGoldScoreResponse:
+      type: object
+      required: [results, scoredCount, errorCount]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [caseId, provider, status]
+            properties:
+              caseId: { type: integer }
+              provider: { type: string, enum: [local, gemini] }
+              status: { type: string, enum: [scored, error] }
+              accuracy: { type: number }
+              comparedFields: { type: integer }
+              equalFields: { type: integer }
+              errorCode: { type: string }
+              scoreId: { type: integer }
+              fieldDiffs:
+                type: array
+                items:
+                  type: object
+                  required: [field, expected, predicted]
+                  properties:
+                    field: { type: string }
+                    expected: {}
+                    predicted: {}
+        scoredCount: { type: integer }
+        errorCount: { type: integer }
     DistillationApplyEvidenceRecord:
       type: object
       required:

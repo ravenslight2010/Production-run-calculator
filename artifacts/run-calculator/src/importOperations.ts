@@ -21,6 +21,10 @@ export type ImportOperationSourceEvidence = {
   parseVersion: string;
 };
 
+export type ImportGoldCapture = {
+  input: Record<string, unknown>;
+};
+
 export class ImportOperationError extends Error {
   constructor(
     message: string,
@@ -299,6 +303,7 @@ export function applyImportOperation<T>(
     sourceLabel: string;
     changes: Record<string, unknown>;
     sourceEvidence?: ImportOperationSourceEvidence;
+    goldCapture?: ImportGoldCapture;
     expectedStateHash?: string;
     requestHash?: string;
   },

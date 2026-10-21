@@ -221,6 +221,32 @@ describe("GET /readyz optional AI capability", () => {
     expect(JSON.stringify(body)).not.toContain("test-");
     expect(JSON.stringify(mocks.info.mock.calls)).not.toContain("test-");
   });
+
+  it("keeps core readiness healthy when the optional import-gold evaluator is enabled but unavailable", async () => {
+    const previousEnabled = process.env.IMPORT_GOLD_LOCAL_ENABLED;
+    const previousBaseUrl = process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+    try {
+      setProviderEnv({});
+      process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+      process.env.IMPORT_GOLD_LOCAL_BASE_URL = "http://127.0.0.1:1/v1";
+      const response = await fetch(`${baseUrl}/readyz`);
+      const body = await response.json() as {
+        status: string;
+        checks: { database: string; dependencies: string };
+        capabilities: { ai: { status: string } };
+      };
+      expect(response.status).toBe(200);
+      expect(body.status).toBe("ok");
+      expect(body.checks.database).toBe("ok");
+      expect(body.checks.dependencies).toBe("warning");
+      expect(body.capabilities.ai.status).toBe("not_configured");
+    } finally {
+      if (previousEnabled === undefined) delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
+      else process.env.IMPORT_GOLD_LOCAL_ENABLED = previousEnabled;
+      if (previousBaseUrl === undefined) delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+      else process.env.IMPORT_GOLD_LOCAL_BASE_URL = previousBaseUrl;
+    }
+  });
 });
 
 describe("GET /healthz cache maintenance diagnostics", () => {

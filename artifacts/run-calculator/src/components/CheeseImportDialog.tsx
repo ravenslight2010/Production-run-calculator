@@ -25,6 +25,7 @@ type Props = {
   error: string | null;
   prepared: CheeseImportPrepared | null;
   applying: boolean;
+  goldCaptureEnabled?: boolean;
   /**
    * Confirm with the reviewed cheese recipes, blend-name aliases the manual
    * "use existing recipe" picks should be remembered as, and the ids of absent
@@ -35,6 +36,7 @@ type Props = {
     newAliases: SpecImportAlias[],
     recipesToRemove: string[],
     destructiveChangesAcknowledged: boolean,
+    captureGoldCase?: boolean,
   ) => void;
 };
 
@@ -53,6 +55,7 @@ export default function CheeseImportDialog({
   error,
   prepared,
   applying,
+  goldCaptureEnabled = false,
   onConfirm,
 }: Props) {
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
@@ -78,9 +81,11 @@ export default function CheeseImportDialog({
   // tripping the generic duplicate-target block.
   const [mergedAwayKeys, setMergedAwayKeys] = useState<Set<string>>(new Set());
   const [destructiveChangesConfirmed, setDestructiveChangesConfirmed] = useState(false);
+  const [captureGoldCase, setCaptureGoldCase] = useState(false);
 
   useEffect(() => {
     if (prepared) {
+      setCaptureGoldCase(false);
       setDestructiveChangesConfirmed(false);
       // Detect the merge-re-import case: an alias-linked row whose link target
       // is also claimed by another candidate's exact-id update.
@@ -118,6 +123,7 @@ export default function CheeseImportDialog({
       setRedirects(new Map());
       setRenames(new Map());
     } else {
+      setCaptureGoldCase(false);
       setDestructiveChangesConfirmed(false);
       setItems([]);
       setSelected(new Set());
@@ -291,7 +297,7 @@ export default function CheeseImportDialog({
       const rename = renameOf(it);
       if (rename) addAlias(it.candidate.recipe.name.trim(), rename, brand);
     }
-    onConfirm(included.map(resolveItem), newAliases, [...removedRecipes], destructiveChangesConfirmed);
+    onConfirm(included.map(resolveItem), newAliases, [...removedRecipes], destructiveChangesConfirmed, captureGoldCase);
   };
 
   return (
@@ -777,6 +783,22 @@ export default function CheeseImportDialog({
             </>
           )}
         </div>
+
+        {goldCaptureEnabled && prepared && (
+          <label className="mx-4 flex cursor-pointer items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={captureGoldCase}
+              onChange={(event) => setCaptureGoldCase(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+              data-testid="cheese-import-gold-opt-in"
+            />
+            <span>
+              Save this reviewed input and the applied result as a private evaluation case.
+              Only opt in when source-use and retention are authorized.
+            </span>
+          </label>
+        )}
 
         <div className="flex items-center justify-end gap-2 border-t border-border p-4">
           <button

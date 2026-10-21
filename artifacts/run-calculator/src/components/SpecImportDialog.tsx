@@ -76,6 +76,7 @@ type Props = {
   existingRecipeNamesByKind: Record<SpecImportDisplayKind, string[]>;
   /** Current selected run, used only as the explicit demand basis for the read-only stock preview. */
   inventoryImpactRun?: SpecImportImpactRun | null;
+  goldCaptureEnabled?: boolean;
   /**
    * Confirm with the edited, kept-only import the user chose to apply.
    * `learnedRenames` are the step-1 brand/flavor renames turned into learnable
@@ -96,6 +97,7 @@ type Props = {
     acceptedNewMixIngredientNames: ReadonlySet<string>,
     destructiveChangesAcknowledged: boolean,
     destructiveReviewSignature?: string,
+    captureGoldCase?: boolean,
   ) => void;
 };
 
@@ -804,6 +806,7 @@ export default function SpecImportDialog({
   aiRetryAvailable = false,
   existingRecipeNamesByKind,
   inventoryImpactRun = null,
+  goldCaptureEnabled = false,
   onConfirm,
 }: Props) {
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
@@ -811,6 +814,7 @@ export default function SpecImportDialog({
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
   const [removedProfiles, setRemovedProfiles] = useState<RemovedProfileItem[]>([]);
   const [destructiveChangesConfirmed, setDestructiveChangesConfirmed] = useState(false);
+  const [captureGoldCase, setCaptureGoldCase] = useState(false);
   // Two-step review: step 1 confirms product brand/flavor names only; step 2
   // reviews everything else (recipes, die types, the diff, notes, mappings).
   const [step, setStep] = useState<1 | 2>(1);
@@ -827,6 +831,7 @@ export default function SpecImportDialog({
 
   useEffect(() => {
     if (prepared) {
+      setCaptureGoldCase(false);
       setActiveSourceCellKey(null);
       setManualFormulaValues({});
       setProfiles(buildProfileItems(prepared));
@@ -847,6 +852,7 @@ export default function SpecImportDialog({
       setDestructiveChangesConfirmed(false);
       setStep(1);
     } else {
+      setCaptureGoldCase(false);
       setActiveSourceCellKey(null);
       setManualFormulaValues({});
       setProfiles([]);
@@ -2082,6 +2088,22 @@ export default function SpecImportDialog({
           )}
         </fieldset>
 
+        {goldCaptureEnabled && prepared && step === 2 && (
+          <label className="mx-4 flex cursor-pointer items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={captureGoldCase}
+              onChange={(event) => setCaptureGoldCase(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+              data-testid="spec-import-gold-opt-in"
+            />
+            <span>
+              Save this reviewed input and the applied result as a private evaluation case.
+              Only opt in when source-use and retention are authorized.
+            </span>
+          </label>
+        )}
+
         <div className="flex items-center justify-end gap-2 border-t border-border p-4">
           {retryBlocked && (
             <button
@@ -2145,6 +2167,7 @@ export default function SpecImportDialog({
               acceptedNewMixNames,
               destructiveChangesConfirmed,
               importReview ? importReviewSignature(importReview) : undefined,
+              captureGoldCase,
             )}
               disabled={
                 loading ||

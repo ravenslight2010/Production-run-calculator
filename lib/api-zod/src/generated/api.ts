@@ -694,6 +694,9 @@ export const listOperationalIntentReceiptsQueryAfterMin = 0;
 export const listOperationalIntentReceiptsResponseCursorMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+export const listImportGoldCasesQueryLimitDefault = 50;
+export const listImportGoldCasesQueryLimitMax = 100;
+export const scoreImportGoldCasesBodyCaseIdsMax = 3;
 export const applyImportOperationPathOperationIdMin = 16;
 export const applyImportOperationPathOperationIdMax = 120;
 export const applyImportOperationBodyImportTypeMax = 40;
@@ -9058,6 +9061,123 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
 
 
 /**
+ * @summary Read manager-only import-gold feature and provider configuration
+ */
+export const GetImportGoldConfigResponse = zod.object({
+  "enabled": zod.boolean(),
+  "localConfigured": zod.boolean(),
+  "geminiConfigured": zod.boolean(),
+  "retention": zod.string(),
+  "persistsAcrossFactoryPurge": zod.boolean()
+})
+
+
+/**
+ * @summary List bounded, scoped import-gold cases and recent scores
+ */
+
+
+
+export const ListImportGoldCasesQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(listImportGoldCasesQueryLimitMax).default(listImportGoldCasesQueryLimitDefault)
+})
+
+export const ListImportGoldCasesResponse = zod.object({
+  "cases": zod.array(zod.object({
+  "id": zod.int(),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "sourceLabel": zod.string(),
+  "excluded": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "scores": zod.array(zod.object({
+  "id": zod.int(),
+  "provider": zod.enum(['local', 'gemini']),
+  "status": zod.enum(['scored', 'error']),
+  "accuracy": zod.number().nullable(),
+  "comparedFields": zod.int(),
+  "equalFields": zod.int(),
+  "errorCode": zod.string().nullable(),
+  "fieldDiffs": zod.array(zod.object({
+  "field": zod.string(),
+  "expected": zod.unknown(),
+  "predicted": zod.unknown()
+})),
+  "createdAt": zod.coerce.date()
+}))
+}))
+})
+
+
+/**
+ * @summary Exclude or restore a case for scoring and export
+ */
+
+
+
+export const SetImportGoldCaseExclusionParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const SetImportGoldCaseExclusionBody = zod.object({
+  "excluded": zod.boolean()
+})
+
+export const SetImportGoldCaseExclusionResponse = zod.unknown()
+
+
+/**
+ * @summary Permanently delete a case and its score history for retention purposes
+ */
+
+
+
+export const DeleteImportGoldCaseParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const DeleteImportGoldCaseResponse = zod.void()
+
+
+/**
+ * @summary Export up to 100 active scoped evaluation cases as JSONL
+ */
+export const ExportImportGoldCasesResponse = zod.unknown()
+
+
+/**
+ * @summary Score up to three active scoped cases with one configured provider
+ */
+
+
+
+
+export const ScoreImportGoldCasesBody = zod.object({
+  "provider": zod.enum(['local', 'gemini']),
+  "caseIds": zod.array(zod.int().min(1)).max(scoreImportGoldCasesBodyCaseIdsMax).optional()
+})
+
+export const ScoreImportGoldCasesResponse = zod.object({
+  "results": zod.array(zod.object({
+  "caseId": zod.int(),
+  "provider": zod.enum(['local', 'gemini']),
+  "status": zod.enum(['scored', 'error']),
+  "accuracy": zod.number().optional(),
+  "comparedFields": zod.int().optional(),
+  "equalFields": zod.int().optional(),
+  "errorCode": zod.string().optional(),
+  "scoreId": zod.int().optional(),
+  "fieldDiffs": zod.array(zod.object({
+  "field": zod.string(),
+  "expected": zod.unknown(),
+  "predicted": zod.unknown()
+})).optional()
+})),
+  "scoredCount": zod.int(),
+  "errorCount": zod.int()
+})
+
+
+/**
  * @summary Atomically apply a reviewed import
  */
 
@@ -9080,6 +9200,11 @@ export const ApplyImportOperationBody = zod.object({
   "sourceLabel": zod.string().max(applyImportOperationBodySourceLabelMax),
   "requestHash": zod.string().regex(applyImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
+  "goldCapture": zod.object({
+  "input": zod.looseObject({
+
+})
+}).optional().describe('Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.'),
   "sourceEvidence": zod.object({
   "sourceText": zod.string().min(1).max(applyImportOperationBodySourceEvidenceSourceTextMax),
   "parseVersion": zod.string().min(1).max(applyImportOperationBodySourceEvidenceParseVersionMax)

@@ -57,7 +57,7 @@ import { fetchCheeseRecipes } from "./cheeseRecipes";
 import { requestMatchPremix } from "./premixMatch";
 import { logCorrectionWriteFailure, saveAiCorrections } from "./aiCorrections";
 import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./savedPremixSheets";
-import { applyImportOperation } from "./importOperations";
+import { applyImportOperation, type ImportGoldCapture } from "./importOperations";
 
 export type PremixImportPrepared = {
   /** Ready-to-apply mixes (grounded, AI-matched, deterministic ids). */
@@ -360,6 +360,7 @@ export async function commitPremixImport(
   extraAliases: ReadonlyArray<SpecImportAlias> = [],
   mixesToRemove: ReadonlyArray<string> = [],
   operationId?: string,
+  goldCapture?: ImportGoldCapture,
 ): Promise<PremixCommitResult> {
   // The review may be assembled by an older client or by a caller other than
   // the current dialog. Re-apply the boundary guard here so an empty normalized
@@ -406,6 +407,7 @@ export async function commitPremixImport(
         ...(atomicPullUpserts.length ? { freezerPullItems: { upsert: atomicPullUpserts } } : {}),
         ...(aliases.length ? { specImportAliases: { upsert: aliases } } : {}),
       },
+      ...(goldCapture ? { goldCapture } : {}),
     });
     atomicApplied = true;
     resultHash = committed.resultHash;

@@ -480,6 +480,7 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
+import { fetchImportGoldConfig, makeImportGoldInput } from "../importGold";
 import {
   clearPendingImportOperation,
   createImportOperationId,
@@ -871,6 +872,7 @@ const loadDoughGuideImportDialog = () =>
     default: module.DoughGuideImportDialog,
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
+const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
@@ -3150,6 +3152,14 @@ export default function Home() {
   const canRecordQc = hasCapability("record-qc");
   const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
+  const { data: importGoldConfig } = useQuery({
+    queryKey: ["import-gold-config"],
+    queryFn: fetchImportGoldConfig,
+    enabled: canManageStaff,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const goldCaptureEnabled = canManageStaff && importGoldConfig?.enabled === true;
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
@@ -13042,6 +13052,7 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
     destructiveChangesAcknowledged = false,
     destructiveReviewSignature?: string,
+    captureGoldCase = false,
   ) {
     if (!specImportPrepared) return;
     // The commit spans profile and inventory master-data writes after an AI
@@ -13084,7 +13095,13 @@ export default function Home() {
     specImportOperationRef.current = operationId;
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
-        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(
+          toCommit,
+          forceUpdateProfileKeys,
+          acceptedNewMixIngredientNames,
+          operationId,
+          captureGoldCase ? { input: makeImportGoldInput({ profiles: editedParsed.profiles, recipes: editedParsed.recipes }) } : undefined,
+        );
       finishSpecImportOutcome("success");
       setSpecImportReviewNotice(null);
       setSpecImportRetryPending(false);
@@ -13702,6 +13719,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     mixesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
+    captureGoldCase = false,
   ) {
     if (!premixImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -13733,6 +13751,7 @@ export default function Home() {
         newAliases,
         mixesToRemove,
         operationId,
+        captureGoldCase ? { input: makeImportGoldInput({ candidates: premixImportPrepared.candidates.map(({ mix }) => mix) }) } : undefined,
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
@@ -14185,6 +14204,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
+    captureGoldCase = false,
   ) {
     if (!cheeseImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -14210,7 +14230,14 @@ export default function Home() {
     const operationId = cheeseImportOperationRef.current ?? createImportOperationId();
     cheeseImportOperationRef.current = operationId;
     try {
-      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove, operationId);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(
+        cheeseImportPrepared,
+        recipesToApply,
+        newAliases,
+        recipesToRemove,
+        operationId,
+        captureGoldCase ? { input: makeImportGoldInput({ recipes: cheeseImportPrepared.candidates.map(({ recipe }) => recipe) }) } : undefined,
+      );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -17029,6 +17056,11 @@ export default function Home() {
                     />
                     <SyncConflictStatsCard />
                     <AuditLogCard />
+                    <DeferredSurface
+                      label="import gold evaluation lab"
+                      load={loadImportGoldLabCard}
+                      componentProps={{}}
+                    />
                   </div>
                 )}
 
@@ -18243,6 +18275,7 @@ export default function Home() {
                     values: form.getValues(),
                   }
                 : null,
+              goldCaptureEnabled,
               onConfirm: handleSpecImportConfirm,
             }}
           />
@@ -18277,6 +18310,7 @@ export default function Home() {
               error: premixImportError,
               prepared: premixImportPrepared,
               applying: premixImportApplying,
+              goldCaptureEnabled,
               onConfirm: handlePremixImportConfirm,
             }}
           />
@@ -18389,6 +18423,7 @@ export default function Home() {
               error: cheeseImportError,
               prepared: cheeseImportPrepared,
               applying: cheeseImportApplying,
+              goldCaptureEnabled,
               onConfirm: handleCheeseImportConfirm,
             }}
           />
