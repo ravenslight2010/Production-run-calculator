@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -46,6 +47,35 @@ function validManifest() {
   };
 }
 
+function createSourceFixture({ homeSource, helperSource }) {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "home-deferred-boundary-"));
+  const sourceRoot = path.join(fixtureRoot, "src");
+  const homeFilePath = path.join(sourceRoot, "pages/home.tsx");
+  const liveRunFilePath = path.join(
+    sourceRoot,
+    "components/live-stations/LiveRunTabContent.tsx",
+  );
+  const helperFilePath = path.join(sourceRoot, "components/homeBridge.ts");
+  const deferredPanelPath = path.join(sourceRoot, "components/SetupContent.tsx");
+
+  fs.mkdirSync(path.dirname(homeFilePath), { recursive: true });
+  fs.mkdirSync(path.dirname(liveRunFilePath), { recursive: true });
+  fs.mkdirSync(path.dirname(helperFilePath), { recursive: true });
+  fs.writeFileSync(homeFilePath, homeSource);
+  fs.writeFileSync(liveRunFilePath, "");
+  fs.writeFileSync(helperFilePath, helperSource);
+  fs.writeFileSync(deferredPanelPath, "export default function SetupContent() {}");
+
+  return {
+    homeFilePath,
+    homeSource,
+    liveRunFilePath,
+    liveRunSource: "",
+    sourceRoot,
+    cleanup: () => fs.rmSync(fixtureRoot, { recursive: true, force: true }),
+  };
+}
+
 test("source keeps every optional panel dynamically loaded and outside the opening Home graph", () => {
   const homeSource = fs.readFileSync(
     path.resolve(scriptDir, "../src/pages/home.tsx"),
@@ -66,10 +96,25 @@ test("source keeps every optional panel dynamically loaded and outside the openi
 for (const suffix of DEFERRED_HOME_MODULE_SUFFIXES) {
   const name = path.basename(suffix, ".tsx");
 
-  for (const [sourceName, key, specifier] of [
-    ["Home", "homeSource", `../components/${name}`],
-    ["LiveRunTabContent", "liveRunSource", `../../components/${name}`],
+  for (const [sourceName, key, rootPath] of [
+    ["Home", "homeSource", path.resolve(scriptDir, "../src/pages/home.tsx")],
+    [
+      "LiveRunTabContent",
+      "liveRunSource",
+      path.resolve(
+        scriptDir,
+        "../src/components/live-stations/LiveRunTabContent.tsx",
+      ),
+    ],
   ]) {
+    const panelPath = path.resolve(
+      scriptDir,
+      `../src${suffix.replace("/src", "")}`,
+    );
+    const relativeSpecifier = path.relative(path.dirname(rootPath), panelPath);
+    const specifier = relativeSpecifier.startsWith(".")
+      ? relativeSpecifier
+      : `./${relativeSpecifier}`;
     test(`source boundary rejects ${name} statically imported by ${sourceName}`, () => {
       assert.throws(
         () =>
@@ -114,6 +159,40 @@ test("source boundary rejects a deferred panel loaded by a side-effect static im
       }),
     /Home statically imports deferred Home panel/,
   );
+});
+
+test("source boundary rejects a deferred panel reached through an intermediate local import", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "../components/homeBridge";\n${sourceHome()}`,
+    helperSource: `import SetupContent from "./SetupContent";\nexport const bridge = SetupContent;`,
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> components\/homeBridge\.ts -> components\/SetupContent\.tsx/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary ignores type-only and dynamic imports in intermediate modules", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { loadSetupContent } from "../components/homeBridge";\n${sourceHome()}`,
+    helperSource: [
+      'import type { SetupContentProps } from "./SetupContent";',
+      'export { type SetupContentProps } from "./SetupContent";',
+      'export const loadSetupContent = () => import("./SetupContent");',
+    ].join("\n"),
+  });
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 test("accepts optional Home surfaces reachable only through a dynamic import", () => {

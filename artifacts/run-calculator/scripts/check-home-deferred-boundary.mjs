@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import ts from "@workspace/typescript-api-v6";
 import { fileURLToPath } from "node:url";
 
 export const DEFERRED_HOME_MODULE_SUFFIXES = [
@@ -27,50 +28,173 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
 const DEFERRED_HOME_PANEL_NAMES = DEFERRED_HOME_MODULE_SUFFIXES.map((suffix) =>
   path.basename(suffix, ".tsx"),
 );
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const SOURCE_ROOT = path.resolve(SCRIPT_DIR, "../src");
+const HOME_FILE = path.resolve(SOURCE_ROOT, "pages/home.tsx");
+const LIVE_RUN_FILE = path.resolve(
+  SOURCE_ROOT,
+  "components/live-stations/LiveRunTabContent.tsx",
+);
 
 function normalize(value) {
   return value.replaceAll("\\", "/");
 }
 
-function staticImportSpecifiers(source) {
+function isTypeOnlyExport(node) {
+  if (node.isTypeOnly) return true;
+  if (!node.exportClause || !ts.isNamedExports(node.exportClause)) return false;
+  return (
+    node.exportClause.elements.length > 0 &&
+    node.exportClause.elements.every((element) => element.isTypeOnly)
+  );
+}
+
+function staticImportSpecifiers(source, filePath) {
   const specifiers = [];
-  const importPattern =
-    /^\s*import\s+(?!type\b)(?!["'])[\s\S]*?\sfrom\s+["']([^"']+)["']\s*;?/gm;
-  for (const match of source.matchAll(importPattern)) {
-    specifiers.push(match[1]);
-  }
-  const sideEffectImportPattern = /^\s*import\s*["']([^"']+)["']\s*;?/gm;
-  for (const match of source.matchAll(sideEffectImportPattern)) {
-    specifiers.push(match[1]);
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      const clause = statement.importClause;
+      if (!clause) {
+        specifiers.push(statement.moduleSpecifier.text);
+        continue;
+      }
+      if (clause.isTypeOnly) continue;
+      const namedImports = clause.namedBindings;
+      const isOnlyTypeSpecifiers =
+        !clause.name &&
+        namedImports &&
+        ts.isNamedImports(namedImports) &&
+        namedImports.elements.length > 0 &&
+        namedImports.elements.every((element) => element.isTypeOnly);
+      if (!isOnlyTypeSpecifiers) {
+        specifiers.push(statement.moduleSpecifier.text);
+      }
+      continue;
+    }
+
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      !isTypeOnlyExport(statement)
+    ) {
+      specifiers.push(statement.moduleSpecifier.text);
+    }
   }
   return specifiers;
 }
 
-export function checkHomeDeferredSourceBoundary({ homeSource, liveRunSource }) {
-  const sources = [
-    ["Home", homeSource],
-    ["LiveRunTabContent", liveRunSource],
+function resolveLocalSource(specifier, importerPath, sourceRoot, readSource) {
+  const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
+  let basePath;
+  if (cleanSpecifier.startsWith("@/")) {
+    basePath = path.resolve(sourceRoot, cleanSpecifier.slice(2));
+  } else if (cleanSpecifier.startsWith(".")) {
+    basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
+  } else {
+    return null;
+  }
+
+  const supportedExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+  const extension = path.extname(basePath);
+  if (extension && !supportedExtensions.includes(extension)) return null;
+
+  const candidates = extension
+    ? [basePath]
+    : [
+        basePath,
+        ...supportedExtensions.map((candidateExtension) => `${basePath}${candidateExtension}`),
+        ...supportedExtensions.map((candidateExtension) =>
+          path.join(basePath, `index${candidateExtension}`),
+        ),
+      ];
+  for (const candidate of candidates) {
+    try {
+      readSource(candidate);
+      return candidate;
+    } catch (error) {
+      if (
+        error?.code !== "ENOENT" &&
+        error?.code !== "ENOTDIR" &&
+        error?.code !== "EISDIR"
+      ) {
+        throw error;
+      }
+    }
+  }
+  throw new Error(
+    `Unable to resolve local static import "${specifier}" from "${importerPath}".`,
+  );
+}
+
+export function checkHomeDeferredSourceBoundary({
+  homeSource,
+  liveRunSource,
+  homeFilePath = HOME_FILE,
+  liveRunFilePath = LIVE_RUN_FILE,
+  sourceRoot = SOURCE_ROOT,
+  readSource = (filePath) => fs.readFileSync(filePath, "utf8"),
+}) {
+  const roots = [
+    ["Home", homeFilePath, homeSource],
+    ["LiveRunTabContent", liveRunFilePath, liveRunSource],
   ];
-  for (const [sourceName, source] of sources) {
-    const importedNames = new Set(
-      staticImportSpecifiers(source).map((specifier) =>
-        path.basename(specifier).replace(/\.tsx?$/, ""),
-      ),
-    );
-    const eagerPanels = DEFERRED_HOME_PANEL_NAMES.filter((name) =>
-      importedNames.has(name),
-    );
-    if (eagerPanels.length > 0) {
-      throw new Error(
-        `${sourceName} statically imports deferred Home panel(s):\n${eagerPanels
-          .map((name) => `- ${name}`)
-          .join("\n")}`,
+
+  const deferredPaths = new Map(
+    DEFERRED_HOME_MODULE_SUFFIXES.map((suffix, index) => [
+      normalize(path.resolve(sourceRoot, `.${suffix.replace("/src", "")}`)),
+      DEFERRED_HOME_PANEL_NAMES[index],
+    ]),
+  );
+  const visited = new Set();
+  const visit = (sourceName, filePath, source, importChain) => {
+    const normalizedPath = normalize(path.resolve(filePath));
+    if (visited.has(normalizedPath)) return;
+    visited.add(normalizedPath);
+
+    for (const specifier of staticImportSpecifiers(source, normalizedPath)) {
+      const importedPath = resolveLocalSource(
+        specifier,
+        normalizedPath,
+        sourceRoot,
+        readSource,
+      );
+      if (!importedPath) continue;
+
+      const normalizedImportPath = normalize(path.resolve(importedPath));
+      const deferredPanel = deferredPaths.get(normalizedImportPath);
+      const nextChain = [...importChain, path.relative(sourceRoot, normalizedImportPath)];
+      if (deferredPanel) {
+        throw new Error(
+          `${sourceName} statically imports deferred Home panel(s):\n- ${deferredPanel}\n` +
+            `Import chain: ${[sourceName, ...nextChain].join(" -> ")}`,
+        );
+      }
+      visit(
+        sourceName,
+        normalizedImportPath,
+        readSource(normalizedImportPath),
+        nextChain,
       );
     }
+  };
+
+  for (const [sourceName, filePath, source] of roots) {
+    visit(sourceName, filePath, source, []);
   }
 
   const dynamicImportNames = new Set(
-    sources.flatMap(([, source]) =>
+    roots.flatMap(([, , source]) =>
       [...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)].map(
         ([, specifier]) =>
           path.basename(specifier).replace(/\.tsx?$/, ""),
@@ -181,9 +305,8 @@ export function checkHomeDeferredBoundary(manifest) {
 }
 
 function runCli() {
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const manifestPath = path.resolve(
-    scriptDir,
+    SCRIPT_DIR,
     "../dist/public/.vite/workbook-boundary-manifest.json",
   );
   if (!fs.existsSync(manifestPath)) {
