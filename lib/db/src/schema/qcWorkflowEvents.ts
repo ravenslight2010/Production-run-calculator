@@ -4,6 +4,7 @@ import {
   pgTable,
   text,
   integer,
+  serial,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -27,7 +28,7 @@ export type QcWorkflowEventType =
 export const qcWorkflowEventsTable = pgTable(
   "qc_workflow_events",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     operationId: text("operation_id").notNull(),
     recordId: text("record_id").notNull(),

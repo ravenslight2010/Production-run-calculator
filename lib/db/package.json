@@ -8,10 +8,9 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "push": "pnpm run apply-serial-to-identity && drizzle-kit push --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
-    "push-force": "pnpm run apply-serial-to-identity && drizzle-kit push --force --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
+    "push": "drizzle-kit push --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
+    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
     "apply-audit-log-protection": "node ./migrations/apply-audit-log-protection.mjs",
-    "apply-serial-to-identity": "node ./migrations/apply-serial-to-identity.mjs",
     "test:serial-to-identity": "node --test ./migrations/serial-to-identity.integration.test.mjs"
   },
   "dependencies": {

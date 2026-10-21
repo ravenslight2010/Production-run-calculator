@@ -1,5 +1,6 @@
 import {
   integer,
+  serial,
   pgTable,
   text,
   timestamp,
@@ -61,7 +62,7 @@ export const freezerSurplusAllocationsTable = pgTable(
 export const freezerSurplusAdjustmentsTable = pgTable(
   "freezer_surplus_adjustments",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     eventId: text("event_id").notNull(),
     lotId: text("lot_id").notNull(),

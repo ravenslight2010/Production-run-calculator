@@ -1,9 +1,9 @@
-import { pgTable, text, numeric, integer, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, integer, serial, jsonb, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const productionRunsTable = pgTable("production_runs", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  id: serial("id").primaryKey(),
   scope: text("scope").notNull().default("live"),
   label: text("label").notNull().default(""),
   casesNeeded: integer("cases_needed").notNull(),

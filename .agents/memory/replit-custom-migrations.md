@@ -1,10 +1,19 @@
 ---
-name: Replit custom migrations
-description: Replit publishing can sync Drizzle schema without running raw SQL migration scripts required for triggers and functions.
+name: Replit migration boundaries
+description: Publish owns managed production schema changes; direct SQL rehearsals do not establish Publish compatibility.
 ---
 
-Custom database SQL that is not represented in the Drizzle schema must run before the production server starts, not only through development schema commands.
+Use the supported Publish schema-diff flow for managed production databases.
+Do not add deployment-build or startup-time DDL to work around a failed diff.
 
-**Why:** Replit's publish flow applied the table/column schema but skipped the checked-in audit trigger and maintenance functions, so strict readiness returned 503 during Autoscale promotion.
+**Why:** A direct serial-to-identity conversion can pass its disposable rehearsal
+while Publish still generates a conflicting sequence creation against production.
+The user explicitly approved restoring development compatibility instead of
+changing production outside Publish. Earlier advice in this note to run custom
+DDL before serving was unsafe under the supported migration policy and is retired.
 
-**How to apply:** Chain the idempotent custom migration ahead of the production server command in the validated `.replit` deployment run configuration, then let readiness verify the resulting database protection.
+**How to apply:** Keep legacy serial generators until a production-compatible
+Publish path is demonstrated. Repair schema source and development with approval,
+preserve rows and generator high-water marks, then recompute the actual Publish
+diff. If a required trigger/function cannot be represented by that flow, report
+the limitation rather than inventing a production DDL path.
