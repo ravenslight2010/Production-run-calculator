@@ -87,6 +87,27 @@ The attached JSON keeps only pathname, status, bounded failure text, timing,
 and network-profile metadata; it never captures request bodies, response
 bodies, customer data, or full URLs.
 
+For source-matched opening-byte evidence, the dedicated
+`playwright.home-opening-byte-evidence.config.ts` run uses a disposable local
+production build, blocks service workers, and disables the browser cache. It
+counts only JavaScript in the generated static entry/Home graph plus CSS linked
+from the generated HTML, reporting aggregate encoded body and transfer bytes.
+The network profile begins after the sign-in screen is visible, so those byte
+totals include app-shell assets fetched before the authenticated-readiness timer;
+they are not, by themselves, a direct byte-to-readiness conversion.
+
+Run five clean contexts per desktop and phone profile from the repository root:
+
+```sh
+HOME_OPENING_BYTE_EVIDENCE=1 bash scripts/src/run-release-node.sh \
+  bash scripts/src/run-isolated-browser-suite.sh \
+  --playwright-config=playwright.home-opening-byte-evidence.config.ts \
+  --repeat-each=5
+```
+
+The sanitized sample summary is retained in
+`docs/evidence/home-opening-byte-guard-decision-2026-10-21.md`.
+
 ## Workbook startup split evidence
 
 The full workbook workflow is loaded through `loadWorkbookWorkflow` only when
