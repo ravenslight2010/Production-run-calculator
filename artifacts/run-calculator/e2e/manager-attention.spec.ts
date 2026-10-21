@@ -389,6 +389,184 @@ test("manager can keyboard-open each Manager attention workflow and retain usefu
   }
 });
 
+test("manager can approve and decline password resets by keyboard and retain useful focus", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(150_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  try {
+    const manager = await fixtures.createAccount({
+      username: uniqueTestId("e2e_reset_keyboard_manager"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    const approvedStaff = await fixtures.createAccount({
+      username: uniqueTestId("e2e_reset_keyboard_approved"),
+      password: PASSWORD,
+      capabilities: [],
+      onboardingSeen: true,
+    });
+    const declinedStaff = await fixtures.createAccount({
+      username: uniqueTestId("e2e_reset_keyboard_declined"),
+      password: PASSWORD,
+      capabilities: [],
+      onboardingSeen: true,
+    });
+    const approvedRequestId = uniqueTestId("keyboard_approved_reset");
+    const declinedRequestId = uniqueTestId("keyboard_declined_reset");
+    const seedDb = new Client({
+      connectionString: requireIsolatedTestDatabase(
+        "seed keyboard password reset requests",
+      ),
+    });
+    try {
+      await seedDb.connect();
+      const now = Date.now();
+      await seedDb.query(
+        `INSERT INTO password_reset_requests (id, user_id, status, created_at)
+         VALUES ($1, $2, 'pending', $3), ($4, $5, 'pending', $6)`,
+        [
+          approvedRequestId,
+          approvedStaff.userId,
+          new Date(now),
+          declinedRequestId,
+          declinedStaff.userId,
+          new Date(now - 1_000),
+        ],
+      );
+    } finally {
+      await seedDb.end().catch(() => {});
+    }
+
+    await page.context().addCookies([
+      { name: "rc_auth", value: manager.token, url: API_BASE },
+    ]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await openManagerAttention(page);
+    await page.getByTestId("manager-attention-action-password-resets").click();
+
+    const approvedRow = page.getByTestId(`password-reset-request-${approvedRequestId}`);
+    const declinedRow = page.getByTestId(`password-reset-request-${declinedRequestId}`);
+    await expect(approvedRow).toContainText(approvedStaff.username);
+    await expect(declinedRow).toContainText(declinedStaff.username);
+
+    const tabTo = async (target: Locator) => {
+      for (let tabCount = 0; tabCount < 120; tabCount += 1) {
+        if (await target.evaluate((element) => element === document.activeElement)) return;
+        await page.keyboard.press("Tab");
+      }
+      throw new Error("Keyboard navigation did not reach the requested password reset control.");
+    };
+
+    const approvedDecline = approvedRow.getByRole("button", {
+      name: "Decline",
+      exact: true,
+    });
+    const approve = approvedRow.getByRole("button", {
+      name: "Approve",
+      exact: true,
+    });
+    await tabTo(approvedDecline);
+    await expect(approvedDecline).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(approve).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    const codeDialog = page.getByRole("dialog", {
+      name: `Reset code for ${approvedStaff.username}`,
+    });
+    await expect(codeDialog).toBeVisible();
+    await expect(codeDialog.getByText(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/)).toBeVisible();
+    const approvedStatus = page.getByTestId("password-reset-decision-status");
+    await expect(approvedStatus).toContainText(
+      `Password reset request for ${approvedStaff.username} approved.`,
+    );
+
+    const doneButton = codeDialog.getByRole("button", { name: "Done", exact: true });
+    await tabTo(doneButton);
+    await expect(doneButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(codeDialog).toBeHidden();
+    await expect(approvedRow).toBeHidden();
+    await expect(declinedRow).toBeVisible();
+    const declinedAction = declinedRow.getByRole("button", {
+      name: "Decline",
+      exact: true,
+    });
+    await expect(declinedAction).toBeFocused();
+
+    const declinedApprove = declinedRow.getByRole("button", {
+      name: "Approve",
+      exact: true,
+    });
+    await page.keyboard.press("Tab");
+    await expect(declinedApprove).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(declinedAction).toBeFocused();
+    await page.keyboard.press("Space");
+
+    await expect(declinedRow).toBeHidden();
+    await expect(page.getByText("No pending password reset requests.")).toBeVisible();
+    await expect(page.getByTestId("password-reset-decision-status")).toContainText(
+      `Password reset request for ${declinedStaff.username} declined.`,
+    );
+    await expect(
+      page.getByText("Password reset requests", { exact: true }),
+    ).toBeFocused();
+
+    const verifyDb = new Client({
+      connectionString: requireIsolatedTestDatabase(
+        "verify keyboard password reset decisions",
+      ),
+    });
+    try {
+      await verifyDb.connect();
+      const result = await verifyDb.query<{
+        id: string;
+        status: string;
+        code_hash: string | null;
+      }>(
+        `SELECT id, status, code_hash
+         FROM password_reset_requests
+         WHERE id = ANY($1::text[])
+         ORDER BY id`,
+        [[approvedRequestId, declinedRequestId]],
+      );
+      expect(result.rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: approvedRequestId,
+            status: "approved",
+            code_hash: expect.any(String),
+          }),
+          expect.objectContaining({
+            id: declinedRequestId,
+            status: "declined",
+            code_hash: null,
+          }),
+        ]),
+      );
+    } finally {
+      await verifyDb.end().catch(() => {});
+    }
+    expect(browserErrors).toEqual([]);
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
 test("manager setup stays usable when recipe names are incomplete", async ({
   page,
   playwright,
