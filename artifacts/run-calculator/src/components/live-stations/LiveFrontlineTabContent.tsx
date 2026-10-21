@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef } from "react";
+import { useWatch } from "react-hook-form";
 import { Boxes } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { applyRecipeSubstitutions } from "@workspace/inventory-math";
@@ -27,6 +28,7 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
   const { v, runStatus, currentRun, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection, switchToRun } = hx;
   const { calc, elapsedBatchSec, linePhases } = useLiveRun();
+  const currentValues = useWatch({ control: form.control }) as FormValues;
   const autoAdvancedRunRef = useRef<string | null>(null);
   useEffect(() => {
     const nextIndex = dayState.currentIndex + 1;
@@ -119,7 +121,7 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
         <CardContent className="px-5 pb-5">
           <p className="text-xs text-muted-foreground mb-3">Current pounds loaded at each configured applicator. Save an adjustment or fill the slot to its cap after a load or refill.</p>
           {APPLICATOR_STOCK_REGISTERS.map((register) => {
-            const values = v as unknown as Record<string, unknown>;
+            const values = currentValues as unknown as Record<string, unknown>;
             const fields = applicatorStockFields(register);
             const capacity = computeApplicatorStockCapacityLbs(values, register);
             if (capacity <= 0) return null;

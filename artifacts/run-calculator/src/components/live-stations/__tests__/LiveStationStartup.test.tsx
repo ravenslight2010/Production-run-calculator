@@ -2,7 +2,7 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { FormProvider, useForm, useWatch } from "react-hook-form";
+import { FormProvider, useForm, useFormContext, useWatch } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeCtx } from "../../../contexts/HomeCtx";
 import { HomeTabCtx } from "../../../contexts/HomeTabCtx";
@@ -299,6 +299,34 @@ function applicatorStockControls(slot: (typeof FRONTLINE_APPLICATOR_LOCK_CASES)[
   return [input, ...buttons];
 }
 
+type CheeseApplicatorSlot = "app1" | "app2" | "app3" | "app4";
+
+function ApplicatorRecipeEditor({ slot, recipeLbs }: { slot: CheeseApplicatorSlot; recipeLbs: number }) {
+  const { control, setValue } = useFormContext<FormValues>();
+  const recipeField = `${slot}CheeseRecipe` as `${CheeseApplicatorSlot}CheeseRecipe`;
+  const stockField = `${slot}StockLbs` as `${CheeseApplicatorSlot}StockLbs`;
+  const stockLbs = useWatch({ control, name: stockField });
+  return (
+    <>
+      <button
+        type="button"
+        data-testid={`edit-${slot}-recipe`}
+        onClick={() => setValue(recipeField, [{ ingredient: "Mozzarella", lbs: recipeLbs }], { shouldDirty: true })}
+      >
+        Edit {slot} recipe
+      </button>
+      <button
+        type="button"
+        data-testid={`clear-${slot}-recipe`}
+        onClick={() => setValue(recipeField, [], { shouldDirty: true })}
+      >
+        Clear {slot} recipe
+      </button>
+      <output data-testid={`${slot}-stock-value`}>{stockLbs}</output>
+    </>
+  );
+}
+
 function expectSelector(
   selector:
     | { readonly role: "button"; readonly name: string }
@@ -405,6 +433,40 @@ describe("live station startup", () => {
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );
+
+  it("refreshes each applicator stock cap after recipe edits and uses batch weight for empty recipes", async () => {
+    render(
+      <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
+        <>
+          <LiveFrontlineTabContent />
+          {FRONTLINE_APPLICATOR_LOCK_CASES.map(({ slot }) => (
+            <ApplicatorRecipeEditor key={slot} slot={slot} recipeLbs={30 + Number(slot.slice(-1))} />
+          ))}
+        </>
+      </StationProviders>,
+    );
+
+    for (const { slot } of FRONTLINE_APPLICATOR_LOCK_CASES) {
+      const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
+      const stockRow = input.parentElement!.parentElement!;
+      const capacityLbs = (30 + Number(slot.slice(-1))) * 2;
+      expect(input.max).toBe("50");
+
+      fireEvent.click(screen.getByTestId(`edit-${slot}-recipe`));
+      await waitFor(() => expect(input.max).toBe(String(capacityLbs)));
+      expect(within(stockRow).getByText(`Capacity ${capacityLbs.toFixed(1)} lb`)).toBeTruthy();
+      fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
+      await waitFor(() => expect(screen.getByTestId(`${slot}-stock-value`).textContent).toBe(String(capacityLbs)));
+      expect(input.value).toBe(String(capacityLbs));
+
+      fireEvent.click(screen.getByTestId(`clear-${slot}-recipe`));
+      await waitFor(() => expect(input.max).toBe("50"));
+      expect(within(stockRow).getByText("Capacity 50.0 lb")).toBeTruthy();
+      fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
+      await waitFor(() => expect(screen.getByTestId(`${slot}-stock-value`).textContent).toBe("50"));
+      expect(input.value).toBe("50");
+    }
+  });
 
   it("keeps simultaneous peer locks scoped to their matching Frontline correction rows", () => {
     claimManualSectionLock(RUN_ID, "app1", "peer-app1", 30_000, true);
