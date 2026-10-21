@@ -104,6 +104,38 @@ test("flags synthetic street and mailing addresses without echoing their content
   }
 });
 
+test("flags mailing addresses split across adjacent lines without echoing their contents", () => {
+  const street = "91 Maple Street";
+  const cityPostal = "Sampletown, IL 60614";
+  const content = `${street}\n${cityPostal}`;
+
+  const findings = findFixHistoryDetails(content);
+  assert.deepEqual(findings, [
+    { line: 1, category: "mailing address" },
+    { line: 2, category: "mailing address" },
+  ]);
+
+  const diagnostic = findings.map(formatFixHistoryFinding).join("\n");
+  for (const matchedValue of [street, "Sampletown", "60614"]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
+test("allows benign adjacent technical lines, paths, release numbers, and dates", () => {
+  const content = [
+    "The helper uses",
+    "scripts/src/check-codex-fixes.test.mts",
+    "Release 3.12.0 shipped after",
+    "the review date 2026-10-21.",
+    "Node 22.4.1 supports API v2;",
+    "the local development server uses port 8080.",
+    "A street matcher checks",
+    "its input one line at a time.",
+  ].join("\n");
+
+  assert.deepEqual(findFixHistoryDetails(content), []);
+});
+
 test("flags synthetic credential values, private-key markers, and URL user-info without echoing values", () => {
   const password = "synthetic-password-73";
   const bearer = "synthetic-bearer-credential-482";

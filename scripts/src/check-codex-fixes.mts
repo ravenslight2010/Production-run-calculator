@@ -33,6 +33,10 @@ const phoneNumber =
   /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?!\w)|(?<!\w)\d{3}[-.]\d{4}(?!\w)/;
 const mailingAddress =
   /\bP(?:ost)?\.?\s*O(?:ffice)?\.?\s+Box\s+\d{1,8}\b|(?<![\w./-])\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\.?\s+)?[a-z0-9.'’-]+(?:\s+[a-z0-9.'’-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|circle|cir\.?|parkway|pkwy\.?|place|pl\.?|terrace|ter\.?|highway|hwy\.?|way)\b/i;
+const wrappedStreetAddressLine =
+  /^\s*(?:[-*]\s+)?\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\.?\s+)?[a-z0-9.'’-]+(?:\s+[a-z0-9.'’-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|circle|cir\.?|parkway|pkwy\.?|place|pl\.?|terrace|ter\.?|highway|hwy\.?|way)\s*[.,]?\s*$/i;
+const wrappedCityPostalLine =
+  /^\s*(?:[-*]\s+)?[a-z][a-z.'’-]*(?:\s+[a-z][a-z.'’-]*){0,4},\s*[a-z]{2}\s+\d{5}(?:-\d{4})?\s*[.,]?\s*$/i;
 const privateKeyMarker = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/i;
 const urlUserInfo = /\bhttps?:\/\/([^/@\s]+)@/gi;
 const credentialAssignment =
@@ -164,8 +168,20 @@ function hasInfrastructureIdentifier(line: string): boolean {
 
 export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
   const findings: FixHistoryFinding[] = [];
+  const lines = content.split(/\r?\n/u);
+  const wrappedMailingAddressLines = new Set<number>();
 
-  for (const [index, line] of content.split(/\r?\n/u).entries()) {
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    if (
+      wrappedStreetAddressLine.test(lines[index]) &&
+      wrappedCityPostalLine.test(lines[index + 1])
+    ) {
+      wrappedMailingAddressLines.add(index);
+      wrappedMailingAddressLines.add(index + 1);
+    }
+  }
+
+  for (const [index, line] of lines.entries()) {
     if (hasInfrastructureIdentifier(line)) {
       findings.push({ line: index + 1, category: "infrastructure identifier" });
     }
@@ -186,7 +202,7 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
       findings.push({ line: index + 1, category: "contact detail" });
     }
 
-    if (mailingAddress.test(line)) {
+    if (mailingAddress.test(line) || wrappedMailingAddressLines.has(index)) {
       findings.push({ line: index + 1, category: "mailing address" });
     }
 
