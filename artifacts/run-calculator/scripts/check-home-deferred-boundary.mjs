@@ -4,6 +4,12 @@ import ts from "@workspace/typescript-api-v6";
 import { fileURLToPath } from "node:url";
 
 export const DEFERRED_HOME_MODULE_SUFFIXES = [
+  "/src/components/ExcelImportDialog.tsx",
+  "/src/components/SpecImportDialog.tsx",
+  "/src/components/PremixImportDialog.tsx",
+  "/src/components/ShippingImportDialog.tsx",
+  "/src/components/RecipeGuideImportDialog.tsx",
+  "/src/components/CheeseImportDialog.tsx",
   "/src/components/SetupContent.tsx",
   "/src/components/WarehouseTabContent.tsx",
   "/src/components/MixesTabContent.tsx",
@@ -94,6 +100,35 @@ function staticImportSpecifiers(source, filePath) {
   return specifiers;
 }
 
+function literalDynamicImportSpecifiers(source, filePath) {
+  const specifiers = [];
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1
+    ) {
+      const [argument] = node.arguments;
+      if (
+        ts.isStringLiteral(argument) ||
+        ts.isNoSubstitutionTemplateLiteral(argument)
+      ) {
+        specifiers.push(argument.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return specifiers;
+}
+
 function resolveLocalSource(specifier, importerPath, sourceRoot, readSource) {
   const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
   let basePath;
@@ -156,6 +191,32 @@ export function checkHomeDeferredSourceBoundary({
       DEFERRED_HOME_PANEL_NAMES[index],
     ]),
   );
+  const dynamicImportPaths = new Set();
+  for (const [, filePath, source] of roots) {
+    for (const specifier of literalDynamicImportSpecifiers(source, filePath)) {
+      const importedPath = resolveLocalSource(
+        specifier,
+        filePath,
+        sourceRoot,
+        readSource,
+      );
+      if (importedPath) {
+        dynamicImportPaths.add(normalize(path.resolve(importedPath)));
+      }
+    }
+  }
+
+  const unregisteredDynamicImports = [...dynamicImportPaths].filter(
+    (importedPath) => !deferredPaths.has(importedPath),
+  );
+  if (unregisteredDynamicImports.length > 0) {
+    throw new Error(
+      `Home has local dynamic import(s) missing from the deferred panel inventory:\n${unregisteredDynamicImports
+        .map((importedPath) => `- ${path.relative(sourceRoot, importedPath)}`)
+        .join("\n")}`,
+    );
+  }
+
   const visited = new Set();
   const visit = (sourceName, filePath, source, importChain) => {
     const normalizedPath = normalize(path.resolve(filePath));
@@ -193,17 +254,9 @@ export function checkHomeDeferredSourceBoundary({
     visit(sourceName, filePath, source, []);
   }
 
-  const dynamicImportNames = new Set(
-    roots.flatMap(([, , source]) =>
-      [...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)].map(
-        ([, specifier]) =>
-          path.basename(specifier).replace(/\.tsx?$/, ""),
-      ),
-    ),
-  );
-  const missingLoaders = DEFERRED_HOME_PANEL_NAMES.filter(
-    (name) => !dynamicImportNames.has(name),
-  );
+  const missingLoaders = [...deferredPaths.entries()]
+    .filter(([modulePath]) => !dynamicImportPaths.has(modulePath))
+    .map(([, name]) => name);
   if (missingLoaders.length > 0) {
     throw new Error(
       `Home is missing dynamic imports for deferred panel(s):\n${missingLoaders
