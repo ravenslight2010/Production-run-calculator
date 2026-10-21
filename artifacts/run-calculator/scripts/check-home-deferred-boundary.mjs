@@ -101,8 +101,9 @@ function staticImportSpecifiers(source, filePath) {
   return specifiers;
 }
 
-function literalDynamicImportSpecifiers(source, filePath) {
+function analyzeDynamicImports(source, filePath) {
   const specifiers = [];
+  const nonLiteralLocations = [];
   const sourceFile = ts.createSourceFile(
     filePath,
     source,
@@ -113,21 +114,26 @@ function literalDynamicImportSpecifiers(source, filePath) {
   const visit = (node) => {
     if (
       ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
     ) {
       const [argument] = node.arguments;
       if (
-        ts.isStringLiteral(argument) ||
-        ts.isNoSubstitutionTemplateLiteral(argument)
+        argument &&
+        (ts.isStringLiteral(argument) ||
+          ts.isNoSubstitutionTemplateLiteral(argument))
       ) {
         specifiers.push(argument.text);
+      } else {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(sourceFile),
+        );
+        nonLiteralLocations.push(`line ${line + 1}, column ${character + 1}`);
       }
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return specifiers;
+  return { specifiers, nonLiteralLocations };
 }
 
 function resolveSourceFile(basePath, specifier, readSource) {
@@ -306,8 +312,19 @@ export function checkHomeDeferredSourceBoundary({
     ]),
   );
   const dynamicImportPaths = new Set();
-  for (const [, filePath, source] of roots) {
-    for (const specifier of literalDynamicImportSpecifiers(source, filePath)) {
+  for (const [sourceName, filePath, source] of roots) {
+    const { specifiers, nonLiteralLocations } = analyzeDynamicImports(
+      source,
+      filePath,
+    );
+    if (nonLiteralLocations.length > 0) {
+      throw new Error(
+        `${sourceName} has runtime dynamic import(s) with a non-literal specifier that the Home startup guard cannot inspect:\n` +
+          `${nonLiteralLocations.map((location) => `- ${location}`).join("\n")}\n` +
+          `Use a string literal or no-substitution template literal for each dynamic import specifier.`,
+      );
+    }
+    for (const specifier of specifiers) {
       const importedPath = resolveLocalSource(
         specifier,
         filePath,
@@ -475,6 +492,10 @@ export function checkHomeDeferredBoundary(manifest) {
 }
 
 function runCli() {
+  const sourceResult = checkHomeDeferredSourceBoundary({
+    homeSource: fs.readFileSync(HOME_FILE, "utf8"),
+    liveRunSource: fs.readFileSync(LIVE_RUN_FILE, "utf8"),
+  });
   const manifestPath = path.resolve(
     SCRIPT_DIR,
     "../dist/public/.vite/workbook-boundary-manifest.json",
@@ -484,6 +505,9 @@ function runCli() {
   }
   const result = checkHomeDeferredBoundary(
     JSON.parse(fs.readFileSync(manifestPath, "utf8")),
+  );
+  console.log(
+    `Home source boundary OK: ${sourceResult.deferredHomePanels} optional surfaces are statically inventoried.`,
   );
   console.log(
     `Home boundary OK: ${result.eagerModuleCount} opening modules; ${result.deferredHomePanels} optional surfaces are deferred.`,

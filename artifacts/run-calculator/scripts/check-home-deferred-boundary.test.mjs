@@ -171,6 +171,69 @@ test("source boundary rejects removal of an existing Home dynamic loader", () =>
   );
 });
 
+for (const [sourceName, key] of [
+  ["Home", "homeSource"],
+  ["LiveRunTabContent", "liveRunSource"],
+]) {
+  test(`source boundary rejects a computed runtime dynamic import in ${sourceName}`, () => {
+    assert.throws(
+      () =>
+        checkHomeDeferredSourceBoundary({
+          homeSource:
+            key === "homeSource"
+              ? `${sourceHome()}\nconst loadPanel = (panel) => import(panel);`
+              : sourceHome(),
+          liveRunSource:
+            key === "liveRunSource"
+              ? `const loadPanel = (panel) => import(panel);`
+              : "",
+        }),
+      new RegExp(
+        `${sourceName} has runtime dynamic import\\(s\\) with a non-literal specifier[\\s\\S]*line \\d+, column \\d+[\\s\\S]*Use a string literal or no-substitution template literal`,
+      ),
+    );
+  });
+}
+
+test("source boundary ignores TypeScript import-type syntax", () => {
+  const fixture = createSourceFixture({
+    homeSource: (sourceRoot) =>
+      `${sourceHome(sourceRoot)}\ntype UnregisteredPanel = import("../components/UnregisteredPanel").default;`,
+    helperSource: "",
+  });
+  fs.writeFileSync(
+    path.join(fixture.sourceRoot, "components/UnregisteredPanel.tsx"),
+    "export default function UnregisteredPanel() {}",
+  );
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary keeps literal package dynamic imports outside local panel inventory", () => {
+  const result = checkHomeDeferredSourceBoundary({
+    homeSource: `${sourceHome()}\nconst loadExternal = () => import("@workspace/home-bridge");`,
+    liveRunSource: "",
+  });
+  assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+});
+
+test("source boundary accepts a no-substitution template literal for a local panel", () => {
+  const homeSource = sourceHome().replace(
+    'import("../components/SetupContent")',
+    "import(`../components/SetupContent`)",
+  );
+  const result = checkHomeDeferredSourceBoundary({
+    homeSource,
+    liveRunSource: "",
+  });
+  assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+});
+
 test("source boundary rejects a deferred panel loaded by a side-effect static import", () => {
   assert.throws(
     () =>
