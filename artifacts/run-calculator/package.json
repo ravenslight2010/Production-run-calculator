@@ -10,6 +10,7 @@
     "test:workbook-boundary": "node --test scripts/check-workbook-boundary.test.mjs",
     "check:deferred-home-boundary": "node scripts/check-home-deferred-boundary.mjs",
     "test:deferred-home-boundary": "node --test scripts/check-home-deferred-boundary.test.mjs",
+    "test:home-startup-budget": "node --test scripts/check-home-startup-budget.test.mjs",
     "check:as-any-budget": "node scripts/check-as-any-budget.mjs",
     "test:as-any-budget": "node --test scripts/check-as-any-budget.test.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
