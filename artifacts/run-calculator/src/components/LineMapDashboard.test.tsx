@@ -27,10 +27,12 @@ function renderLineMap(
     active?: boolean;
     scheduledDays?: ScheduledDay[];
     configuredApplicator?: 3 | 4;
+    applicatorBatchesAvailable?: boolean;
   } = {},
 ) {
   const active = options.active ?? false;
   const configuredApplicator = options.configuredApplicator;
+  const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
   mocks.useHomeTabCtx.mockReturnValue({
     v: {
       traysOnLine: active ? 1 : 0,
@@ -70,9 +72,9 @@ function renderLineMap(
       sauceDepletionSec: 0,
       sauceEffBarrel: 0,
       app3Lbs: configuredApplicator === 3 ? 40 : 0,
-      app3Batches: configuredApplicator === 3 ? 2 : 0,
+      app3Batches: configuredApplicator === 3 && applicatorBatchesAvailable ? 2 : 0,
       app4Lbs: configuredApplicator === 4 ? 40 : 0,
-      app4Batches: configuredApplicator === 4 ? 2 : 0,
+      app4Batches: configuredApplicator === 4 && applicatorBatchesAvailable ? 2 : 0,
       pressCasesLeft: active ? 80 : 0,
       casesCompleted: active ? 20 : 0,
       ppm: 0,
@@ -121,6 +123,20 @@ describe("LineMapDashboard station lifecycle statuses", () => {
       const frontline = screen.getByRole("button", { name: /Frontline/ });
       expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
       expect(within(frontline).getByText("2.00 batches")).toBeTruthy();
+    },
+  );
+
+  it.each([3, 4] as const)(
+    "shows the need for applicator %i in pounds when batch quantity is unavailable",
+    (slot) => {
+      renderLineMap("running", {
+        configuredApplicator: slot,
+        applicatorBatchesAvailable: false,
+      });
+
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
+      expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
     },
   );
 
