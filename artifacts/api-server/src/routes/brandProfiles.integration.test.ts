@@ -423,7 +423,7 @@ describe("brand-profiles applicator-audit route", () => {
               app3CheeseRecipeName: "Mozz Blend",
               app3Type: "cheese",
               app4CheeseRecipeName: "",
-              app4Type: "Pepperoni",
+              app4Type: "Cheese",
               dieType: "12in",
             },
             crustValues: { crustsPerCycle: 7 },
@@ -452,7 +452,7 @@ describe("brand-profiles applicator-audit route", () => {
           app3CheeseRecipeName: slot === "app3" ? "" : "Mozz Blend",
           app3Type: slot === "app3" ? "" : "cheese",
           app4CheeseRecipeName: "",
-          app4Type: slot === "app4" ? "" : "Pepperoni",
+          app4Type: slot === "app4" ? "" : "Cheese",
           dieType: "12in",
         },
         crustValues: { crustsPerCycle: 7 },
@@ -477,7 +477,7 @@ describe("brand-profiles applicator-audit route", () => {
             app3CheeseRecipeName: "Mozz Blend",
             app3Type: "cheese",
             app4CheeseRecipeName: "",
-            app4Type: "Pepperoni",
+            app4Type: "Cheese",
           },
         }),
       ],
@@ -494,7 +494,7 @@ describe("brand-profiles applicator-audit route", () => {
       app3CheeseRecipeName: "Mozz Blend",
       app3Type: "cheese",
       app4CheeseRecipeName: "",
-      app4Type: "Pepperoni",
+      app4Type: "Cheese",
     });
     const audit = await req(OPERATOR, "GET", "/api/brand-profiles/applicator-audit");
     expect(audit.status).toBe(200);
@@ -521,19 +521,19 @@ describe("brand-profiles stale-sauce-name route", () => {
       items: [
         profile({
           key: "brand-a__alfredo",
-          brand: "Brand A",
+          brand: "brand-a",
           flavor: "Alfredo",
           values: { frontlineRecipeName: "Alfredo Sauce" },
         }),
         profile({
           key: "brand-b__alfredo",
-          brand: "Brand B",
+          brand: "brand-b",
           flavor: "Alfredo",
           values: { frontlineRecipeName: "alfredo sauce" },
         }),
         profile({
           key: "brand-c__ranch",
-          brand: "Brand C",
+          brand: "brand-c",
           flavor: "Ranch",
           values: { frontlineRecipeName: "Ranch" },
         }),
@@ -543,7 +543,9 @@ describe("brand-profiles stale-sauce-name route", () => {
     const response = await req(OPERATOR, "GET", "/api/brand-profiles/stale-sauce-names");
     expect(response.status).toBe(200);
     const body = (await response.json()) as { items: Array<{ key: string; sauceName: string }> };
-    expect(body.items).toEqual([{ key: "brand-c__ranch", sauceName: "Ranch" }]);
+    expect(body.items).toEqual([
+      { key: "brand-c__ranch", brand: "brand-c", flavor: "Ranch", sauceName: "Ranch" },
+    ]);
   });
 });
 
