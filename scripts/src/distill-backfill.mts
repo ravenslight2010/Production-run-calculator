@@ -242,6 +242,100 @@ export function appendMetadataMaintenanceEntry(
   };
 }
 
+function resolveMetadataDecisionPath(repoRoot: string, decisionPath: string): string {
+  const realRepoRoot = fs.realpathSync(repoRoot);
+  const resolvedPath = fs.realpathSync(path.resolve(realRepoRoot, decisionPath));
+  if (!isWithin(realRepoRoot, resolvedPath)) {
+    throw new Error("--decision must resolve to a file inside the repository");
+  }
+  if (!fs.statSync(resolvedPath).isFile()) {
+    throw new Error("--decision must resolve to a regular file");
+  }
+  return resolvedPath;
+}
+
+export function appendMetadataMaintenanceEntryFile(
+  decisionPath: string,
+  entry: unknown,
+): DecisionFile {
+  const resolvedPath = fs.realpathSync(decisionPath);
+  const fileStat = fs.statSync(resolvedPath);
+  if (!fileStat.isFile()) throw new Error("decision file must be a regular file");
+
+  const lockPath = `${resolvedPath}.metadata-maintenance.lock`;
+  let lockFd: number | undefined;
+  let temporaryDirectory: string | undefined;
+  try {
+    try {
+      lockFd = fs.openSync(lockPath, "wx", 0o600);
+    } catch (error) {
+      if (isRecord(error) && error.code === "EEXIST") {
+        throw new Error("another metadata update is in progress or a stale metadata lock remains");
+      }
+      throw error;
+    }
+    fs.writeFileSync(lockFd, `${process.pid}\n`, "utf8");
+
+    const decision = appendMetadataMaintenanceEntry(
+      readJson(resolvedPath, "decision file"),
+      entry,
+    );
+    temporaryDirectory = fs.mkdtempSync(
+      path.join(path.dirname(resolvedPath), ".distill-metadata-maintenance-"),
+    );
+    const temporaryPath = path.join(temporaryDirectory, path.basename(resolvedPath));
+    const temporaryFd = fs.openSync(temporaryPath, "wx", fileStat.mode & 0o777);
+    try {
+      fs.writeFileSync(temporaryFd, `${JSON.stringify(decision, null, 2)}\n`, "utf8");
+      fs.fsyncSync(temporaryFd);
+    } finally {
+      fs.closeSync(temporaryFd);
+    }
+    fs.renameSync(temporaryPath, resolvedPath);
+    return decision;
+  } finally {
+    if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    if (lockFd !== undefined) {
+      fs.closeSync(lockFd);
+      fs.rmSync(lockPath, { force: true });
+    }
+  }
+}
+
+export function runMetadataMaintenanceCommand(args: string[], repoRoot: string): DecisionFile {
+  if (args[0] === "--") args = args.slice(1);
+  if (args[0] !== "append-metadata") {
+    throw new Error("metadata command must start with append-metadata");
+  }
+
+  const values = new Map<string, string>();
+  const valueFlags = new Set(["--date", "--note", "--decision"]);
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index]!;
+    if (!valueFlags.has(arg)) throw new Error(`unknown metadata option: ${arg}`);
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
+    if (values.has(arg)) throw new Error(`${arg} may be provided only once`);
+    values.set(arg, value);
+    index++;
+  }
+
+  const date = values.get("--date");
+  const note = values.get("--note");
+  if (date === undefined || note === undefined) {
+    throw new Error("append-metadata requires --date and --note");
+  }
+  const decisionPath = resolveMetadataDecisionPath(
+    repoRoot,
+    values.get("--decision") ?? DEFAULT_DECISION_RELATIVE_PATH,
+  );
+  return appendMetadataMaintenanceEntryFile(decisionPath, {
+    date,
+    changeType: "metadata-only",
+    note,
+  });
+}
+
 function validateGoDecision(
   decision: DecisionFile,
   contract: ProductionContract,
@@ -980,8 +1074,15 @@ async function main(): Promise<void> {
   const scriptPath = fileURLToPath(import.meta.url);
   const repoRoot = path.resolve(path.dirname(scriptPath), "../..");
   try {
-    const result = await runBackfill(parseArguments(process.argv.slice(2), repoRoot));
-    process.exitCode = result.exitCode;
+    const args = process.argv.slice(2);
+    if (args[0] === "--") args.shift();
+    if (args[0] === "append-metadata") {
+      const updated = runMetadataMaintenanceCommand(args, repoRoot);
+      console.log(`Appended metadata-only maintenance entry dated ${updated.maintenanceHistory?.at(-1)?.date}.`);
+    } else {
+      const result = await runBackfill(parseArguments(args, repoRoot));
+      process.exitCode = result.exitCode;
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "distillation backfill failed");
     process.exitCode = 1;

@@ -7,6 +7,7 @@ import {
   EXPECTED_PRODUCTION_PROMPT_SHA256,
   appendMetadataMaintenanceEntry,
   loadProductionContract,
+  runMetadataMaintenanceCommand,
   runBackfill,
 } from "./distill-backfill.mts";
 import {
@@ -216,6 +217,82 @@ fs.mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
 const decisionPath = path.join(repoRoot, "docs", "evidence", "decision.json");
 const redactionPath = path.join(privateRoot, "redaction.json");
 const evidencePath = path.join(privateRoot, "corpus.jsonl");
+const metadataCommandPath = path.join(repoRoot, "docs", "evidence", "metadata-command.json");
+const priorMaintenanceEntry = {
+  date: "2026-10-08",
+  changeType: "metadata-only",
+  note: "Earlier decision and evidence review remains in history.",
+};
+const metadataCommandRecord = {
+  ...makeDecision("no-go"),
+  maintenanceHistory: [priorMaintenanceEntry],
+  retainedContext: { ownerNote: "Preserve non-history metadata as well." },
+};
+fs.writeFileSync(metadataCommandPath, `${JSON.stringify(metadataCommandRecord, null, 2)}\n`);
+const metadataCommandBefore = JSON.parse(fs.readFileSync(metadataCommandPath, "utf8")) as Record<string, unknown>;
+const metadataCommandEntry = {
+  date: "2026-10-21",
+  changeType: "metadata-only",
+  note: "Refreshed metadata without changing the decision or evaluation evidence.",
+};
+const metadataCommandResult = runMetadataMaintenanceCommand([
+  "append-metadata",
+  "--decision",
+  path.relative(repoRoot, metadataCommandPath),
+  "--date",
+  metadataCommandEntry.date,
+  "--note",
+  metadataCommandEntry.note,
+], repoRoot);
+const metadataCommandWritten = JSON.parse(fs.readFileSync(metadataCommandPath, "utf8")) as Record<string, unknown>;
+assert.deepEqual(metadataCommandResult.maintenanceHistory, [
+  priorMaintenanceEntry,
+  metadataCommandEntry,
+]);
+assert.deepEqual(metadataCommandWritten, metadataCommandResult);
+assert.equal(metadataCommandWritten.decision, "no-go");
+assert.deepEqual(metadataCommandWritten.benchmark, metadataCommandBefore.benchmark);
+assert.deepEqual(metadataCommandWritten.trainingEvaluation, metadataCommandBefore.trainingEvaluation);
+assert.deepEqual(metadataCommandWritten.datasetSafety, metadataCommandBefore.datasetSafety);
+assert.deepEqual(
+  Object.fromEntries(Object.entries(metadataCommandWritten).filter(([key]) => key !== "maintenanceHistory")),
+  Object.fromEntries(Object.entries(metadataCommandBefore).filter(([key]) => key !== "maintenanceHistory")),
+);
+
+const legacyDecisionPath = path.join(repoRoot, "docs", "evidence", "legacy-decision.json");
+const legacyDecisionRecord = {
+  ...makeDecision("no-go"),
+  retainedLegacyNote: "A legacy record has no maintenanceHistory property.",
+};
+fs.writeFileSync(legacyDecisionPath, JSON.stringify(legacyDecisionRecord));
+const legacyAppend = runMetadataMaintenanceCommand([
+  "append-metadata",
+  "--decision",
+  path.relative(repoRoot, legacyDecisionPath),
+  "--date",
+  "2026-10-21",
+  "--note",
+  "Appended metadata to a legacy record without changing its decision.",
+], repoRoot);
+assert.deepEqual(legacyAppend.maintenanceHistory, [{
+  date: "2026-10-21",
+  changeType: "metadata-only",
+  note: "Appended metadata to a legacy record without changing its decision.",
+}]);
+assert.deepEqual(
+  Object.fromEntries(Object.entries(legacyAppend).filter(([key]) => key !== "maintenanceHistory")),
+  legacyDecisionRecord,
+);
+
+const invalidMetadataCommandBefore = fs.readFileSync(metadataCommandPath, "utf8");
+for (const invalidArgs of [
+  ["append-metadata", "--decision", path.relative(repoRoot, metadataCommandPath), "--date", "2026-02-30", "--note", "Invalid calendar date."],
+  ["append-metadata", "--decision", path.relative(repoRoot, metadataCommandPath), "--date", "2026-10-21", "--note", "  "],
+]) {
+  assert.throws(() => runMetadataMaintenanceCommand(invalidArgs, repoRoot), /metadata maintenance entry/u);
+  assert.equal(fs.readFileSync(metadataCommandPath, "utf8"), invalidMetadataCommandBefore);
+}
+
 const systemPromptSentToOutput: string[] = [];
 const dependencies = {
   contract,
