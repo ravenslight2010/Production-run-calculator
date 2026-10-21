@@ -295,7 +295,7 @@ export const aggregateRunDemand = (valsList: FormValues[]): RunLine[] =>
 // Build the per-key location-stock map computeTransferNeeds expects from the
 // inventory items' byLocation breakdown.
 export function buildStockByKey(items: InventoryItem[]): Record<string, LocationStock[]> {
-  const out: Record<string, LocationStock[]> = {};
+  const out = Object.create(null) as Record<string, LocationStock[]>;
   for (const it of items) out[it.key] = it.byLocation;
   return out;
 }
