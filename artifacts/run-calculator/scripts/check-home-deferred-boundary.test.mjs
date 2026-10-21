@@ -51,7 +51,7 @@ function validManifest() {
   };
 }
 
-function createSourceFixture({ homeSource, helperSource }) {
+function createSourceFixture({ homeSource, helperSource, packageSource }) {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "home-deferred-boundary-"));
   const sourceRoot = path.join(fixtureRoot, "src");
   const homeFilePath = path.join(sourceRoot, "pages/home.tsx");
@@ -70,6 +70,18 @@ function createSourceFixture({ homeSource, helperSource }) {
     fs.mkdirSync(path.dirname(panelPath), { recursive: true });
     fs.writeFileSync(panelPath, `export default function ${path.basename(panelPath, ".tsx")}() {}`);
   }
+  if (packageSource !== undefined) {
+    const packageRoot = path.join(fixtureRoot, "lib/home-bridge");
+    fs.mkdirSync(path.join(packageRoot, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@workspace/home-bridge",
+        exports: { ".": "./src/index.ts" },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "src/index.ts"), packageSource);
+  }
   const resolvedHomeSource =
     typeof homeSource === "function" ? homeSource(sourceRoot) : homeSource;
   fs.writeFileSync(homeFilePath, resolvedHomeSource);
@@ -80,6 +92,7 @@ function createSourceFixture({ homeSource, helperSource }) {
     liveRunFilePath,
     liveRunSource: "",
     sourceRoot,
+    workspaceRoot: fixtureRoot,
     cleanup: () => fs.rmSync(fixtureRoot, { recursive: true, force: true }),
   };
 }
@@ -181,6 +194,43 @@ test("source boundary rejects a deferred panel reached through an intermediate l
       () => checkHomeDeferredSourceBoundary(fixture),
       /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> components\/homeBridge\.ts -> components\/SetupContent\.tsx/,
     );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary follows a deferred panel re-exported through a local workspace package", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: 'export { default as bridge } from "../../../src/components/SetupContent";',
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> \.\.\/lib\/home-bridge\/src\/index\.ts -> components\/SetupContent\.tsx/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary ignores third-party imports in a local workspace package", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: [
+      'import "third-party-package";',
+      'export type { SetupContentProps } from "../../../src/components/SetupContent";',
+      'export const loadSetupContent = () => import("../../../src/components/SetupContent");',
+      "export const bridge = true;",
+    ].join("\n"),
+  });
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
   } finally {
     fixture.cleanup();
   }

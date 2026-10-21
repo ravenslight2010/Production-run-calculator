@@ -37,6 +37,7 @@ const DEFERRED_HOME_PANEL_NAMES = DEFERRED_HOME_MODULE_SUFFIXES.map((suffix) =>
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_ROOT = path.resolve(SCRIPT_DIR, "../src");
 const HOME_FILE = path.resolve(SOURCE_ROOT, "pages/home.tsx");
+const WORKSPACE_ROOT = path.resolve(SOURCE_ROOT, "../../..");
 const LIVE_RUN_FILE = path.resolve(
   SOURCE_ROOT,
   "components/live-stations/LiveRunTabContent.tsx",
@@ -129,17 +130,7 @@ function literalDynamicImportSpecifiers(source, filePath) {
   return specifiers;
 }
 
-function resolveLocalSource(specifier, importerPath, sourceRoot, readSource) {
-  const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
-  let basePath;
-  if (cleanSpecifier.startsWith("@/")) {
-    basePath = path.resolve(sourceRoot, cleanSpecifier.slice(2));
-  } else if (cleanSpecifier.startsWith(".")) {
-    basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
-  } else {
-    return null;
-  }
-
+function resolveSourceFile(basePath, specifier, readSource) {
   const supportedExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
   const extension = path.extname(basePath);
   if (extension && !supportedExtensions.includes(extension)) return null;
@@ -168,8 +159,130 @@ function resolveLocalSource(specifier, importerPath, sourceRoot, readSource) {
     }
   }
   throw new Error(
-    `Unable to resolve local static import "${specifier}" from "${importerPath}".`,
+    `Unable to resolve local static import "${specifier}" from "${basePath}".`,
   );
+}
+
+function workspacePackageRoot(packageName, workspaceRoot, readSource) {
+  const packageDirectory = packageName.slice("@workspace/".length);
+  const candidateDirectories = [
+    path.resolve(workspaceRoot, "artifacts", packageDirectory),
+    path.resolve(workspaceRoot, "lib", packageDirectory),
+    path.resolve(workspaceRoot, "lib", "integrations", packageDirectory),
+    path.resolve(workspaceRoot, "scripts"),
+  ];
+  const matches = [];
+  for (const candidateDirectory of candidateDirectories) {
+    const manifestPath = path.join(candidateDirectory, "package.json");
+    try {
+      const manifest = JSON.parse(readSource(manifestPath));
+      if (manifest.name === packageName) matches.push(candidateDirectory);
+    } catch (error) {
+      if (
+        error?.code !== "ENOENT" &&
+        error?.code !== "ENOTDIR" &&
+        error?.code !== "EISDIR"
+      ) {
+        throw error;
+      }
+    }
+  }
+  if (matches.length > 1) {
+    throw new Error(`Workspace package "${packageName}" has multiple local manifests.`);
+  }
+  return matches[0] ?? null;
+}
+
+function exportTarget(exportsField, exportKey) {
+  const selectedExport =
+    typeof exportsField === "string" || Array.isArray(exportsField)
+      ? exportKey === "."
+        ? exportsField
+        : undefined
+      : exportsField &&
+          Object.keys(exportsField).some((key) => key.startsWith("."))
+        ? exportsField[exportKey]
+        : exportKey === "."
+          ? exportsField
+          : undefined;
+
+  const selectRuntimeTarget = (value) => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const target = selectRuntimeTarget(entry);
+        if (target) return target;
+      }
+      return null;
+    }
+    if (!value || typeof value !== "object") return null;
+    for (const condition of ["source", "import", "default", "node", "require"]) {
+      const target = selectRuntimeTarget(value[condition]);
+      if (target) return target;
+    }
+    return null;
+  };
+  return selectRuntimeTarget(selectedExport);
+}
+
+function resolveWorkspaceSource(
+  specifier,
+  workspaceRoot,
+  readSource,
+) {
+  const match = specifier.match(/^(@workspace\/[^/]+)(\/.*)?$/);
+  if (!match) return null;
+  const [, packageName, packageSubpath = ""] = match;
+  const packageRoot = workspacePackageRoot(packageName, workspaceRoot, readSource);
+  if (!packageRoot) {
+    throw new Error(`Unable to find local workspace package "${packageName}".`);
+  }
+
+  const manifestPath = path.join(packageRoot, "package.json");
+  const manifest = JSON.parse(readSource(manifestPath));
+  const exportKey = packageSubpath ? `.${packageSubpath}` : ".";
+  const target = exportTarget(manifest.exports, exportKey);
+  if (!target || !target.startsWith("./")) {
+    throw new Error(
+      `Workspace package "${packageName}" does not export a local source entry for "${exportKey}".`,
+    );
+  }
+
+  const targetPath = path.resolve(packageRoot, target);
+  const relativeTarget = path.relative(packageRoot, targetPath);
+  if (
+    relativeTarget === ".." ||
+    relativeTarget.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeTarget)
+  ) {
+    throw new Error(
+      `Workspace package "${packageName}" export "${exportKey}" escapes its package directory.`,
+    );
+  }
+  return resolveSourceFile(targetPath, specifier, readSource);
+}
+
+function resolveLocalSource(
+  specifier,
+  importerPath,
+  sourceRoot,
+  workspaceRoot,
+  readSource,
+  includeWorkspacePackages = true,
+) {
+  const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
+  let basePath;
+  if (cleanSpecifier.startsWith("@/")) {
+    basePath = path.resolve(sourceRoot, cleanSpecifier.slice(2));
+  } else if (cleanSpecifier.startsWith(".")) {
+    basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
+  } else {
+    return includeWorkspacePackages
+      ? resolveWorkspaceSource(cleanSpecifier, workspaceRoot, readSource)
+      : null;
+  }
+
+  return resolveSourceFile(basePath, specifier, readSource);
 }
 
 export function checkHomeDeferredSourceBoundary({
@@ -178,6 +291,7 @@ export function checkHomeDeferredSourceBoundary({
   homeFilePath = HOME_FILE,
   liveRunFilePath = LIVE_RUN_FILE,
   sourceRoot = SOURCE_ROOT,
+  workspaceRoot = WORKSPACE_ROOT,
   readSource = (filePath) => fs.readFileSync(filePath, "utf8"),
 }) {
   const roots = [
@@ -198,7 +312,9 @@ export function checkHomeDeferredSourceBoundary({
         specifier,
         filePath,
         sourceRoot,
+        workspaceRoot,
         readSource,
+        false,
       );
       if (importedPath) {
         dynamicImportPaths.add(normalize(path.resolve(importedPath)));
@@ -228,6 +344,7 @@ export function checkHomeDeferredSourceBoundary({
         specifier,
         normalizedPath,
         sourceRoot,
+        workspaceRoot,
         readSource,
       );
       if (!importedPath) continue;
