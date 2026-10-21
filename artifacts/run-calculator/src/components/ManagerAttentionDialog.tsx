@@ -189,8 +189,15 @@ const ManagerAttentionDialog = memo(function ManagerAttentionDialog({
     <Dialog open={authorized && open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-h-[88dvh] w-[calc(100vw-1rem)] max-w-lg overflow-y-auto p-4 sm:p-6"
+        data-testid="manager-attention-dialog"
         onCloseAutoFocus={(event) => {
-          if (!restoreFocusRef.current || !returnFocusRef?.current) return;
+          if (!restoreFocusRef.current) {
+            // An action is handing focus to its destination; do not let the
+            // dialog restore focus to its menu item after that transition.
+            event.preventDefault();
+            return;
+          }
+          if (!returnFocusRef?.current) return;
           event.preventDefault();
           returnFocusRef.current.focus();
         }}

@@ -4274,6 +4274,8 @@ export default function Home() {
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
   const [showManagerAttention, setShowManagerAttention] = useState(false);
+  const [managerAttentionFocusDestination, setManagerAttentionFocusDestination] =
+    useState<"staff" | "incidents" | null>(null);
   const managerAttentionTriggerRef = useRef<HTMLButtonElement>(null);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
@@ -7254,13 +7256,40 @@ export default function Home() {
   const canViewManagerAttention =
     isManager || canApproveResets || canReviewIncidents || canManageProfiles;
 
+  useEffect(() => {
+    if (!managerAttentionFocusDestination || activeTab !== managerAttentionFocusDestination) return;
+
+    let frame = 0;
+    let attempts = 0;
+    const focusDestinationAfterDialogCloses = () => {
+      const dialog = document.querySelector('[data-testid="manager-attention-dialog"]');
+      if (dialog && attempts < 120) {
+        attempts += 1;
+        frame = window.requestAnimationFrame(focusDestinationAfterDialogCloses);
+        return;
+      }
+      if (!dialog) {
+        document
+          .querySelector<HTMLElement>(
+            ".station-tabs [role='tabpanel'][data-state='active']",
+          )
+          ?.focus();
+      }
+      setManagerAttentionFocusDestination(null);
+    };
+    frame = window.requestAnimationFrame(focusDestinationAfterDialogCloses);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, managerAttentionFocusDestination]);
+
   function resolveManagerAttention(item: ManagerAttentionItem) {
     setShowManagerAttention(false);
     if (item.kind === "password-resets") {
+      setManagerAttentionFocusDestination("staff");
       setActiveTab("staff");
       return;
     }
     if (item.kind === "incidents") {
+      setManagerAttentionFocusDestination("incidents");
       setActiveTab("incidents");
       return;
     }

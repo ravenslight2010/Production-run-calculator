@@ -14,7 +14,7 @@ const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 
 async function openManagerAttention(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^More/ }).click();
-  await page.getByRole("menuitem", { name: "Manager attention", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Manager attention/ }).click();
   await expect(page.getByRole("dialog", { name: "Manager attention" })).toBeVisible();
 }
 
@@ -243,8 +243,7 @@ test("manager can open and close Manager attention using only the keyboard", asy
     await page.keyboard.press("Enter");
 
     const managerAttentionItem = page.getByRole("menuitem", {
-      name: "Manager attention",
-      exact: true,
+      name: /^Manager attention/,
     });
     await expect(managerAttentionItem).toBeVisible();
     await page.keyboard.press("Home");
@@ -257,6 +256,134 @@ test("manager can open and close Manager attention using only the keyboard", asy
     await expect(dialog).toBeHidden();
     await expect(moreButton).toBeVisible();
     await expect(moreButton).toBeFocused();
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
+test("manager can keyboard-open each Manager attention workflow and retain useful focus", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(90_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_manager_attention_keyboard_actions"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    const scheduledBrand = uniqueTestId("KeyboardAttentionBrand");
+    const scheduledFlavor = uniqueTestId("KeyboardAttentionFlavor");
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+    await page.route("**/api/password-reset-requests", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: uniqueTestId("keyboard-reset"),
+          userId: uniqueTestId("keyboard-staff"),
+          username: "keyboard-fixture-staff",
+          requestedAt: new Date().toISOString(),
+        }]),
+      });
+    });
+    await page.route("**/api/incidents/actionable-count", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ count: 1 }),
+      }));
+    await page.route("**/api/sync/scheduled?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          date: tomorrow,
+          runCount: 1,
+          runs: [{
+            id: uniqueTestId("keyboard-scheduled"),
+            brand: scheduledBrand,
+            flavor: scheduledFlavor,
+            casesNeeded: 10,
+            dieType: "",
+          }],
+        }]),
+      }));
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const activateByTabAndEnter = async (action: Locator) => {
+      for (let tabCount = 0; tabCount < 40; tabCount += 1) {
+        if (await action.evaluate((element) => element === document.activeElement)) break;
+        await page.keyboard.press("Tab");
+      }
+      await expect(action).toBeFocused();
+      await page.keyboard.press("Enter");
+    };
+    const expectUsefulFocus = async () => {
+      const focused = page.locator(":focus");
+      await expect(focused).toBeVisible();
+      const focusState = await focused.evaluate((element) => ({
+        tagName: element.tagName,
+        enabled: !("disabled" in element) || !(element as HTMLButtonElement).disabled,
+        actionable:
+          element.matches("button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])"),
+      }));
+      expect(focusState.tagName, "focus must not be abandoned on the document body").not.toMatch(
+        /^(BODY|HTML)$/,
+      );
+      expect(focusState.enabled, "focus must remain on an enabled control").toBe(true);
+      expect(focusState.actionable, "focus must remain on a keyboard-operable control").toBe(true);
+    };
+
+    const moreButton = page.getByRole("button", { name: /^More/ });
+    const workflows = [
+      {
+        kind: "password-resets",
+        destination: () => page.getByRole("heading", { name: "Staff Roster" }),
+      },
+      {
+        kind: "incidents",
+        destination: () =>
+          page
+            .locator(".station-tabs [role='tabpanel'][data-state='active']")
+            .getByText("Reported issues", { exact: true }),
+      },
+      {
+        kind: "recipe-setup",
+        destination: () => page.getByRole("dialog", { name: "Setup Profiles" }),
+      },
+    ] as const;
+
+    for (const workflow of workflows) {
+      await openManagerAttention(page);
+      const dialog = page.getByRole("dialog", { name: "Manager attention" });
+      await expect(dialog.getByTestId(`manager-attention-${workflow.kind}`)).toBeVisible();
+      const action = dialog.getByTestId(`manager-attention-action-${workflow.kind}`);
+      await activateByTabAndEnter(action);
+      await expect(workflow.destination()).toBeVisible();
+      await expect(dialog).toBeHidden();
+      await expectUsefulFocus();
+
+      if (workflow.kind !== "recipe-setup") {
+        await expect(
+          page.locator(".station-tabs [role='tabpanel'][data-state='active']"),
+        ).toBeFocused();
+      } else {
+        await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
+        await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
+        await page.getByRole("dialog", { name: "Setup Profiles" })
+          .getByRole("button", { name: "Close", exact: true })
+          .click();
+      }
+      await expect(moreButton).toBeVisible();
+    }
   } finally {
     await fixtures.cleanup();
   }
