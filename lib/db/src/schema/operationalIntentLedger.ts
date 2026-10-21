@@ -16,7 +16,7 @@ export const operationalIntentLedgerTable = pgTable("operational_intent_ledger",
   // need to replay an unbounded command history to recover it.
   // Additive cursor only: this table already exists in populated deployments
   // with its idempotency unique key. Do not replace/add a primary key during a
-  // rolling schema update. PostgreSQL's serial sequence supplies increasing
+  // rolling schema update. The identity sequence supplies increasing
   // values for newly compacted receipts.
   sequence: integer("sequence").notNull().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull(),
