@@ -59,6 +59,7 @@ COPY lib/db/package.json ./lib/db/package.json
 COPY lib/distill-dataset/package.json ./lib/distill-dataset/package.json
 COPY lib/downtime-trends/package.json ./lib/downtime-trends/package.json
 COPY lib/factory-constants/package.json ./lib/factory-constants/package.json
+COPY lib/field-check-contract/package.json ./lib/field-check-contract/package.json
 COPY lib/fill-missing/package.json ./lib/fill-missing/package.json
 COPY lib/formula-guard/package.json ./lib/formula-guard/package.json
 COPY lib/freezer-pull/package.json ./lib/freezer-pull/package.json
@@ -121,7 +122,8 @@ RUN rm -rf /app/migration \
 # It intentionally retains the source and development dependencies that the
 # workspace command needs; it is not the image deployed for API traffic.
 FROM builder AS api-migrate
-CMD ["pnpm", "--filter", "@workspace/db", "run", "push-force"]
+USER node
+CMD ["pnpm", "--config.verify-deps-before-run=false", "--filter", "@workspace/db", "run", "push-force"]
 
 ########## api-runtime-deps: production dependencies externalized by esbuild ##########
 FROM builder AS api-runtime-deps
@@ -132,13 +134,17 @@ RUN rm -rf /app/api-runtime \
 FROM ${NODE_IMAGE} AS api
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
-COPY --from=builder /app/artifacts/run-calculator/dist/public ./artifacts/run-calculator/dist/public
-COPY --from=api-runtime-deps /app/api-runtime/node_modules ./node_modules
-COPY --from=api-migrate-runtime /app/migration ./migration
+COPY --chown=node:node --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+COPY --chown=node:node --from=builder /app/artifacts/run-calculator/dist/public ./artifacts/run-calculator/dist/public
+COPY --chown=node:node --from=api-runtime-deps /app/api-runtime/node_modules ./node_modules
+COPY --chown=node:node --from=api-migrate-runtime /app/migration ./migration
+USER node
 CMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 ########## web: static files served by Caddy (also gives HTTPS) ##########
 FROM caddy:2-alpine AS web
+USER root
+RUN chown 1001:1001 /data /config
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY --from=builder /app/artifacts/run-calculator/dist/public /srv
+USER 1001:1001

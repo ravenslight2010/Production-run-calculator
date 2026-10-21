@@ -449,6 +449,30 @@ test_release_build_identity_is_prepared_for_container_and_browser_smoke() {
   echo "PASS: prepares shared identities for container and isolated browser builds"
 }
 
+test_docker_executable_targets_default_to_nonroot() {
+  local dockerfile
+  local compose
+  dockerfile=$(<"${SCRIPT_DIR}/../../Dockerfile")
+  compose=$(<"${SCRIPT_DIR}/../../docker-compose.yml")
+
+  assert_contains "$dockerfile" $'FROM builder AS api-migrate\nUSER node\nCMD ["pnpm", "--config.verify-deps-before-run=false", "--filter", "@workspace/db", "run", "push-force"]'
+  assert_contains "$dockerfile" 'COPY lib/field-check-contract/package.json ./lib/field-check-contract/package.json'
+  assert_contains "$dockerfile" $'FROM ${NODE_IMAGE} AS api\nENV NODE_ENV=production\nWORKDIR /app\nCOPY --chown=node:node'
+  assert_contains "$dockerfile" $'COPY --chown=node:node --from=api-migrate-runtime /app/migration ./migration\nUSER node\nCMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]'
+  assert_contains "$dockerfile" $'FROM caddy:2-alpine AS web\nUSER root\nRUN chown 1001:1001 /data /config'
+  assert_contains "$dockerfile" $'COPY --from=builder /app/artifacts/run-calculator/dist/public /srv\nUSER 1001:1001'
+  assert_contains "$compose" '    user: node'
+  assert_contains "$compose" '    user: "1001:1001"'
+  assert_contains "$compose" '      - NET_BIND_SERVICE'
+  assert_contains "$compose" '      - CHOWN'
+  assert_contains "$compose" '    command: ["chown -R 1001:1001 /data /config"]'
+  assert_contains "$compose" '      - no-new-privileges:true'
+  assert_contains "$compose" '    network_mode: none'
+  assert_contains "$compose" '      - "80:80"'
+  assert_contains "$compose" '      - "443:443"'
+  echo "PASS: executable Docker targets declare non-root users and preserve published ports"
+}
+
 test_rejects_github_package_publishing() {
   local workspace
   workspace=$(make_workspace package-publishing 1.7.12 1.7.12)
@@ -1739,6 +1763,7 @@ test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
 test_ci_docker_image_check_is_build_only
 test_release_build_identity_is_prepared_for_container_and_browser_smoke
+test_docker_executable_targets_default_to_nonroot
 test_rejects_github_package_publishing
 test_rejects_registry_image_pushes
 test_rejects_production_deploy_and_promotion_authority
