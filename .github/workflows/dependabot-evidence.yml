@@ -1,0 +1,62 @@
+name: Dependabot evidence refresh
+
+# Dependabot lockfile bumps change the pinned pnpm-lock SHA-256 recorded in the
+# checked-in corpus evidence (lib/corpus-harness/snapshots/evaluation-manifest.json
+# and the benchmark JSON pins). Without a refresh those PRs fail the evidence
+# gates for reasons unrelated to the dependency change itself (this blocked
+# #73/#75/#77).
+#
+# This workflow runs only on dependabot-authored pull requests, regenerates the
+# corpus evidence snapshots against the PR's lockfile, and commits the result
+# back to the PR branch so the evidence pins self-heal.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-evidence-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-evidence:
+    name: Regenerate corpus evidence pins
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # workflow-contract: write-exception
+      # The job commits refreshed evidence pins back to the dependabot PR
+      # branch; that self-heal is the entire purpose of this workflow.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+      # pnpm version is read from the "packageManager" field in package.json.
+      # Use pnpm/action-setup like the other workflows: `corepack prepare
+      # --activate` alone never installs the pnpm shim on the PATH, so the
+      # install step failed with "pnpm: command not found".
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate corpus evidence snapshots
+        run: pnpm --filter @workspace/corpus-harness run snapshots
+      - name: Commit refreshed evidence pins
+        run: |
+          if git diff --quiet; then
+            echo "Evidence pins already current; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(evidence): rebind corpus pins to dependabot lockfile"
+          git push

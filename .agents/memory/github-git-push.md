@@ -103,6 +103,18 @@ A workspace Git credential may be a token-only value rather than an authenticate
 
 ## Linked worktrees with optional LFS assets
 
+When reconciling the GitHub backup, inspect the proposed merged tree even when
+Git reports only one textual conflict. Preserve the current Publish-compatible
+database policy until an explicitly approved replacement has been verified.
+
+**Why:** A backup branch reintroduced identity generators and their automatic
+conversion while deleting the serial repair fixture; most of those reversions
+merged without textual conflicts.
+
+**How to apply:** Review schema declarations, package hooks, repair fixtures, and
+their CI tests together. A clean merge is not proof that the current publishing
+fix survives.
+
 For bounded CI comparisons, set `GIT_LFS_SKIP_SMUDGE=1` on linked-worktree creation only after confirming that every selected test/build input is available as a normal Git blob and LFS payloads are outside the measured check closure.
 
 **Why:** A hosted worktree can fail during LFS smudge before any comparison runs, even when the primary checkout is valid and Git push authentication works.

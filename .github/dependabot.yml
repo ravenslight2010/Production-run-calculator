@@ -9,12 +9,8 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     versioning-strategy: increase
-    ignore:
-      # Expo SDK and its toolchain are version-locked; bump manually.
-      - dependency-name: "expo"
-      - dependency-name: "@expo/*"
-      - dependency-name: "expo-*"
-      - dependency-name: "react-native"
+    # (The Expo ignore block was removed: no expo/react-native dependency
+    # exists in any workspace package.json, so the entries were vestigial.)
 
   # Keep pinned GitHub Actions current without changing their immutable SHA
   # pins manually. The workflow comments retain the human-readable release.

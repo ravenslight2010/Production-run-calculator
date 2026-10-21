@@ -751,7 +751,7 @@ export const HealthCheckResponse = zod.object({
   "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
   "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
   "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
-}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+}).catchall(zod.enum(['ok', 'warning', 'error', 'pending'])).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
   "capabilities": zod.object({
   "ai": zod.object({
   "status": zod.enum(['configured', 'not_configured', 'pending']),
@@ -783,7 +783,7 @@ export const ReadinessCheckResponse = zod.object({
   "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
   "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
   "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
-}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+}).catchall(zod.enum(['ok', 'warning', 'error', 'pending'])).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
   "capabilities": zod.object({
   "ai": zod.object({
   "status": zod.enum(['configured', 'not_configured', 'pending']),
@@ -2500,7 +2500,7 @@ export const WasteInsightResponse = zod.object({
  */
 export const OperationsSpecReconciliationBody = zod.object({
   "specSheetId": zod.int().describe('The id of the saved spec sheet to check against'),
-  "currentRecipes": zod.array(zod.object({
+  "currentRecipes": zod.array(zod.looseObject({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
   "name": zod.string(),
   "rows": zod.array(zod.object({
@@ -2508,7 +2508,7 @@ export const OperationsSpecReconciliationBody = zod.object({
   "lbs": zod.number()
 }))
 }).describe('A single recipe (dough/sauce/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough/sauce/cheese)'),
-  "currentProfiles": zod.array(zod.object({
+  "currentProfiles": zod.array(zod.looseObject({
   "brand": zod.string(),
   "flavor": zod.string(),
   "dieType": zod.string().optional(),
@@ -5808,7 +5808,7 @@ export const GetPublishedSourceLibraryReconciliationCaptureResponse = zod.object
 
 
 export const CaptureSourceLibraryReconciliationBody = zod.object({
-  "deploymentHandoff": zod.object({
+  "deploymentHandoff": zod.looseObject({
   "schemaVersion": zod.literal(2),
   "kind": zod.enum(['published-source-deployment-handoff']),
   "deploymentId": zod.string().min(1).max(captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax),
@@ -6382,7 +6382,7 @@ export const ListSpecSheetsResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6399,7 +6399,7 @@ export const SaveSpecSheetBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older/mobile clients (they share a legacy bucket).'),
   "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot\'s parse instead of re-running the AI. Omitted by older/mobile clients.'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6413,7 +6413,7 @@ export const SaveSpecSheetResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6436,7 +6436,7 @@ export const DeleteSpecSheetResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
@@ -6456,7 +6456,7 @@ export const ListShippingGuidesResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6482,7 +6482,7 @@ export const SaveShippingGuideBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct guide.'),
   "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes.'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6505,7 +6505,7 @@ export const SaveShippingGuideResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6537,7 +6537,7 @@ export const DeleteShippingGuideResponse = zod.object({
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.object({
+  "data": zod.looseObject({
   "rows": zod.array(zod.object({
   "brand": zod.string(),
   "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
@@ -6565,7 +6565,7 @@ export const ListPremixSheetsResponse = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.array(zod.object({
+  "data": zod.array(zod.looseObject({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6594,7 +6594,7 @@ export const ListPremixSheetsResponse = zod.object({
 export const SavePremixSheetBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older/mobile clients (they share a legacy bucket).'),
-  "data": zod.array(zod.object({
+  "data": zod.array(zod.looseObject({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6620,7 +6620,7 @@ export const SavePremixSheetResponse = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.array(zod.object({
+  "data": zod.array(zod.looseObject({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -6772,7 +6772,7 @@ export const DeletePremixSheetResponse = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
-  "data": zod.array(zod.object({
+  "data": zod.array(zod.looseObject({
   "id": zod.string(),
   "scope": zod.string().optional(),
   "name": zod.string(),
@@ -7019,7 +7019,7 @@ export const ListImportHistoryResponse = zod.object({
   "sourceLabel": zod.string(),
   "customerScope": zod.string().nullish(),
   "status": zod.enum(['complete', 'partial', 'failed']),
-  "summary": zod.object({
+  "summary": zod.looseObject({
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(listImportHistoryResponseImportsItemSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7048,7 +7048,7 @@ export const RecordImportHistoryBody = zod.object({
   "customerScope": zod.string().optional(),
   "status": zod.enum(['complete', 'partial', 'failed']),
   "operationId": zod.string().describe('Client-generated idempotency key for safely retrying an audit write.'),
-  "summary": zod.object({
+  "summary": zod.looseObject({
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryBodySummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7070,7 +7070,7 @@ export const RecordImportHistoryResponse = zod.object({
   "sourceLabel": zod.string(),
   "customerScope": zod.string().nullish(),
   "status": zod.enum(['complete', 'partial', 'failed']),
-  "summary": zod.object({
+  "summary": zod.looseObject({
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryResponseImportSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -8368,7 +8368,7 @@ export const GetSyncTodayQueryParams = zod.object({
 
 
 
-export const GetSyncTodayResponse = zod.union([zod.object({
+export const GetSyncTodayResponse = zod.union([zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
@@ -8449,7 +8449,7 @@ export const PutSyncTodayQueryParams = zod.object({
 export const PutSyncTodayBody = zod.object({
   "senderId": zod.string().optional(),
   "snapshotId": zod.string().regex(putSyncTodayBodySnapshotIdRegExp).optional(),
-  "payload": zod.object({
+  "payload": zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
@@ -8466,7 +8466,7 @@ export const PutSyncTodayBody = zod.object({
 
 export const PutSyncTodayResponse = zod.object({
   "ok": zod.boolean().optional(),
-  "data": zod.object({
+  "data": zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).optional().describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -8605,7 +8605,7 @@ export const ClaimAutoTrackEventResponse = zod.object({
   "updatedAt": zod.number()
 }),
   "values": zod.record(zod.string(), zod.unknown()),
-  "data": zod.object({
+  "data": zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -8943,7 +8943,7 @@ export const SubmitManualSectionEditResponse = zod.object({
   "duplicate": zod.boolean(),
   "canonicalRevision": zod.int().min(submitManualSectionEditResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitManualSectionEditResponseServerTimeMin),
-  "data": zod.object({
+  "data": zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -9011,7 +9011,7 @@ export const SubmitOperationalIntentResponse = zod.object({
   "cursor": zod.int().min(1),
   "canonicalRevision": zod.int().min(submitOperationalIntentResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(submitOperationalIntentResponseServerTimeMin),
-  "data": zod.object({
+  "data": zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
@@ -9049,7 +9049,7 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
   "deviceId": zod.string().optional(),
   "serverReceivedAt": zod.coerce.date().optional(),
   "createdAt": zod.coerce.date(),
-  "snapshot": zod.union([zod.object({
+  "snapshot": zod.union([zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
 }).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.null()]).optional()

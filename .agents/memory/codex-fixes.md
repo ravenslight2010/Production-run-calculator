@@ -17,6 +17,49 @@ while retaining the schema-startup and CI-validation lessons.
 snapshot only. Repository edits do not rewrite Git history or remove
 previously published copies.
 
+## 2026-09-23 — Fix Render import: retired Gemini model + cold-start chunk fetch
+
+**File(s):** `lib/integrations-openai-ai-server/src/models.ts`, `lib/integrations-openai-ai-server/src/client.ts`, `artifacts/run-calculator/src/specImport.ts`, `artifacts/run-calculator/src/App.tsx`
+
+**Problem:** On Render, "the import feature isn't working": imports either
+fail with an auto-captured `Failed to fetch dynamically imported module:
+…/specImport-CuF8iBes.js` crash (lazy-chunk fetch dying at the autoscale edge
+during cold start) or never attempt the AI fallback. Root causes:
+
+- `gemini-2.5-flash` (main's `AI_MODELS`) is restricted for new users on the
+  direct Gemini API — with Render's `GOOGLE_API_KEY`, `generateContent` returns
+  404 "no longer available to new users"; Google points to `gemini-3.6-flash`.
+  Every AI import/parse call on Render was failing at the provider, so "AI
+  last" never fired.
+- The import workspace's lazy chunks (`specImport-*.js`, xlsx, …) are fetched on
+  the user's first click; on the autoscale deployment that fetch can die during
+  the ~90s cold start (the chunk later returns 200 — transient, not a missing
+  file).
+
+**Fix:**
+- `AI_MODELS` full/cheap → `gemini-3.6-flash`; restored
+  `thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }` in the adapter's
+  `buildConfig` so thinking tokens can't starve `maxOutputTokens`; bumped
+  `SPEC_PARSE_VERSION` 39 → 40 so stale cached parses are invalidated.
+- `App.tsx` `HomeGate` preloads `loadWorkbookWorkflow()` after sign-in, warming
+  the lazy workbook/import chunks while the instance is already warm; the
+  existing `createRetryableLoader` still allows a fresh attempt if the first
+  click ever hits a transient failure.
+
+**Why it was needed:** Render runs the direct Gemini API (`GOOGLE_API_KEY`);
+the configured model was retired, so "AI last" never fired, and cold starts
+made the first import click fail at the chunk layer.
+
+**Verification:** live API probes (3.6-flash JSON + thinkingLevel LOW → 200
+STOP; 2.5-flash/2.5-pro/2.0-flash → 404), `check-model-version-bump.sh` pass,
+targeted `tsc -b` typechecks for the changed packages
+(integrations-openai-ai-server, run-calculator, api-server, spec-import,
+inventory-math, recipe-guide-import). Full root `CI=true pnpm run typecheck`
+is pending on this ARM box — its pretypecheck needs a missing `lightningcss`
+aarch64 binary (the CI Typecheck job covers it). Large-spec harness
+re-verification runs via CI/nightly.
+
+
 ## 2026-10-03 — ARM host: add local toolchain memory (extends existing x64-binary note)
 
 **File(s):** `.agents/memory/local-arm64-toolchain.md`, `.agents/memory/MEMORY.md`, `.agents/memory/codex-fixes.md`
@@ -1330,6 +1373,40 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 
 **Verification**: root typecheck + api-server typecheck green; workflow lint (actionlint 1.7.12) passes all 8 files; local api-server units 586/586 (DB tests skip). Full CI authority: run 35138904564 -> fixed in follow-up run.
 
+## 2026-09-20 — Readiness gate ignored Render's `GOOGLE_API_KEY` provider
+
+**File(s):** `artifacts/api-server/src/routes/health.ts`, `artifacts/api-server/src/routes/health.test.ts`
+
+**What was wrong:** `/api/readyz` and `/api/healthz` only treated `AI_INTEGRATIONS_GEMINI_API_KEY` or `OPENAI_API_KEY` as a configured AI provider. Render's single-service deploy uses the standard Gemini key `GOOGLE_API_KEY` (the only key path `client.ts` accepts for off-Replit deploys), so a Render instance with startup healthy and DB healthy still reported `dependencies: "error"` → 503 degraded → Render marked the service down.
+
+**What the fix was:** Added `process.env.GOOGLE_API_KEY` to the readiness `aiConfigured` check, and added two tests (GOOGLE-only → `dependencies: ok`; no key → 503 `dependencies: error`). The flat checks body never carried the `detail` string, so assertions use statuses only.
+
+**Why it was needed:** Render healthchecks against `/api/readyz`; without this, even a successful redeploy of `main` would stay red when the env uses `GOOGLE_API_KEY`.
+
+**Verification:** `vitest run src/routes/health.test.ts` — 6/6 pass; api-server typecheck clean.
+
+## 2026-09-22 — Render recovery: Drizzle schema migration completed; readiness fix promoted to main (PR #79)
+
+**File(s):** production DB (Render Postgres `runcalc-db`), `.github/workflows/ci.yml` (unchanged), `artifacts/api-server/src/routes/health.ts` (+test) via PR #79.
+
+**What was wrong:** Render's Postgres was never migrated (image deploys skip the preDeploy `drizzle push`). Startup failed at `data_heals_failed:data-heal-result-backfill-v1` (missing `data_heals.result` JSONB) and the `ingredients_active_name_scope_idx` unique index could not build while live duplicates existed. Readiness additionally rejected Render's `GOOGLE_API_KEY`.
+
+**What was done:**
+- Verified Render DB reachable via external host `dpg-daa6ajtg1s2s73c9d2bg-a.oregon-postgres.render.com` (the env `DATABASE_URL` bare host only resolves inside Render's VPC).
+- `scope` column pre-applied and obsolete `id` PK/column dropped on `proactive_alert_settings` (documented `push-force` blockers), then `pnpm --filter @workspace/db run push-force` completed: `data_heals.result` present, 78 tables, `ingredients_active_name_scope_idx` created (duplicate groups had since reduced to 0). Repeated push reports `[✓] Changes applied` (benign drizzle no-op) — no prompts or errors.
+- Promoted the GOOGLE_API_KEY readiness fix to `main` via PR #79 (cherry-pick of `6971c4bd` + CodeRabbit-requested test hardening): merged `6a8f5f89`, CI publish run `35685637153` success, artifact digest `sha256:b2746e...`, image `ghcr.io/ravenslight2010/runcalc-api:6a8f5f89...`.
+
+**Live verification:** `/api/livez` 200; `/api/readyz` now reports `startup: ok`, `database: ok` (was failing) — the only red check left is `dependencies` because Render still runs the pre-fix `:latest` image. Render API ignored all PATCH imagePath shapes and rejects env-var updates, so pointing the service at the sha tag needs a dashboard click (Settings → Image) unless CI starts publishing `:latest`.
+
+**Watch items:** `runcalc-db` is free tier and **expires 2026-09-29**. Nightly CI still lacks a `DATABASE_URL` Actions secret.
+
+## 2026-09-22 (later) — Render fully green; image switched to immutable sha tag
+
+**What was done:** User changed the service image tag in the Render dashboard (Settings → Image) to `ghcr.io/ravenslight2010/runcalc-api:6a8f5f89cdf213e573866660c61b9ca35dea9687` and redeployed. The Render API cannot change the image path for image services (all PATCH `imagePath` shapes, deploy-with-image bodies, and env-var writes are accepted-but-ignored or 400/405), so the dashboard is the only non-code path.
+
+**Verification (2026-09-22 ~23:12 UTC):** `https://runcalc.onrender.com/api/readyz` → HTTP 200 with `process/startup/database/dependencies/backgroundWorkers` all `ok`; `/api/healthz` 200; `/api/livez` 200. Live deploy image ref is the sha tag (digest `caf0787b…` platform manifest; evidence index digest for the same publish is `fff67f56…`).
+
+**Outstanding watch items:** `runcalc-db` (free tier) expires **2026-09-29**; nightly CI still has no `DATABASE_URL` Actions secret.
 ## Run action touch-target coverage
 
 **Date**: 2026-10-16

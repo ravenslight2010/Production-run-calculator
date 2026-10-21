@@ -1928,6 +1928,12 @@ const steps: ReleaseStep[] = [
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:budget"],
     stage: "release-tests",
+    env: {
+      // The merged suite is larger than the 150s default budget assumed, and
+      // shared CI runners are slower than the tuning environment; the default
+      // budget still guards local and standard-lane runs.
+      CALCULATOR_TEST_BUDGET_MS: "300000",
+    },
   },
   {
     label: "production rules tests",

@@ -413,10 +413,49 @@ Add dedicated tracking for physical stations currently missing from the app.
 - New open-ended assistants that recombine already-visible live-run facts
 - Presenting deterministic math as dependent on a model
 
+### Local-first adapter + distillation research (2026-09-26 to 09-28)
+Directly addresses the "AI model routing / fallback providers" item above, and goes
+further: `feat/local-ai-adapter` (merged content, see branch-map work) implements a
+self-hosted local model server as an alternative to the Gemini dependency, motivated by
+the Sept 2026 Gemini model-retirement incident that broke Render imports for days (PR
+#81 fixed it by moving to `gemini-3.6-flash`; the local adapter is a structural hedge
+against the next retirement, not just another patch).
+
+Research chain, each gated on the one before it:
+1. **`local-ai-installation-research-2026-09-26.md`** — can AI run in-app with no
+   external API? Concludes: not in-browser (floor tablet hardware, shared-hardware
+   quality concerns), but a self-hosted local model server is viable — this is what
+   `feat/local-ai-adapter` implements.
+2. **`how-to-build-ai-research-2026-09-28.md`** / **`how-to-build-an-ai-research-2026-09-28.md`** —
+   general + project-mapped research on what "building AI" actually requires (fine-tuning
+   cost/hardware, RAG-vs-fine-tuning decision frameworks), concluding fine-tuning is
+   **low priority** relative to extraction + correction memory, consistent with the value
+   audit's "Keep" column above.
+3. **`ai-phase0-adapter-dataset-design-2026-09-28.md`** — the gate: only pursue
+   distillation/fine-tuning if a Phase-0 benchmark shows the local base model genuinely
+   trailing Gemini on this app's own import corpus. Dataset curation can start now;
+   training waits on that result.
+4. **`qlora-distillation-techniques-2026-09-28.md`**, **`qlora-unsloth-config-and-train-checklist-2026-09-28.md`**,
+   **`near-dup-hashing-research-2026-09-28.md`**, **`ai-deep-dive-continuation-2026-09-28.md`** —
+   the conditional fallback path's technical detail (QLoRA/Unsloth config, train/dev/
+   holdout leakage prevention), prepared ahead of the gate so no time is lost if it
+   triggers.
+5. **`lib/distill-dataset`** (new shared package) — implements the dataset-hygiene
+   functions the gate's dataset-curation step needs now (near-dup detection via word
+   shingles + Jaccard similarity, train/holdout leakage checks) — this part is usable
+   immediately regardless of whether the fine-tuning gate ever triggers, since clean
+   dataset curation has value on its own.
+
+Also: `pre-implementation-research-pack-2026-09-19.md` and
+`all-remaining-deep-dives-2026-09-19.md` are earlier (Sept 19) research in the same vein,
+previously sitting only in `attached_assets/` as raw uploads — moved into `docs/` here
+for discoverability.
+
 ### Code References
 - `artifacts/api-server/src/routes/ai*.ts` — AI route handlers
 - `lib/ai-memory/` — shared AI memory system
 - `lib/integrations-openai-ai-server/` — AI server integration
+- `lib/distill-dataset/` — dataset hygiene for the conditional fine-tuning fallback
 - `artifacts/run-calculator/src/components/ai/` — AI UI components
 - `docs/ai-feature-value-audit-2026-09-05.md` — decision standard
 
@@ -429,21 +468,35 @@ Add dedicated tracking for physical stations currently missing from the app.
 **Priority**: Medium
 
 ### Summary
-Reduce battery drain and improve performance, especially on mobile devices.
+Reduce battery drain and improve performance on phone/tablet browsers (the product is
+web-only now — the standalone mobile app was archived, see
+`.agents/memory/web-mobile-parity.md`). A full audit of every `setInterval` in the web
+app found a reusable pattern: `hooks/useClock.ts` already implements
+pattern (1s-while-live / 10s-idle cadence, pauses entirely when the tab is hidden,
+Android focus-fallback) but is only used in one place. `CanonicalRunViewCard.tsx` has
+persistent 1-second and 15-second timers without visibility handling. `InventoryTab.tsx`
+has 5 similar one-second retry countdown effects, but they are bounded and active only
+while `retryIn > 0`. Also confirmed: Floor Mode has no Screen Wake Lock integration,
+and the repository provides no measured reason to replace SSE with WebSocket.
 
 ### Ideas
-- **Reduce network polling frequency** — adaptive polling based on run state
+- **Extract `useClock`'s visibility-pausing logic into a reusable hook** and apply it first to `CanonicalRunViewCard.tsx`, then to the 5 bounded Inventory retry countdowns
+- **Screen Wake Lock for Floor Mode** — keeps the idle "big numbers" kiosk display actually on screen instead of dimming per OS timeout
+- **Reduce network polling frequency** — largely moot; sync/auto-track already moved to server-push (SSE), not polling
 - **Lazy load tab content** — only load active tab data
 - **Service worker caching** — offline support for viewed data
-- **WebSocket instead of SSE** — more efficient bidirectional sync
+- ~~**WebSocket instead of SSE**~~ — keep SSE unless project profiling identifies a transport-specific problem
 - **Background sync** — batch updates instead of real-time push for non-critical data
-- **Compression** — gzip/brotli for API responses
+- **Compression** — gzip/brotli for API responses — **owned by the sync plan's Phase 3**, don't duplicate
 - **Virtual scrolling** — for long lists (inventory, history)
 
 ### Code References
-- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context
-- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` — auto-tracking engine
+- `artifacts/run-calculator/src/hooks/useClock.ts` — the pattern to extract/reuse
+- `artifacts/run-calculator/src/components/InventoryTab.tsx` — 5 bounded retry countdown effects without visibility handling
+- `artifacts/run-calculator/src/components/CanonicalRunViewCard.tsx` — persistent 1s + 15s timers without visibility handling
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context, `useClock`'s one current consumer
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
+- `artifacts/run-calculator/src/pages/home.tsx` (`floorModeEnabled`) — where Screen Wake Lock would be wired in
 
 ---
 
@@ -678,4 +731,97 @@ Retained AI extraction workloads need bounded failure behavior implemented aroun
 ### Rejected implementation boundary
 
 Do not reuse the historical `improvements/observability-resilience` branch. Its query monkey-patching, caller-selected audit scope, raw diagnostic exposure, unrestricted telemetry, obsolete OpenAI client, unapplied patch files, and unbudgeted pool increase are not implementation templates.
+
+
+---
+
+## 17. Auto-Track Coordination
+
+**Status**: Research complete — mostly "keep as-is," a few additive improvements  
+**Full plan**: [docs/autotrack-coordination-research.md](autotrack-coordination-research.md)  
+**Priority**: Low-Medium — not broken, but the observability gap means the next subtle
+bug in this class surfaces via a floor complaint instead of a metric, same as every
+prior one documented in `.agents/memory/autotrack-*.md`
+
+### Summary
+Automatic case/skid/tray/batch/barrel counters that advance on their own while a run is
+running — tied into the sync system (shares its payload, its date-keyed storage, and the
+same server-authoritative migration as Section 13). Research confirmed this is already a
+correctly-designed distributed-coordination protocol (fencing tokens via
+generation/sequence, DB-layer idempotency for the real inventory side effect,
+server-authoritative ticking) — not a system needing a redesign.
+
+### Ideas
+- **Claim rejection / stuck-channel observability** — no monitoring today for a channel
+  whose `nextDueAt` is overdue or whose claims keep getting rejected
+- **Property-based testing** — the newly-added property-based testing skill is a strong
+  fit for this state machine's documented history of subtle interaction bugs
+- **Name the fencing-token pattern explicitly in code comments** — cheap insurance
+  against a future "simplification" reintroducing a bug this system already paid to fix
+
+### Code References
+- `artifacts/api-server/src/lib/autoTrackCoordination.ts` — the coordination protocol
+- `artifacts/api-server/src/lib/autoTrackServerTicks.ts` — server tick engine
+- `.agents/memory/cross-channel-auto-track-claims.md` — the core fencing/ownership write-up
+
+---
+
+## 18. Incident Tracking & Push Notification Delivery
+
+**Status**: Research complete — mature system, one concrete half-built gap  
+**Full plan**: [docs/incident-notifications-research.md](incident-notifications-research.md)  
+**Priority**: Medium — finishing an already-60%-built feature, not starting a new one
+
+### Summary
+Not previously on this backlog. The incident-reporting/AI-diagnosis pipeline itself is
+mature (deterministic fallback clustering, history-aware diagnosis with recurrence
+tracking, two dedicated prompt-injection/authorization-boundary defenses that also
+strengthen Section 11's findings). The real gap is delivery: `web-push` is a real,
+installed dependency with working VAPID/subscription-CRUD infrastructure
+(`webPush.ts`), but nothing in the codebase ever calls `sendNotification` — incident
+severity/recurrence and proactive alerts both compute a signal worth pushing and neither
+one delivers it to a closed/backgrounded device.
+
+### Ideas
+- **Wire `sendWebPush` into incident severity/recurrence and proactive alerts** — the
+  two consumers that already compute the trigger signal; this is finishing existing
+  infrastructure, not building new
+- **Standard push hygiene**: prune subscriptions that come back expired/invalid (410/404)
+
+### Code References
+- `artifacts/api-server/src/lib/incidents.ts` / `routes/incidentsAi.ts` — incident CRUD + diagnosis
+- `lib/incident-cluster/src/index.ts` — deterministic + AI-assisted clustering
+- `artifacts/api-server/src/routes/webPush.ts` — subscription CRUD, no send-side counterpart
+- `.agents/memory/incident-diagnosis.md` — full system write-up + test-isolation gotchas
+
+---
+
+## 19. Merge-Suggest (Dedup System) — Alias Chain Correctness
+
+**Status**: Research complete — solid design, one correctness gap  
+**Full plan**: [docs/merge-suggest-research.md](merge-suggest-research.md)  
+**Priority**: Low-Medium — silent, not urgent, but the same "quietly stops working"
+class of bug the auto-track lessons are about
+
+### Summary
+Not previously on this backlog. The ingredient/recipe/brand/flavor dedup system
+(`lib/merge-suggest`) is well-designed — learned aliases, existence guards, category
+scoping, transitively-clustered near-dup matching (validated against outside research:
+token-based + edit-distance is the right algorithm family for this data shape, no
+change recommended there). The gap: when an alias's target itself later gets merged
+into a newer canonical name, the older alias silently stops firing (its existence guard
+correctly fails) with no error or indication — a manager has to notice and re-approve a
+merge decision they already made once.
+
+### Ideas
+- **Retarget alias chains at merge-confirmation time** — when B (an existing alias
+  target) is merged into C, rewrite `X → B` aliases to `X → C` instead of leaving them
+  to quietly fail
+- Add an explicit `learnedAliasChain.test.ts`-style test case, matching the existing
+  transitive-clustering test's pattern, before this regresses unnoticed later
+
+### Code References
+- `lib/merge-suggest/src/index.ts` — `collectMergeAliases`, `suggestionsFromAliases`
+- `lib/db/src/schema/mergeAliases.ts` — learned alias storage
+- `lib/db/src/schema/mergedAway.ts` — tombstone only, confirmed not a lineage tracker
 

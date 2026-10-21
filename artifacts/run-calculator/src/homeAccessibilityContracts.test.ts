@@ -13,7 +13,7 @@ describe("Home accessibility contracts", () => {
     const headerBadge = home.slice(headerBadgeStart, headerBadgeEnd);
 
     const menuItemStart = home.indexOf(
-      '<DropdownMenuItem\n                    aria-label="Manager attention"',
+      "`Manager attention — ${managerAttentionTotal} manager actions need attention`",
     );
     const menuItemEnd = home.indexOf("</DropdownMenuItem>", menuItemStart);
     const menuItem = home.slice(menuItemStart, menuItemEnd);

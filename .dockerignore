@@ -17,3 +17,4 @@ screenshots
 .cache
 Dockerfile
 docker-compose.yml
+docker-compose.local-ai.yml
