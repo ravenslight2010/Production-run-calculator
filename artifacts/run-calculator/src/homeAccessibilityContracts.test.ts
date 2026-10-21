@@ -13,7 +13,7 @@ describe("Home accessibility contracts", () => {
     const headerBadge = home.slice(headerBadgeStart, headerBadgeEnd);
 
     const menuItemStart = home.indexOf(
-      '<DropdownMenuItem\n                    aria-label="Manager attention"',
+      "`Manager attention — ${managerAttentionTotal} manager actions need attention`",
     );
     const menuItemEnd = home.indexOf("</DropdownMenuItem>", menuItemStart);
     const menuItem = home.slice(menuItemStart, menuItemEnd);
@@ -21,7 +21,7 @@ describe("Home accessibility contracts", () => {
     const menuBadgeEnd = menuItem.indexOf("</span>", menuBadgeStart);
     const menuBadge = menuItem.slice(menuBadgeStart, menuBadgeEnd);
 
-    const className = (source: string) => source.match(/className="([^"]+)"/)?.[1] ?? "";
+    const className = (source: string) => source.match(/className="([^"]+)")/)?.[1] ?? "";
     const badges = [className(headerBadge), className(menuBadge)];
 
     expect(headerBadgeStart).toBeGreaterThanOrEqual(0);
