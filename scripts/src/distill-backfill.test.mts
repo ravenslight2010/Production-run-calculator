@@ -190,6 +190,19 @@ function writeJsonl(filePath: string, records: unknown[]) {
   fs.writeFileSync(filePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, { mode: 0o600 });
 }
 
+function readTestLinuxProcessIdentity(pid: number) {
+  const statContents = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+  const commandEnd = statContents.lastIndexOf(")");
+  const fields = commandEnd < 0 ? [] : statContents.slice(commandEnd + 1).trim().split(/\s+/u);
+  const startTimeTicks = fields[19];
+  assert.ok(startTimeTicks && /^\d+$/u.test(startTimeTicks));
+  return {
+    platform: "linux" as const,
+    bootId: fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
+    startTimeTicks,
+  };
+}
+
 function makeOptions({
   repoRoot,
   decisionPath,
@@ -349,8 +362,7 @@ try {
   const activeLockPath = `${activeLockDecisionPath}.metadata-maintenance.lock`;
   const activeHolderScript = [
     `const fs = require("node:fs");`,
-    `const fd = fs.openSync(${JSON.stringify(activeLockPath)}, "wx", 0o600);`,
-    "fs.writeFileSync(fd, String(process.pid) + String.fromCharCode(10));",
+    `fs.openSync(${JSON.stringify(activeLockPath)}, "wx", 0o600);`,
     `process.stdout.write("lock-ready\\n");`,
     "setInterval(() => {}, 1000);",
   ].join("\n");
@@ -367,11 +379,16 @@ try {
   });
   await holderReady;
   try {
+    const activeOwner = {
+      pid: activeHolder.pid!,
+      identity: readTestLinuxProcessIdentity(activeHolder.pid!),
+    };
+    fs.writeFileSync(activeLockPath, `${JSON.stringify(activeOwner)}\n`);
     assert.throws(
       () => appendMetadataMaintenanceEntryFile(activeLockDecisionPath, syntheticLockEntry),
       /metadata update is active/u,
     );
-    assert.equal(fs.readFileSync(activeLockPath, "utf8"), `${activeHolder.pid}\n`);
+    assert.equal(fs.readFileSync(activeLockPath, "utf8"), `${JSON.stringify(activeOwner)}\n`);
     assert.equal(fs.existsSync(`${activeLockPath}.recovery`), false);
   } finally {
     activeHolder.kill("SIGTERM");
@@ -394,21 +411,74 @@ try {
   assert.equal(fs.existsSync(`${malformedLockPath}.recovery`), false);
   fs.rmSync(malformedLockPath);
 
+  const legacyLockDecisionPath = path.join(repoRoot, "docs", "evidence", "legacy-active-lock.json");
+  fs.writeFileSync(legacyLockDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const legacyLockPath = `${legacyLockDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(legacyLockPath, `${process.pid}\n`, { mode: 0o600 });
+  assert.throws(
+    () => appendMetadataMaintenanceEntryFile(legacyLockDecisionPath, syntheticLockEntry),
+    /live legacy PID-only lock.*PID reuse cannot be distinguished/u,
+  );
+  assert.equal(fs.readFileSync(legacyLockPath, "utf8"), `${process.pid}\n`);
+  assert.equal(fs.existsSync(`${legacyLockPath}.recovery`), false);
+  fs.rmSync(legacyLockPath);
+
   const abandonedOwnerPid = 2_000_000_000;
   assert.throws(() => process.kill(abandonedOwnerPid, 0), { code: "ESRCH" });
+  const reusedPidDecisionPath = path.join(repoRoot, "docs", "evidence", "reused-pid-lock.json");
+  fs.writeFileSync(reusedPidDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const reusedPidLockPath = `${reusedPidDecisionPath}.metadata-maintenance.lock`;
+  const reusedPidOwner = {
+    pid: process.pid,
+    identity: {
+      ...readTestLinuxProcessIdentity(process.pid),
+      startTimeTicks: "0",
+    },
+  };
+  fs.writeFileSync(reusedPidLockPath, `${JSON.stringify(reusedPidOwner)}\n`, { mode: 0o600 });
+  const reusedPidAppend = appendMetadataMaintenanceEntryFile(reusedPidDecisionPath, syntheticLockEntry);
+  assert.deepEqual(reusedPidAppend.maintenanceHistory, [syntheticLockEntry]);
+  assert.equal(fs.existsSync(reusedPidLockPath), false);
+  assert.equal(fs.existsSync(`${reusedPidLockPath}.recovery`), false);
+
   const abandonedLockDecisionPath = path.join(repoRoot, "docs", "evidence", "abandoned-lock.json");
   fs.writeFileSync(abandonedLockDecisionPath, JSON.stringify(makeDecision("no-go")));
   const abandonedLockPath = `${abandonedLockDecisionPath}.metadata-maintenance.lock`;
-  fs.writeFileSync(abandonedLockPath, `${abandonedOwnerPid}\n`, { mode: 0o600 });
+  fs.writeFileSync(abandonedLockPath, `${JSON.stringify({
+    pid: abandonedOwnerPid,
+    identity: {
+      platform: "linux",
+      bootId: "00000000-0000-0000-0000-000000000000",
+      startTimeTicks: "123",
+    },
+  })}\n`, { mode: 0o600 });
   const recoveredAppend = appendMetadataMaintenanceEntryFile(abandonedLockDecisionPath, syntheticLockEntry);
   assert.deepEqual(recoveredAppend.maintenanceHistory, [syntheticLockEntry]);
   assert.equal(fs.existsSync(abandonedLockPath), false);
   assert.equal(fs.existsSync(`${abandonedLockPath}.recovery`), false);
 
+  const abandonedLegacyDecisionPath = path.join(repoRoot, "docs", "evidence", "abandoned-legacy-lock.json");
+  fs.writeFileSync(abandonedLegacyDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const abandonedLegacyLockPath = `${abandonedLegacyDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(abandonedLegacyLockPath, `${abandonedOwnerPid}\n`, { mode: 0o600 });
+  const abandonedLegacyAppend = appendMetadataMaintenanceEntryFile(
+    abandonedLegacyDecisionPath,
+    syntheticLockEntry,
+  );
+  assert.deepEqual(abandonedLegacyAppend.maintenanceHistory, [syntheticLockEntry]);
+  assert.equal(fs.existsSync(abandonedLegacyLockPath), false);
+
   const racingDecisionPath = path.join(repoRoot, "docs", "evidence", "racing-lock.json");
   fs.writeFileSync(racingDecisionPath, JSON.stringify(makeDecision("no-go")));
   const racingLockPath = `${racingDecisionPath}.metadata-maintenance.lock`;
-  fs.writeFileSync(racingLockPath, `${abandonedOwnerPid}\n`, { mode: 0o600 });
+  fs.writeFileSync(racingLockPath, `${JSON.stringify({
+    pid: abandonedOwnerPid,
+    identity: {
+      platform: "linux",
+      bootId: "00000000-0000-0000-0000-000000000000",
+      startTimeTicks: "123",
+    },
+  })}\n`, { mode: 0o600 });
   const racingResults = await Promise.all([
     runConcurrentMetadataAppend(
       racingDecisionPath,

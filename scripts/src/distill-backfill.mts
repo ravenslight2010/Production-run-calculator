@@ -254,13 +254,56 @@ function resolveMetadataDecisionPath(repoRoot: string, decisionPath: string): st
   return resolvedPath;
 }
 
-function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"): number {
+type LinuxProcessIdentity = {
+  platform: "linux";
+  bootId: string;
+  startTimeTicks: string;
+};
+
+type MetadataLockOwner = {
+  pid: number;
+  identity?: LinuxProcessIdentity;
+};
+
+function readLinuxProcessIdentity(pid: number): LinuxProcessIdentity {
+  if (process.platform !== "linux") {
+    throw new Error("metadata locks require Linux process identity support; leave the lock untouched on this platform");
+  }
+
+  let statContents: string;
+  let bootId: string;
+  try {
+    statContents = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    bootId = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  } catch {
+    throw new Error(`cannot establish the Linux process identity for metadata lock owner ${pid}`);
+  }
+
+  // The command name is parenthesized and may itself contain spaces or
+  // parentheses. Fields after its final ')' start at proc stat field 3.
+  const commandEnd = statContents.lastIndexOf(")");
+  const fields = commandEnd < 0 ? [] : statContents.slice(commandEnd + 1).trim().split(/\s+/u);
+  const startTimeTicks = fields[19];
+  if (!/^[a-f0-9-]{36}$/u.test(bootId) || !startTimeTicks || !/^\d+$/u.test(startTimeTicks)) {
+    throw new Error(`cannot validate the Linux process identity for metadata lock owner ${pid}`);
+  }
+  return { platform: "linux", bootId, startTimeTicks };
+}
+
+function serializeMetadataLockOwner(): string {
+  return `${JSON.stringify({
+    pid: process.pid,
+    identity: readLinuxProcessIdentity(process.pid),
+  })}\n`;
+}
+
+function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"): MetadataLockOwner {
   const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
   let lockStat: fs.Stats;
   let contents: string;
   try {
     lockStat = fs.lstatSync(lockPath);
-    if (!lockStat.isFile() || lockStat.isSymbolicLink() || lockStat.size > 64) {
+    if (!lockStat.isFile() || lockStat.isSymbolicLink() || lockStat.size > 256) {
       throw new Error("not a small regular file");
     }
     contents = fs.readFileSync(lockPath, "utf8");
@@ -268,26 +311,71 @@ function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"
     throw new Error(`metadata ${lockKind} lock is malformed or unreadable. ${guidance}`);
   }
 
-  const match = /^([1-9]\d{0,14})\n?$/u.exec(contents);
-  const pid = match ? Number(match[1]) : Number.NaN;
-  if (!Number.isSafeInteger(pid) || pid <= 0) {
+  const legacyMatch = /^([1-9]\d{0,14})\n?$/u.exec(contents);
+  if (legacyMatch) {
+    const pid = Number(legacyMatch[1]);
+    if (Number.isSafeInteger(pid) && pid > 0) return { pid };
     throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
   }
-  return pid;
+
+  let value: unknown;
+  try {
+    value = JSON.parse(contents) as unknown;
+  } catch {
+    throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
+  }
+  if (
+    !isRecord(value)
+    || Object.keys(value).length !== 2
+    || !Number.isSafeInteger(value.pid)
+    || (value.pid as number) <= 0
+    || !isRecord(value.identity)
+    || Object.keys(value.identity).length !== 3
+    || value.identity.platform !== "linux"
+    || typeof value.identity.bootId !== "string"
+    || !/^[a-f0-9-]{36}$/u.test(value.identity.bootId)
+    || typeof value.identity.startTimeTicks !== "string"
+    || !/^\d+$/u.test(value.identity.startTimeTicks)
+  ) {
+    throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
+  }
+  return {
+    pid: value.pid as number,
+    identity: value.identity as unknown as LinuxProcessIdentity,
+  };
 }
 
-function isMetadataLockOwnerActive(pid: number): boolean {
+function isMetadataLockOwnerActive(owner: MetadataLockOwner, lockPath: string): boolean {
+  const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
   try {
-    process.kill(pid, 0);
-    return true;
+    process.kill(owner.pid, 0);
   } catch (error) {
     if (isRecord(error) && error.code === "ESRCH") return false;
-    if (isRecord(error) && error.code === "EPERM") return true;
-    throw new Error(`cannot establish whether metadata lock owner ${pid} is active; leave the lock untouched and retry after checking the process`);
+    if (isRecord(error) && error.code === "EPERM") {
+      if (!owner.identity) {
+        throw new Error(`metadata lock owner PID ${owner.pid} is permission-protected and has no process identity; leave the legacy lock untouched. ${guidance}`);
+      }
+    } else {
+      throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
+    }
   }
+
+  if (!owner.identity) {
+    throw new Error(`metadata lock owner PID ${owner.pid} is a live legacy PID-only lock; PID reuse cannot be distinguished, so leave it untouched. ${guidance}`);
+  }
+
+  let currentIdentity: LinuxProcessIdentity;
+  try {
+    currentIdentity = readLinuxProcessIdentity(owner.pid);
+  } catch {
+    throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
+  }
+  return currentIdentity.bootId === owner.identity.bootId
+    && currentIdentity.startTimeTicks === owner.identity.startTimeTicks;
 }
 
 function acquireMetadataMaintenanceLock(lockPath: string): number {
+  const lockContents = serializeMetadataLockOwner();
   let initialFd: number | undefined;
   try {
     initialFd = fs.openSync(lockPath, "wx", 0o600);
@@ -296,7 +384,7 @@ function acquireMetadataMaintenanceLock(lockPath: string): number {
   }
   if (initialFd !== undefined) {
     try {
-      fs.writeFileSync(initialFd, `${process.pid}\n`, "utf8");
+      fs.writeFileSync(initialFd, lockContents, "utf8");
       return initialFd;
     } catch (error) {
       fs.closeSync(initialFd);
@@ -318,17 +406,17 @@ function acquireMetadataMaintenanceLock(lockPath: string): number {
       }
       throw error;
     }
-    fs.writeFileSync(recoveryFd, `${process.pid}\n`, "utf8");
+    fs.writeFileSync(recoveryFd, lockContents, "utf8");
 
-    const ownerPid = readMetadataLockOwner(lockPath, "update");
-    if (isMetadataLockOwnerActive(ownerPid)) {
-      throw new Error(`another metadata update is active (lock owner PID ${ownerPid}); retry after it finishes`);
+    const owner = readMetadataLockOwner(lockPath, "update");
+    if (isMetadataLockOwnerActive(owner, lockPath)) {
+      throw new Error(`another metadata update is active (lock owner PID ${owner.pid}); retry after it finishes`);
     }
 
     fs.unlinkSync(lockPath);
     const replacementFd = fs.openSync(lockPath, "wx", 0o600);
     try {
-      fs.writeFileSync(replacementFd, `${process.pid}\n`, "utf8");
+      fs.writeFileSync(replacementFd, lockContents, "utf8");
       return replacementFd;
     } catch (error) {
       fs.closeSync(replacementFd);
