@@ -10,6 +10,7 @@ import {
   readBoundedJson,
   validateSourceRecord,
 } from "../../scripts/src/build-source-identity.mjs";
+import { VITE_CLIENT_RESOLVE_CONDITIONS } from "./scripts/vite-client-resolve-conditions.mjs";
 
 const rawPort = process.env.PORT;
 
@@ -236,6 +237,7 @@ export default defineConfig(async ({ command }) => ({
       : []),
   ],
   resolve: {
+    conditions: [...VITE_CLIENT_RESOLVE_CONDITIONS],
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
       "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),

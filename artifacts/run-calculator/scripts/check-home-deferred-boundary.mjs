@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import ts from "@workspace/typescript-api-v6";
 import { fileURLToPath } from "node:url";
+import { VITE_CLIENT_RESOLVE_CONDITIONS } from "./vite-client-resolve-conditions.mjs";
 
 export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/ExcelImportDialog.tsx",
@@ -244,23 +245,49 @@ function exportTarget(exportsField, exportKey) {
           ? exportsField
           : undefined;
 
-  const selectRuntimeTarget = (value) => {
+  const selectRuntimeTarget = (value, conditions) => {
     if (typeof value === "string") return value;
     if (Array.isArray(value)) {
       for (const entry of value) {
-        const target = selectRuntimeTarget(entry);
+        const target = selectRuntimeTarget(entry, conditions);
         if (target) return target;
       }
       return null;
     }
     if (!value || typeof value !== "object") return null;
-    for (const condition of ["source", "import", "default", "node", "require"]) {
-      const target = selectRuntimeTarget(value[condition]);
+    for (const [condition, branch] of Object.entries(value)) {
+      if (condition !== "default" && !conditions.has(condition)) continue;
+      const target = selectRuntimeTarget(branch, conditions);
       if (target) return target;
     }
     return null;
   };
-  return selectRuntimeTarget(selectedExport);
+
+  const selectForMode = (mode) => {
+    const conditions = new Set([
+      ...VITE_CLIENT_RESOLVE_CONDITIONS.filter(
+        (condition) => condition !== "development|production",
+      ),
+      mode,
+      "import",
+      "default",
+    ]);
+    return selectRuntimeTarget(selectedExport, conditions);
+  };
+
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === "development" || nodeEnv === "production") {
+    return selectForMode(nodeEnv);
+  }
+
+  const developmentTarget = selectForMode("development");
+  const productionTarget = selectForMode("production");
+  if (developmentTarget !== productionTarget) {
+    throw new Error(
+      `Workspace package export "${exportKey}" resolves to different entries for Vite development and production conditions; set NODE_ENV to the build mode or use a mode-independent export.`,
+    );
+  }
+  return productionTarget;
 }
 
 function resolveWorkspaceSource(

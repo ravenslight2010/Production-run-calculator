@@ -57,6 +57,8 @@ function createSourceFixture({
   packageSource,
   workspacePatterns = ["lib/*"],
   packageLocations = packageSource === undefined ? [] : ["lib/home-bridge"],
+  packageExports,
+  browserPackageSource,
 }) {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "home-deferred-boundary-"));
   const sourceRoot = path.join(fixtureRoot, "src");
@@ -91,10 +93,13 @@ function createSourceFixture({
       path.join(packageRoot, "package.json"),
       JSON.stringify({
         name: "@workspace/home-bridge",
-        exports: { ".": "./src/index.ts" },
+        exports: packageExports ?? { ".": "./src/index.ts" },
       }),
     );
     fs.writeFileSync(path.join(packageRoot, "src/index.ts"), packageSource ?? "");
+    if (browserPackageSource !== undefined) {
+      fs.writeFileSync(path.join(packageRoot, "browser.ts"), browserPackageSource);
+    }
   }
   const resolvedHomeSource =
     typeof homeSource === "function" ? homeSource(sourceRoot) : homeSource;
@@ -289,6 +294,59 @@ test("source boundary follows a deferred panel re-exported through a local works
       /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> \.\.\/lib\/home-bridge\/src\/index\.ts -> components\/SetupContent\.tsx/,
     );
   } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary follows the browser-selected workspace package export", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    packageExports: {
+      ".": {
+        browser: "./browser.ts",
+        default: "./src/index.ts",
+      },
+    },
+    browserPackageSource:
+      'export { default as bridge } from "../../src/components/SetupContent";',
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> \.\.\/lib\/home-bridge\/browser\.ts -> components\/SetupContent\.tsx/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary rejects exports with mode-dependent source entries when NODE_ENV is unset", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    packageExports: {
+      ".": {
+        development: "./src/index.ts",
+        production: "./browser.ts",
+      },
+    },
+    browserPackageSource: "export const bridge = true;",
+  });
+  const originalNodeEnv = process.env.NODE_ENV;
+  delete process.env.NODE_ENV;
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /different entries for Vite development and production conditions/,
+    );
+  } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
     fixture.cleanup();
   }
 });
