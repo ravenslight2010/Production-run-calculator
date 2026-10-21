@@ -24,19 +24,20 @@ function createFixture(t, { buildId = expectedBuildId, includeBuildIdentity = tr
   const expectedDir = path.join(repoRoot, ".local/build-identity");
   fs.mkdirSync(viteDir, { recursive: true });
   fs.mkdirSync(expectedDir, { recursive: true });
+  const preparedRecord = {
+    schemaVersion: 1,
+    kind: "prepared-build-source",
+    appBuildId: expectedBuildId,
+    sourcePolicy: SOURCE_POLICY,
+    sourceFingerprintSha256: fingerprintSource(repoRoot).sourceFingerprintSha256,
+    gitRevision: null,
+    gitBinding: "unavailable",
+    preparedAt: "2026-10-21T06:18:48.202Z",
+    mode: "publish",
+  };
   fs.writeFileSync(
     path.join(expectedDir, "expected-source.json"),
-    JSON.stringify({
-      schemaVersion: 1,
-      kind: "prepared-build-source",
-      appBuildId: expectedBuildId,
-      sourcePolicy: SOURCE_POLICY,
-      sourceFingerprintSha256: fingerprintSource(repoRoot).sourceFingerprintSha256,
-      gitRevision: null,
-      gitBinding: "unavailable",
-      preparedAt: "2026-10-21T06:18:48.202Z",
-      mode: "publish",
-    }),
+    JSON.stringify(preparedRecord),
   );
   if (includeBuildIdentity) {
     fs.writeFileSync(path.join(outputDir, "app-build.json"), JSON.stringify({ buildId }));
@@ -84,14 +85,16 @@ function createFixture(t, { buildId = expectedBuildId, includeBuildIdentity = tr
     fs.writeFileSync(target, contents);
   }
   fs.writeFileSync(path.join(outputDir, "index.html"), '<link href="./assets/styles.css">');
-  return { repoRoot, assets };
+  return { repoRoot, assets, preparedRecord };
 }
 
 test("measures a build whose generated identity matches the prepared source identity", (t) => {
-  const { repoRoot, assets } = createFixture(t);
+  const { repoRoot, assets, preparedRecord } = createFixture(t);
 
   const result = measureHomeOpeningGraph(repoRoot);
 
+  assert.equal(result.appBuildId, preparedRecord.appBuildId);
+  assert.equal(result.sourceFingerprintSha256, preparedRecord.sourceFingerprintSha256);
   assert.equal(result.openingJavaScript.chunkCount, 3);
   assert.equal(result.openingJavaScript.rawBytes, Buffer.byteLength(
     assets["assets/index.js"] + assets["assets/shared.js"] + assets["assets/home.js"],

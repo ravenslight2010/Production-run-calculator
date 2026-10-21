@@ -46,11 +46,15 @@ export function verifyGeneratedBuildIdentity(repoRoot, outputDir) {
       "Run pnpm run publish:ready before measuring.",
     );
   }
+  return {
+    appBuildId: expected.appBuildId,
+    sourceFingerprintSha256: expected.sourceFingerprintSha256,
+  };
 }
 
 export function measureHomeOpeningGraph(repoRoot = defaultRepoRoot) {
   const outputDir = path.join(repoRoot, "artifacts/run-calculator/dist/public");
-  verifyGeneratedBuildIdentity(repoRoot, outputDir);
+  const verifiedIdentity = verifyGeneratedBuildIdentity(repoRoot, outputDir);
   const manifest = JSON.parse(fs.readFileSync(
     path.join(outputDir, ".vite/workbook-boundary-manifest.json"),
     "utf8",
@@ -126,6 +130,7 @@ export function measureHomeOpeningGraph(repoRoot = defaultRepoRoot) {
   );
 
   return {
+    ...verifiedIdentity,
     openingRoots: roots.map(([file, chunk]) => ({ file, name: chunk.name ?? null })),
     openingJavaScript: {
       chunkCount: opening.length,
