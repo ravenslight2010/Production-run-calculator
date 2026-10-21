@@ -1,4 +1,8 @@
 import type { FormValues } from "./types";
+import {
+  computeFrontlineRunRequirement,
+  type Calc,
+} from "@workspace/live-calc";
 
 export type FrontlineQuantitySource = {
   productionNeedsAvailable?: boolean;
@@ -24,6 +28,74 @@ export type FrontlineNeedRow = {
   recipeName?: string;
   batchProgressField?: "app1BatchesMade" | "app2BatchesMade" | "app3BatchesMade" | "app4BatchesMade";
 };
+
+type LiveFrontlineCalcInput = Pick<
+  Calc,
+  | "casesLeftToRun"
+  | "sauceBatches"
+  | "pep1Lbs"
+  | "pep1Batches"
+  | "pep2Lbs"
+  | "pep2Batches"
+  | "pep1LbsB"
+  | "pep1BatchesB"
+  | "pep2LbsB"
+  | "pep2BatchesB"
+>;
+
+/**
+ * Collect the quantities used by the live Frontline panel. Applicator needs
+ * are recalculated from the selected recipe (or configured batch weight),
+ * while Sauce and Pep values come from the live calculator.
+ */
+export function deriveLiveFrontlineQuantitySource(
+  v: FormValues,
+  calc: LiveFrontlineCalcInput,
+): FrontlineQuantitySource {
+  const appRequirement = (slot: 1 | 2 | 3 | 4) => {
+    const recipeLbs = (v[`app${slot}CheeseRecipe`] ?? []).reduce(
+      (sum, row) => sum + (Number(row.lbs) || 0),
+      0,
+    );
+    return computeFrontlineRunRequirement({
+      casesNeeded: v.casesNeeded,
+      pizzasPerCase: v.pizzasPerCase,
+      ozPerPizza: v[`app${slot}OzPerPizza`],
+      configuredEffectiveWeight: recipeLbs > 0
+        ? recipeLbs
+        : v[`app${slot}BatchLbs`],
+    });
+  };
+
+  const app1 = appRequirement(1);
+  const app2 = appRequirement(2);
+  const app3 = appRequirement(3);
+  const app4 = appRequirement(4);
+
+  return {
+    sauceLbs: Math.max(
+      0,
+      calc.casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase,
+    ) * v.sauceOzPerPizza / 16 + 30,
+    sauceBatches: calc.sauceBatches,
+    app1Lbs: app1.totalLbs,
+    app1Batches: app1.totalUnits,
+    app2Lbs: app2.totalLbs,
+    app2Batches: app2.totalUnits,
+    app3Lbs: app3.totalLbs,
+    app3Batches: app3.totalUnits,
+    app4Lbs: app4.totalLbs,
+    app4Batches: app4.totalUnits,
+    pep1Lbs: calc.pep1Lbs,
+    pep1Batches: calc.pep1Batches,
+    pep2Lbs: calc.pep2Lbs,
+    pep2Batches: calc.pep2Batches,
+    pep1LbsB: calc.pep1LbsB,
+    pep1BatchesB: calc.pep1BatchesB,
+    pep2LbsB: calc.pep2LbsB,
+    pep2BatchesB: calc.pep2BatchesB,
+  };
+}
 
 /**
  * One presentation model for every Frontline operator surface.

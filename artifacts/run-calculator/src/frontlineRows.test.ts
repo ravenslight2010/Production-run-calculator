@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VALUES } from "./types";
-import { deriveFrontlineNeedRows, type FrontlineQuantitySource } from "./frontlineRows";
+import { DEFAULT_VALUES, type FormValues } from "./types";
+import {
+  deriveFrontlineNeedRows,
+  deriveLiveFrontlineQuantitySource,
+  type FrontlineQuantitySource,
+} from "./frontlineRows";
 
 const quantities: FrontlineQuantitySource = {
   sauceLbs: 90, sauceBatches: 3,
@@ -15,6 +19,75 @@ const quantities: FrontlineQuantitySource = {
 };
 
 describe("deriveFrontlineNeedRows", () => {
+  it("derives applicator needs from partial and empty recipe rows", () => {
+    const values: FormValues = {
+      ...DEFAULT_VALUES,
+      casesNeeded: 100,
+      casesPerLayer: 4,
+      pizzasPerCase: 10,
+      sauceOzPerPizza: 2,
+      app1Type: "Cheese",
+      app1OzPerPizza: 2,
+      app1BatchLbs: 50,
+      app1CheeseRecipe: [
+        { ingredient: "", lbs: 0 },
+        { ingredient: "Mozzarella", lbs: 40 },
+      ],
+      app1CheeseRecipeName: "House Cheese",
+      app2Type: "Mix",
+      app2OzPerPizza: 4,
+      app2BatchLbs: 60,
+      app2CheeseRecipe: [],
+      app2CheeseRecipeName: "House Mix",
+    };
+    const quantities = deriveLiveFrontlineQuantitySource(values, {
+      casesLeftToRun: 20,
+      sauceBatches: 0,
+      pep1Lbs: 12,
+      pep1Batches: 0,
+      pep2Lbs: 0,
+      pep2Batches: 0,
+      pep1LbsB: 0,
+      pep1BatchesB: 0,
+      pep2LbsB: 0,
+      pep2BatchesB: 0,
+    });
+
+    expect(quantities).toMatchObject({
+      sauceLbs: 60,
+      app1Lbs: 145,
+      app1Batches: 145 / 40,
+      app2Lbs: 270,
+      app2Batches: 5.4,
+      pep1Lbs: 12,
+      pep1Batches: 0,
+    });
+    expect(deriveFrontlineNeedRows(values, quantities)).toMatchObject([
+      {
+        key: "sauce",
+        amount: 60,
+        unit: "lbs",
+        totalLbs: 60,
+      },
+      {
+        key: "app1",
+        label: "App 1 — Cheese",
+        amount: 145 / 40,
+        unit: "batches",
+        totalLbs: 145,
+        recipeName: "House Cheese",
+      },
+      {
+        key: "app2",
+        label: "App 2 — Mix",
+        amount: 5.4,
+        unit: "batches",
+        totalLbs: 270,
+        recipeName: "House Mix",
+      },
+    ]);
+  });
+
   it("keeps physical line order and falls back to pounds without a batch weight", () => {
     const v = {
       ...DEFAULT_VALUES,
