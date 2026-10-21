@@ -71,6 +71,7 @@ interface ZoneStatus {
   icon: React.ReactNode;
   navTab: HomeTab;
   status: "active" | "idle" | "stopped" | "upstream";
+  reason?: string;
   metrics: { label: string; value: string }[];
   sub?: string;
 }
@@ -88,6 +89,18 @@ function deriveStationStatus(
   return isActive ? "active" : "idle";
 }
 
+function deriveStationReason(
+  status: ZoneStatus["status"],
+  runStatus: RunLifecycleStatus,
+  hasRun: boolean,
+): string | undefined {
+  if (status === "upstream") return "Run is waiting to start";
+  if (status !== "idle") return undefined;
+  if (!hasRun) return "No active run selected";
+  if (runStatus === "paused") return "Line is paused";
+  if (runStatus === "running") return "No current station activity";
+  return undefined;
+}
 function statusBadge(status: ZoneStatus["status"]) {
   const map = {
     active:  { cls: "bg-emerald-500", label: "Running" },
@@ -204,7 +217,7 @@ export default function LineMapDashboard() {
       { label: "Target", value: fmtNum(v.casesNeeded) },
     ];
 
-    return [
+    const stationZones: ZoneStatus[] = [
       { id: "dough" as ZoneId, label: "Dough", icon: <Layers className="w-5 h-5" />, navTab: "dough", status: doughStatus, metrics: doughMetrics, sub: "Mix · Form · Stage" },
       { id: "sauce" as ZoneId, label: "Sauce", icon: <Droplets className="w-5 h-5" />, navTab: "sauce", status: sauceStatus, metrics: sauceMetrics, sub: "Mix · Barrel" },
       { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: `Pre-tunnel ${fmtNum(v.preTunnelMin || 2.5)} min` },
@@ -213,6 +226,10 @@ export default function LineMapDashboard() {
       { id: "packaging" as ZoneId, label: "Packaging", icon: <Package className="w-5 h-5" />, navTab: "packaging", status: packStatus, metrics: packMetrics, sub: `Post-tunnel ${fmtNum(v.postTunnelMin || 2.5)} min` },
       { id: "warehouse" as ZoneId, label: "Warehouse", icon: <Warehouse className="w-5 h-5" />, navTab: "warehouse", status: deriveStationStatus(runStatus, hasRun, false), metrics: whMetrics, sub: "Cooler · Freezer" },
     ];
+    return stationZones.map((zone) => ({
+      ...zone,
+      reason: deriveStationReason(zone.status, runStatus, hasRun),
+    }));
   }, [calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct]);
 
   // Overall line status
@@ -333,6 +350,14 @@ function ZoneCard({ zone, onClick }: { zone: ZoneStatus; onClick: () => void }) 
       </div>
       {zone.sub && (
         <p className="text-[10px] text-muted-foreground mb-1.5 truncate">{zone.sub}</p>
+      )}
+      {zone.reason && (
+        <p
+          className="text-[11px] text-muted-foreground mb-1.5"
+          data-testid={`status-reason-${zone.id}`}
+        >
+          {zone.reason}
+        </p>
       )}
       {zone.metrics.length > 0 && (
         <div className="space-y-0.5">

@@ -90,6 +90,11 @@ function expectZoneStatus(zoneName: RegExp, label: string) {
   expect(within(zone).getByText(label)).toBeTruthy();
 }
 
+function expectZoneReason(zoneName: RegExp, reason: string) {
+  const zone = screen.getByRole("button", { name: zoneName });
+  expect(within(zone).getByText(reason)).toBeTruthy();
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -103,6 +108,14 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneStatus(/Press \/ Oven/, "Waiting");
     expectZoneStatus(/Freeze Tunnel/, "Waiting");
     expectZoneStatus(/Packaging/, "Waiting");
+    expectZoneReason(/Press \/ Oven/, "Run is waiting to start");
+    expectZoneReason(/Freeze Tunnel/, "Run is waiting to start");
+    expectZoneReason(/Packaging/, "Run is waiting to start");
+    expect(
+      screen.getByRole("button", {
+        name: /Press \/ Oven.*Run is waiting to start/,
+      }),
+    ).toBeTruthy();
   });
 
   it("shows active only for running stations with current activity", () => {
@@ -115,6 +128,12 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneStatus(/Frontline/, "Running");
     expectZoneStatus(/Freeze Tunnel/, "Running");
     expectZoneStatus(/Packaging/, "Running");
+    expectZoneReason(/Warehouse/, "No current station activity");
+    expect(
+      within(screen.getByRole("button", { name: /Dough/ })).queryByText(
+        "No current station activity",
+      ),
+    ).toBeNull();
   });
 
   it("keeps inactive stations idle while a run is running", () => {
@@ -123,6 +142,9 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneStatus(/Press \/ Oven/, "Idle");
     expectZoneStatus(/Freeze Tunnel/, "Idle");
     expectZoneStatus(/Packaging/, "Idle");
+    expectZoneReason(/Press \/ Oven/, "No current station activity");
+    expectZoneReason(/Freeze Tunnel/, "No current station activity");
+    expectZoneReason(/Packaging/, "No current station activity");
   });
 
   it("does not show station activity while the line is paused", () => {
@@ -135,6 +157,9 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneStatus(/Frontline/, "Idle");
     expectZoneStatus(/Freeze Tunnel/, "Idle");
     expectZoneStatus(/Packaging/, "Idle");
+    expectZoneReason(/Dough/, "Line is paused");
+    expectZoneReason(/Press \/ Oven/, "Line is paused");
+    expect(screen.queryByText("No current station activity")).toBeNull();
   });
 
   it("shows stopped for stations when a run has ended", () => {
@@ -144,6 +169,9 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneStatus(/Press \/ Oven/, "Stopped");
     expectZoneStatus(/Freeze Tunnel/, "Stopped");
     expectZoneStatus(/Packaging/, "Stopped");
+    expect(screen.queryByText("Run is waiting to start")).toBeNull();
+    expect(screen.queryByText("Line is paused")).toBeNull();
+    expect(screen.queryByText("No current station activity")).toBeNull();
   });
 
   it("keeps stations idle when no run is selected", () => {
@@ -154,6 +182,9 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneStatus(/Press \/ Oven/, "Idle");
     expectZoneStatus(/Freeze Tunnel/, "Idle");
     expectZoneStatus(/Packaging/, "Idle");
+    expectZoneReason(/Press \/ Oven/, "No active run selected");
+    expectZoneReason(/Freeze Tunnel/, "No active run selected");
+    expectZoneReason(/Packaging/, "No active run selected");
   });
 
   it("previews the earliest named run in the upcoming schedule", () => {
