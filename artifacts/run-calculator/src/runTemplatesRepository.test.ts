@@ -87,7 +87,7 @@ describe("run template repository", () => {
       }
 
       const flushing = flushRunTemplates();
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(31_000);
       await flushing;
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -116,7 +116,7 @@ describe("run template repository", () => {
 
     saveRunTemplate(template("committed"));
     const flushing = flushRunTemplates();
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     await flushing;
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -146,7 +146,7 @@ describe("run template repository", () => {
 
     saveRunTemplate(template("not committed"));
     const flushing = flushRunTemplates();
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     await flushing;
     await reconcileRunTemplates();
 
