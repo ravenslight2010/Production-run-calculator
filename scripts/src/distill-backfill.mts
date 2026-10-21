@@ -254,6 +254,95 @@ function resolveMetadataDecisionPath(repoRoot: string, decisionPath: string): st
   return resolvedPath;
 }
 
+function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"): number {
+  const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
+  let lockStat: fs.Stats;
+  let contents: string;
+  try {
+    lockStat = fs.lstatSync(lockPath);
+    if (!lockStat.isFile() || lockStat.isSymbolicLink() || lockStat.size > 64) {
+      throw new Error("not a small regular file");
+    }
+    contents = fs.readFileSync(lockPath, "utf8");
+  } catch {
+    throw new Error(`metadata ${lockKind} lock is malformed or unreadable. ${guidance}`);
+  }
+
+  const match = /^([1-9]\d{0,14})\n?$/u.exec(contents);
+  const pid = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
+  }
+  return pid;
+}
+
+function isMetadataLockOwnerActive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isRecord(error) && error.code === "ESRCH") return false;
+    if (isRecord(error) && error.code === "EPERM") return true;
+    throw new Error(`cannot establish whether metadata lock owner ${pid} is active; leave the lock untouched and retry after checking the process`);
+  }
+}
+
+function acquireMetadataMaintenanceLock(lockPath: string): number {
+  let initialFd: number | undefined;
+  try {
+    initialFd = fs.openSync(lockPath, "wx", 0o600);
+  } catch (error) {
+    if (!isRecord(error) || error.code !== "EEXIST") throw error;
+  }
+  if (initialFd !== undefined) {
+    try {
+      fs.writeFileSync(initialFd, `${process.pid}\n`, "utf8");
+      return initialFd;
+    } catch (error) {
+      fs.closeSync(initialFd);
+      fs.rmSync(lockPath, { force: true });
+      throw error;
+    }
+  }
+
+  const recoveryLockPath = `${lockPath}.recovery`;
+  let recoveryFd: number | undefined;
+  try {
+    try {
+      recoveryFd = fs.openSync(recoveryLockPath, "wx", 0o600);
+    } catch (error) {
+      if (isRecord(error) && error.code === "EEXIST") {
+        throw new Error(
+          `metadata lock recovery is already in progress or its recovery lock is stale; retry after it finishes, or inspect ${recoveryLockPath} and remove it only after confirming its owner is inactive`,
+        );
+      }
+      throw error;
+    }
+    fs.writeFileSync(recoveryFd, `${process.pid}\n`, "utf8");
+
+    const ownerPid = readMetadataLockOwner(lockPath, "update");
+    if (isMetadataLockOwnerActive(ownerPid)) {
+      throw new Error(`another metadata update is active (lock owner PID ${ownerPid}); retry after it finishes`);
+    }
+
+    fs.unlinkSync(lockPath);
+    const replacementFd = fs.openSync(lockPath, "wx", 0o600);
+    try {
+      fs.writeFileSync(replacementFd, `${process.pid}\n`, "utf8");
+      return replacementFd;
+    } catch (error) {
+      fs.closeSync(replacementFd);
+      fs.rmSync(lockPath, { force: true });
+      throw error;
+    }
+  } finally {
+    if (recoveryFd !== undefined) {
+      fs.closeSync(recoveryFd);
+      fs.rmSync(recoveryLockPath, { force: true });
+    }
+  }
+}
+
 export function appendMetadataMaintenanceEntryFile(
   decisionPath: string,
   entry: unknown,
@@ -266,15 +355,7 @@ export function appendMetadataMaintenanceEntryFile(
   let lockFd: number | undefined;
   let temporaryDirectory: string | undefined;
   try {
-    try {
-      lockFd = fs.openSync(lockPath, "wx", 0o600);
-    } catch (error) {
-      if (isRecord(error) && error.code === "EEXIST") {
-        throw new Error("another metadata update is in progress or a stale metadata lock remains");
-      }
-      throw error;
-    }
-    fs.writeFileSync(lockFd, `${process.pid}\n`, "utf8");
+    lockFd = acquireMetadataMaintenanceLock(lockPath);
 
     const decision = appendMetadataMaintenanceEntry(
       readJson(resolvedPath, "decision file"),
