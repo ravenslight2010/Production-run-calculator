@@ -70,16 +70,13 @@
 - [DB recovery](dev-db-connection-exhaustion.md) + [deadlines](pool-acquisition-deadlines.md) + [capacity](database-capacity-evidence.md) — bound waits; backend slots are not Autoscale counts.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Applicator tolerances](applicator-tolerance-columns.md) — first post-name number is oz/pizza; trailing 0.2/0.1 cells are tolerances; verify TARGET WEIGHT sum.
-- [Bare-qualifier pep names](natural-pep-name-poison.md) — use the full product name; guard synced-name poison at write time.
-- [Re-import rename memory](spec-reimport-rename-memory.md) — learn aliases on every rename; never fuzz between distinct parenthetical variants.
-- [Name-only attachment](recipe-name-only-attachment.md) + [fan narrowing](brand-fan-linked-name-narrowing.md) — attach by name/slot; brand/flavor fan-out is retired.
-- [Correcting-import cleanup](correcting-import-alias-cleanup.md) — corrections remove bad aliases when safe and learn the reverse.
+- [Pepperoni names](natural-pep-name-poison.md) + [rename memory](spec-reimport-rename-memory.md) — use full names; learn aliases on rename and never fuzz distinct variants.
+- [Attach](recipe-name-only-attachment.md) + [fan](brand-fan-linked-name-narrowing.md) + [correction](correcting-import-alias-cleanup.md) — link by name/slot; correct bad aliases safely.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
 - [Sync safety](sync-snapshot-identity.md) + [write fences](complete-sync-snapshot-fencing.md) + [offline intents](offline-operational-intents.md) — stable hashes/fences; non-OK is never ack.
 - [Sync and auto-tracking priority](sync-autotracking-priority.md) — prioritize sync reliability; align recovery/lifecycle across trackers without flattening station-specific production math.
 - [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
-- [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve units and fail closed on unsupported layouts.
-- [Apply-source retention](apply-source-evidence-retention.md) — formula and cached-result text stays review-only; do not send formula-cell results with Apply evidence.
+- [Formula safety](formula-import-safety.md) + [layouts](source-workbook-layouts.md) + [Apply retention](apply-source-evidence-retention.md) — preserve units; formula/cached values stay review-only.
 - [Release evidence and readiness](release-evidence-index.md) — revision binding, bounded gates, browser proof, retry/cancel outcomes and deployment-bound readiness.
 - [Source](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to its DB, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
@@ -87,8 +84,7 @@
 - [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — offline gates; ties fail; use ignored caches for local weights.
 - [Local model memory headroom](local-model-memory-headroom.md) — verify available RAM at the required context on the actual evaluator; a 16-GiB cap did not guarantee Qwen3 8B fit.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
-- [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
-- [Finished-case adjustment audit](finished-case-adjustment-audit.md) — keep actor/reason history behind manager authorization without narrowing general stock reads.
+- [Warehouse/Inventory](warehouse-inventory-boundary.md) + [case adjustment audit](finished-case-adjustment-audit.md) — keep destinations distinct and gate actor/reason history.
 - [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
 - [AI cache](retained-ai-cache-boundary.md) + [retired data](retired-ai-data-retention.md) — recompute deterministic matches; stop writers before allowlisted cleanup and redact sensitive payloads.
 - [Operational read-model integrity](operational-read-model-integrity.md) — canonical reports fail closed on rejected snapshot facts; offline exports must preserve non-authoritative provenance.
@@ -100,8 +96,7 @@
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — REPLIT_ENVIRONMENT=production can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) + [MPL web-push approval](mpl-web-push-approval.md) — keep one atomic alert claim; package approval is limited to web-push@3.6.7.
-- [Scheduled queue warning channel](scheduled-queue-warning-channel.md) — stalled/duplicate queue warnings use readiness and transition logs, not generic staff push.
-- [Scheduled evaluation identity](scheduled-evaluation-idempotency.md) — one scope/time slot is independent of scheduler identity; legacy queue cleanup requires a separate audited process.
+- [Queue warnings](scheduled-queue-warning-channel.md) + [evaluation identity](scheduled-evaluation-idempotency.md) — log stalls and dedupe by scope/time, not scheduler identity.
 - [Dated sync authorization](dated-sync-authorization.md) — staff use `/sync/today`; dated writes must not trust client-claimed scheduling dates.
 - [Bounded archive reads](bounded-archive-range-reads.md) + [cursors](queue-history-cursor-precision.md) — cap spans/results and preserve timestamp precision to prevent row skips.
 - [Finalized report authenticity](finalized-report-authenticity.md) — sign canonical payload/audit envelopes; verify persisted rows and classify unsigned legacy records.
@@ -120,10 +115,8 @@
 - [PWA cache](pwa-offline-eventsource-fixtures.md) + [deferred cache](pwa-deferred-cache-policy.md) — close owned SSE on outages; lazy loading alone does not warrant excluding precache.
 - [PWA update prompts](pwa-update-prompts.md) — worker updates and stale-client recovery remain opt-in or gated by explicit safe-state proof.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
-- [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
-- [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
-- [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
-- [Disposable DB startup](disposable-database-test-startup.md) — wait for test schemas and keep local PostgreSQL rehearsals alive across shell calls.
+- [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64](local-arm64-toolchain.md) + [disposable DB](disposable-database-test-startup.md) — use private sockets; wait for test schemas.
+- [Section-scoped edits](section-scoped-online-edits.md) + [automatic staged supply](automatic-staged-supply.md) — use durable row fencing; derive stages from cumulative progress.
 - [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — Publish owns managed schema changes; direct SQL rehearsals do not prove Publish compatibility.
 - [Container deployment history](container-image-migration.md) + [image provenance](container-image-release-evidence.md) — Render steps are historical; container lessons do not change Replit’s production publishing authority.
 - [Compose env isolation](docker-compose-env-file-overrides.md) — replace base Compose env files with `!override`; assert the resolved database URL stays on disposable Postgres.
@@ -133,8 +126,7 @@
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
 - [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
-- [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — shared handoffs must retain exact CI/task-run reports with full run and revision identity, not summaries alone.
-- [GitHub CI trigger access](github-ci-trigger-access.md) — an authorized source-control connection may not authenticate `gh`; verify run access before claiming CI evidence.
+- [GitHub CI evidence](github-actions-evidence-extraction.md) + [trigger access](github-ci-trigger-access.md) — retain run/revision records; verify source-control access before claiming a run.
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
@@ -146,7 +138,6 @@
 - [Pool fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 bytes; waive drift only with fresh owner-reviewed pins.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) — record-first, non-blocking workflow with explicit target, role, sign-off, and retention rules.
 - [Run to Time policy](run-to-time-operator-policy.md) — elapsed targets mean reached today; reset restores the standard evening target rather than copying now.
-- [Daily reset](daily-reset-trigger.md) + [auth identity](auth-identity-cache.md) + [sessions](account-lifecycle-sessions.md) — server owns rollover; tokens need DB rows and revocation fences.
 - [Crust batch UI](crust-run-no-dough-batches.md) + [run-need cap](autotrack-over-provisioning.md) — hide dough batches in crust mode and clamp live auto-track to actual demand.
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.
 - [SSE reader timeouts](sse-test-reader-timeouts.md) + [listener stop](sync-listener-stop-diagnostics.md) — retain pending reads across timeouts; fence in-flight metrics after shutdown.
@@ -157,4 +148,5 @@
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
 - [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.
+- [Docker browser smoke runtime](docker-browser-smoke-runtime.md) — keep Replit Docker DNS and healthcheck workarounds test-only; verify the app and API before browser checks.
 - [Release guide authority claims](release-guide-authority-claims.md) — check provider/action/live-target claims, preserving explicit negatives, examples, and historical context.
