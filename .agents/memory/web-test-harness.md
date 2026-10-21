@@ -130,6 +130,21 @@ interrupted before its `finally` cleanup.
 current live date row, then write the fixture snapshot and retain normal
 `finally` cleanup. Never do this against a shared or production database.
 
+## Reserved ingredient names in full-app browser fixtures
+
+When checking prototype-sensitive ingredient accumulation, keep reserved names
+in focused accumulator/API tests and use ordinary live-run data for responsive
+full-app browser checks. Seeding `__proto__` as the initial pepperoni type caused
+a live-run startup error before the deferred Mix Plan view mounted.
+
+**Why:** The full app runs live applicator setup before the Mix Plan view is
+opened, so that unrelated startup path can mask whether the accumulator and
+rendered view handle a reserved ingredient key correctly.
+
+**How to apply:** If browser-level reserved-name coverage is needed, isolate the
+Mix Plan component or exercise the name through its recipe data without placing
+it in the initial live-run form; investigate live-run startup separately.
+
 ## Same-origin request diagnostics
 
 **Rule:** Determine cross-origin behavior from the request URL and page origin,

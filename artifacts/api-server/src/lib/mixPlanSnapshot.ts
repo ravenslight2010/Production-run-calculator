@@ -18,7 +18,13 @@ import {
   type SummaryStatsInput,
   type RecipeRow,
 } from "@workspace/inventory-math";
-import { buildMixPlan, type Mix, type MixPlanGroup } from "@workspace/mixes";
+import {
+  addIngredientOzPerPizza,
+  buildMixPlan,
+  createIngredientOzPerPizza,
+  type Mix,
+  type MixPlanGroup,
+} from "@workspace/mixes";
 
 /** Run row shape the route feeds us (values resolved from profile/runValues). */
 export type MixPlanRunInput = {
@@ -69,7 +75,7 @@ export function toMixScheduledRun(input: MixPlanRunInput): {
     vals as unknown as SummaryStatsInput,
     [],
   );
-  const ingredientOzPerPizza: Record<string, number> = {};
+  const ingredientOzPerPizza = createIngredientOzPerPizza();
   const addSlot = (recipe: unknown, type: string, oz: number) => {
     const rows = toRecipeRows(recipe);
     if ((rows?.length ?? 0) > 0 && oz > 0) {
@@ -77,17 +83,21 @@ export function toMixScheduledRun(input: MixPlanRunInput): {
       rows?.forEach((row, i) => {
         const name = (row.ingredient ?? "").trim();
         if (!name) return;
-        ingredientOzPerPizza[name] = (ingredientOzPerPizza[name] ?? 0) + (ozRows[i] ?? 0);
+        addIngredientOzPerPizza(
+          ingredientOzPerPizza,
+          name,
+          ozRows[i] ?? 0,
+        );
       });
     } else if (type && oz > 0) {
-      ingredientOzPerPizza[type] = (ingredientOzPerPizza[type] ?? 0) + oz;
+      addIngredientOzPerPizza(ingredientOzPerPizza, type, oz);
     }
   };
   const addPep = (type: unknown, oz: unknown) => {
     const name = String(type ?? "").trim();
     const amount = Number(oz) || 0;
     if (name && amount > 0) {
-      ingredientOzPerPizza[name] = (ingredientOzPerPizza[name] ?? 0) + amount;
+      addIngredientOzPerPizza(ingredientOzPerPizza, name, amount);
     }
   };
   addSlot(vals.app1CheeseRecipe, String(vals.app1Type ?? ""), Number(vals.app1OzPerPizza) || 0);

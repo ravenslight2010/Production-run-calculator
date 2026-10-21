@@ -338,6 +338,37 @@ describe("buildMixPlan — prep mixes: ingredientOzPerPizza lookup", () => {
     expect(entry.missingAmounts).toBe(false);
   });
 
+  it("a missing reserved-name total uses the mix fallback instead of an inherited value", () => {
+    const ingredientName = "constructor";
+    const pizzas = 120;
+    const otherPizzas = 80;
+    const fallbackOz = 2.5;
+    const mixes = [
+      makePrepMix({
+        name: "Constructor Prep Mix",
+        components: [{ ingredient: ingredientName, perPizza: fallbackOz }],
+      }),
+    ];
+    const runs = [
+      prepRun(TODAY, pizzas, [ingredientName], {}, "BrandA"),
+      prepRun(TODAY, otherPizzas, [ingredientName], {}, "BrandB"),
+    ];
+
+    const [group] = buildMixPlan({ mixes, runs, today: TODAY });
+    const entry = group.prepMixes[0];
+    const expectedLbs = (fallbackOz * pizzas) / OZ_PER_LB;
+    expect(entry.components[0].lbs).toBeCloseTo(
+      (fallbackOz * (pizzas + otherPizzas)) / OZ_PER_LB,
+      8,
+    );
+    expect(entry.contributions).toHaveLength(2);
+    expect(entry.contributions?.[0].totalLbs).toBeCloseTo(expectedLbs, 8);
+    expect(entry.contributions?.[1].totalLbs).toBeCloseTo(
+      (fallbackOz * otherPizzas) / OZ_PER_LB,
+      8,
+    );
+  });
+
   it("ingredient key lookup is case-insensitive when the profile key differs in case", () => {
     // Mix component is "Garlic Salt"; profile stores it as "garlic salt" (all lowercase).
     const mixIngredient = "Garlic Salt";

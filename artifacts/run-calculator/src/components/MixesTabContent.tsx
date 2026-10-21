@@ -3,7 +3,12 @@ import { AlertTriangle, Blend, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useMixesTabCtx } from "../contexts/MixesTabCtx";
-import { buildMixPlan, type Mix } from "@workspace/mixes";
+import {
+  addIngredientOzPerPizza,
+  buildMixPlan,
+  createIngredientOzPerPizza,
+  type Mix,
+} from "@workspace/mixes";
 import { useMixPlanSnapshot, refreshMixPlanSnapshot } from "../mixPlanSnapshotClient";
 import { computeCheesePerPizzaOz, computeSummaryStats, fmtComma, fmtNum, todayStr } from "../utils";
 import { loadProfile, loadRunValues } from "../storage";
@@ -146,7 +151,7 @@ export default memo(function MixesTabContent() {
                     // ingredient extraction logic stays in one place.
                     const valsToMixRun = (date: string, brand: string, flavor: string, vals: FormValues) => {
                       const s = computeSummaryStats(vals);
-                      const ingredientOzPerPizza: Record<string, number> = {};
+                      const ingredientOzPerPizza = createIngredientOzPerPizza();
                       const addSlot = (
                         recipe: typeof vals.app1CheeseRecipe,
                         type: string,
@@ -156,12 +161,14 @@ export default memo(function MixesTabContent() {
                           const { rows } = computeCheesePerPizzaOz(recipe, oz);
                           recipe.forEach((row, i) => {
                             if (row.ingredient)
-                              ingredientOzPerPizza[row.ingredient] =
-                                (ingredientOzPerPizza[row.ingredient] ?? 0) + rows[i];
+                              addIngredientOzPerPizza(
+                                ingredientOzPerPizza,
+                                row.ingredient,
+                                rows[i],
+                              );
                           });
                         } else if (type && oz > 0) {
-                          ingredientOzPerPizza[type] =
-                            (ingredientOzPerPizza[type] ?? 0) + oz;
+                          addIngredientOzPerPizza(ingredientOzPerPizza, type, oz);
                         }
                       };
                       addSlot(vals.app1CheeseRecipe, vals.app1Type, vals.app1OzPerPizza);
@@ -169,13 +176,13 @@ export default memo(function MixesTabContent() {
                       addSlot(vals.app3CheeseRecipe, vals.app3Type, vals.app3OzPerPizza);
                       addSlot(vals.app4CheeseRecipe, vals.app4Type, vals.app4OzPerPizza);
                       if (vals.pep1Type && vals.pep1OzPerPizza > 0)
-                        ingredientOzPerPizza[vals.pep1Type] = (ingredientOzPerPizza[vals.pep1Type] ?? 0) + vals.pep1OzPerPizza;
+                        addIngredientOzPerPizza(ingredientOzPerPizza, vals.pep1Type, vals.pep1OzPerPizza);
                       if (vals.pep2Type && vals.pep2OzPerPizza > 0)
-                        ingredientOzPerPizza[vals.pep2Type] = (ingredientOzPerPizza[vals.pep2Type] ?? 0) + vals.pep2OzPerPizza;
+                        addIngredientOzPerPizza(ingredientOzPerPizza, vals.pep2Type, vals.pep2OzPerPizza);
                       if (vals.pep1TypeB && (vals.pep1OzPerPizzaB ?? 0) > 0)
-                        ingredientOzPerPizza[vals.pep1TypeB] = (ingredientOzPerPizza[vals.pep1TypeB] ?? 0) + (vals.pep1OzPerPizzaB ?? 0);
+                        addIngredientOzPerPizza(ingredientOzPerPizza, vals.pep1TypeB, vals.pep1OzPerPizzaB ?? 0);
                       if (vals.pep2TypeB && (vals.pep2OzPerPizzaB ?? 0) > 0)
-                        ingredientOzPerPizza[vals.pep2TypeB] = (ingredientOzPerPizza[vals.pep2TypeB] ?? 0) + (vals.pep2OzPerPizzaB ?? 0);
+                        addIngredientOzPerPizza(ingredientOzPerPizza, vals.pep2TypeB, vals.pep2OzPerPizzaB ?? 0);
                       return {
                         date,
                         brand,

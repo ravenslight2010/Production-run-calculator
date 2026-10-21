@@ -52,7 +52,11 @@
 
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { requireIsolatedTestDatabase } from "./isolation";
+import {
+  AuthorizedBrowserFixtures,
+  DEFAULT_MANAGER_CAPABILITIES,
+  requireIsolatedTestDatabase,
+} from "./isolation";
 import {
   dismissOnboardingIfPresent,
   signUpAndHandleOnboarding,
@@ -65,6 +69,11 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
+const API_BASE =
+  process.env.PLAYWRIGHT_BASE_URL
+  ?? (process.env.RELEASE_BROWSER_LOCAL_SERVERS === "1"
+    ? `http://127.0.0.1:${process.env.RELEASE_BROWSER_WEB_PORT ?? "18084"}`
+    : `https://${process.env.REPLIT_DEV_DOMAIN}`);
 async function closeOnboardingIfVisible(page: Page): Promise<void> {
   await dismissOnboardingIfPresent(page);
 }
@@ -852,6 +861,91 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  test("prep mix card shows the ordinary ingredient total", async ({
+    page,
+    playwright,
+  }) => {
+    const suffix = uid();
+    const mixId = `prep-normal-${suffix}`;
+    const mixName = `NormalPrepMix ${suffix}`;
+    const ingredient = `TestHerb_${suffix}`;
+    const brand = `NormalBrand_${suffix}`;
+    const today = todayStr();
+    const runId = `normal-run-${suffix}`;
+    const fixtures = await AuthorizedBrowserFixtures.create(
+      playwright,
+      API_BASE,
+      SIGNUP_CODE,
+    );
+    try {
+      const account = await fixtures.createAccount({
+        username: `user_${suffix}`,
+        password: "TestPass123!",
+        capabilities: DEFAULT_MANAGER_CAPABILITIES,
+        onboardingSeen: true,
+      });
+      await fixtures.seedMix(account, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        components: [{ ingredient, perPizza: 0.5 }],
+      });
+      await fixtures.removeTodaySync([today]);
+      await fixtures.seedTodaySync({
+        token: account.token,
+            senderId: `normal-sender-${suffix}`,
+        date: today,
+        payload: {
+          dayState: {
+            date: today,
+            runs: [{ id: runId, brand, flavor: "", seeded: false }],
+            currentIndex: 0,
+            resetAt: 0,
+            substitutions: [],
+            substitutionLog: [],
+            stagedItems: {},
+          },
+          runValues: {
+            [runId]: {
+              casesNeeded: 1,
+              pizzasPerCase: 8,
+              casesPerLayer: 0,
+              pep1Type: ingredient,
+              pep1OzPerPizza: 2,
+            },
+          },
+          runValuesUpdatedAt: { [runId]: Date.now() },
+          packagingProgress: {},
+        },
+      });
+
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: account.token,
+        url: API_BASE,
+      }]);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({
+        state: "attached",
+        timeout: 25_000,
+      });
+
+      await goToMixes(page);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 20_000 });
+      await expect(todayCard.getByText(mixName, { exact: true })).toBeVisible();
+      await expect(todayCard.getByText(ingredient, { exact: true })).toBeVisible();
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      await expect(ingredientRow).toContainText("1.00");
+    } finally {
+      await fixtures.cleanup();
     }
   });
 

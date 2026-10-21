@@ -104,6 +104,38 @@ describe("toMixScheduledRun", () => {
       "Sausage B": 4,
     });
   });
+
+  it("keeps prototype-sensitive recipe and topping names as ordinary totals", () => {
+    const run = toMixScheduledRun({
+      date: "2026-09-12",
+      brand: "Pizza Co",
+      flavor: "Cheese",
+      values: {
+        ...cheeseRunValues,
+        app1CheeseRecipe: [
+          { ingredient: "__proto__", lbs: 1 },
+          { ingredient: "constructor", lbs: 1 },
+          { ingredient: "prototype", lbs: 1 },
+        ],
+        app1OzPerPizza: 6,
+        pep1Type: "__proto__",
+        pep1OzPerPizza: 1,
+        pep1TypeB: "constructor",
+        pep1OzPerPizzaB: 0.5,
+      },
+    });
+
+    expect(Object.getPrototypeOf(run.ingredientOzPerPizza)).toBeNull();
+    expect(run.ingredients).toEqual(["__proto__", "constructor", "prototype"]);
+    expect(run.ingredientOzPerPizza["__proto__"]).toBeCloseTo(3, 5);
+    expect(run.ingredientOzPerPizza.constructor).toBeCloseTo(2.5, 5);
+    expect(run.ingredientOzPerPizza.prototype).toBeCloseTo(2, 5);
+    expect(Object.entries(JSON.parse(JSON.stringify(run.ingredientOzPerPizza)))).toEqual([
+      ["__proto__", 3],
+      ["constructor", 2.5],
+      ["prototype", 2],
+    ]);
+  });
 });
 
 describe("computeMixPlanSnapshot", () => {
