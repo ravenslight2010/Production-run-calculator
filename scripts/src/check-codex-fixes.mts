@@ -5,7 +5,10 @@ export type FixHistoryFindingCategory =
   | "infrastructure identifier"
   | "deployment image tag"
   | "actionable operational watch detail"
-  | "contact detail";
+  | "contact detail"
+  | "credential value"
+  | "private-key material"
+  | "URL user-info";
 
 export type FixHistoryFinding = {
   line: number;
@@ -27,6 +30,107 @@ const emailAddress =
   /(?<![\w.+-])[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\b/i;
 const phoneNumber =
   /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?!\w)|(?<!\w)\d{3}[-.]\d{4}(?!\w)/;
+const privateKeyMarker = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/i;
+const urlUserInfo = /\bhttps?:\/\/([^/@\s]+)@/gi;
+const credentialAssignment =
+  /\b(?:password|passwd|pwd|token|secret|api[_ -]?key|access[_ -]?key|client[_ -]?secret|authorization)\s*(?:=|:)\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`|([^\s,;]+))/gi;
+const bearerCredential = /\bbearer\s+([a-z0-9._~+/-]{8,})/gi;
+const jwtCredential = /\beyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\b/g;
+const knownTokenFormat =
+  /\b(?:ghp_[a-zA-Z0-9]{12,}|github_pat_[a-zA-Z0-9_]{12,}|gho_[a-zA-Z0-9]{12,}|glpat-[a-zA-Z0-9_-]{12,}|xox[baprs]-[a-zA-Z0-9-]{12,}|sk_(?:live|test)_[a-zA-Z0-9]{12,}|ya29\.[a-zA-Z0-9_-]{12,})\b/g;
+
+const harmlessCredentialValues = new Set([
+  "bearer",
+  "changeme",
+  "example",
+  "example-value",
+  "none",
+  "null",
+  "pass",
+  "password",
+  "placeholder",
+  "redacted",
+  "removed",
+  "string",
+  "undefined",
+  "user",
+  "username",
+  "your-api-key",
+  "your-api-key-here",
+  "your_api_key",
+  "your-password",
+  "your-password-here",
+  "your-secret",
+  "your-secret-here",
+  "your-token",
+  "your-token-here",
+]);
+
+function normalizedCredentialValue(value: string): string {
+  return value
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/[.,;)}\]]+$/g, "")
+    .toLowerCase();
+}
+
+function isHarmlessCredentialValue(value: string): boolean {
+  const normalized = normalizedCredentialValue(value);
+  return (
+    normalized.length === 0 ||
+    harmlessCredentialValues.has(normalized) ||
+    /^<[^<>]+>$/.test(normalized) ||
+    /^\[[^\[\]]+\]$/.test(normalized) ||
+    /^\*{3,}$/.test(normalized) ||
+    /^\$?(?:\{[A-Z][A-Z0-9_]*\}|[A-Z][A-Z0-9_]*)$/.test(value.trim()) ||
+    /^(?:process\.env|import\.meta\.env)\.[A-Z][A-Z0-9_]*$/.test(value.trim())
+  );
+}
+
+function hasCredentialValue(line: string): boolean {
+  credentialAssignment.lastIndex = 0;
+  for (const match of line.matchAll(credentialAssignment)) {
+    const value = match.slice(1).find((part) => part !== undefined);
+    if (value && !isHarmlessCredentialValue(value)) return true;
+  }
+
+  urlUserInfo.lastIndex = 0;
+  for (const match of line.matchAll(urlUserInfo)) {
+    const separator = match[1].indexOf(":");
+    const username = separator === -1 ? match[1] : match[1].slice(0, separator);
+    const password = separator === -1 ? undefined : match[1].slice(separator + 1);
+    if (
+      (username && !isHarmlessCredentialValue(username)) ||
+      (password && !isHarmlessCredentialValue(password))
+    ) {
+      return true;
+    }
+  }
+
+  bearerCredential.lastIndex = 0;
+  for (const match of line.matchAll(bearerCredential)) {
+    if (!isHarmlessCredentialValue(match[1])) return true;
+  }
+
+  jwtCredential.lastIndex = 0;
+  if (jwtCredential.test(line)) return true;
+
+  knownTokenFormat.lastIndex = 0;
+  return knownTokenFormat.test(line);
+}
+
+function hasEmailAddress(line: string): boolean {
+  const match = emailAddress.exec(line);
+  if (!match || match.index === undefined) return false;
+
+  const emailAtIndex = match.index + match[0].indexOf("@");
+  urlUserInfo.lastIndex = 0;
+  for (const urlMatch of line.matchAll(urlUserInfo)) {
+    const urlAtIndex = urlMatch.index + urlMatch[0].lastIndexOf("@");
+    if (urlAtIndex === emailAtIndex) return false;
+  }
+  return true;
+}
 
 function isPrivateOrLocalIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
@@ -75,8 +179,16 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
       });
     }
 
-    if (emailAddress.test(line) || phoneNumber.test(line)) {
+    if (hasEmailAddress(line) || phoneNumber.test(line)) {
       findings.push({ line: index + 1, category: "contact detail" });
+    }
+
+    if (privateKeyMarker.test(line)) {
+      findings.push({ line: index + 1, category: "private-key material" });
+    }
+
+    if (hasCredentialValue(line)) {
+      findings.push({ line: index + 1, category: "credential value" });
     }
   }
 

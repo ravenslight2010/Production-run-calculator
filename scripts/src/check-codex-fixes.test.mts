@@ -75,6 +75,59 @@ test("flags email addresses and phone numbers by category and line without echoi
   }
 });
 
+test("flags synthetic credential values, private-key markers, and URL user-info without echoing values", () => {
+  const password = "synthetic-password-73";
+  const bearer = "synthetic-bearer-credential-482";
+  const privateKeyMarker = "-----BEGIN PRIVATE KEY-----";
+  const urlUserInfo = "synthetic-user:synthetic-password";
+  const jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJzeW50aGV0aWMifQ.synthetic-signature-value";
+  const knownToken = "ghp_syntheticCredentialValue123456";
+  const content = [
+    `password = ${password}`,
+    `Authorization: Bearer ${bearer}`,
+    privateKeyMarker,
+    `https://${urlUserInfo}@service.example.invalid/path`,
+    jwt,
+    knownToken,
+  ].join("\n");
+
+  const findings = findFixHistoryDetails(content);
+  assert.deepEqual(findings, [
+    { line: 1, category: "credential value" },
+    { line: 2, category: "credential value" },
+    { line: 3, category: "private-key material" },
+    { line: 4, category: "credential value" },
+    { line: 5, category: "credential value" },
+    { line: 6, category: "credential value" },
+  ]);
+
+  const diagnostic = findings.map(formatFixHistoryFinding).join("\n");
+  for (const matchedValue of [
+    password,
+    bearer,
+    privateKeyMarker,
+    urlUserInfo,
+    jwt,
+    knownToken,
+  ]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
+test("allows safe variable names and explicit credential placeholders", () => {
+  const content = [
+    "API_TOKEN",
+    "TOKEN=$SESSION_TOKEN",
+    "SECRET=process.env.SESSION_SECRET",
+    "PASSWORD=<redacted>",
+    "api_key: your_api_key",
+    "Bearer <token>",
+    "https://user:password@example.invalid/path",
+  ].join("\n");
+
+  assert.deepEqual(findFixHistoryDetails(content), []);
+});
+
 test("allows generic lessons and the known harmless public API endpoint", () => {
   const content = [
     "A bounded retry preserves the original error for diagnosis.",
