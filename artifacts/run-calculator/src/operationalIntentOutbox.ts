@@ -5,6 +5,7 @@ import {
   isManualSectionRejectionCode,
   MANUAL_SECTION_FIELDS,
   manualSectionForField,
+  type ManualSection,
   type ManualSectionRejectionCode,
 } from "@workspace/sync-contract";
 import { clearManualSectionLocks, restoreManualSectionValues } from "./manualSectionLocks";
@@ -36,6 +37,34 @@ const manualRetryKey = (owner: string, id: string) => `${owner}:${id}`;
 const manualSectionChains = new Map<string, Promise<unknown>>();
 const manualSectionCanonical = new Map<string, Record<string, number>>();
 const MANUAL_SECTION_PENDING_KEY = "run-calculator:manual-section-pending:v1";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isManualSection(value: string): value is ManualSection {
+  return Object.prototype.hasOwnProperty.call(MANUAL_SECTION_FIELDS, value);
+}
+
+function parseManualSectionCanonical(
+  data: unknown,
+  runId: string,
+  section: string,
+): { data: Record<string, unknown>; sectionValues: Record<string, number> } | undefined {
+  if (!isRecord(data) || !isRecord(data.runValues) || !isManualSection(section)) return undefined;
+  const runValues = data.runValues[runId];
+  if (!isRecord(runValues)) return undefined;
+
+  const restored = restoreManualSectionValues(section, runValues);
+  const sectionValues: Record<string, number> = {};
+  for (const field of MANUAL_SECTION_FIELDS[section]) {
+    const value = restored[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+    sectionValues[field] = value;
+  }
+  return { data, sectionValues };
+}
+
 export type PendingManualSection = {
   id: string; runId: string; section: string; date: string; resetEpoch: number;
   values: Record<string, number>; baseValues: Record<string, number>;
@@ -447,31 +476,37 @@ async function submitManualSectionNow(input: {
       }),
     });
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    let body: { data?: unknown; outcome?: string; code?: unknown; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
-    try { body = await response.json(); } catch {}
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = await response.json();
+      if (isRecord(parsed)) body = parsed;
+    } catch {}
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    if (response.ok && body.data) {
+    if (response.ok) {
       if (capturedOwner !== activeOwner) return "identity-mismatch";
-      const canonicalServerTime = Number.isFinite(body.serverTime) ? body.serverTime : undefined;
-      const canonicalValues = (body.data as any)?.runValues?.[input.runId] ?? {};
-      const canonicalSectionValues = restoreManualSectionValues(
-        input.section as any,
-        canonicalValues,
-      ) as Record<string, number>;
-      if (Object.values(canonicalSectionValues).some((value) => Number.isFinite(Number(value)))) {
-        manualSectionCanonical.set(`${capturedOwner}:${input.runId}:${input.section}`, canonicalSectionValues);
-      }
-      const intent = {
-        version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
-        resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
-        commandCategory: "correction" as const, deviceId: getOperationalDeviceId(), baseRevision: input.baseRevision ?? 0,
-        occurredAt: Date.now(), values: restoreManualSectionValues(input.section as any, canonicalValues) as Record<string, number>, state: "accepted" as const,
-        ...(Number.isSafeInteger(body.canonicalRevision) ? { canonicalRevision: body.canonicalRevision } : {}),
-        ...(canonicalServerTime !== undefined ? { serverTime: canonicalServerTime, serverTimeOffsetMs: canonicalServerTime - Date.now() } : {}),
-        ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
-      };
-      if (adoptCanonical) {
-        await adoptCanonical(body.data, intent, "accepted");
+      const canonical = parseManualSectionCanonical(body.data, input.runId, input.section);
+      if (canonical) {
+        const canonicalServerTime = typeof body.serverTime === "number" && Number.isFinite(body.serverTime)
+          ? body.serverTime
+          : undefined;
+        manualSectionCanonical.set(
+          `${capturedOwner}:${input.runId}:${input.section}`,
+          canonical.sectionValues,
+        );
+        const intent = {
+          version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
+          resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
+          commandCategory: "correction" as const, deviceId: getOperationalDeviceId(), baseRevision: input.baseRevision ?? 0,
+          occurredAt: Date.now(), values: canonical.sectionValues, state: "accepted" as const,
+          ...(typeof body.canonicalRevision === "number" && Number.isSafeInteger(body.canonicalRevision)
+            ? { canonicalRevision: body.canonicalRevision }
+            : {}),
+          ...(canonicalServerTime !== undefined ? { serverTime: canonicalServerTime, serverTimeOffsetMs: canonicalServerTime - Date.now() } : {}),
+          ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
+        };
+        if (adoptCanonical) {
+          await adoptCanonical(canonical.data, intent, "accepted");
+        }
       }
       if (capturedOwner !== activeOwner) return "identity-mismatch";
     }
