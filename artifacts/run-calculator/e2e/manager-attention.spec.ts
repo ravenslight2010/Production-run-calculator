@@ -211,6 +211,57 @@ async function expectBadgeFitsViewport(locator: Locator, label: string): Promise
     .toBeLessThanOrEqual(bounds.viewportHeight);
 }
 
+test("manager can open and close Manager attention using only the keyboard", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(60_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_manager_attention_keyboard"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    await page.route("**/api/incidents/actionable-count", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ count: 1 }),
+      }));
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const moreButton = page.getByRole("button", { name: /^More/ });
+    await expect(page.getByLabel("1 manager actions need attention", { exact: true })).toBeVisible();
+    await moreButton.focus();
+    await expect(moreButton).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    const managerAttentionItem = page.getByRole("menuitem", {
+      name: "Manager attention",
+      exact: true,
+    });
+    await expect(managerAttentionItem).toBeVisible();
+    await page.keyboard.press("Home");
+    await expect(managerAttentionItem).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "Manager attention" });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(moreButton).toBeVisible();
+    await expect(moreButton).toBeFocused();
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
 test("manager setup stays usable when recipe names are incomplete", async ({
   page,
   playwright,
