@@ -6,6 +6,7 @@ export type FixHistoryFindingCategory =
   | "deployment image tag"
   | "actionable operational watch detail"
   | "contact detail"
+  | "mailing address"
   | "credential value"
   | "private-key material"
   | "URL user-info";
@@ -30,6 +31,8 @@ const emailAddress =
   /(?<![\w.+-])[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\b/i;
 const phoneNumber =
   /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?!\w)|(?<!\w)\d{3}[-.]\d{4}(?!\w)/;
+const mailingAddress =
+  /\bP(?:ost)?\.?\s*O(?:ffice)?\.?\s+Box\s+\d{1,8}\b|(?<![\w./-])\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\.?\s+)?[a-z0-9.'’-]+(?:\s+[a-z0-9.'’-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|circle|cir\.?|parkway|pkwy\.?|place|pl\.?|terrace|ter\.?|highway|hwy\.?|way)\b/i;
 const privateKeyMarker = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/i;
 const urlUserInfo = /\bhttps?:\/\/([^/@\s]+)@/gi;
 const credentialAssignment =
@@ -181,6 +184,10 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
 
     if (hasEmailAddress(line) || phoneNumber.test(line)) {
       findings.push({ line: index + 1, category: "contact detail" });
+    }
+
+    if (mailingAddress.test(line)) {
+      findings.push({ line: index + 1, category: "mailing address" });
     }
 
     if (privateKeyMarker.test(line)) {

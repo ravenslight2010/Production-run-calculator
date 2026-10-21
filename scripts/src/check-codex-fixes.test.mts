@@ -75,6 +75,35 @@ test("flags email addresses and phone numbers by category and line without echoi
   }
 });
 
+test("flags synthetic street and mailing addresses without echoing their contents", () => {
+  const streetAddress = "4827 W. Cedarbrook Avenue";
+  const mailingAddress = "91 Maple Street, Sampletown, IL 60614";
+  const postOfficeBox = "P.O. Box 4821";
+  const content = [
+    `The sample delivery location is ${streetAddress}.`,
+    `Mail the synthetic package to ${mailingAddress}.`,
+    `The alternate synthetic destination is ${postOfficeBox}.`,
+  ].join("\n");
+
+  const findings = findFixHistoryDetails(content);
+  assert.deepEqual(findings, [
+    { line: 1, category: "mailing address" },
+    { line: 2, category: "mailing address" },
+    { line: 3, category: "mailing address" },
+  ]);
+
+  const diagnostic = findings.map(formatFixHistoryFinding).join("\n");
+  for (const matchedValue of [
+    streetAddress,
+    mailingAddress,
+    postOfficeBox,
+    "Sampletown",
+    "60614",
+  ]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
 test("flags synthetic credential values, private-key markers, and URL user-info without echoing values", () => {
   const password = "synthetic-password-73";
   const bearer = "synthetic-bearer-credential-482";
@@ -134,8 +163,10 @@ test("allows generic lessons and the known harmless public API endpoint", () => 
     "The public endpoint is https://generativelanguage.googleapis.com.",
     "A container build uses a supported runtime image.",
     "Operational checks should report a category and line, not matched text.",
+    "scripts/src/check-codex-fixes.test.mts and .agents/memory/codex-fixes.md are technical paths.",
     "Node 22.4.1 supports API v2; the local development server uses port 8080.",
-    "The review date is 2026-10-21, and the parser recognizes RFC 5322 syntax.",
+    "Release 3.12.0 shipped after the review date 2026-10-21.",
+    "The date October 21, 2026 is written in long form.",
   ].join("\n");
 
   assert.deepEqual(findFixHistoryDetails(content), []);
