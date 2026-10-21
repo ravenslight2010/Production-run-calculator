@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   NEAR_DUPLICATE_POLICY,
@@ -431,7 +432,34 @@ function acquireMetadataMaintenanceLock(lockPath: string): number {
   }
 }
 
-export function appendMetadataMaintenanceEntryFile(
+function clearAbandonedMetadataRecoveryGuard(lockPath: string): void {
+  const recoveryLockPath = `${lockPath}.recovery`;
+  try {
+    fs.lstatSync(recoveryLockPath);
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return;
+    throw new Error(
+      `metadata recovery lock is unreadable. Inspect ${recoveryLockPath}; remove it only after confirming no metadata recovery is active.`,
+    );
+  }
+
+  const owner = readMetadataLockOwner(recoveryLockPath, "recovery");
+  if (isMetadataLockOwnerActive(owner, recoveryLockPath)) {
+    throw new Error(
+      `metadata lock recovery is already active (owner PID ${owner.pid}); retry after it finishes`,
+    );
+  }
+
+  try {
+    fs.unlinkSync(recoveryLockPath);
+  } catch {
+    throw new Error(
+      `metadata recovery lock could not be cleared safely. Inspect ${recoveryLockPath}; remove it only after confirming no metadata recovery is active.`,
+    );
+  }
+}
+
+export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   decisionPath: string,
   entry: unknown,
 ): DecisionFile {
@@ -443,6 +471,7 @@ export function appendMetadataMaintenanceEntryFile(
   let lockFd: number | undefined;
   let temporaryDirectory: string | undefined;
   try {
+    clearAbandonedMetadataRecoveryGuard(lockPath);
     lockFd = acquireMetadataMaintenanceLock(lockPath);
 
     const decision = appendMetadataMaintenanceEntry(
@@ -468,6 +497,100 @@ export function appendMetadataMaintenanceEntryFile(
       fs.closeSync(lockFd);
       fs.rmSync(lockPath, { force: true });
     }
+  }
+}
+
+function metadataWorkerNodeArgs(): string[] {
+  const args: string[] = [];
+  for (let index = 0; index < process.execArgv.length; index++) {
+    const arg = process.execArgv[index]!;
+    if (["-e", "--eval", "-p", "--print"].includes(arg)) {
+      index++;
+      continue;
+    }
+    if (arg.startsWith("--eval=") || arg.startsWith("--print=")) continue;
+    args.push(arg);
+  }
+  return args;
+}
+
+export function appendMetadataMaintenanceEntryFile(
+  decisionPath: string,
+  entry: unknown,
+): DecisionFile {
+  const resolvedPath = fs.realpathSync(decisionPath);
+  const recoveryGatePath = `${resolvedPath}.metadata-maintenance.lock.recovery.gate`;
+  let gateFd: number | undefined;
+  try {
+    // Keep this inode stable: removing it could let concurrent processes lock different inodes.
+    gateFd = fs.openSync(
+      recoveryGatePath,
+      fs.constants.O_CREAT | fs.constants.O_RDWR | fs.constants.O_NOFOLLOW,
+      0o600,
+    );
+    const gateStat = fs.fstatSync(gateFd);
+    if (!gateStat.isFile()) throw new Error("not a regular file");
+  } catch {
+    throw new Error(
+      `metadata recovery gate is unavailable. Inspect ${recoveryGatePath} and retry after confirming no metadata maintenance is active.`,
+    );
+  } finally {
+    if (gateFd !== undefined) fs.closeSync(gateFd);
+  }
+
+  const moduleUrl = pathToFileURL(fileURLToPath(import.meta.url)).href;
+  const workerSource = [
+    `import { appendMetadataMaintenanceEntryFileWithRecoveryGate } from ${JSON.stringify(moduleUrl)};`,
+    "let input = \"\";",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "try {",
+    "  const request = JSON.parse(input);",
+    "  const result = appendMetadataMaintenanceEntryFileWithRecoveryGate(request.decisionPath, request.entry);",
+    "  process.stdout.write(JSON.stringify(result));",
+    "} catch (error) {",
+    "  console.error(error instanceof Error ? error.message : \"metadata maintenance failed\");",
+    "  process.exitCode = 1;",
+    "}",
+  ].join("\n");
+  const result = spawnSync(
+    "flock",
+    [
+      "--exclusive",
+      "--nonblock",
+      recoveryGatePath,
+      process.execPath,
+      ...metadataWorkerNodeArgs(),
+      "--input-type=module",
+      "-e",
+      workerSource,
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      input: JSON.stringify({ decisionPath: resolvedPath, entry }),
+      maxBuffer: 64 * 1024,
+    },
+  );
+
+  if (result.error) {
+    throw new Error(
+      `metadata recovery gate could not start (${result.error.message}); leave existing locks untouched and retry after checking the local flock utility`,
+    );
+  }
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    if (!stderr || /^flock:/u.test(stderr)) {
+      throw new Error(
+        `metadata lock recovery is already in progress or the recovery gate is unavailable; retry after it finishes, or inspect ${recoveryGatePath}`,
+      );
+    }
+    throw new Error(stderr || "metadata maintenance worker failed");
+  }
+
+  try {
+    return JSON.parse(result.stdout) as DecisionFile;
+  } catch {
+    throw new Error("metadata maintenance worker returned an invalid result");
   }
 }
 

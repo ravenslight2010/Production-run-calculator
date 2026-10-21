@@ -124,6 +124,39 @@ function runConcurrentMetadataAppend(
   });
 }
 
+function spawnRecoveryGuardHolder(lockPath: string): {
+  child: ReturnType<typeof spawn>;
+  recoveryPath: string;
+  gatePath: string;
+  ready: Promise<void>;
+} {
+  const recoveryPath = `${lockPath}.recovery`;
+  const gatePath = `${recoveryPath}.gate`;
+  const holderScript = [
+    `const fs = require("node:fs");`,
+    "const stat = fs.readFileSync(`/proc/${process.pid}/stat`, \"utf8\");",
+    "const fields = stat.slice(stat.lastIndexOf(\")\") + 1).trim().split(/\\s+/u);",
+    "const owner = { pid: process.pid, identity: { platform: \"linux\", bootId: fs.readFileSync(\"/proc/sys/kernel/random/boot_id\", \"utf8\").trim(), startTimeTicks: fields[19] } };",
+    `fs.writeFileSync(${JSON.stringify(recoveryPath)}, JSON.stringify(owner) + String.fromCharCode(10), { mode: 0o600 });`,
+    `process.stdout.write("recovery-ready\\n");`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+  const child = spawn(
+    "flock",
+    ["--no-fork", "--exclusive", gatePath, process.execPath, "-e", holderScript],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const ready = new Promise<void>((resolve, reject) => {
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (chunk.includes("recovery-ready\n")) resolve();
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`recovery guard holder exited before readiness (${code})`)));
+  });
+  return { child, recoveryPath, gatePath, ready };
+}
+
 function makeCandidate(brand: string, index: number, mismatch = false) {
   const sourceText = `Brand\t${brand}\nCase Pack\t12\nNotes\tSynthetic Supplier 42\nLine\t${index}`;
   const values = { profile: { brand, pizzasPerCase: 12 } };
@@ -357,6 +390,73 @@ try {
     changeType: "metadata-only",
     note: "Synthetic lock recovery test.",
   };
+  const priorRecoveryHistoryEntry = {
+    date: "2026-10-08",
+    changeType: "metadata-only",
+    note: "Earlier maintenance history must survive recovery.",
+  };
+  const abandonedOwnerPid = 2_000_000_000;
+  assert.throws(() => process.kill(abandonedOwnerPid, 0), { code: "ESRCH" });
+  const abandonedOwner = {
+    pid: abandonedOwnerPid,
+    identity: {
+      platform: "linux" as const,
+      bootId: "00000000-0000-0000-0000-000000000000",
+      startTimeTicks: "123",
+    },
+  };
+
+  const interruptedRecoveryDecisionPath = path.join(repoRoot, "docs", "evidence", "interrupted-recovery.json");
+  fs.writeFileSync(interruptedRecoveryDecisionPath, JSON.stringify({
+    ...makeDecision("no-go"),
+    maintenanceHistory: [priorRecoveryHistoryEntry],
+  }));
+  const interruptedRecoveryLockPath = `${interruptedRecoveryDecisionPath}.metadata-maintenance.lock`;
+  const activeRecoveryHolder = spawnRecoveryGuardHolder(interruptedRecoveryLockPath);
+  await activeRecoveryHolder.ready;
+  const interruptedRecoveryContents = fs.readFileSync(activeRecoveryHolder.recoveryPath, "utf8");
+  assert.equal(
+    (JSON.parse(interruptedRecoveryContents) as { pid: number }).pid,
+    activeRecoveryHolder.child.pid,
+  );
+  try {
+    assert.throws(
+      () => appendMetadataMaintenanceEntryFile(interruptedRecoveryDecisionPath, syntheticLockEntry),
+      /metadata lock recovery is already in progress/u,
+    );
+    assert.equal(fs.readFileSync(activeRecoveryHolder.recoveryPath, "utf8"), interruptedRecoveryContents);
+    assert.equal(fs.existsSync(interruptedRecoveryLockPath), false);
+  } finally {
+    activeRecoveryHolder.child.kill("SIGKILL");
+    await new Promise<void>((resolve, reject) => {
+      activeRecoveryHolder.child.once("error", reject);
+      activeRecoveryHolder.child.once("exit", () => resolve());
+    });
+  }
+  fs.writeFileSync(interruptedRecoveryLockPath, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
+  const recoveredInterruptedAppend = appendMetadataMaintenanceEntryFile(
+    interruptedRecoveryDecisionPath,
+    syntheticLockEntry,
+  );
+  assert.deepEqual(recoveredInterruptedAppend.maintenanceHistory, [
+    priorRecoveryHistoryEntry,
+    syntheticLockEntry,
+  ]);
+  assert.equal(fs.existsSync(activeRecoveryHolder.recoveryPath), false);
+  assert.equal(fs.existsSync(interruptedRecoveryLockPath), false);
+  assert.equal(fs.existsSync(activeRecoveryHolder.gatePath), true);
+
+  const malformedRecoveryDecisionPath = path.join(repoRoot, "docs", "evidence", "malformed-recovery.json");
+  fs.writeFileSync(malformedRecoveryDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const malformedRecoveryLockPath = `${malformedRecoveryDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(`${malformedRecoveryLockPath}.recovery`, "not-a-pid\n", { mode: 0o600 });
+  assert.throws(
+    () => appendMetadataMaintenanceEntryFile(malformedRecoveryDecisionPath, syntheticLockEntry),
+    /recovery lock has an invalid owner/u,
+  );
+  assert.equal(fs.readFileSync(`${malformedRecoveryLockPath}.recovery`, "utf8"), "not-a-pid\n");
+  assert.equal(fs.existsSync(malformedRecoveryLockPath), false);
+
   const activeLockDecisionPath = path.join(repoRoot, "docs", "evidence", "active-lock.json");
   fs.writeFileSync(activeLockDecisionPath, JSON.stringify(makeDecision("no-go")));
   const activeLockPath = `${activeLockDecisionPath}.metadata-maintenance.lock`;
@@ -423,8 +523,6 @@ try {
   assert.equal(fs.existsSync(`${legacyLockPath}.recovery`), false);
   fs.rmSync(legacyLockPath);
 
-  const abandonedOwnerPid = 2_000_000_000;
-  assert.throws(() => process.kill(abandonedOwnerPid, 0), { code: "ESRCH" });
   const reusedPidDecisionPath = path.join(repoRoot, "docs", "evidence", "reused-pid-lock.json");
   fs.writeFileSync(reusedPidDecisionPath, JSON.stringify(makeDecision("no-go")));
   const reusedPidLockPath = `${reusedPidDecisionPath}.metadata-maintenance.lock`;
@@ -444,14 +542,7 @@ try {
   const abandonedLockDecisionPath = path.join(repoRoot, "docs", "evidence", "abandoned-lock.json");
   fs.writeFileSync(abandonedLockDecisionPath, JSON.stringify(makeDecision("no-go")));
   const abandonedLockPath = `${abandonedLockDecisionPath}.metadata-maintenance.lock`;
-  fs.writeFileSync(abandonedLockPath, `${JSON.stringify({
-    pid: abandonedOwnerPid,
-    identity: {
-      platform: "linux",
-      bootId: "00000000-0000-0000-0000-000000000000",
-      startTimeTicks: "123",
-    },
-  })}\n`, { mode: 0o600 });
+  fs.writeFileSync(abandonedLockPath, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
   const recoveredAppend = appendMetadataMaintenanceEntryFile(abandonedLockDecisionPath, syntheticLockEntry);
   assert.deepEqual(recoveredAppend.maintenanceHistory, [syntheticLockEntry]);
   assert.equal(fs.existsSync(abandonedLockPath), false);
@@ -469,16 +560,13 @@ try {
   assert.equal(fs.existsSync(abandonedLegacyLockPath), false);
 
   const racingDecisionPath = path.join(repoRoot, "docs", "evidence", "racing-lock.json");
-  fs.writeFileSync(racingDecisionPath, JSON.stringify(makeDecision("no-go")));
+  fs.writeFileSync(racingDecisionPath, JSON.stringify({
+    ...makeDecision("no-go"),
+    maintenanceHistory: [priorRecoveryHistoryEntry],
+  }));
   const racingLockPath = `${racingDecisionPath}.metadata-maintenance.lock`;
-  fs.writeFileSync(racingLockPath, `${JSON.stringify({
-    pid: abandonedOwnerPid,
-    identity: {
-      platform: "linux",
-      bootId: "00000000-0000-0000-0000-000000000000",
-      startTimeTicks: "123",
-    },
-  })}\n`, { mode: 0o600 });
+  fs.writeFileSync(racingLockPath, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
+  fs.writeFileSync(`${racingLockPath}.recovery`, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
   const racingResults = await Promise.all([
     runConcurrentMetadataAppend(
       racingDecisionPath,
@@ -504,12 +592,16 @@ try {
   const racingDecision = JSON.parse(fs.readFileSync(racingDecisionPath, "utf8")) as {
     maintenanceHistory: Array<{ note: string }>;
   };
-  assert.equal(racingDecision.maintenanceHistory.length, racingSuccesses.length);
+  assert.equal(racingDecision.maintenanceHistory.length, racingSuccesses.length + 1);
+  assert.equal(racingDecision.maintenanceHistory[0]?.note, priorRecoveryHistoryEntry.note);
   assert.deepEqual(
     new Set(racingDecision.maintenanceHistory.map((entry) => entry.note)),
-    new Set(racingResults.flatMap((result, index) => result.code === 0
-      ? [index === 0 ? "First concurrent synthetic recovery attempt." : "Second concurrent synthetic recovery attempt."]
-      : [])),
+    new Set([
+      priorRecoveryHistoryEntry.note,
+      ...racingResults.flatMap((result, index) => result.code === 0
+        ? [index === 0 ? "First concurrent synthetic recovery attempt." : "Second concurrent synthetic recovery attempt."]
+        : []),
+    ]),
   );
   assert.equal(fs.existsSync(racingLockPath), false);
   assert.equal(fs.existsSync(`${racingLockPath}.recovery`), false);
