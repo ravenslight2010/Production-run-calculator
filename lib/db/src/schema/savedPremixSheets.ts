@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
 
 // Saved premix sheets. When the premix workbook importer commits an import, a
 // snapshot of the parsed premix sheet (the Mix[] it declared) is saved here so
@@ -8,7 +8,7 @@ import { pgTable, text, jsonb, timestamp, serial } from "drizzle-orm/pg-core";
 // factory-wide across all signed-in users, exactly like saved spec sheets.
 // `scope` isolates the sandbox account from live.
 export const savedPremixSheetsTable = pgTable("saved_premix_sheets", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   label: text("label").notNull(),
   // Stable per-file identity (normalized uploaded filename) so retention keeps the

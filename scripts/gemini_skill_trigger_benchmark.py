@@ -30,7 +30,7 @@ FAILURE_CATEGORIES = frozenset({
     "response_schema",
     "field_validation",
 })
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = os.environ.get("GEMINI_BENCHMARK_MODEL", "gemini-3.6-flash")
 DEFAULT_CONFIDENCE = 0.75
 MINIMUM_ACCURACY = 0.8
 MINIMUM_COVERAGE = 0.8

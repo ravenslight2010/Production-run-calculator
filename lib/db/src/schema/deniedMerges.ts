@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uniqueIndex, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uniqueIndex, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -24,7 +24,7 @@ import { z } from "zod/v4";
 export const deniedMergesTable = pgTable(
   "denied_merges",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     category: text("category").notNull().default("ingredient"),
     brand: text("brand"),

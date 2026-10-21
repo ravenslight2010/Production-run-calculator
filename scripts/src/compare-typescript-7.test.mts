@@ -329,7 +329,7 @@ test("compact contract evidence reuses the existing TypeScript 6 and 7 builds", 
     "utf8",
   );
   assert.equal((workflow.match(/run: node scripts\/src\/test-results\.mjs run --lane release-/gu) ?? []).length, 2);
-  assert.equal((workflow.match(/uses: actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4/gu) ?? []).length >= 2, true);
+  assert.equal((workflow.match(/uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2/gu) ?? []).length >= 2, true);
   assert.match(workflow, /typescript-7-declaration-contracts-standard-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
   assert.match(workflow, /typescript-7-declaration-contracts-full-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
 });

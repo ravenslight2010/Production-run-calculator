@@ -34,7 +34,7 @@ for workflow in "${workflow_files[@]}"; do
   mapfile -t download_lines < <(
     {
       grep -Ein \
-        'releases/download|gh[[:space:]]+(release[[:space:]]+)?download|actions/download-artifact|(^|[[:space:]])(curl|wget)[[:space:]].*(--output[=[:space:]]|-o[[:space:]]|--remote-name([[:space:]]|$)|(^|[[:space:]])-O([[:space:]]|$))|(^|[[:space:]])(tar|unzip)[[:space:]]' \
+        'releases/download|gh[[:space:]]+(release[[:space:]]+)?download|(^|[[:space:]])(curl|wget)[[:space:]].*(--output[=[:space:]]|-o[[:space:]]|--remote-name([[:space:]]|$)|(^|[[:space:]])-O([[:space:]]|$))|(^|[[:space:]])(tar|unzip)[[:space:]]' \
         "$workflow" || true
       awk '
         function continued(line) { return line ~ /\\[[:space:]]*$/ }

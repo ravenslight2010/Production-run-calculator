@@ -1,4 +1,4 @@
-import { boolean, index, integer, serial, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 // Bounded, payload-free failure events used to aggregate background-operation
 // health across API instances. Retention is enforced by the API diagnostics
@@ -6,7 +6,7 @@ import { boolean, index, integer, serial, pgTable, text, timestamp } from "drizz
 export const backgroundOperationEventsTable = pgTable(
   "background_operation_events",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     operation: text("operation").notNull(),
     sourceInstance: text("source_instance").notNull().default("legacy"),
     errorCode: text("error_code").notNull(),

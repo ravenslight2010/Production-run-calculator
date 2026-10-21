@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uniqueIndex, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uniqueIndex, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -22,7 +22,7 @@ import { z } from "zod/v4";
 export const facilityKnowledgeTable = pgTable(
   "facility_knowledge",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     domain: text("domain").notNull(),
     key: text("key").notNull(),

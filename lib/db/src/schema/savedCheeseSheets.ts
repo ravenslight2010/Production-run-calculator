@@ -1,10 +1,10 @@
-import { pgTable, text, jsonb, timestamp, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
 
 // Parsed Cheese Mix Recipe Specs retained after a reviewed import. The source
 // is intentionally parsed data only: original workbook bytes are never stored.
 // `scope` keeps sandbox data separate from live factory data.
 export const savedCheeseSheetsTable = pgTable("saved_cheese_sheets", {
-  id: serial("id").primaryKey(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull().default("live"),
   label: text("label").notNull(),
   // Normalized filename identity. Retention keeps two versions per workbook.

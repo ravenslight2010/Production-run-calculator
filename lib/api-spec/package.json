@@ -12,8 +12,10 @@
     "test:generated-isolation": "bash ./check-generated.test.sh"
   },
   "devDependencies": {
-    "orval": "8.42.0",
+    "orval": "8.43.0",
+    "typedoc": "0.28.20",
     "typedoc-plugin-coverage": "4.0.3",
+    "typedoc-plugin-markdown": "4.14.0",
     "typescript": "6.0.3"
   }
 }

@@ -1,10 +1,10 @@
-import { pgTable, text, jsonb, timestamp, index, uniqueIndex, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer } from "drizzle-orm/pg-core";
 
 /** Bounded, sanitized audit records for workbook imports. */
 export const importHistoryTable = pgTable(
   "import_history",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     scope: text("scope").notNull().default("live"),
     importType: text("import_type").notNull(),
     sourceKey: text("source_key"),

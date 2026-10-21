@@ -620,6 +620,11 @@ async function seedBreakSchedule(): Promise<{
 async function openSettings(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
+  // Wait for the dropdown to fully unmount before returning. Radix keeps the
+  // menu in the DOM through its close fade-out; an axe scan that lands during
+  // the fade computes opacity-blended colors and reports phantom dark-on-dark
+  // contrast violations (plus a region violation for the popper wrapper).
+  await expect(page.getByRole("menu")).toHaveCount(0);
   const heading = page.getByRole("heading", { name: "Manage Lists & Settings" });
   await expect(heading).toBeVisible();
   return heading;
@@ -886,9 +891,9 @@ test.describe("accessibility smoke", () => {
     const fieldChecks = page.getByTestId("field-checks-panel");
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
-    await expect(fieldChecks.getByText("Authenticated app startup and home bundle timing.", { exact: true })).toBeVisible();
+    await expect(fieldChecks.getByText("Recorded when the authenticated field-check observer starts; home-bundle timing is a separate performance observation.", { exact: true })).toBeVisible();
     await expect(fieldChecks.getByText("Guided hardware confirmations", { exact: true })).toBeVisible();
-    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Health Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toBeVisible();
     expect(
       await fieldChecks.getByRole("button", { name: "Pass", exact: true }).count(),
@@ -1234,7 +1239,7 @@ test.describe("accessibility smoke", () => {
     await expect(fieldChecks).toBeVisible();
     await expect(fieldChecks.getByRole("heading", { name: "Field checks" })).toBeVisible();
     await expect(fieldChecks.getByText("Guided hardware confirmations", { exact: true })).toBeVisible();
-    await expect(fieldChecks.getByText(/Touch accuracy: Unsupported/)).toBeVisible();
+    await expect(fieldChecks.getByText(/Touch accuracy: Health Unsupported/)).toBeVisible();
     await expect(fieldChecks.getByRole("combobox", { name: "Device category", exact: true })).toHaveCount(0);
     await expect(fieldChecks.getByRole("button", { name: "Pass", exact: true })).toHaveCount(0);
     await expect(fieldChecks.getByRole("button", { name: "Fail", exact: true })).toHaveCount(0);

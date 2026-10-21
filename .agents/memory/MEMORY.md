@@ -154,4 +154,10 @@
 - [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
+- [Auto-track remainder carry](autotrack-zero-seed.md) + [zero seed](autotrack-remainder-carry.md) — remainder carry + resets-before-write ordering (fixed interval REJECTED); dough counters decrement-only w/ one-shot Suggest seed when left 0.
+- [Scheduled-day and import auth](scheduled-day-client-date.md) + [schedule-import-401.md] — key sync by client date and stop raw-fetch writes on 401 before hydration or reporting per-day failures.
+- [Profile source-of-truth for pending runs](scheduled-run-profile-snapshot.md) — profile saves fan out to ALL not-started runs (today + scheduled) w/ LWW stamps; started runs keep their snapshot.
+- [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.
+- [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher for importer link passes; only loose-key equality may auto-rename, reorder/typo/family-fold are declinable suggestions (prod cross-link incident).
+- [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
 - [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.

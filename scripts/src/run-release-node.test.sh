@@ -1173,7 +1173,6 @@ test_release_runner_verifies_local_tls_certificates() {
   local ipv6_url
   local ipv6_path_url
   local mismatched_ipv6_url
-  local mismatched_ipv6_path_url
   local ipv6_proxy_url
   local attempt
   local status
@@ -1494,8 +1493,12 @@ const registryServer = https.createServer(
     }
 
     if (request.method === "GET" && requestUrl.pathname === "/downgrade.tgz") {
+      // Target 127.0.0.2 rather than 127.0.0.1: the HTTPS-only guard
+      // deliberately exempts same-host loopback cleartext requests, so the
+      // downgrade must use a non-exempt loopback address to prove the guard
+      // blocks the cleartext fetch before any bytes leave the process.
       response.writeHead(302, {
-        location: `http://127.0.0.1:${httpTarballServer.address().port}/fixture.tgz`,
+        location: `http://127.0.0.2:${httpTarballServer.address().port}/fixture.tgz`,
       });
       response.end();
       return;
@@ -1592,20 +1595,24 @@ const ipv6ProxyServer = http.createServer();
 ipv6ProxyServer.on("connect", (request, clientSocket, head) => {
   fs.appendFileSync(ipv6ProxyRequestLogPath, `${request.url}\n`);
   const ipv6Target = /^\[(::1|::2)\]:(\d+)$/.exec(request.url ?? "");
+  const nameTarget = /^ipv6-mismatch\.invalid:(\d+)$/.exec(request.url ?? "");
   const ipv4Target = /^127\.0\.0\.1:(\d+)$/.exec(request.url ?? "");
-  const targetPort = Number(ipv6Target?.[2] ?? ipv4Target?.[1]);
+  const targetPort = Number(
+    ipv6Target?.[2] ?? nameTarget?.[1] ?? ipv4Target?.[1],
+  );
   if (
     !targetPort ||
-    (ipv6Target && targetPort !== ipv6Server.address()?.port) ||
+    ((ipv6Target || nameTarget) &&
+      targetPort !== ipv6Server.address()?.port) ||
     (ipv4Target && targetPort !== registryServer.address()?.port) ||
-    (!ipv6Target && !ipv4Target)
+    (!ipv6Target && !nameTarget && !ipv4Target)
   ) {
     clientSocket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
 
   const upstream = net.connect(
-    { host: ipv6Target ? "::1" : "127.0.0.1", port: targetPort },
+    { host: ipv6Target || nameTarget ? "::1" : "127.0.0.1", port: targetPort },
     () => {
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length > 0) upstream.write(head);
@@ -1790,7 +1797,14 @@ EOF
   ipv6_url="https://[::1]:$(cat "$ipv6_port_file")/"
   ipv6_path_url="https://[::1]:$(cat "$ipv6_port_file")/npm/"
   mismatched_ipv6_url="https://[::2]:$(cat "$ipv6_port_file")/"
-  mismatched_ipv6_path_url="https://[::2]:$(cat "$ipv6_port_file")/npm/"
+  # npm's bundled https-proxy-agent omits servername for IP-literal targets
+  # and drops host when upgrading the CONNECT tunnel, so Node skips hostname
+  # verification entirely for https://[::2] through a proxy. The proxied
+  # npm/npx mismatch cases therefore use a DNS hostname mismatch, which proxy
+  # agents verify correctly; the direct [::2] client case above still covers
+  # IP SAN identity without a proxy.
+  mismatched_ipv6_name_url="https://ipv6-mismatch.invalid:$(cat "$ipv6_port_file")/"
+  mismatched_ipv6_name_path_url="https://ipv6-mismatch.invalid:$(cat "$ipv6_port_file")/npm/"
   ipv6_proxy_url="http://127.0.0.1:$(cat "$ipv6_proxy_port_file")"
 
   set +e
@@ -2215,21 +2229,21 @@ EOF
   set +e
   run_local_npx "${cert_dir}/test-ca.pem" \
     "${workspace}/ipv6-npx-mismatch-cache" "$ipv6_npx_mismatch_output" \
-    "$mismatched_ipv6_path_url" "$ipv6_proxy_url"
+    "$mismatched_ipv6_name_path_url" "$ipv6_proxy_url"
   status=$?
   set -e
   local ipv6_npx_mismatch_result
   ipv6_npx_mismatch_result=$(cat "$ipv6_npx_mismatch_output")
   if [[ "$status" -eq 0 ]] ||
     [[ "$ipv6_npx_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
-    printf 'Installed npx did not reject the mismatched IPv6 registry certificate by identity (status %s):\n%s\n' \
+    printf 'Installed npx did not reject the mismatched registry certificate hostname identity (status %s):\n%s\n' \
       "$status" "$ipv6_npx_mismatch_result" >&2
     return 1
   fi
   assert_not_contains "$ipv6_npx_mismatch_result" "ECONNREFUSED"
   assert_not_contains "$ipv6_npx_mismatch_result" "ECONNRESET"
   assert_contains "$(cat "$ipv6_proxy_requests")" \
-    "[::2]:$(cat "$ipv6_port_file")"
+    "ipv6-mismatch.invalid:$(cat "$ipv6_port_file")"
   assert_not_contains "$(cat "$registry_requests")" "GET /${package_name}"
 
   : >"$registry_requests"
@@ -2258,7 +2272,7 @@ EOF
   run_local_npm_install \
     "${workspace}/ipv6-npm-mismatch-project" \
     "${workspace}/ipv6-npm-mismatch-cache" "$ipv6_npm_mismatch_output" \
-    "${workspace}/ipv6-npm-mismatch-marker" "$mismatched_ipv6_url" \
+    "${workspace}/ipv6-npm-mismatch-marker" "$mismatched_ipv6_name_url" \
     "$ipv6_proxy_url"
   status=$?
   set -e
@@ -2266,14 +2280,14 @@ EOF
   ipv6_npm_mismatch_result=$(cat "$ipv6_npm_mismatch_output")
   if [[ "$status" -eq 0 ]] ||
     [[ "$ipv6_npm_mismatch_result" != *"ERR_TLS_CERT_ALTNAME_INVALID"* ]]; then
-    printf 'Installed npm did not reject the mismatched IPv6 registry certificate by identity (status %s):\n%s\n' \
+    printf 'Installed npm did not reject the mismatched registry certificate hostname identity (status %s):\n%s\n' \
       "$status" "$ipv6_npm_mismatch_result" >&2
     return 1
   fi
   assert_not_contains "$ipv6_npm_mismatch_result" "ECONNREFUSED"
   assert_not_contains "$ipv6_npm_mismatch_result" "ECONNRESET"
   assert_contains "$(cat "$ipv6_proxy_requests")" \
-    "[::2]:$(cat "$ipv6_port_file")"
+    "ipv6-mismatch.invalid:$(cat "$ipv6_port_file")"
   assert_not_contains "$(cat "$registry_requests")" "GET /${package_name}"
 
   set +e
@@ -2296,8 +2310,11 @@ EOF
       "$untrusted_npx_result" >&2
     return 1
   fi
-  assert_contains "$(cat "$registry_requests")" "GET /${package_name}"
-  assert_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
+  # Certificate validation fails during the TLS handshake, before any HTTP
+  # request bytes are sent, so the registry must not log the package fetch;
+  # the npm error above already proves the attempt reached the registry URL.
+  assert_not_contains "$(cat "$registry_requests")" "GET /${package_name}"
+  assert_not_contains "$(cat "$registry_requests")" "GET /fixture.tgz"
 
   printf 'altered\n' >"$tarball_mode_file"
   set +e

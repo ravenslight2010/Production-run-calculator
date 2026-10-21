@@ -7,6 +7,13 @@ vi.mock("@google/genai", () => ({
   GoogleGenAI: class {
     models = { generateContent, generateContentStream };
   },
+  ThinkingLevel: {
+    THINKING_LEVEL_UNSPECIFIED: "THINKING_LEVEL_UNSPECIFIED",
+    MINIMAL: "MINIMAL",
+    LOW: "LOW",
+    MEDIUM: "MEDIUM",
+    HIGH: "HIGH",
+  },
 }));
 
 import {
@@ -123,8 +130,22 @@ describe("Gemini adapter resilience", () => {
     expect(serializedMetrics).not.toContain("gemini-test");
   });
 
-  it("keeps Gemini selected when only a proposed local endpoint is configured", async () => {
+  it("routes local-first and fails closed when the local endpoint is unreachable without opt-in fallback", async () => {
     vi.stubEnv("LOCAL_AI_BASE_URL", "http://127.0.0.1:11434/v1");
+    generateContent.mockResolvedValue({ text: "Gemini response" });
+
+    // Nothing listens on the local endpoint; without
+    // LOCAL_AI_FALLBACK_TO_GEMINI=true the transport failure must surface
+    // instead of silently falling through to Gemini.
+    await expect(openai.chat.completions.create(params)).rejects.toThrow();
+
+    expect(generateContent).not.toHaveBeenCalled();
+    expect(generateContentStream).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the Gemini chain on local transport failure when opted in", async () => {
+    vi.stubEnv("LOCAL_AI_BASE_URL", "http://127.0.0.1:11434/v1");
+    vi.stubEnv("LOCAL_AI_FALLBACK_TO_GEMINI", "true");
     generateContent.mockResolvedValue({ text: "Gemini response" });
 
     await expect(openai.chat.completions.create(params)).resolves.toEqual({

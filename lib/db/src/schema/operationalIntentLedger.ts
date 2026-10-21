@@ -7,7 +7,6 @@ import {
   uniqueIndex,
   index,
   integer,
-  serial,
 } from "drizzle-orm/pg-core";
 
 /** Non-expiring idempotency fence for offline production commands. */
@@ -17,9 +16,9 @@ export const operationalIntentLedgerTable = pgTable("operational_intent_ledger",
   // need to replay an unbounded command history to recover it.
   // Additive cursor only: this table already exists in populated deployments
   // with its idempotency unique key. Do not replace/add a primary key during a
-  // rolling schema update. The legacy serial sequence supplies increasing
+  // rolling schema update. PostgreSQL's serial sequence supplies increasing
   // values for newly compacted receipts.
-  sequence: serial("sequence").notNull(),
+  sequence: integer("sequence").notNull().generatedByDefaultAsIdentity(),
   scope: text("scope").notNull(),
   date: text("date").notNull(),
   intentId: text("intent_id").notNull(),

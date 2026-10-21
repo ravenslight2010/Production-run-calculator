@@ -33,6 +33,35 @@ router.get("/build-info", (_req: Request, res: Response) => {
 type CheckStatus = "ok" | "warning" | "error" | "pending";
 type AiCapabilityStatus = "configured" | "not_configured" | "pending";
 
+// Optional live probe of a self-hosted OpenAI-compatible model server
+// (Ollama / llama.cpp). Env-config presence is the deploy gate; the live probe
+// only runs when LOCAL_AI_STRICT_READINESS=true so that a slow cold-start
+// tunnel or model load does not block platform rollouts by default. The
+// fail-closed AI behavior per the deterministic-AI-gates policy already covers
+// the runtime path.
+async function probeLocalModelHost(): Promise<"ok" | "error"> {
+  const base = process.env.LOCAL_AI_BASE_URL;
+  if (!base || process.env.LOCAL_AI_STRICT_READINESS !== "true") return "ok";
+  const probeUrl = `${base.replace(/\/$/, "")}/models`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(probeUrl, {
+      signal: controller.signal,
+      headers: process.env.LOCAL_AI_API_KEY
+        ? { authorization: `Bearer ${process.env.LOCAL_AI_API_KEY}` }
+        : undefined,
+    });
+    return res.ok ? "ok" : "error";
+  } catch {
+    return "error";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+
 async function readiness(req: Request, res: Response): Promise<void> {
   const startup = getStartupHealth();
   const correlationId = String(
@@ -79,14 +108,32 @@ async function readiness(req: Request, res: Response): Promise<void> {
 
     // This is a credential-configuration signal, not a remote provider probe.
     // AI is optional for core API traffic, so its absence is reported without
-    // preventing core readiness.
-    const aiConfigured = isGeminiProviderConfigured();
+    // preventing core readiness. A configured self-hosted LOCAL_AI_BASE_URL
+    // (OpenAI-compatible local backend) also satisfies the check; an unrelated
+    // OPENAI_API_KEY is intentionally NOT accepted. When a local host is
+    // configured, an optional strict probe (LOCAL_AI_STRICT_READINESS=true)
+    // can fail readiness if the model server is unreachable.
+    const aiConfigured =
+      isGeminiProviderConfigured() || Boolean(process.env.LOCAL_AI_BASE_URL);
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "warning", detail: "ai_provider_not_configured" };
     capabilities.ai = aiConfigured
       ? { status: "configured" }
       : { status: "not_configured", detail: "ai_provider_not_configured" };
+    if (aiConfigured && process.env.LOCAL_AI_BASE_URL) {
+      const probeStatus = await probeLocalModelHost();
+      if (probeStatus !== "ok") {
+        checks.dependencies = {
+          status: "error",
+          detail: "local_model_host_unreachable",
+        };
+        capabilities.ai = {
+          status: "not_configured",
+          detail: "local_model_host_unreachable",
+        };
+      }
+    }
     const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
     const scheduledEvaluationQueue = getScheduledEvaluationQueueDiagnostics();
     const syncOutboxLag = getSyncOutboxLagDiagnostics();
