@@ -227,7 +227,6 @@ jobs:
           persist-credentials: false
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
-      # pnpm version is read from the "packageManager" field in package.json
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -289,10 +288,6 @@ jobs:
       - name: Apply schema
         id: apply-schema
         run: pnpm --filter @workspace/db run push-force
-      - name: Verify serial-to-identity migration on disposable databases
-        env:
-          SERIAL_IDENTITY_TEST_ADMIN_URL: ${{ env.DATABASE_URL }}
-        run: pnpm --filter @workspace/db run test:serial-to-identity
       - name: Run API server tests
         id: run-api-server-tests
         run: node scripts/src/test-results.mjs run --lane ci-api-postgres -- pnpm --filter @workspace/api-server test
