@@ -170,6 +170,51 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expectZoneReason(/Packaging/, "No current station activity");
   });
 
+  it("labels the age unknown when a running idle station has no authoritative activity timestamp", () => {
+    renderLineMap("running");
+
+    for (const zoneId of [
+      "dough",
+      "sauce",
+      "press",
+      "frontline",
+      "freezeTunnel",
+      "packaging",
+      "warehouse",
+    ]) {
+      expect(
+        screen.getByTestId(`station-activity-age-${zoneId}`).textContent,
+      ).toBe("Time since last confirmed activity: unknown");
+    }
+    expectZoneStatus(/Press \/ Oven/, "Idle");
+    expectZoneReason(/Press \/ Oven/, "No current station activity");
+  });
+
+  it("does not show an activity age for active stations or non-running lifecycle states", () => {
+    renderLineMap("running", { active: true });
+    expect(
+      within(screen.getByRole("button", { name: /Press \/ Oven/ })).queryByTestId(
+        "station-activity-age-press",
+      ),
+    ).toBeNull();
+    cleanup();
+
+    renderLineMap("paused");
+    expect(screen.queryByTestId("station-activity-age-press")).toBeNull();
+    cleanup();
+
+    renderLineMap("pending");
+    expect(screen.queryByTestId("station-activity-age-press")).toBeNull();
+    cleanup();
+
+    renderLineMap("ended");
+    expect(screen.queryByTestId("station-activity-age-press")).toBeNull();
+    cleanup();
+
+    renderLineMap("pending", { currentRun: null });
+    expect(screen.queryByTestId("station-activity-age-press")).toBeNull();
+  });
+
   it("does not show station activity while the line is paused", () => {
     renderLineMap("paused", { active: true });
 

@@ -364,6 +364,15 @@ function ZoneCard({ zone, onClick }: { zone: ZoneStatus; onClick: () => void }) 
           {zone.reason}
         </p>
       )}
+      {/* Run-wide edit stamps and projection capture times are not station events. */}
+      {zone.reason === "No current station activity" && (
+        <p
+          className="text-[11px] text-muted-foreground mb-1.5"
+          data-testid={`station-activity-age-${zone.id}`}
+        >
+          Time since last confirmed activity: unknown
+        </p>
+      )}
       {zone.metrics.length > 0 && (
         <div className="space-y-0.5">
           {zone.metrics.map((m) => (
