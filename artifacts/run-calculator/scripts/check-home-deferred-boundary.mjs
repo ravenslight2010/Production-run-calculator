@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import ts from "@workspace/typescript-api-v6";
 import { fileURLToPath } from "node:url";
 
@@ -169,29 +170,60 @@ function resolveSourceFile(basePath, specifier, readSource) {
   );
 }
 
-function workspacePackageRoot(packageName, workspaceRoot, readSource) {
-  const packageDirectory = packageName.slice("@workspace/".length);
-  const candidateDirectories = [
-    path.resolve(workspaceRoot, "artifacts", packageDirectory),
-    path.resolve(workspaceRoot, "lib", packageDirectory),
-    path.resolve(workspaceRoot, "lib", "integrations", packageDirectory),
-    path.resolve(workspaceRoot, "scripts"),
-  ];
-  const matches = [];
-  for (const candidateDirectory of candidateDirectories) {
-    const manifestPath = path.join(candidateDirectory, "package.json");
-    try {
-      const manifest = JSON.parse(readSource(manifestPath));
-      if (manifest.name === packageName) matches.push(candidateDirectory);
-    } catch (error) {
-      if (
-        error?.code !== "ENOENT" &&
-        error?.code !== "ENOTDIR" &&
-        error?.code !== "EISDIR"
-      ) {
-        throw error;
-      }
+function discoverWorkspacePackageDirectories(workspaceRoot) {
+  const result = spawnSync(
+    "pnpm",
+    ["--dir", workspaceRoot, "--recursive", "list", "--json", "--depth", "-1"],
+    { encoding: "utf8" },
+  );
+  if (result.error || result.status !== 0) {
+    const detail =
+      result.error?.message || result.stderr?.trim() || `exit status ${result.status}`;
+    throw new Error(
+      `Unable to discover local workspace packages from pnpm-workspace.yaml: ${detail}`,
+    );
+  }
+
+  let packages;
+  try {
+    packages = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(
+      `Unable to parse pnpm workspace package listing: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!Array.isArray(packages)) {
+    throw new Error("pnpm workspace package listing must be a JSON array.");
+  }
+
+  const root = path.resolve(workspaceRoot);
+  return packages.map((workspacePackage) => {
+    if (typeof workspacePackage?.path !== "string") {
+      throw new Error("pnpm workspace package listing contains an entry without a path.");
     }
+    const packageDirectory = path.resolve(workspacePackage.path);
+    const relativePath = path.relative(root, packageDirectory);
+    if (
+      relativePath === ".." ||
+      relativePath.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativePath)
+    ) {
+      throw new Error(
+        `pnpm reported a workspace package outside the workspace root: "${packageDirectory}".`,
+      );
+    }
+    return packageDirectory;
+  });
+}
+
+function workspacePackageRoot(packageName, readSource, workspacePackageDirectories) {
+  const matches = [];
+  for (const candidateDirectory of workspacePackageDirectories) {
+    const manifestPath = path.join(candidateDirectory, "package.json");
+    const manifest = JSON.parse(readSource(manifestPath));
+    if (manifest.name === packageName) matches.push(candidateDirectory);
   }
   if (matches.length > 1) {
     throw new Error(`Workspace package "${packageName}" has multiple local manifests.`);
@@ -235,11 +267,16 @@ function resolveWorkspaceSource(
   specifier,
   workspaceRoot,
   readSource,
+  getWorkspacePackageDirectories,
 ) {
   const match = specifier.match(/^(@workspace\/[^/]+)(\/.*)?$/);
   if (!match) return null;
   const [, packageName, packageSubpath = ""] = match;
-  const packageRoot = workspacePackageRoot(packageName, workspaceRoot, readSource);
+  const packageRoot = workspacePackageRoot(
+    packageName,
+    readSource,
+    getWorkspacePackageDirectories(),
+  );
   if (!packageRoot) {
     throw new Error(`Unable to find local workspace package "${packageName}".`);
   }
@@ -275,6 +312,7 @@ function resolveLocalSource(
   workspaceRoot,
   readSource,
   includeWorkspacePackages = true,
+  getWorkspacePackageDirectories,
 ) {
   const cleanSpecifier = specifier.split(/[?#]/, 1)[0];
   let basePath;
@@ -284,7 +322,12 @@ function resolveLocalSource(
     basePath = path.resolve(path.dirname(importerPath), cleanSpecifier);
   } else {
     return includeWorkspacePackages
-      ? resolveWorkspaceSource(cleanSpecifier, workspaceRoot, readSource)
+      ? resolveWorkspaceSource(
+          cleanSpecifier,
+          workspaceRoot,
+          readSource,
+          getWorkspacePackageDirectories,
+        )
       : null;
   }
 
@@ -300,6 +343,11 @@ export function checkHomeDeferredSourceBoundary({
   workspaceRoot = WORKSPACE_ROOT,
   readSource = (filePath) => fs.readFileSync(filePath, "utf8"),
 }) {
+  let workspacePackageDirectories;
+  const getWorkspacePackageDirectories = () => {
+    workspacePackageDirectories ??= discoverWorkspacePackageDirectories(workspaceRoot);
+    return workspacePackageDirectories;
+  };
   const roots = [
     ["Home", homeFilePath, homeSource],
     ["LiveRunTabContent", liveRunFilePath, liveRunSource],
@@ -332,6 +380,7 @@ export function checkHomeDeferredSourceBoundary({
         workspaceRoot,
         readSource,
         false,
+        getWorkspacePackageDirectories,
       );
       if (importedPath) {
         dynamicImportPaths.add(normalize(path.resolve(importedPath)));
@@ -363,6 +412,8 @@ export function checkHomeDeferredSourceBoundary({
         sourceRoot,
         workspaceRoot,
         readSource,
+        true,
+        getWorkspacePackageDirectories,
       );
       if (!importedPath) continue;
 

@@ -51,7 +51,13 @@ function validManifest() {
   };
 }
 
-function createSourceFixture({ homeSource, helperSource, packageSource }) {
+function createSourceFixture({
+  homeSource,
+  helperSource,
+  packageSource,
+  workspacePatterns = ["lib/*"],
+  packageLocations = packageSource === undefined ? [] : ["lib/home-bridge"],
+}) {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "home-deferred-boundary-"));
   const sourceRoot = path.join(fixtureRoot, "src");
   const homeFilePath = path.join(sourceRoot, "pages/home.tsx");
@@ -63,6 +69,14 @@ function createSourceFixture({ homeSource, helperSource, packageSource }) {
   fs.mkdirSync(path.dirname(homeFilePath), { recursive: true });
   fs.mkdirSync(path.dirname(liveRunFilePath), { recursive: true });
   fs.mkdirSync(path.dirname(helperFilePath), { recursive: true });
+  fs.writeFileSync(
+    path.join(fixtureRoot, "package.json"),
+    JSON.stringify({ name: "home-deferred-boundary-fixture", private: true }),
+  );
+  fs.writeFileSync(
+    path.join(fixtureRoot, "pnpm-workspace.yaml"),
+    `packages:\n${workspacePatterns.map((pattern) => `  - "${pattern}"`).join("\n")}\n`,
+  );
   fs.writeFileSync(liveRunFilePath, "");
   fs.writeFileSync(helperFilePath, helperSource);
   for (const suffix of DEFERRED_HOME_MODULE_SUFFIXES) {
@@ -70,8 +84,8 @@ function createSourceFixture({ homeSource, helperSource, packageSource }) {
     fs.mkdirSync(path.dirname(panelPath), { recursive: true });
     fs.writeFileSync(panelPath, `export default function ${path.basename(panelPath, ".tsx")}() {}`);
   }
-  if (packageSource !== undefined) {
-    const packageRoot = path.join(fixtureRoot, "lib/home-bridge");
+  for (const packageLocation of packageLocations) {
+    const packageRoot = path.join(fixtureRoot, packageLocation);
     fs.mkdirSync(path.join(packageRoot, "src"), { recursive: true });
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
@@ -80,7 +94,7 @@ function createSourceFixture({ homeSource, helperSource, packageSource }) {
         exports: { ".": "./src/index.ts" },
       }),
     );
-    fs.writeFileSync(path.join(packageRoot, "src/index.ts"), packageSource);
+    fs.writeFileSync(path.join(packageRoot, "src/index.ts"), packageSource ?? "");
   }
   const resolvedHomeSource =
     typeof homeSource === "function" ? homeSource(sourceRoot) : homeSource;
@@ -285,15 +299,77 @@ test("source boundary ignores third-party imports in a local workspace package",
     helperSource: "",
     packageSource: [
       'import "third-party-package";',
-      'export type { SetupContentProps } from "../../../src/components/SetupContent";',
-      'export const loadSetupContent = () => import("../../../src/components/SetupContent");',
+      'export type { SetupContentProps } from "../../../../../../src/components/SetupContent";',
+      'export const loadSetupContent = () => import("../../../../../../src/components/SetupContent");',
       "export const bridge = true;",
     ].join("\n"),
+    workspacePatterns: ["modules/**/packages/*"],
+    packageLocations: ["modules/team/tooling/packages/home-bridge"],
   });
 
   try {
     const result = checkHomeDeferredSourceBoundary(fixture);
     assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary discovers packages under nested pnpm workspace patterns", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: [
+      'import "third-party-package";',
+      'export { default as bridge } from "../../../../../../src/components/SetupContent";',
+    ].join("\n"),
+    workspacePatterns: ["modules/**/packages/*"],
+    packageLocations: ["modules/team/tooling/packages/home-bridge"],
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*modules\/team\/tooling\/packages\/home-bridge\/src\/index\.ts/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary clearly rejects unresolved local workspace package names", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/missing-package";\n${sourceHome()}`,
+    helperSource: "",
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Unable to find local workspace package "@workspace\/missing-package"/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary clearly rejects ambiguous local workspace package names", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    workspacePatterns: ["modules/**/packages/*"],
+    packageLocations: [
+      "modules/one/packages/home-bridge",
+      "modules/two/packages/home-bridge",
+    ],
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Workspace package "@workspace\/home-bridge" has multiple local manifests/,
+    );
   } finally {
     fixture.cleanup();
   }
