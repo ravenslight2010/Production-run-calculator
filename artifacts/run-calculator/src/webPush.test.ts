@@ -1,8 +1,38 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchVapidPublicKey, listPushSubscriptions, vapidKeyToUint8Array } from "./webPush";
+import {
+  enableWebPush,
+  fetchVapidPublicKey,
+  listPushSubscriptions,
+  recoverWebPush,
+  vapidKeyToUint8Array,
+} from "./webPush";
 
 describe("web push client helpers", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  function installPushBrowser(existingSubscription: PushSubscription | null) {
+    const subscribe = vi.fn();
+    const getSubscription = vi.fn().mockResolvedValue(existingSubscription);
+    const registration = { pushManager: { getSubscription, subscribe } };
+    const notification = Object.assign(vi.fn(), {
+      permission: "granted",
+      requestPermission: vi.fn().mockResolvedValue("granted"),
+    });
+    const storage = new Map<string, string>();
+    vi.stubGlobal("window", {
+      isSecureContext: true,
+      Notification: notification,
+      PushManager: vi.fn(),
+      atob: globalThis.atob,
+    });
+    vi.stubGlobal("navigator", { serviceWorker: { ready: Promise.resolve(registration) } });
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    return { registration, subscribe, getSubscription, storage };
+  }
 
   it("converts URL-safe VAPID public keys", () => {
     expect(Array.from(vapidKeyToUint8Array("AQI_"))).toEqual([1, 2, 63]);
@@ -18,5 +48,115 @@ describe("web push client helpers", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/web-push/vapid-public-key");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: "same-origin" });
     expect(fetchMock.mock.calls[1][0]).toBe("/api/web-push/subscriptions");
+  });
+
+  it("keeps the current browser subscription when the server rejects its registration", async () => {
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    const current = { unsubscribe, toJSON: () => ({ endpoint: "https://push.example/old" }) } as unknown as PushSubscription;
+    const { storage } = installPushBrowser(current);
+    storage.set("run-calculator.web-push-subscription-id.v1", "saved-device-id");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "Invalid push subscription" }), { status: 400 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await enableWebPush("AQI_");
+
+    expect(result).toMatchObject({
+      state: "error",
+      registrationRejected: true,
+      subscriptionWasExisting: true,
+      subscription: current,
+      subscriptionId: "saved-device-id",
+    });
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    expect(storage.get("run-calculator.web-push-subscription-id.v1")).toBe("saved-device-id");
+  });
+
+  it("replaces the device subscription only when recovery is explicitly requested", async () => {
+    const events: string[] = [];
+    const current = {
+      unsubscribe: vi.fn(async () => { events.push("unsubscribe old"); return true; }),
+      toJSON: () => ({ endpoint: "https://push.example/old" }),
+    } as unknown as PushSubscription;
+    const replacement = {
+      toJSON: () => ({ endpoint: "https://push.example/new" }),
+    } as unknown as PushSubscription;
+    const { subscribe, storage } = installPushBrowser(current);
+    storage.set("run-calculator.web-push-subscription-id.v1", "saved-device-id");
+    subscribe.mockImplementation(async () => {
+      events.push("subscribe new");
+      return replacement;
+    });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+        events.push(`request ${init?.method}`);
+        return new Response(null, { status: 204 });
+      })
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+        events.push(`request ${init?.method}`);
+        return new Response(JSON.stringify({ id: "fresh-device-id" }), { status: 201 });
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await recoverWebPush("AQI_", current, "saved-device-id", true);
+
+    expect(result).toMatchObject({
+      state: "enabled",
+      subscription: replacement,
+      subscriptionId: "fresh-device-id",
+    });
+    expect(events).toEqual([
+      "request DELETE",
+      "unsubscribe old",
+      "subscribe new",
+      "request POST",
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/web-push/subscriptions/saved-device-id");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/web-push/subscriptions");
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("notification-prefs"))).toBe(true);
+    expect(storage.get("run-calculator.web-push-subscription-id.v1")).toBe("fresh-device-id");
+  });
+
+  it("leaves the current subscription intact when the saved server registration cannot be revoked", async () => {
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    const current = {
+      unsubscribe,
+      toJSON: () => ({ endpoint: "https://push.example/old" }),
+    } as unknown as PushSubscription;
+    const { storage, subscribe } = installPushBrowser(current);
+    storage.set("run-calculator.web-push-subscription-id.v1", "saved-device-id");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "Request failed" }), { status: 503 }),
+    ));
+
+    const result = await recoverWebPush("AQI_", current, "saved-device-id", true);
+
+    expect(result).toMatchObject({ state: "error", subscription: current, subscriptionId: "saved-device-id" });
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(storage.get("run-calculator.web-push-subscription-id.v1")).toBe("saved-device-id");
+  });
+
+  it("refuses to replace a previously saved subscription when its server ID is unknown", async () => {
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    const current = {
+      unsubscribe,
+      toJSON: () => ({ endpoint: "https://push.example/old" }),
+    } as unknown as PushSubscription;
+    const { subscribe } = installPushBrowser(current);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await recoverWebPush("AQI_", current, undefined, true);
+
+    expect(result).toMatchObject({ state: "error", subscription: current });
+    expect(result.error).toContain("cannot be identified safely");
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

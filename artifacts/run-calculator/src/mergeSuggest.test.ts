@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { clearMergeSuggestionCache, isCurrentMergeSuggestionRequest, suggestMerges } from "./mergeSuggest";
+import {
+  clearMergeSuggestionCache,
+  isCurrentMergeSuggestionRequest,
+  saveConfirmedMergeAliasesBestEffort,
+  suggestMerges,
+} from "./mergeSuggest";
 import {
   collectDeniedPairs,
   collectMergeAliases,
@@ -213,4 +218,122 @@ describe("suggestMerges request lifecycle", () => {
     ]);
   });
 
+});
+
+describe("saveConfirmedMergeAliasesBestEffort", () => {
+  const response = (body: unknown, status = 200): Response =>
+    ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retargets existing aliases before saving the direct source mapping", async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (init?.method === "POST") return response({ aliases: [] });
+      return response({ aliases: [{ externalName: "A", canonicalName: "B" }] });
+    }));
+
+    await saveConfirmedMergeAliasesBestEffort(["B"], "C");
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/merge-aliases",
+      "/api/merge-aliases",
+    ]);
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      aliases: [
+        { externalName: "A", canonicalName: "C" },
+        { externalName: "B", canonicalName: "C" },
+      ],
+    });
+  });
+
+  it.each([
+    { category: "mixes" as const, brand: undefined, expectedGet: "/api/merge-aliases?category=mixes" },
+    { category: "dough" as const, brand: undefined, expectedGet: "/api/merge-aliases?category=dough" },
+    { category: "sauce" as const, brand: undefined, expectedGet: "/api/merge-aliases?category=sauce" },
+    { category: "cheese" as const, brand: undefined, expectedGet: "/api/merge-aliases?category=cheese" },
+    { category: "brand" as const, brand: undefined, expectedGet: "/api/merge-aliases?category=brand" },
+    { category: "flavor" as const, brand: "Brand A", expectedGet: "/api/merge-aliases?category=flavor&brand=Brand+A" },
+  ])("keeps $category aliases in their category and brand scope", async ({ category, brand, expectedGet }) => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const aliasesByScope = new Map<string, MergeAlias[]>([
+      ["ingredient|", [{ externalName: "A", canonicalName: "B" }]],
+      ["mixes|", [{ externalName: "A", canonicalName: "B" }]],
+      ["dough|", [{ externalName: "A", canonicalName: "B" }]],
+      ["sauce|", [{ externalName: "A", canonicalName: "B" }]],
+      ["cheese|", [{ externalName: "A", canonicalName: "B" }]],
+      ["brand|", [{ externalName: "A", canonicalName: "B" }]],
+      ["flavor|Brand A", [{ externalName: "A", canonicalName: "B" }]],
+      ["flavor|Brand B", [{ externalName: "A", canonicalName: "B" }]],
+    ]);
+    const scopeKey = (scopeCategory: string, scopeBrand?: string) =>
+      `${scopeCategory}|${scopeCategory === "flavor" ? scopeBrand ?? "" : ""}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      const parsedUrl = new URL(url, "http://app.test");
+      const queryCategory = parsedUrl.searchParams.get("category") ?? "ingredient";
+      const queryBrand = parsedUrl.searchParams.get("brand") ?? undefined;
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as {
+          aliases: MergeAlias[];
+          category?: string;
+          brand?: string;
+        };
+        aliasesByScope.set(scopeKey(body.category ?? "ingredient", body.brand), body.aliases);
+        return response({ aliases: body.aliases });
+      }
+      return response({ aliases: aliasesByScope.get(scopeKey(queryCategory, queryBrand)) ?? [] });
+    }));
+
+    await saveConfirmedMergeAliasesBestEffort(["B"], "C", category, brand);
+
+    expect(calls[0].url).toBe(expectedGet);
+    const body = JSON.parse(String(calls[1].init?.body));
+    expect(body.category).toBe(category);
+    if (category === "flavor") expect(body.brand).toBe(brand);
+    else expect(body).not.toHaveProperty("brand");
+    expect(body.aliases).toEqual([
+      { externalName: "A", canonicalName: "C" },
+      { externalName: "B", canonicalName: "C" },
+    ]);
+    expect(aliasesByScope.get(scopeKey(category, brand))).toEqual(body.aliases);
+    const untouchedScope = category === "flavor" ? "flavor|Brand B" : "ingredient|";
+    expect(aliasesByScope.get(untouchedScope)).toEqual([{ externalName: "A", canonicalName: "B" }]);
+  });
+
+  it("still saves direct aliases when reading the scoped alias list fails", async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      return init?.method === "POST"
+        ? response({ aliases: [] })
+        : response({ error: "unavailable" }, 503);
+    }));
+
+    await expect(saveConfirmedMergeAliasesBestEffort(["B"], "C", "flavor", "Brand A"))
+      .resolves.toBeUndefined();
+
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      aliases: [{ externalName: "B", canonicalName: "C" }],
+      category: "flavor",
+      brand: "Brand A",
+    });
+  });
+
+  it("does not reject or block when the alias write fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? response({ error: "unavailable" }, 503)
+        : response({ aliases: [] }),
+    ));
+
+    await expect(saveConfirmedMergeAliasesBestEffort(["B"], "C")).resolves.toBeUndefined();
+  });
 });

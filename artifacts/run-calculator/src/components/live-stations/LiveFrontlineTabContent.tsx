@@ -7,7 +7,6 @@ import {
   applicatorStockFields,
   capApplicatorStock,
   computeApplicatorStockCapacityLbs,
-  computeFrontlineRunRequirement,
 } from "@workspace/live-calc";
 import { MANUAL_SECTION_FIELDS, type ManualSection } from "@workspace/sync-contract";
 import type { FormValues } from "../../types";
@@ -16,7 +15,10 @@ import { useManualControlLock } from "../../manualSectionLocks";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useLiveRun } from "../../contexts/LiveRunContext";
 import { isFrontlineDrainComplete } from "../../linePhases";
-import { deriveFrontlineNeedRows } from "../../frontlineRows";
+import {
+  deriveFrontlineNeedRows,
+  deriveLiveFrontlineQuantitySource,
+} from "../../frontlineRows";
 import { fmtNum, sauceBarrelBreakdown } from "../../utils";
 import { ApplicatorStockRow } from "./ApplicatorStockRow";
 import { ReadOnlyRecipeCard, StatRow } from "./stationShared";
@@ -96,18 +98,13 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     }, baseline);
   }, [currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
   const isLive = runStatus === "running" || runStatus === "paused";
-  const appRequirement = (slot: 1 | 2 | 3 | 4) => {
-    const recipeLbs = (v[`app${slot}CheeseRecipe`] ?? []).reduce((sum: number, row: any) => sum + (Number(row.lbs) || 0), 0);
-    return computeFrontlineRunRequirement({ casesNeeded: v.casesNeeded, pizzasPerCase: v.pizzasPerCase, ozPerPizza: v[`app${slot}OzPerPizza`], configuredEffectiveWeight: recipeLbs > 0 ? recipeLbs : v[`app${slot}BatchLbs`] });
-  };
-  const requirements = [1, 2, 3, 4].map(appRequirement);
-  const frontlineRows = deriveFrontlineNeedRows(v, { ...calc, ...Object.fromEntries(requirements.flatMap((r, i) => [[`app${i + 1}Lbs`, r.totalLbs], [`app${i + 1}Batches`, r.totalUnits]])), sauceLbs: Math.max(0, calc.casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase) * v.sauceOzPerPizza / 16 + 30 } as any);
+  const frontlineRows = deriveFrontlineNeedRows(v, deriveLiveFrontlineQuantitySource(v, calc));
   return (
     <>
       <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
         <div className="h-1 bg-primary w-full" /><CardHeader className="pb-2 pt-4 px-5"><CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Boxes className="w-4 h-4" /> Batches Needed</CardTitle></CardHeader>
         <CardContent className="px-5 pb-5"><p className="text-xs text-muted-foreground mb-4">Based on <span className="font-mono text-foreground">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span> cases × <span className="font-mono text-foreground">{v.pizzasPerCase}</span> pizzas/case</p>
-          {frontlineRows.map((row: any) => {
+          {frontlineRows.map((row) => {
             const testId = `output-${row.key}-batches`;
             const bd = row.station === "sauce" && row.unit === "batches" ? sauceBarrelBreakdown(row.amount, calc.sauceEffBarrel) : null;
             return <StatRow key={row.key} label={row.label} value={bd ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels` : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`} testId={testId} highlight={row.amount > 0} sub={row.recipeName} />;
@@ -150,13 +147,17 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
           })}
         </CardContent>
       </Card>
-      {[1, 2, 3, 4].map((slot, i) => {
-        const app: any = { type: v[`app${slot}Type`], recipe: v[`app${slot}CheeseRecipe`], name: v[`app${slot}CheeseRecipeName`] };
-        const t = (app.type ?? "").trim(); if (!t) return null;
+      {([
+        { slot: 1, type: v.app1Type, recipe: v.app1CheeseRecipe, name: v.app1CheeseRecipeName },
+        { slot: 2, type: v.app2Type, recipe: v.app2CheeseRecipe, name: v.app2CheeseRecipeName },
+        { slot: 3, type: v.app3Type, recipe: v.app3CheeseRecipe, name: v.app3CheeseRecipeName },
+        { slot: 4, type: v.app4Type, recipe: v.app4CheeseRecipe, name: v.app4CheeseRecipeName },
+      ] as const).map((app) => {
+        const t = app.type.trim(); if (!t) return null;
         const isMix = t.toLowerCase().includes("mix"); if (t.toLowerCase() !== "cheese" && !isMix) return null;
-        const rows = applyRecipeSubstitutions(app.recipe ?? [], dayState.substitutions ?? []).rows.filter((r: any) => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0);
+        const rows = applyRecipeSubstitutions(app.recipe ?? [], dayState.substitutions ?? []).rows.filter((row) => row.ingredient.trim() !== "" || Number(row.lbs ?? 0) > 0);
         if (!rows.length) return null;
-        return <ReadOnlyRecipeCard key={i} title={`${t} Recipe`} subtitle={app.name?.trim() || undefined} recipe={app.recipe ?? []} substitutions={dayState.substitutions ?? []} accent={isMix ? "bg-emerald-500/70" : "bg-amber-500/70"} />;
+        return <ReadOnlyRecipeCard key={app.slot} title={`${t} Recipe`} subtitle={app.name?.trim() || undefined} recipe={app.recipe ?? []} substitutions={dayState.substitutions ?? []} accent={isMix ? "bg-emerald-500/70" : "bg-amber-500/70"} />;
       })}
     </>
   );

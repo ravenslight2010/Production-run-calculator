@@ -80,6 +80,13 @@ function renderDialog(
     cheese: [],
     mix: [],
   },
+  recovery: {
+    reviewNotice?: string;
+    retryPending?: boolean;
+    retryBlocked?: boolean;
+    retryingPending?: boolean;
+    onRetryPending?: () => void;
+  } = {},
 ) {
   return render(
     <SpecImportDialog
@@ -89,6 +96,11 @@ function renderDialog(
       error={null}
       prepared={prepared}
       applying={false}
+      reviewNotice={recovery.reviewNotice}
+      retryPending={recovery.retryPending}
+      retryBlocked={recovery.retryBlocked}
+      retryingPending={recovery.retryingPending}
+      onRetryPending={recovery.onRetryPending}
       canUseAiTools={ai.allowed ?? false}
       aiRetryAvailable={ai.retryAvailable ?? false}
       onUseAiFallback={ai.onRetry ?? (() => {})}
@@ -99,6 +111,31 @@ function renderDialog(
 }
 
 describe("SpecImportDialog two-step wizard", () => {
+  it("keeps an ambiguous changed review locked and offers an exact retry", () => {
+    const retry = vi.fn();
+    const { container } = renderDialog(
+      makePrepared([{ brand: "Mauro's Pinsa", flavor: "Italian Beef" }]),
+      () => {},
+      {},
+      undefined,
+      {
+        reviewNotice: "The server did not confirm the earlier save.",
+        retryPending: true,
+        retryBlocked: true,
+        onRetryPending: retry,
+      },
+    );
+
+    expect(screen.getByTestId("spec-import-review-notice").textContent)
+      .toContain("did not confirm");
+    expect(container.querySelector("fieldset")?.disabled).toBe(true);
+    fireEvent.click(screen.getByText("Next"));
+    expect((screen.getByText("Retry same save").closest("button") as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByText("Retry exact save"));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it("shows a server-known one-row Mix in the Mix category during review", () => {
     const name = "Bobo's Deluxe Meat Mix";
     const prepared = makePrepared(

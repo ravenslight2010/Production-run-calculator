@@ -401,11 +401,10 @@ export default function SpecReconcilePanel({
             {staleExpanded && (
               <div className="space-y-2">
                 <p className="text-xs text-amber-700">
-                  These profiles have a generic sauce category label (e.g. "BBQ Sauce", "Ranch") instead
-                  of a specific product name. This happens when a spec sheet's sauce row lists a brand
-                  name in parentheses — e.g. "BBQ Sauce (Hoosier Daddy Sweet &amp; Sassy)" — and the
-                  parenthetical was dropped during an earlier import. Re-importing the original spec sheet
-                  will replace it with the correct sauce name.
+                  These profiles use a generic sauce label that has no matching recipe in the sauce
+                  library. Check the source spec for a product-specific name (often shown in parentheses)
+                  before re-importing. A matching shared recipe, such as an existing Alfredo Sauce, is
+                  not listed as stale just because multiple profiles use it.
                 </p>
                 <ul className="space-y-1" data-testid="stale-sauce-profiles-list">
                   {staleProfiles.map((p) => (
@@ -456,10 +455,10 @@ export default function SpecReconcilePanel({
             {auditExpanded && (
               <div className="space-y-2">
                 <p className="text-xs text-red-700">
-                  These profiles have an app 3 or app 4 applicator recipe name or type that looks like
-                  it came from a different product — a sign of a cross-run autosave bug where switching
-                  between two runs quickly caused the wrong run's values to be saved into this profile.
-                  Review each profile in Setup and clear or re-import the applicator 3/4 values as needed.
+                  Review the reason shown for each app 3/4 value: it may be a recipe linked from another
+                  profile, a recipe name containing another brand, or a Cheese applicator missing its
+                  required recipe link. Direct ingredient types such as Olive Oil or Pepperoni are valid
+                  without a recipe and are not flagged for that reason.
                 </p>
                 <ul className="space-y-1" data-testid="applicator-audit-list">
                   {auditProfiles.map((p, i) => (
@@ -484,7 +483,7 @@ export default function SpecReconcilePanel({
                              ? "belongs to a different product"
                              : p.reason === "cross-brand"
                                ? "contains another brand's name"
-                               : "applicator type set but no recipe"})
+                                : "Cheese applicator is missing its required recipe"})
                          </span>
                        </span>
                        {canManageProfiles && (

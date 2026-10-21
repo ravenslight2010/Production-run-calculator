@@ -11,6 +11,16 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   NOTIFICATION_KINDS,
   isNotifEnabled,
   type NotificationKind,
@@ -21,6 +31,7 @@ import {
   enableWebPush,
   fetchVapidPublicKey,
   getWebPushStatus,
+  recoverWebPush,
   type WebPushStatus,
 } from "../webPush";
 
@@ -47,20 +58,58 @@ export default function AlertSettingsDialog({
   onToggleFloorMode,
 }: AlertSettingsDialogProps) {
   const [push, setPush] = useState<WebPushStatus>({ state: "unsupported" });
+  const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     let active = true;
-    void getWebPushStatus().then((status) => { if (active) setPush(status); });
+    void getWebPushStatus().then((status) => {
+      if (active) setPush((current) => current.registrationRejected ? current : status);
+    });
     return () => { active = false; };
   }, [open]);
 
   const enablePush = async () => {
-    setPush({ state: "enabling" });
+    setPush({
+      state: "enabling",
+      subscription: push.subscription,
+      subscriptionId: push.subscriptionId,
+    });
     try {
       setPush(await enableWebPush(await fetchVapidPublicKey()));
     } catch (error) {
-      setPush({ state: "error", error: error instanceof Error ? error.message : "Could not enable Web Push." });
+      setPush({
+        state: "error",
+        error: error instanceof Error ? error.message : "Could not enable Web Push.",
+        subscription: push.subscription,
+        subscriptionId: push.subscriptionId,
+      });
+    }
+  };
+
+  const restorePush = async () => {
+    setConfirmRestoreOpen(false);
+    setPush({
+      state: "enabling",
+      subscription: push.subscription,
+      subscriptionId: push.subscriptionId,
+    });
+    try {
+      setPush(await recoverWebPush(
+        await fetchVapidPublicKey(),
+        push.subscription,
+        push.subscriptionId,
+        push.subscriptionWasExisting,
+      ));
+    } catch (error) {
+      setPush({
+        state: "error",
+        error: error instanceof Error ? error.message : "Could not restore Web Push.",
+        subscription: push.subscription,
+        subscriptionId: push.subscriptionId,
+        registrationRejected: true,
+        subscriptionWasExisting: push.subscriptionWasExisting,
+      });
     }
   };
 
@@ -68,6 +117,8 @@ export default function AlertSettingsDialog({
     setPush({ state: "enabling", subscription: push.subscription });
     setPush(await disableWebPush(push.subscription, push.subscriptionId));
   };
+  const canSafelyReplaceSubscription = Boolean(push.subscription)
+    && !(push.subscriptionWasExisting && !push.subscriptionId);
 
   const pushCopy: Record<Exclude<WebPushStatus["state"], "error">, string> = {
     unsupported: "This browser does not support Web Push on this device.",
@@ -97,14 +148,27 @@ export default function AlertSettingsDialog({
                 <BellRing className="w-4 h-4" /> Web Push on this device
               </Label>
               <p className="text-xs text-muted-foreground">
-                {push.state === "error" ? push.error : pushCopy[push.state]}
+                {push.state === "error"
+                  ? push.registrationRejected
+                    ? canSafelyReplaceSubscription
+                      ? "The server rejected this device’s saved notification subscription. Alerts may not arrive here until you restore this device. Account alert choices will not change."
+                      : "The server rejected this device’s saved notification subscription, but its matching server registration cannot be identified. The browser subscription was left untouched."
+                    : push.error
+                  : pushCopy[push.state]}
               </p>
             </div>
             {push.state === "enabled" ? (
-              <Button variant="outline" size="sm" disabled={false} onClick={() => void disablePush()}
+              <Button variant="outline" size="sm" onClick={() => void disablePush()}
                 data-testid="button-disable-web-push">
                 Disable
               </Button>
+            ) : push.state === "error" && push.registrationRejected && push.subscription ? (
+              canSafelyReplaceSubscription ? (
+                <Button size="sm" onClick={() => setConfirmRestoreOpen(true)}
+                  data-testid="button-restore-web-push">
+                  Restore this device
+                </Button>
+              ) : null
             ) : push.state === "available" || push.state === "error" ? (
               <Button size="sm" onClick={() => void enablePush()} data-testid="button-enable-web-push">
                 Enable
@@ -113,7 +177,13 @@ export default function AlertSettingsDialog({
               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" aria-label="Updating Web Push" />
             ) : null}
           </div>
-          {push.state === "error" && <p role="alert" className="text-xs text-destructive">Web Push was not changed. Try again.</p>}
+          {push.state === "error" && (
+            <p role="alert" className="text-xs text-destructive">
+              {push.registrationRejected
+                ? "The current browser subscription has not been replaced."
+                : "Web Push was not changed. Try again."}
+            </p>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground">
@@ -162,6 +232,24 @@ export default function AlertSettingsDialog({
           </div>
         </div>
       </DialogContent>
+      <AlertDialog open={confirmRestoreOpen} onOpenChange={setConfirmRestoreOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore Web Push on this device?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove this device’s current browser subscription and
+              register a fresh one. Continue only if you want to replace it.
+              Your account-level alert choices will stay unchanged.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-web-push-restore">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void restorePush()} data-testid="button-confirm-web-push-restore">
+              Replace subscription
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

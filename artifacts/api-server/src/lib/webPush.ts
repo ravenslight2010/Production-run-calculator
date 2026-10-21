@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import webpush from "web-push";
 import {
+  boundedDurationMs,
+  classifyBackgroundFailure,
   createBackgroundOperationBackoff,
   runBackgroundOperation,
 } from "./backgroundOperations";
@@ -19,6 +21,7 @@ import {
   markScheduledEvaluationQueueSampleUnavailable,
   registerServerJob,
   sampleScheduledEvaluationQueue,
+  ScheduledEvaluationQueueReadError,
   SCHEDULED_EVALUATION_CANONICAL_ACTOR,
   SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS,
   type ScheduledEvaluationQueueTransition,
@@ -29,6 +32,85 @@ export type WebPushKind = (typeof WEB_PUSH_KINDS)[number];
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_ENDPOINT = 2048;
 const DEFAULT_ALERT_INTERVAL_MS = 60_000;
+const SLOW_QUEUE_SAMPLE_WARNING_MS = 1_000;
+const SUPPORTED_PUSH_ENDPOINT_HOSTS = new Set([
+  "fcm.googleapis.com",
+  "updates.push.services.mozilla.com",
+  "push.services.mozilla.com",
+  "web.push.apple.com",
+]);
+
+export type PushProviderClassification = "google" | "mozilla" | "apple" | "other" | "unknown";
+export type PushRegistrationRejectionReason =
+  | "invalid_subscription"
+  | "invalid_endpoint"
+  | "unsafe_endpoint"
+  | "unsupported_provider"
+  | "invalid_keys"
+  | "invalid_expiration"
+  | "expired_subscription";
+
+const PROVIDER_DOMAIN_HINTS: ReadonlyArray<{ provider: Exclude<PushProviderClassification, "other" | "unknown">; domains: readonly string[] }> = [
+  { provider: "google", domains: ["googleapis.com"] },
+  { provider: "mozilla", domains: ["mozilla.com", "mozilla.net"] },
+  { provider: "apple", domains: ["apple.com"] },
+];
+
+function classifyProviderHost(host: string): PushProviderClassification {
+  for (const { provider, domains } of PROVIDER_DOMAIN_HINTS) {
+    if (domains.some((domain) => host === domain || host.endsWith(`.${domain}`))) return provider;
+  }
+  return "other";
+}
+
+function inspectPushEndpoint(endpoint: unknown): {
+  reason: PushRegistrationRejectionReason | null;
+  provider: PushProviderClassification;
+} {
+  if (typeof endpoint !== "string" || endpoint.length === 0 || endpoint.length > MAX_ENDPOINT) {
+    return { reason: "invalid_endpoint", provider: "unknown" };
+  }
+
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return { reason: "invalid_endpoint", provider: "unknown" };
+  }
+
+  const provider = classifyProviderHost(url.hostname);
+  if (url.protocol !== "https:" || url.username || url.password || url.port) {
+    return { reason: "unsafe_endpoint", provider };
+  }
+  // URL.username/password do not expose an empty userinfo section ("https://@host").
+  const authority = /^https:\/\/([^/?#]*)/i.exec(endpoint)?.[1];
+  if (!authority || authority.includes("@")) return { reason: "unsafe_endpoint", provider };
+  // The exact host set intentionally rejects IP literals and lookalike suffixes.
+  if (!SUPPORTED_PUSH_ENDPOINT_HOSTS.has(url.hostname)) return { reason: "unsupported_provider", provider };
+  return { reason: null, provider };
+}
+
+/**
+ * Returns only bounded classification values suitable for operational logs.
+ * Never include the endpoint, keys, or other subscription contents in telemetry.
+ */
+export function classifyPushSubscription(input: unknown): {
+  reason: PushRegistrationRejectionReason | null;
+  provider: PushProviderClassification;
+} {
+  if (!input || typeof input !== "object") return { reason: "invalid_subscription", provider: "unknown" };
+  const s = input as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; expirationTime?: unknown };
+  const endpoint = inspectPushEndpoint(s.endpoint);
+  if (endpoint.reason) return endpoint;
+  if (typeof s.keys?.p256dh !== "string" || s.keys.p256dh.length <= 15 || s.keys.p256dh.length > 512
+    || typeof s.keys?.auth !== "string" || s.keys.auth.length <= 7 || s.keys.auth.length > 256) {
+    return { reason: "invalid_keys", provider: endpoint.provider };
+  }
+  if (s.expirationTime != null && (typeof s.expirationTime !== "number" || !Number.isFinite(s.expirationTime))) {
+    return { reason: "invalid_expiration", provider: endpoint.provider };
+  }
+  return { reason: null, provider: endpoint.provider };
+}
 
 export function vapidPublicKey(): string | null {
   const key = process.env.WEB_PUSH_VAPID_PUBLIC_KEY;
@@ -49,13 +131,20 @@ function configuredSender(): boolean {
   }
 }
 
+export function validPushEndpoint(endpoint: unknown): endpoint is string {
+  return inspectPushEndpoint(endpoint).reason === null;
+}
+
 export function validSubscription(input: unknown): input is { endpoint: string; keys: { p256dh: string; auth: string }; expirationTime?: number | null } {
-  if (!input || typeof input !== "object") return false;
-  const s = input as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown }; expirationTime?: unknown };
-  return typeof s.endpoint === "string" && s.endpoint.startsWith("https://") && s.endpoint.length <= MAX_ENDPOINT
-    && typeof s.keys?.p256dh === "string" && s.keys.p256dh.length > 15 && s.keys.p256dh.length <= 512
-    && typeof s.keys?.auth === "string" && s.keys.auth.length > 7 && s.keys.auth.length <= 256
-    && (s.expirationTime == null || (typeof s.expirationTime === "number" && Number.isFinite(s.expirationTime)));
+  return classifyPushSubscription(input).reason === null;
+}
+
+export async function sendPushNotification(
+  subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
+  payload: string,
+): Promise<void> {
+  if (!validPushEndpoint(subscription.endpoint)) throw new Error("Invalid push endpoint");
+  await webpush.sendNotification(subscription, payload, { TTL: 300, urgency: "high" });
 }
 
 type Candidate = {
@@ -182,6 +271,9 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number, signal
   const capabilities = new Map<string, boolean>();
   for (const s of rows) {
     if (signal?.aborted) throw new Error("Scheduled alert evaluation cancelled");
+    // Protect delivery as well as registration: legacy or manually altered rows
+    // must never become signed requests to an unapproved destination.
+    if (!validPushEndpoint(s.endpoint)) continue;
     if (candidate.dueAt && s.createdAt.getTime() > candidate.dueAt) continue;
     // A missing preference means enabled, matching /me/notification-prefs.
     if (s.notificationPrefs?.[candidate.kind] === false) continue;
@@ -210,7 +302,7 @@ async function deliver(scope: Scope, candidate: Candidate, nowMs: number, signal
     try {
       // Intentionally generic: no recipe, customer, run label, or inventory data.
       const payload = JSON.stringify({ id: candidate.id.slice(0, 96), kind: candidate.kind, title: "Production alert", body: "A production timing alert needs attention." });
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 300, urgency: "high" });
+      await sendPushNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
       await db.update(webPushDeliveriesTable).set({ status: "delivered", attempts: 1, deliveredAt: new Date() }).where(eq(webPushDeliveriesTable.id, claim.id));
       delivered++;
     } catch (error) {
@@ -503,14 +595,16 @@ function logScheduledEvaluationQueueTransitions(
 
 export function startWebPushAlertScheduler(options: {
   now?: () => number;
+  monotonicNow?: () => number;
   enqueue?: typeof enqueueScheduledWebPushAlerts;
   sampleQueue?: () => Promise<ScheduledEvaluationQueueTransition>;
 } = {}): WebPushAlertScheduler {
   const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
   const now = options.now ?? Date.now;
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
   const sampleQueue = options.sampleQueue ?? sampleScheduledEvaluationQueue;
-  const backoff = createBackgroundOperationBackoff();
+  const backoff = createBackgroundOperationBackoff({ jitter: true });
   let stopped = false;
   let scheduling = false;
   let monitoring = false;
@@ -518,6 +612,7 @@ export function startWebPushAlertScheduler(options: {
   const sample = () => {
     if (stopped || monitoring) return;
     monitoring = true;
+    const startedAt = monotonicNow();
     void sampleQueue()
       .then((transition) => {
         if (monitorUnavailable) {
@@ -527,17 +622,33 @@ export function startWebPushAlertScheduler(options: {
           }, "Scheduled evaluation queue monitor recovered");
           monitorUnavailable = false;
         }
-        logScheduledEvaluationQueueTransitions(transition);
-      })
-      .catch(() => {
-        markScheduledEvaluationQueueSampleUnavailable();
-        if (!monitorUnavailable) {
+        const durationMs = transition.sampleTiming?.durationMs ??
+          boundedDurationMs(monotonicNow() - startedAt);
+        if (durationMs >= SLOW_QUEUE_SAMPLE_WARNING_MS) {
           logger.warn({
             event: "scheduled_evaluation_queue_monitor",
-            outcome: "sample_unavailable",
-          }, "Scheduled evaluation queue monitor sample unavailable");
-          monitorUnavailable = true;
+            outcome: "slow_sample",
+            failureStage: "snapshot",
+            durationMs,
+            ...(transition.sampleTiming
+              ? { queryDurationsMs: transition.sampleTiming.queryDurationsMs }
+              : {}),
+          }, "Scheduled evaluation queue monitor sample was slow");
         }
+        logScheduledEvaluationQueueTransitions(transition);
+      })
+      .catch((error: unknown) => {
+        markScheduledEvaluationQueueSampleUnavailable();
+        const readError = error instanceof ScheduledEvaluationQueueReadError ? error : undefined;
+        logger.warn({
+          event: "scheduled_evaluation_queue_monitor",
+          outcome: "sample_unavailable",
+          failureStage: readError?.failureStage ?? "snapshot",
+          failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
+          durationMs: readError?.totalDurationMs ?? boundedDurationMs(monotonicNow() - startedAt),
+          ...(readError ? { queryDurationMs: readError.queryDurationMs } : {}),
+        }, "Scheduled evaluation queue monitor sample unavailable");
+        monitorUnavailable = true;
       })
       .finally(() => { monitoring = false; });
   };
@@ -546,6 +657,7 @@ export function startWebPushAlertScheduler(options: {
     const currentTime = now();
     if (!backoff.isReady(currentTime)) return;
     scheduling = true;
+    const startedAt = monotonicNow();
     // Freeze the bucket input across the retry. A partial first insert near a
     // bucket boundary must converge on the same idempotency keys.
     const scheduledAt = currentTime;
@@ -554,9 +666,15 @@ export function startWebPushAlertScheduler(options: {
       () => enqueue(scheduledAt, interval),
     )
       .then(() => backoff.recordSuccess())
-      .catch(() => {
+      .catch((error: unknown) => {
         backoff.recordFailure(now());
-        logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed");
+        logger.error({
+          event: "web_push_alert_scheduler",
+          outcome: "failed",
+          failureStage: "enqueue",
+          failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
+          durationMs: boundedDurationMs(monotonicNow() - startedAt),
+        }, "Web push alert scheduling failed");
       })
       .finally(() => { scheduling = false; });
   };

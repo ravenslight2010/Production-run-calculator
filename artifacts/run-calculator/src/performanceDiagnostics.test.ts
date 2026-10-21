@@ -7,6 +7,7 @@ import {
   getMemoryDiagnostics,
   getPerformanceDiagnostics,
   installApiRequestInstrumentation,
+  markExpectedAuthLifecycleCancellation,
   PERFORMANCE_BUDGETS,
   recordBrowserLoadTimings,
   recordDeferredStartup,
@@ -245,6 +246,59 @@ describe("calculator performance diagnostics", () => {
       operationCategory: "sync",
       requestOutcome: "cancelled",
     });
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("labels only explicitly marked auth lifecycle aborts and keeps them bounded", async () => {
+    const listener = vi.fn();
+    const controller = new AbortController();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", ((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason), { once: true });
+      })) as unknown as typeof fetch);
+
+    const request = fetchWithDiagnostics("/api/me?private=query", { signal: controller.signal });
+    markExpectedAuthLifecycleCancellation(controller.signal);
+    controller.abort(new DOMException("private abort text", "AbortError"));
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+
+    const detail = (listener.mock.calls[0]?.[0] as CustomEvent).detail;
+    expect(detail).toMatchObject({
+      operationCategory: "authentication",
+      requestRoute: "authentication",
+      requestOutcome: "cancelled",
+      cancellationClassification: "expected_auth_lifecycle",
+    });
+    expect(JSON.stringify(detail)).not.toMatch(/private|query/);
+    window.removeEventListener("app:api-failure", listener);
+  });
+
+  it("classifies an auth-probe deadline as timeout and keeps an HTTP 401 as authentication rejection", async () => {
+    const listener = vi.fn();
+    window.addEventListener("app:api-failure", listener);
+    vi.stubGlobal("fetch", vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response("{}", { status: 401 });
+    }));
+
+    const timeoutController = new AbortController();
+    timeoutController.abort(new DOMException("private timeout text", "TimeoutError"));
+    await expect(
+      fetchWithDiagnostics("/api/me", { signal: timeoutController.signal }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    await fetchWithDiagnostics("/api/me");
+
+    expect((listener.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+      operationCategory: "authentication",
+      requestOutcome: "timeout",
+    });
+    expect((listener.mock.calls[1]?.[0] as CustomEvent).detail).toMatchObject({
+      operationCategory: "authentication",
+      requestOutcome: "authentication_rejected",
+      httpStatus: 401,
+    });
+    expect(JSON.stringify(listener.mock.calls)).not.toContain("private timeout text");
     window.removeEventListener("app:api-failure", listener);
   });
 

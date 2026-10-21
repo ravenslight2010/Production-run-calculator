@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   EXPECTED_PRODUCTION_PROMPT_SHA256,
+  appendMetadataMaintenanceEntry,
   loadProductionContract,
   runBackfill,
 } from "./distill-backfill.mts";
@@ -13,6 +14,7 @@ import {
   hashHumanApplyRecord,
   sha256,
 } from "@workspace/distill-dataset";
+import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 
 const systemPrompt = "Synthetic pinned production prompt";
 const contract = {
@@ -31,9 +33,42 @@ const checkedDecision = JSON.parse(
     path.join(workspaceRoot, "docs/evidence/distillation-backfill-decision-2026-10-02.json"),
     "utf8",
   ),
-) as { decision: string; productionSystemPromptSha256: string };
+) as {
+  decision: string;
+  currentParseVersion: string;
+  productionSystemPromptSha256: string;
+  maintenanceHistory: Array<{
+    date: string;
+    changeType: string;
+    note: string;
+  }>;
+};
 assert.equal(checkedDecision.productionSystemPromptSha256, currentProductionContract.systemPromptSha256);
+assert.equal(checkedDecision.currentParseVersion, SPEC_IMPORT_PARSE_VERSION);
+assert.equal(checkedDecision.currentParseVersion, currentProductionContract.currentParseVersion);
 assert.equal(checkedDecision.decision, "no-go");
+assert.equal(checkedDecision.maintenanceHistory.length, 1);
+assert.equal(checkedDecision.maintenanceHistory[0]?.date, "2026-10-08");
+assert.equal(checkedDecision.maintenanceHistory[0]?.changeType, "metadata-only");
+assert.match(checkedDecision.maintenanceHistory[0]?.note ?? "", /no-go decision.*unchanged/u);
+
+const maintenanceRefresh = {
+  date: "2026-10-20",
+  changeType: "metadata-only",
+  note: "Refreshed metadata without changing the decision or evaluation evidence.",
+} as const;
+const refreshedDecision = appendMetadataMaintenanceEntry(checkedDecision, maintenanceRefresh);
+assert.deepEqual(refreshedDecision.maintenanceHistory, [
+  ...checkedDecision.maintenanceHistory,
+  maintenanceRefresh,
+]);
+const checkedDecisionFields = Object.fromEntries(
+  Object.entries(checkedDecision).filter(([key]) => key !== "maintenanceHistory"),
+);
+const refreshedDecisionFields = Object.fromEntries(
+  Object.entries(refreshedDecision).filter(([key]) => key !== "maintenanceHistory"),
+);
+assert.deepEqual(refreshedDecisionFields, checkedDecisionFields);
 
 function makeDecision(decision: "go" | "no-go") {
   return {
@@ -195,7 +230,13 @@ const redaction = {
 fs.writeFileSync(redactionPath, JSON.stringify(redaction), { mode: 0o600 });
 
 try {
-  fs.writeFileSync(decisionPath, JSON.stringify(makeDecision("no-go")));
+  fs.writeFileSync(decisionPath, JSON.stringify({
+    ...makeDecision("no-go"),
+    maintenanceUpdate: {
+      date: "2026-10-08",
+      note: "Legacy decision records without a maintenance history remain readable.",
+    },
+  }));
   const missingEvidencePath = path.join(privateRoot, "must-not-be-read.jsonl");
   const noGoOut = path.join(privateRoot, "no-go-out");
   const noGo = await runBackfill(makeOptions({
@@ -211,6 +252,30 @@ try {
   assert.match(noGo.message, /candidateEvidenceRead":false/u);
   assert.equal(fs.existsSync(missingEvidencePath), false);
   assert.equal(fs.existsSync(noGoOut), false);
+
+  for (const maintenanceHistory of [
+    {},
+    [{ date: "2026-02-30", changeType: "metadata-only", note: "invalid date" }],
+    [{ date: "2026-10-08", changeType: "decision-change", note: "not metadata-only" }],
+    [{ date: "2026-10-08", changeType: "metadata-only", note: " " }],
+    [{ date: "2026-10-08", changeType: "metadata-only", note: "valid note", extra: true }],
+  ]) {
+    fs.writeFileSync(decisionPath, JSON.stringify({
+      ...makeDecision("no-go"),
+      maintenanceHistory,
+    }));
+    await assert.rejects(
+      () => runBackfill(makeOptions({
+        repoRoot,
+        decisionPath,
+        evidencePath: missingEvidencePath,
+        out: noGoOut,
+        manifest: path.join(repoRoot, "docs", "evidence", "no-go-manifest.json"),
+        redactionPath,
+      }), dependencies),
+      /maintenanceHistory/u,
+    );
+  }
 
   fs.writeFileSync(decisionPath, JSON.stringify(makeDecision("go")));
   const records = [

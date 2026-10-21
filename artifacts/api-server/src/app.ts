@@ -8,6 +8,10 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { enhancedErrorMessages } from "./middlewares/errorMessagesEnhanced";
+import {
+  createQueryTokenPromotionMiddleware,
+  httpSecurityHeaders,
+} from "./middlewares/httpSecurity";
 import { isHealthProbePath, observabilityMiddleware } from "./lib/observability";
 
 // CORS is scoped to known dev/preview origins plus any configured production
@@ -87,6 +91,7 @@ app.use(
   }),
 );
 app.use(observabilityMiddleware);
+app.use(httpSecurityHeaders);
 
 app.use(cors(buildCorsOptions()));
 app.use(cookieParser());
@@ -104,25 +109,17 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// The expo-web preview of the mobile app is served from a *.expo.worf.replit.dev
-// origin and reaches the API cross-origin via EventSource, which cannot set an
-// Authorization header. The web SSE client therefore passes the bearer token as
-// a `?token=` query param; promote it to a bearer header before auth runs so the
-// normal auth path applies. Dev/preview only — native (header) and same-origin
-// web (cookie) never need this, so production auth posture is unchanged (no
-// token-in-URL acceptance there).
-if (process.env.NODE_ENV !== "production") {
-  app.use((req, _res, next) => {
-    if (
-      !req.headers.authorization &&
-      typeof req.query.token === "string" &&
-      req.query.token
-    ) {
-      req.headers.authorization = `Bearer ${req.query.token}`;
-    }
-    next();
-  });
-}
+// EventSource cannot set an Authorization header for cross-origin development
+// callers. Query-token promotion is therefore explicit opt-in, disabled by
+// default, and impossible in production. Same-origin web continues to use its
+// cookie; native clients continue to use Authorization headers.
+app.use(
+  "/api",
+  createQueryTokenPromotionMiddleware(
+    process.env.NODE_ENV,
+    process.env.ALLOW_QUERY_TOKEN_AUTH,
+  ),
+);
 
 app.use("/api", router);
 

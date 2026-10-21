@@ -1,11 +1,24 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyImportOperation,
+  clearPendingImportOperation,
   createImportOperationId,
   ImportOperationError,
+  listPendingImportOperations,
+  readPendingImportOperations,
+  retryPendingImportOperation,
   undoImportOperation,
 } from "./importOperations";
 import { buildSpecImportChanges } from "./specImport";
+
+beforeEach(() => {
+  sessionStorage.clear();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  sessionStorage.clear();
+});
 
 describe("import operation client boundary", () => {
   it("builds a bounded spec changes envelope without mutating rows", () => {
@@ -58,7 +71,7 @@ describe("import operation client boundary", () => {
     });
   });
 
-  it("retries the persisted byte-equivalent payload under the same operation ID", async () => {
+  it("recovers the exact pending payload under the same ID and rejects changed reviews", async () => {
     const id = "import-operation-retry-004";
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error("connection reset"))
@@ -75,10 +88,64 @@ describe("import operation client boundary", () => {
     await expect(applyImportOperation(id, {
       ...payload,
       changes: { brandProfiles: { upsert: [{ key: "changed", brand: "Changed", flavor: "Review" }] } },
-    })).resolves.toMatchObject({ operationId: id, resultHash: "hash-4" });
+    })).rejects.toThrow(/reviewed changes differ/u);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(listPendingImportOperations()).toContainEqual({ operationId: id, payload });
+    await expect(retryPendingImportOperation(id))
+      .resolves.toMatchObject({ operationId: id, resultHash: "hash-4" });
     const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(secondBody).toEqual(firstBody);
+  });
+
+  it("blocks a new import while another operation is unresolved", async () => {
+    const id = "import-operation-pending-005";
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("connection reset"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        operation: { operationId: id, status: "applied", result: { ok: true } },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const payload = {
+      importType: "premix" as const,
+      sourceLabel: "reviewed-premix.xlsx",
+      changes: { mixes: { upsert: [{ id: "mix-1" }] } },
+    };
+    await expect(applyImportOperation(id, payload)).rejects.toBeInstanceOf(ImportOperationError);
+    await expect(applyImportOperation("import-operation-new-006", {
+      importType: "cheese",
+      sourceLabel: "different.xlsx",
+      changes: { cheeseRecipes: { upsert: [{ id: "recipe-1" }] } },
+    })).rejects.toThrow(/earlier import is still unconfirmed/u);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(retryPendingImportOperation(id)).resolves.toMatchObject({ operationId: id });
+    expect(listPendingImportOperations()).toEqual([]);
+    clearPendingImportOperation(id);
+  });
+
+  it("reports unreadable pending storage instead of treating it as empty", () => {
+    vi.stubGlobal("window", {
+      get sessionStorage() {
+        throw new Error("storage blocked");
+      },
+    });
+    expect(readPendingImportOperations()).toEqual({ available: false, operations: [] });
+  });
+
+  it("does not send a new operation when the pending record is corrupted", async () => {
+    sessionStorage.setItem("run-calculator.pending-import-operations.v1", "{not-json");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(applyImportOperation("import-operation-corrupt-007", {
+      importType: "premix",
+      sourceLabel: "new.xlsx",
+      changes: { mixes: { upsert: [] } },
+    })).rejects.toMatchObject({
+      name: "ImportOperationError",
+      status: 0,
+      message: expect.stringContaining("No new import was sent"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not accept an undo response without the canonical result", async () => {
@@ -87,5 +154,30 @@ describe("import operation client boundary", () => {
     ));
     await expect(undoImportOperation("import-operation-003", "hash-1"))
       .rejects.toBeInstanceOf(ImportOperationError);
+  });
+
+  it("does not send an import when the exact request cannot be stored for recovery", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      get sessionStorage() {
+        throw new Error("session storage unavailable");
+      },
+    });
+
+    try {
+      await expect(applyImportOperation("import-operation-no-storage-007", {
+        importType: "spec",
+        sourceLabel: "Spec workbook",
+        changes: { brandProfiles: { upsert: [] } },
+      })).rejects.toMatchObject({
+        name: "ImportOperationError",
+        status: 0,
+        message: expect.stringMatching(/no new import was sent/iu),
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

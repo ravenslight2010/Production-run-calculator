@@ -5,7 +5,12 @@ import type { PoolClient } from "pg";
 import { isManualSection, type ManualSection } from "@workspace/sync-contract";
 import type { Scope } from "./requestScope";
 import { logger } from "./logger";
-import { createBackgroundOperationBackoff, runBackgroundOperation } from "./backgroundOperations";
+import {
+  boundedDurationMs,
+  classifyBackgroundFailure,
+  createBackgroundOperationBackoff,
+  runBackgroundOperation,
+} from "./backgroundOperations";
 
 export type SyncOutboxEvent =
   | {
@@ -307,7 +312,7 @@ export function startSyncOutboxListener(
   let draining = false;
   let drainRequested = false;
   let retryDelayMs = 500;
-  const drainBackoff = createBackgroundOperationBackoff();
+  const drainBackoff = createBackgroundOperationBackoff({ jitter: true });
   const cursors = processCursors;
   const observeListenerLag = (
     scope: string,
@@ -407,8 +412,11 @@ export function startSyncOutboxListener(
     if (stopped || draining) return;
     drainRequested = false;
     draining = true;
+    const startedAt = performance.now();
+    let failureStage: "scope-list" | "cursor-seed" | "scope-drain" = "scope-list";
     try {
       await runBackgroundOperation("sync-outbox-drain", async () => {
+        failureStage = "scope-list";
         const result = await pool.query<{ scope: string }>(
           "SELECT scope FROM sync_outbox_cursors ORDER BY scope ASC",
         );
@@ -417,6 +425,7 @@ export function startSyncOutboxListener(
           if (!cursors.has(scope)) {
             // A process starts with no connected SSE clients. Seed the cursor for
             // pre-existing scopes; new scopes first encountered later start at 0.
+            failureStage = "cursor-seed";
             const current = await pool.query<{ cursor: string | number }>(
               "SELECT cursor FROM sync_outbox_cursors WHERE scope = $1",
               [scope],
@@ -424,6 +433,7 @@ export function startSyncOutboxListener(
             cursors.set(scope, Number(current.rows[0]?.cursor ?? 0));
             continue;
           }
+          failureStage = "scope-drain";
           await drainScope(scope);
         }
       });
@@ -434,7 +444,9 @@ export function startSyncOutboxListener(
       logger.warn({
         event: "sync_outbox_drain",
         outcome: "retry",
-        reason: syncOutboxFailureReason(error),
+        failureReason: syncOutboxFailureReason(error),
+        failureStage,
+        durationMs: boundedDurationMs(performance.now() - startedAt),
       }, "Sync outbox drain failed; cursor retained for retry");
     } finally {
       draining = false;
@@ -544,15 +556,6 @@ export function startSyncOutboxListener(
 
 /** Fixed cardinality only: never expose messages, SQL, or arbitrary codes. */
 export function syncOutboxFailureReason(error: unknown): string {
-  let current = error;
-  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
-    const { code, cause } = current as { code?: unknown; cause?: unknown };
-    if (code === "42501") return "database-permission";
-    if (code === "42P01" || code === "42703") return "database-schema";
-    if (code === "53300") return "database-capacity";
-    if (code === "57014" || code === "ETIMEDOUT") return "database-timeout";
-    if (code === "08006" || code === "ECONNRESET" || code === "57P01") return "database-connection";
-    current = cause;
-  }
-  return "delivery-failed";
+  const reason = classifyBackgroundFailure(error, { assumeDatabase: true });
+  return reason === "unexpected" ? "delivery-failed" : reason;
 }

@@ -4,6 +4,7 @@ import {
   BACKGROUND_OPERATION_FAILURE_WINDOW_MS,
   AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP,
   backgroundOperationsDegraded,
+  classifyBackgroundFailure,
   clearBackgroundOperationDiagnosticsForTests,
   createBackgroundOperationBackoff,
   getAutoTrackDeferredDiagnostic,
@@ -77,6 +78,33 @@ describe("background operation connection recovery", () => {
     }))).toBe(true);
     expect(isTransientDatabaseConnectionError(new Error("Job execution timed out"))).toBe(false);
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("bad query"), { code: "23505" }))).toBe(false);
+  });
+
+  it("classifies operational failures with fixed safe labels", () => {
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "53300" })))
+      .toBe("database-capacity");
+    expect(classifyBackgroundFailure(new Error("query failed", {
+      cause: Object.assign(new Error("private"), { code: "57014" }),
+    }))).toBe("database-timeout");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "ECONNRESET" })))
+      .toBe("dependency-connection");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "ECONNRESET" }), {
+      assumeDatabase: true,
+    })).toBe("database-connection");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "42501" })))
+      .toBe("database-permission");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "42P01" })))
+      .toBe("database-schema");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "40P01" })))
+      .toBe("database-conflict");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "23505" })))
+      .toBe("database-error");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "private-user-data" })))
+      .toBe("unexpected");
+    expect(classifyBackgroundFailure(new Error("timeout exceeded when trying to connect")))
+      .toBe("database-timeout");
+    expect(classifyBackgroundFailure(Object.assign(new Error("private"), { code: "ETIMEDOUT" })))
+      .toBe("dependency-timeout");
   });
 
   it("recovers a wrapped pool-acquisition timeout without degrading readiness", async () => {

@@ -4,6 +4,7 @@ import {
   timestamp,
   jsonb,
   integer,
+  serial,
   index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";

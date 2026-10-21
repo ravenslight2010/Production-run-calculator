@@ -9,10 +9,12 @@
 // artifacts/run-calculator-mobile/context/mergeSuggest.ts (replit.md parity).
 
 import {
+  collectMergeAliases,
   mergeSuggestionLists,
   suggestionsFromAliases,
   nearDupSuggestions,
   collectDeniedPairs,
+  retargetMergeAliases,
   filterDeniedSuggestions,
   filterConflictingSuggestions,
   filterCrossBrandSuggestions,
@@ -113,6 +115,36 @@ export async function saveMergeAliases(
     }),
   });
   if (!res.ok) throw new Error(`Save merge aliases failed (${res.status})`);
+}
+
+/**
+ * Learn a confirmed merge without letting alias persistence delay or fail the
+ * merge itself. Existing aliases are fetched in the same category/brand scope
+ * so any mappings aimed at a merged-away name can move to the survivor. If the
+ * read fails, still attempt to persist the direct source-to-survivor aliases.
+ */
+export async function saveConfirmedMergeAliasesBestEffort(
+  sources: string[],
+  target: string,
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<void> {
+  const directAliases = collectMergeAliases(sources, target);
+  if (directAliases.length === 0) return;
+
+  let aliasesToSave = directAliases;
+  try {
+    const existing = await fetchMergeAliases(category, brand);
+    aliasesToSave = retargetMergeAliases(existing, sources, target);
+  } catch {
+    // Keep the direct mappings useful even if listing the current aliases fails.
+  }
+
+  try {
+    await saveMergeAliases(aliasesToSave, category, brand);
+  } catch {
+    // Alias learning is best-effort and must never block a confirmed merge.
+  }
 }
 
 /**

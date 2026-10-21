@@ -46,6 +46,7 @@
 - [One-time heals](one-time-data-heals.md) + [purge](one-time-data-purge.md) + [placeholder runs](seeded-placeholder-runs.md) — marker/epoch guards; seeded blanks stay local; never hold zero runs.
 - [Master-data merge](merge-server-master-data-repoint.md) + [brand aliases](brand-rename-aliases.md) — repoint pools and learn aliases so old names do not return.
 - [API errors](api-json-error-handler.md) + [route mounting](api-route-composition.md) + [compatibility](operations-api-compatibility-window.md) — keep JSON errors, mounts, and aliases explicit.
+- [HTTP security policy](http-security-policy.md) — keep CSP narrowly matched to actual app resources, and emit HSTS only at a verified TLS-terminating layer.
 - [Import units](spec-import-batch-vs-perpizza.md) + [sources](import-source-file-semantics.md) + [dedup](import-order-dedup-keys.md) — keep native units/order; dedup by kind.
 - [Stick pepperoni types](stick-pep-types.md) — cheese sticks are pepperoni types, not cheese recipes; recognize them in prompt and classifier.
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
@@ -122,8 +123,8 @@
 - [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
-- [Disposable DB startup](disposable-database-test-startup.md) — wait for schema before running database tests.
-- [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — apply raw triggers before serving; keep audited maintenance off the app role.
+- [Disposable DB startup](disposable-database-test-startup.md) — wait for test schemas and keep local PostgreSQL rehearsals alive across shell calls.
+- [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — Publish owns managed schema changes; direct SQL rehearsals do not prove Publish compatibility.
 - [Atomic import](atomic-import-operations.md) + [history](completed-history-durability.md) + [undo](data-health-undo-coverage.md) — preserve evidence, enrich history idempotently, retain snapshots.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.

@@ -17,6 +17,7 @@ import {
   type AuthSessionReason,
   type StaffMember,
 } from "./inventoryShared";
+import { markExpectedAuthLifecycleCancellation } from "./performanceDiagnostics";
 import { AuthContext } from "./useAuth";
 import { resetMasterDataTransportCache } from "./masterData";
 import { setProfileCacheIdentity } from "./profileCache";
@@ -30,12 +31,15 @@ const AUTH_SESSION_PROBE_TIMEOUT_MESSAGE =
 async function fetchSessionWithDeadline(signal: AbortSignal): Promise<StaffMember> {
   const controller = new AbortController();
   let timedOut = false;
-  const abortFromQuery = () => controller.abort(signal.reason);
+  const abortFromQuery = () => {
+    markExpectedAuthLifecycleCancellation(controller.signal);
+    controller.abort(signal.reason);
+  };
   if (signal.aborted) abortFromQuery();
   else signal.addEventListener("abort", abortFromQuery, { once: true });
   const timeout = setTimeout(() => {
     timedOut = true;
-    controller.abort();
+    controller.abort(new DOMException("Staff session check timed out", "TimeoutError"));
   }, AUTH_SESSION_PROBE_TIMEOUT_MS);
 
   try {

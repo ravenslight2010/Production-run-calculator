@@ -45,6 +45,7 @@ export type ApiFailureEvent = {
   operationCategory: ApiOperationCategory;
   requestRoute: ApiRequestRoute;
   requestOutcome: ApiRequestOutcome;
+  cancellationClassification?: "expected_auth_lifecycle";
   elapsedMs: number;
   observedAt: string;
   backgroundObserved: boolean;
@@ -85,6 +86,12 @@ export const DIAGNOSTIC_INGESTION_TRANSPORTS = {
 type FetchTransport = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 let apiFetchTransport: FetchTransport | null = null;
 let installedApiFetchWrapper: typeof fetch | null = null;
+const expectedAuthLifecycleAbortSignals = new WeakSet<AbortSignal>();
+
+/** Mark only the signal created for a known React Query auth-probe lifecycle abort. */
+export function markExpectedAuthLifecycleCancellation(signal: AbortSignal): void {
+  expectedAuthLifecycleAbortSignals.add(signal);
+}
 
 export type DiagnosticIngestionTransportName = keyof typeof DIAGNOSTIC_INGESTION_TRANSPORTS;
 export const IMPORT_PERFORMANCE_BUDGETS = {
@@ -420,7 +427,12 @@ async function fetchWithFailurePolicy(
   const elapsedMs = () => Math.max(0, Math.min(MAX_REQUEST_ELAPSED_MS, Date.now() - startedWallTime));
   const reportFailure = (
     requestOutcome: ApiRequestOutcome,
-    fields: { httpStatus?: number; reasonCode?: ApiRequestReasonCode; correlationId?: string } = {},
+    fields: {
+      httpStatus?: number;
+      reasonCode?: ApiRequestReasonCode;
+      correlationId?: string;
+      cancellationClassification?: ApiFailureEvent["cancellationClassification"];
+    } = {},
   ) => {
     const duration = elapsedMs();
     emitApiFailure({
@@ -431,6 +443,9 @@ async function fetchWithFailurePolicy(
       observedAt: new Date().toISOString(),
       backgroundObserved: hiddenObserved,
       connectivity: connectivity(),
+      ...(fields.cancellationClassification
+        ? { cancellationClassification: fields.cancellationClassification }
+        : {}),
       ...(fields.httpStatus === undefined ? {} : { httpStatus: fields.httpStatus }),
       ...(fields.reasonCode === undefined ? {} : { reasonCode: fields.reasonCode }),
       ...(fields.correlationId === undefined ? {} : { correlationId: fields.correlationId }),
@@ -475,7 +490,13 @@ async function fetchWithFailurePolicy(
             : connectivity() === "offline"
               ? "offline_failure"
               : "transport_failure";
-      reportFailure(requestOutcome);
+      reportFailure(requestOutcome, {
+        ...(requestOutcome === "cancelled" && operation === "authentication" &&
+            route === "authentication" && activeSignal &&
+            expectedAuthLifecycleAbortSignals.has(activeSignal)
+          ? { cancellationClassification: "expected_auth_lifecycle" as const }
+          : {}),
+      });
     }
     throw err;
   } finally {

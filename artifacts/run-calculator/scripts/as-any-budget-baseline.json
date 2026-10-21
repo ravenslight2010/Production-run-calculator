@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "total": 26,
+  "files": {
+    "components/CompactRunStrip.tsx": 2,
+    "components/live-stations/LiveFrontlineTabContent.tsx": 1,
+    "components/live-stations/LiveRunTabContent.tsx": 1,
+    "components/live-stations/LiveSetupRecipesTabContent.tsx": 8,
+    "components/live-stations/LiveSummaryTabContent.tsx": 1,
+    "components/SetupProfileEditor.tsx": 2,
+    "operationalIntentOutbox.ts": 10,
+    "pages/home.tsx": 1
+  }
+}

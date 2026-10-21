@@ -13,11 +13,11 @@ Manager sync diagnostics should expose only a fixed-shape aggregate of exact-sna
 
 **How to apply:** Add telemetry at shared request/startup boundaries and expose only allowlisted machine-readable error codes and counters. For database failures, log safe error metadata and bounded counts rather than `{ err }`, query text, or parameters. For sync health, project only the fixed peer-frame summary required by operators.
 
-Gemini fallback-exhaustion counters are process-local and best-effort; they are not a fleet-wide count. Any later change to interpret this warning as a cross-instance outage signal must add shared aggregation and shared deduplication, while retaining only the bounded result/trigger labels.
+Process-local counters are best-effort observations, not fleet-wide evidence. In a multi-instance deployment, each instance may see only part of an overall failure pattern. Any fleet-wide interpretation requires shared aggregation and deduplication, while retaining only bounded result and trigger labels.
 
-**Why:** Keeping this alert in memory avoids a database write for every failed provider request, but requests distributed across API instances can each stay below the local threshold.
+**Why:** Keeping low-cost observations process-local can avoid a database write for every failed request, but an individual instance cannot represent fleet-wide state.
 
-**How to apply:** Treat the current warning as a per-process degradation signal. If deployment topology or operator needs require fleet-wide detection, design a bounded shared event path and measure its added database load first.
+**How to apply:** Treat process-local warnings as local degradation signals. If fleet-wide detection is needed, design a bounded shared event path and measure its added database load first.
 
 Public health diagnostics that need to distinguish groups derived from predictable operational values should use process-random keyed fingerprints, not plain hashes; treat those references as process-local, not durable identifiers.
 

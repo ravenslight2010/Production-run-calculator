@@ -483,6 +483,18 @@ describe("field-check observer", () => {
     const stop = createFieldCheckObserver("app-build:abc123", TEST_SCOPE);
     window.dispatchEvent(new CustomEvent("app:api-failure", {
       detail: {
+        operationCategory: "authentication",
+        requestRoute: "authentication",
+        requestOutcome: "cancelled",
+        cancellationClassification: "expected_auth_lifecycle",
+        elapsedMs: 20,
+        observedAt: new Date().toISOString(),
+        backgroundObserved: false,
+        connectivity: "online",
+      },
+    }));
+    window.dispatchEvent(new CustomEvent("app:api-failure", {
+      detail: {
         operationCategory: "inventory",
         requestOutcome: "cancelled",
         elapsedMs: 40,
@@ -499,6 +511,10 @@ describe("field-check observer", () => {
       outcome: "incomplete",
       metrics: { sourceCode: 6, outcomeCode: 7, operationCode: 4, backgroundCode: 0 },
     });
+    expect(
+      submit.mock.calls.flatMap((call) => call[0])
+        .filter((item: { checkName: string }) => item.checkName === "performance"),
+    ).toHaveLength(1);
     expect(sample).not.toHaveProperty("reportedRequestCorrelationId");
   });
 

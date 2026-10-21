@@ -31,7 +31,10 @@ describe("Home sync manager boundary", () => {
       ),
       home.slice(
         home.indexOf("if (isPermanentSyncWriteRejection(responseStatus))"),
-        home.indexOf("syncPushQueueRef.current.finish({ drainQueued: false });", home.indexOf("if (isPermanentSyncWriteRejection(responseStatus))")),
+        home.indexOf(
+          "syncPushQueueRef.current.finish({ drainQueued: false });",
+          home.indexOf("if (isPermanentSyncWriteRejection(responseStatus))"),
+        ),
       ),
       home.slice(
         home.indexOf("// All retries exhausted"),
@@ -40,7 +43,7 @@ describe("Home sync manager boundary", () => {
     ];
 
     expect(terminalWriteSections.every((section) => section.includes("syncWriteFieldCheck"))).toBe(true);
-    expect(home.match(/syncWriteFieldCheck/g)).toHaveLength(6);
+    expect(home.match(/syncWriteFieldCheck\(/g)).toHaveLength(5);
   });
 
   it("keeps scheduled profile propagation on the causally fenced write contract", () => {

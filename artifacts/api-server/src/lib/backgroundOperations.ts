@@ -235,6 +235,29 @@ const TRANSIENT_DATABASE_ERROR_CODES = new Set([
   "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT",
 ]);
 
+export type BackgroundFailureReason =
+  | "database-capacity"
+  | "database-timeout"
+  | "database-connection"
+  | "database-permission"
+  | "database-schema"
+  | "database-conflict"
+  | "database-error"
+  | "dependency-timeout"
+  | "dependency-connection"
+  | "unexpected";
+
+const DATABASE_TIMEOUT_CODES = new Set(["57014"]);
+const DEPENDENCY_TIMEOUT_CODES = new Set(["ETIMEDOUT", "ETIMEOUT", "ESOCKETTIMEDOUT", "ECONNABORTED"]);
+const DATABASE_CONNECTION_CODES = new Set([
+  "57P01", "57P02", "57P03",
+  "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
+]);
+const DEPENDENCY_CONNECTION_CODES = new Set([
+  "ECONNRESET", "ECONNREFUSED", "EPIPE", "EHOSTUNREACH", "ENETUNREACH",
+  "ERR_SOCKET_CLOSED",
+]);
+
 function errorCauses(error: unknown): unknown[] {
   const causes: unknown[] = [];
   const seen = new Set<object>();
@@ -258,6 +281,55 @@ function errorCode(error: unknown): string | undefined {
     if (typeof code === "string" && /^[A-Z0-9_.-]{1,64}$/i.test(code)) return code;
   }
   return undefined;
+}
+
+/** Fixed-cardinality labels only; database-only callers may classify generic socket errors as DB failures. */
+export function classifyBackgroundFailure(
+  error: unknown,
+  options: { assumeDatabase?: boolean } = {},
+): BackgroundFailureReason {
+  for (const cause of errorCauses(error)) {
+    const rawCode = (cause as { code?: unknown }).code;
+    const code = typeof rawCode === "string" ? rawCode.toUpperCase() : "";
+    if (code === "53300") return "database-capacity";
+    if (DATABASE_TIMEOUT_CODES.has(code)) return "database-timeout";
+    if (DEPENDENCY_TIMEOUT_CODES.has(code)) {
+      return options.assumeDatabase ? "database-timeout" : "dependency-timeout";
+    }
+    if (code === "42501") return "database-permission";
+    if (code === "42P01" || code === "42703" || code.startsWith("42")) return "database-schema";
+    if (DATABASE_CONNECTION_CODES.has(code) || code.startsWith("08")) return "database-connection";
+    if (DEPENDENCY_CONNECTION_CODES.has(code)) {
+      return options.assumeDatabase ? "database-connection" : "dependency-connection";
+    }
+    if (code.startsWith("40") || code === "55P03") return "database-conflict";
+    if (/^[0-9A-Z]{5}$/.test(code)) return "database-error";
+
+    const message = cause instanceof Error
+      ? cause.message.toLowerCase().trim()
+      : typeof cause === "string" ? cause.toLowerCase().trim() : "";
+    if (/too many clients already|remaining connection slots are reserved/.test(message)) {
+      return "database-capacity";
+    }
+    if (/^(timeout exceeded when trying to connect|pool checkout timed out|query read timeout)$/.test(message) ||
+      /canceling statement due to statement timeout/.test(message)) {
+      return "database-timeout";
+    }
+    if (/terminating connection|server closed the connection unexpectedly/.test(message)) {
+      return "database-connection";
+    }
+    if (/connection (terminated|closed|reset|refused)/.test(message)) {
+      return options.assumeDatabase ? "database-connection" : "dependency-connection";
+    }
+  }
+  return "unexpected";
+}
+
+/** Clamp and normalize elapsed-time fields before they reach logs or telemetry. */
+export function boundedDurationMs(durationMs: number): number {
+  return Number.isFinite(durationMs)
+    ? Math.min(15 * 60_000, Math.max(0, Math.round(durationMs)))
+    : 0;
 }
 
 export function isTransientDatabaseConnectionError(error: unknown): boolean {

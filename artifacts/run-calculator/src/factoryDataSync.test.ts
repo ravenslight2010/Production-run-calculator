@@ -12,7 +12,10 @@ import { clearPerformanceDiagnostics, getPerformanceDiagnostics } from "./perfor
 const QUEUE_KEY = "run-calc-fkv-queue-v1";
 
 function response(ok: boolean, updatedAt = "2026-08-20T12:00:00.000Z") {
-  return { ok, status: ok ? 200 : 503, json: async () => ({ updatedAt }) };
+  return new Response(JSON.stringify({ updatedAt }), {
+    status: ok ? 200 : 503,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 async function settle(): Promise<void> {
@@ -58,7 +61,7 @@ describe("factory data durable write queue", () => {
     expect(localStorage.getItem(QUEUE_KEY)).toBe("[]");
     expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
       "api:other:503",
-      "api-request-failure:other:transport_failure",
+      "api-request-failure:other:http_server_error",
       "api:other:200",
     ]);
   });

@@ -1,6 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, brandProfilesTable, type BrandProfileRow } from "@workspace/db";
+import {
+  db,
+  brandProfilesTable,
+  sauceRecipesTable,
+  type BrandProfileRow,
+} from "@workspace/db";
 import { SaveBrandProfilesBody, DeleteBrandProfilesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { getUserCapabilities } from "../lib/roles";
@@ -171,8 +176,8 @@ type AuditProfile = {
 //     a DIFFERENT profile and is NOT this profile's own primary.
 //  2. cross-brand: the recipe name contains a known brand-name substring that
 //     belongs to a different profile's brand.
-//  3. orphaned-type: app3Type or app4Type is a non-blank, non-None, non-Mix
-//     value while the companion recipe name is blank.
+//  3. orphaned-type: app3Type or app4Type requires a named cheese recipe while
+//     the companion recipe name is blank. Direct ingredient types need no recipe.
 export function computeApplicatorAudit(profiles: AuditProfile[]): AuditItem[] {
   // Build a map: normalized recipe name → set of profile keys that list it as
   // a primary (app1/app2) applicator.
@@ -223,14 +228,10 @@ export function computeApplicatorAudit(profiles: AuditProfile[]): AuditItem[] {
       const appType = String(v[typeField] ?? "").trim();
       const recipeNameLower = recipeName.toLowerCase();
 
-      // Signal 3: orphaned type — type is set to a non-blank, non-None value
-      // but the recipe name is empty. The contaminating run wrote the type
-      // field but had no cheese recipe in that slot.
+      // Signal 3: a Cheese applicator requires a linked recipe. Other named
+      // types are direct ingredients and are valid without a recipe link.
       if (!recipeName) {
-        const isOrphanedType =
-          appType.length > 0 &&
-          appType.toLowerCase() !== "none" &&
-          appType.toLowerCase() !== "mix";
+        const isOrphanedType = appType.toLowerCase() === "cheese";
         if (isOrphanedType) {
           items.push({
             key: p.key,
@@ -407,23 +408,36 @@ router.get("/brand-profiles/stale-sauce-names", async (req: Request, res: Respon
     // Build a SQL expression matching any GENERIC_SAUCE_NAMES value
     // case-insensitively against the stored frontlineRecipeName JSON field.
     const lowerNames = GENERIC_SAUCE_NAMES.map((n) => n.toLowerCase());
-    const rows = await db
-      .select({
-        key: brandProfilesTable.key,
-        brand: brandProfilesTable.brand,
-        flavor: brandProfilesTable.flavor,
-        sauceName: sql<string>`${brandProfilesTable.values}->>'frontlineRecipeName'`,
-      })
-      .from(brandProfilesTable)
-      .where(
-        and(
-          eq(brandProfilesTable.scope, scope),
-          sql`lower(${brandProfilesTable.values}->>'frontlineRecipeName') = ANY(${sql.raw(
-            `ARRAY[${lowerNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]`,
-          )})`,
+    const [profiles, sauceRecipes] = await Promise.all([
+      db
+        .select({
+          key: brandProfilesTable.key,
+          brand: brandProfilesTable.brand,
+          flavor: brandProfilesTable.flavor,
+          sauceName: sql<string>`${brandProfilesTable.values}->>'frontlineRecipeName'`,
+        })
+        .from(brandProfilesTable)
+        .where(
+          and(
+            eq(brandProfilesTable.scope, scope),
+            sql`lower(trim(${brandProfilesTable.values}->>'frontlineRecipeName')) = ANY(${sql.raw(
+              `ARRAY[${lowerNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]`,
+            )})`,
+          ),
         ),
-      );
-    res.json({ items: rows });
+      db
+        .select({ name: sauceRecipesTable.name })
+        .from(sauceRecipesTable)
+        .where(eq(sauceRecipesTable.scope, scope)),
+    ]);
+    const existingNames = new Set(
+      sauceRecipes.map((recipe) => recipe.name.trim().toLowerCase()),
+    );
+    res.json({
+      items: profiles.filter(
+        (profile) => !existingNames.has((profile.sauceName ?? "").trim().toLowerCase()),
+      ),
+    });
   } catch (err) {
     req.log.error({ err }, "failed to list stale-sauce-name profiles");
     res.status(500).json({ error: "Failed to list stale sauce name profiles" });

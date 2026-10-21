@@ -15,6 +15,12 @@ Keep an isolated copy of the installed package-manager state when reusing depend
 
 **How to apply:** Copy installed-state metadata as disposable regular files, rather than linking writable originals or omitting the records. Require the intended build failure, not a package-install failure, in negative integration cases.
 
+For non-root container commands, do not let pnpm verify/reconcile a workspace install that was created as root during image build.
+
+**Why:** pnpm's install metadata records the builder user's store path. Switching to the runtime user can make `pnpm run` try to replace the builder-owned virtual store, even though the frozen build already installed the command's dependencies.
+
+**How to apply:** Keep the runtime workspace read-only and run the migration command with `--config.verify-deps-before-run=false` when its dependencies are installed with `pnpm install --frozen-lockfile` during the image build. Do not solve this by running the migration as root or broadly chowning the builder workspace.
+
 When a production build consumes assets outside its ordinary source roots, allowlist every runtime asset in the sealed source fingerprint and ensure isolated builds copy those same files. Version the source policy when the input boundary changes. A leftover counterpart stage from an older policy must not fail a non-final build stage, but final sealing must still reject mismatched identities.
 
 **Why:** Isolated build copies are assembled from the fingerprinted file list. An unlisted report can be absent from the isolated build and can alter runtime behavior without changing the recorded source identity. Policy bumps can also leave old stage metadata in the other artifact's output directory.

@@ -32,11 +32,8 @@ export type IncidentContext = {
 
 export type IncidentSource = "user_report" | "auto_crash";
 
-// "Seen before" signal computed at report time from past similar incidents in
-// the shared facility-memory pool. `count` is how many prior similar incidents
-// were found; `lastWorkaround` echoes the recovery step that helped previously.
-// Null when this incident has no precedent. Stored on the incident so the
-// manager review list can flag recurring problems, and returned to the reporter.
+// Historical recurrence fields remain in the persisted/API shape for older
+// incident rows. New reports do not compute or populate this value.
 export type IncidentRecurrence = {
   count: number;
   lastWorkaround: string | null;

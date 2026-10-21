@@ -35,18 +35,15 @@ function pathId(raw: string | string[] | undefined): string {
   return (Array.isArray(raw) ? raw[0] : raw) ?? "";
 }
 
-// Cost/abuse guard for the paid incident-diagnosis endpoint: per-user fixed
-// window. This also bounds a crash loop that keeps auto-submitting — the
-// surplus is dropped with a 429 rather than fanning out into many paid calls.
-// Matches the AI optimize/photo endpoints' posture (10 requests / minute).
+// Per-user fixed-window guard for incident reporting. This also bounds a crash
+// loop that keeps auto-submitting; surplus reports receive a 429.
 const REPORT_RATE_WINDOW_MS = 60_000;
 const REPORT_RATE_MAX = 10;
 
 // In production the API may run with more than one instance, so the cap is
 // backed by a shared Postgres store. Elsewhere it falls back to in-memory.
-// Each endpoint gets its own store and namespaced key so their quotas are
-// independent: exhausting the diagnosis limit cannot deny the clustering
-// endpoint (and vice versa).
+// Each endpoint gets its own store and namespaced key so incident-report
+// submissions and incident clustering have independent quotas.
 const reportRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(REPORT_RATE_WINDOW_MS)
@@ -59,16 +56,14 @@ const clustersRateStore =
     ? new PostgresRateLimitStore(CLUSTERS_RATE_WINDOW_MS)
     : undefined;
 
-// POST /incidents — report an issue (or auto-submit a crash) and get an AI
-// diagnosis. Open to ANY signed-in user (the router already requires auth; no
-// capability is needed to report a problem). We persist the incident first so
-// it's never lost even if the AI call fails, then attach the diagnosis.
+// POST /incidents — record an issue report or automatically captured crash for
+// manager review. Open to any signed-in user; no elevated capability is needed.
 router.post(
   "/incidents",
   rateLimit({
     windowMs: REPORT_RATE_WINDOW_MS,
     max: REPORT_RATE_MAX,
-    keyGenerator: (req) => `ai-incident-diagnosis:${req.userId ?? req.ip ?? "unknown"}`,
+    keyGenerator: (req) => `incident-report:${req.userId ?? req.ip ?? "unknown"}`,
     store: reportRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -106,14 +101,11 @@ router.post(
       }
     }
 
-    // Ask the AI for a plain-language diagnosis + safe workaround. Any failure
-    // (provider error, non-JSON) falls back to canned text; the incident is
-    // still recorded with that same text so the manager sees what the user saw.
-    // Generated diagnosis was retired before retention cleanup. Incident capture,
-    // human notes, assignment, and workflow history remain fully operational.
-    const history = { recurrence: null as null };
+    // Keep reporting record-first: persist null generated fields without
+    // invoking an AI provider or triggering notification delivery.
     const diagnosis = null;
     const workaround = null;
+    const recurrence = null;
 
     const incident = await createIncident({
       source: data.source,
@@ -126,7 +118,7 @@ router.post(
       context,
       diagnosis,
       workaround,
-      recurrence: history.recurrence,
+      recurrence,
     });
     logger.info({
       event: "incident_captured",
@@ -141,7 +133,7 @@ router.post(
       correlationId,
       diagnosis,
       workaround,
-      recurrence: history.recurrence,
+      recurrence,
       aiGenerated: false,
     });
   },

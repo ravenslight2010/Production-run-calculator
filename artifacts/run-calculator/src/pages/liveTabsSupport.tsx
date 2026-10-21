@@ -33,13 +33,8 @@ import { WarehouseTabCtx, type WarehouseTabContextValue } from "../contexts/Ware
 import { InventoryTabCtx, type InventoryTabContextValue } from "../contexts/InventoryTabCtx";
 import { MixesTabCtx, type MixesTabContextValue } from "../contexts/MixesTabCtx";
 import { SetupTabCtx, type SetupTabContextValue } from "../contexts/SetupTabCtx";
-import WarehouseTabContent from "../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../components/FreezerSurplusPanel";
 import InventoryTabContent from "../components/InventoryTabContent";
-import MixesTabContent from "../components/MixesTabContent";
-import SetupContent from "../components/SetupContent";
-import SummaryToolsContent from "../components/SummaryToolsContent";
-import ScreenModeView from "../components/ScreenModeView";
 import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
@@ -54,14 +49,9 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
-import GlanceOverlay from "../components/GlanceOverlay";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
-import { LiveSauceTabContent } from "../components/live-stations/LiveSauceTabContent";
-import { LiveFrontlineTabContent } from "../components/live-stations/LiveFrontlineTabContent";
-import { LivePackagingTabContent } from "../components/live-stations/LivePackagingTabContent";
-import { LiveDoughTabContent } from "../components/live-stations/LiveDoughTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
 import { TouchSelect } from "../components/TouchOptionPicker";
@@ -362,7 +352,6 @@ import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
-import DataHealthWorkspace from "../components/DataHealthWorkspace";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
 import {
   buildSyncDiagnosticReport,
@@ -449,8 +438,6 @@ import { cachedProfileKeys } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
-import MixReconcilePanel from "../components/MixReconcilePanel";
-import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
 import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
@@ -764,8 +751,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import SetupProfileEditor from "@/components/SetupProfileEditor";
-import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {

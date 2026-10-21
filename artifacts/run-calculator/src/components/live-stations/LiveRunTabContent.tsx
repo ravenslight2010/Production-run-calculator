@@ -12,11 +12,7 @@ import {
 } from "@workspace/live-calc";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
-import WarehouseTabContent from "../../components/WarehouseTabContent";
 import { FreezerSurplusPanel } from "../../components/FreezerSurplusPanel";
-import MixesTabContent from "../../components/MixesTabContent";
-import SetupContent from "../../components/SetupContent";
-import SummaryToolsContent from "../../components/SummaryToolsContent";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,

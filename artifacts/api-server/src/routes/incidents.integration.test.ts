@@ -1,18 +1,18 @@
-// Integration tests for the incident reporting + AI diagnosis flow.
+// Integration tests for record-first incident reporting and manager review.
 //
-// Anyone signed in can report an issue (or auto-submit a crash) and gets back a
-// plain-language diagnosis + workaround; the incident is persisted with that
-// diagnosis. Managers get a review list, an unreviewed count (for the nav
-// badge), and can mark incidents reviewed. These tests guard:
-//   - reporting is open to any role and persists the incident + diagnosis;
-//   - the diagnosis is recorded even when the AI provider fails (fallback text);
+// Anyone signed in can report an issue or auto-submit a crash. The report is
+// persisted without a generated diagnosis or workaround. Managers get a review
+// list, an unreviewed count (for the nav badge), and can mark incidents reviewed.
+// These tests guard:
+//   - reporting is open to any role and persists the incident with null diagnosis;
 //   - empty submissions are rejected;
 //   - the manager-only endpoints (list/get/review/count) reject operators;
 //   - the unreviewed count drives down as incidents are reviewed.
 //
 // They run the real router against a disposable Postgres database (created from
 // the dev DATABASE_URL's server, schema pushed via drizzle-kit, dropped on
-// teardown). The OpenAI client is mocked so no paid request is made.
+// teardown). The diagnosis provider is mocked as a fail-fast guard; the incident
+// route must not invoke it.
 //
 // @workspace/db binds its pool to process.env.DATABASE_URL at import time, so we
 // create the throwaway DB and repoint DATABASE_URL BEFORE importing the router —
@@ -28,15 +28,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import pg from "pg";
 import { signLegacyTokenForTests } from "../lib/auth";
 
-// Controllable mock of the OpenAI chat client. `nextContent` is what the model
-// "returns"; `shouldThrow` simulates a provider outage.
+// Fail-fast mock of the retired diagnosis provider. Calls are counted so these
+// tests can assert that incident reporting does not invoke it.
 const mock = vi.hoisted(() => ({
-  nextContent: "" as string | null,
-  shouldThrow: false as boolean,
   calls: 0,
-  // The full user prompt the model last received, so tests can assert what the
-  // diagnosis was grounded in (e.g. the "SIMILAR PAST INCIDENTS" block).
-  lastUserPrompt: "" as string,
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => {
@@ -45,13 +40,9 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
     openai: {
       chat: {
         completions: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          create: async (args: any) => {
+          create: async () => {
             mock.calls += 1;
-            const messages = (args?.messages ?? []) as Array<{ role: string; content: string }>;
-            mock.lastUserPrompt = messages.find((m) => m.role === "user")?.content ?? "";
-            if (mock.shouldThrow) throw new Error("provider blew up");
-            return { choices: [{ message: { content: mock.nextContent } }] };
+            throw new Error("The incident route must not call the retired diagnosis provider");
           },
         },
       },
@@ -140,7 +131,7 @@ beforeAll(async () => {
   });
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   if (server) {
@@ -155,17 +146,11 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-}, 60_000);
+}, 180_000);
 
 beforeEach(async () => {
   clearUserValidityCache();
-  mock.nextContent = JSON.stringify({
-    diagnosis: "The save didn't go through.",
-    workaround: "Try again in a moment.",
-  });
-  mock.shouldThrow = false;
   mock.calls = 0;
-  mock.lastUserPrompt = "";
   await db.execute(
     sql`TRUNCATE ${incidentsTable}, ${facilityKnowledgeTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
@@ -322,8 +307,7 @@ describe("POST /incidents — operational reporting without generated diagnosis"
     expect((row.context as { relatedCorrelationId?: string }).relatedCorrelationId).toBeUndefined();
   });
 
-  it("does not depend on the retired AI provider", async () => {
-    mock.shouldThrow = true;
+  it("returns the recorded incident without invoking a diagnosis provider", async () => {
     const res = await req(OPERATOR, "POST", "/api/incidents", userReport());
     expect(res.status).toBe(200);
     const body = (await res.json()) as { incidentId: string; diagnosis: string | null; workaround: string | null };
@@ -649,7 +633,6 @@ describe("retired incident generation boundary", () => {
     const body = (await res.json()) as { recurrence: unknown };
     expect(body.recurrence).toBeNull();
     expect(mock.calls).toBe(0);
-    expect(mock.lastUserPrompt).toBe("");
     expect(await db.select().from(facilityKnowledgeTable)).toHaveLength(0);
   });
 });

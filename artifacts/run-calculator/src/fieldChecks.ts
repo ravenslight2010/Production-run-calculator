@@ -494,6 +494,7 @@ export function createFieldCheckObserver(appBuild: string, originScope: string):
   const onApiFailure = (event: Event) => {
     const detail = (event as CustomEvent<ApiFailureEvent>).detail;
     if (!detail || !Number.isFinite(detail.elapsedMs) || detail.elapsedMs < 0) return;
+    if (detail.cancellationClassification === "expected_auth_lifecycle") return;
     const outcomeCode = ({
       http_server_error: API_REQUEST_OUTCOME_CODES.httpServerError,
       authentication_rejected: API_REQUEST_OUTCOME_CODES.authenticationRejected,

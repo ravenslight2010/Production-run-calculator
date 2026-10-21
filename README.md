@@ -205,7 +205,7 @@ belong in `skill-catalog-allowlist.json` with an explicit routing target.
 ## Product
 
 - Pizza production line planning, scheduling, and inventory for floor staff (web + mobile).
-- AI issue diagnosis & manager alerts: any signed-in user can report an issue and get an immediate plain-language AI diagnosis plus a safe workaround; uncaught crashes are auto-captured and become server-side incidents with AI diagnosis.
+- Issue reporting & manager review: any signed-in user can report an issue, and uncaught crashes are auto-captured as server-side incidents for manager review. Reports do not generate a diagnosis or workaround or trigger notification delivery.
 
 ### Production line layout
 

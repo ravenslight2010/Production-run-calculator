@@ -16,11 +16,25 @@ export interface WebPushStatus {
   subscription?: PushSubscription | null;
   subscriptionId?: string;
   error?: string;
+  registrationRejected?: boolean;
+  subscriptionWasExisting?: boolean;
 }
+
 
 const SUBSCRIPTIONS_URL = "/api/web-push/subscriptions";
 const VAPID_URL = "/api/web-push/vapid-public-key";
 const SUBSCRIPTION_ID_KEY = "run-calculator.web-push-subscription-id.v1";
+
+class PushRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "PushRequestError";
+  }
+}
+
+function wasRegistrationRejected(error: unknown): boolean {
+  return error instanceof PushRequestError && (error.status === 400 || error.status === 422);
+}
 
 function browserPushSupport(): { error?: WebPushStatus; notification?: typeof Notification } {
   if (typeof window === "undefined" || !window.isSecureContext) {
@@ -61,8 +75,11 @@ async function pushFetch(path = SUBSCRIPTIONS_URL, init?: RequestInit): Promise<
   });
   if (!response.ok) {
     let detail = "";
-    try { detail = (await response.json() as { message?: string; error?: string }).message ?? ""; } catch { /* no JSON error body */ }
-    throw new Error(detail || `Web Push request failed (${response.status}).`);
+    try {
+      const body = await response.json() as { message?: string; error?: string };
+      detail = body.message ?? body.error ?? "";
+    } catch { /* no JSON error body */ }
+    throw new PushRequestError(detail || `Web Push request failed (${response.status}).`, response.status);
   }
   return response;
 }
@@ -129,6 +146,9 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
 export async function enableWebPush(vapidPublicKey: string): Promise<WebPushStatus> {
   const support = browserPushSupport();
   if (support.error) return support.error;
+  let subscription: PushSubscription | null = null;
+  const subscriptionId = storedSubscriptionId();
+  let subscriptionWasExisting = false;
   try {
     let permission = support.notification!.permission;
     if (permission === "default") permission = await support.notification!.requestPermission();
@@ -136,15 +156,81 @@ export async function enableWebPush(vapidPublicKey: string): Promise<WebPushStat
     if (permission !== "granted") return { state: "error", error: "Browser notification permission was not granted." };
     const registration = await navigator.serviceWorker.ready;
     const existing = await registration.pushManager.getSubscription();
-    const subscription = existing ?? await registration.pushManager.subscribe({
+    subscriptionWasExisting = existing !== null;
+    subscription = existing ?? await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: vapidKeyToUint8Array(vapidPublicKey),
     });
-    const subscriptionId = await savePushSubscription(subscription);
-    storeSubscriptionId(subscriptionId);
-    return { state: "enabled", subscription, subscriptionId };
+    const savedId = await savePushSubscription(subscription);
+    storeSubscriptionId(savedId);
+    return { state: "enabled", subscription, subscriptionId: savedId };
   } catch (error) {
-    return { state: "error", error: error instanceof Error ? error.message : "Could not enable Web Push." };
+    return {
+      state: "error",
+      error: error instanceof Error ? error.message : "Could not enable Web Push.",
+      subscription,
+      subscriptionId,
+      registrationRejected: wasRegistrationRejected(error),
+      subscriptionWasExisting,
+    };
+  }
+}
+
+/**
+ * Replaces only this browser's push subscription. The caller must first ask the
+ * user to confirm because an existing local subscription will be removed.
+ * Revoke the server row before unsubscribing locally so a failed request never
+ * silently strands a still-working device.
+ */
+export async function recoverWebPush(
+  vapidPublicKey: string,
+  subscription?: PushSubscription | null,
+  subscriptionId?: string,
+  subscriptionWasExisting = false,
+): Promise<WebPushStatus> {
+  const support = browserPushSupport();
+  if (support.error) return support.error;
+
+  let current = subscription ?? null;
+  let currentId = subscriptionId ?? storedSubscriptionId();
+  let replacement: PushSubscription | null = null;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    current ??= await registration.pushManager.getSubscription();
+    if (current && subscriptionWasExisting && !currentId) {
+      throw new Error("This saved device subscription cannot be identified safely, so it was not replaced.");
+    }
+
+    let permission = support.notification!.permission;
+    if (permission === "default") permission = await support.notification!.requestPermission();
+    if (permission === "denied") return { state: "denied" };
+    if (permission !== "granted") {
+      return { state: "error", error: "Browser notification permission was not granted." };
+    }
+
+    if (currentId) await revokePushSubscription(currentId);
+    if (current) {
+      await current.unsubscribe();
+      current = null;
+    }
+    storeSubscriptionId(undefined);
+
+    replacement = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidKeyToUint8Array(vapidPublicKey),
+    });
+    const replacementId = await savePushSubscription(replacement);
+    storeSubscriptionId(replacementId);
+    return { state: "enabled", subscription: replacement, subscriptionId: replacementId };
+  } catch (error) {
+    return {
+      state: "error",
+      error: error instanceof Error ? error.message : "Could not restore Web Push.",
+      subscription: replacement ?? current,
+      subscriptionId: current ? currentId : undefined,
+      registrationRejected: wasRegistrationRejected(error) || (current !== null && subscriptionWasExisting),
+      subscriptionWasExisting: replacement ? false : subscriptionWasExisting,
+    };
   }
 }
 

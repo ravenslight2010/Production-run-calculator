@@ -480,7 +480,13 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
-import { createImportOperationId } from "../importOperations";
+import {
+  clearPendingImportOperation,
+  createImportOperationId,
+  ImportOperationError,
+  readPendingImportOperations,
+  retryPendingImportOperation,
+} from "../importOperations";
 import {
   emitFieldCheckSignal,
   FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
@@ -567,7 +573,7 @@ import {
   collectStaleRecipeLinkNames,
   buildStaleCleanupSuggestions,
 } from "../mergeRecipeNames";
-import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
+import type { MergeSuggestion } from "@workspace/merge-suggest";
 import {
   allergenMeta,
   allergenOptions,
@@ -579,7 +585,7 @@ import {
 } from "@workspace/allergen";
 import {
   suggestMerges,
-  saveMergeAliases,
+  saveConfirmedMergeAliasesBestEffort,
   denyMerge,
   fetchMergedAwayNames,
   saveMergedAwayNames,
@@ -818,7 +824,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import LineMapDashboard from "@/components/LineMapDashboard";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -5479,14 +5484,9 @@ export default function Home() {
         const tombSources = Object.keys(map).filter(s => !tombTargets.has(s.trim().toLowerCase()));
         void saveMergedAwayNames(tombSources).catch(() => {});
       }
-      // Persist the confirmed merge as factory-wide learned aliases (best
-      // effort): feeds the AI suggester next time and powers "previously
-      // merged" suggestions. Awaited so the POST completes before we push.
-      try {
-        await saveMergeAliases(collectMergeAliases(srcs, tgt));
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      // Retarget prior ingredient aliases and save direct mappings in the
+      // background; alias persistence must not delay the confirmed merge.
+      void saveConfirmedMergeAliasesBestEffort(srcs, tgt);
       // Also learn spec-import INGREDIENT aliases (all three kinds — the
       // Ingredients merge tab is category-agnostic and the same physical
       // ingredient can appear in dough, sauce and cheese recipe rows) so a
@@ -5692,19 +5692,16 @@ export default function Home() {
             toText: tgt,
           })),
       );
-      // Persist the confirmed merge as a learned alias, scoped to this
+      // Persist the confirmed merge as learned aliases, scoped to this
       // category ("brand", or "flavor" scoped to the one brand it happened
       // within) so it feeds the AI suggester and "previously merged" list for
       // this tab only — never leaking into another brand's flavor pool.
-      try {
-        await saveMergeAliases(
-          collectMergeAliases(srcs, tgt),
-          mergeBfMode === "brands" ? "brand" : "flavor",
-          mergeBfMode === "flavors" ? mergeBfBrand : undefined,
-        );
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      void saveConfirmedMergeAliasesBestEffort(
+        srcs,
+        tgt,
+        mergeBfMode === "brands" ? "brand" : "flavor",
+        mergeBfMode === "flavors" ? mergeBfBrand : undefined,
+      );
       // ALSO learn a spec-import alias: the Excel importers (spec, premix,
       // cheese) canonicalize through the spec-import alias store, not the merge
       // suggester's — without this, re-importing an old workbook resurrects the
@@ -5812,14 +5809,10 @@ export default function Home() {
           .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
           .map((src) => ({ domain: "recipe", fromText: src, toText: tgt })),
       );
-      // Persist the confirmed merge as a learned alias scoped to this recipe-
+      // Persist the confirmed merge as learned aliases scoped to this recipe-
       // name category so it feeds the AI suggester and "previously merged"
       // list for this tab's own pool only.
-      try {
-        await saveMergeAliases(collectMergeAliases(Object.keys(map), tgt), category);
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      void saveConfirmedMergeAliasesBestEffort(Object.keys(map), tgt, category);
       // Advance the edit stamp on every run the merge re-pointed, so the push
       // below strictly wins the per-run lost-update guard on the server and every
       // peer. Without this, a stale remote payload carrying the pre-merge recipe
@@ -6154,6 +6147,10 @@ export default function Home() {
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [specImportAiRetryCount, setSpecImportAiRetryCount] = useState(0);
+  const [specImportReviewNotice, setSpecImportReviewNotice] = useState<string | null>(null);
+  const [specImportRetryPending, setSpecImportRetryPending] = useState(false);
+  const [specImportRetryBlocked, setSpecImportRetryBlocked] = useState(false);
+  const [specImportRetryingPending, setSpecImportRetryingPending] = useState(false);
   const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
   const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
   const specPhotoPreviews = useMemo(
@@ -12672,6 +12669,94 @@ export default function Home() {
     }).catch(() => {});
   }
 
+  async function recoverPendingImportBeforeNew(): Promise<boolean> {
+    const pendingState = readPendingImportOperations();
+    if (!pendingState.available) {
+      toast({
+        title: "Import recovery is unavailable",
+        description: "Browser storage is blocked or damaged, so the app cannot verify whether an earlier import is waiting. No new import was started. Enable site storage and reload. If the exact saved request cannot be restored, have a manager compare the server data before starting a new reviewed import.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const pending = pendingState.operations[0];
+    if (!pending) return true;
+
+    const payload = pending.payload && typeof pending.payload === "object"
+      ? pending.payload as Record<string, unknown>
+      : {};
+    const importType = payload.importType;
+    toast({
+      title: "Checking the previous import",
+      description: "The exact saved request will be retried under its original ID before another import can start.",
+    });
+    try {
+      await retryPendingImportOperation(pending.operationId);
+    } catch (err) {
+      if (
+        err instanceof ImportOperationError &&
+        err.status === 409 &&
+        err.message === "STALE_REVIEWED_STATE"
+      ) {
+        clearPendingImportOperation(pending.operationId);
+        const afterClear = readPendingImportOperations();
+        if (!afterClear.available || afterClear.operations.length > 0) {
+          toast({
+            title: "Previous import needs recovery",
+            description: "The server rejected the old review before writing, but the saved recovery record could not be safely cleared. No new import was started. Restore browser storage and retry recovery.",
+            variant: "destructive",
+          });
+          return false;
+        }
+        toast({
+          title: "Previous import was not applied",
+          description: "The server rejected the old review before writing. The selected workbook can now be reviewed as a new import.",
+        });
+        return true;
+      }
+      toast({
+        title: "Previous import needs recovery",
+        description: err instanceof Error
+          ? `${err.message} No new import was started. Keep this browser's storage intact, resolve any access or connection issue, and retry the same saved request.`
+          : "The previous save could not be confirmed. No new import was started.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    let cheeseRefreshFailed = false;
+    if (importType === "cheese") {
+      const changes = payload.changes && typeof payload.changes === "object"
+        ? payload.changes as Record<string, unknown>
+        : {};
+      const cheeseChanges = changes.cheeseRecipes && typeof changes.cheeseRecipes === "object"
+        ? changes.cheeseRecipes as Record<string, unknown>
+        : {};
+      const savedRecipes = Array.isArray(cheeseChanges.upsert)
+        ? cheeseChanges.upsert as CheeseRecipe[]
+        : [];
+      try {
+        await propagateCheeseRecipeUpdates(savedRecipes);
+      } catch {
+        cheeseRefreshFailed = true;
+      }
+    }
+    await Promise.allSettled([
+      cycleCountQc.invalidateQueries(),
+      invalidateMasterDataSlice(cycleCountQc, "mixes"),
+      invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes"),
+    ]);
+    toast({
+      title: "Previous import confirmed",
+      description: cheeseRefreshFailed
+        ? "The server confirmed the exact earlier request. Reload the app before starting another import."
+        : "The server confirmed the exact earlier request. Select the workbook again to start a separate import.",
+      ...(cheeseRefreshFailed ? { variant: "destructive" as const } : {}),
+    });
+    return false;
+  }
+
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
@@ -12680,6 +12765,15 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(selectedFiles.length > 0 ? `spec import: ${selectedFiles.length} file(s) selected` : "spec import: picker canceled");
     if (selectedFiles.length === 0) return;
+    if (specImportRetryPending) {
+      toast({
+        title: "Previous import needs recovery",
+        description: "Retry the exact saved operation before starting another import.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!(await recoverPendingImportBeforeNew())) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     if (!canImportSpec) {
       toast({
@@ -12706,6 +12800,9 @@ export default function Home() {
     setSpecImportAiRetryCount(0);
     specImportOperationRef.current = null;
     setSpecImportError(null);
+    setSpecImportReviewNotice(null);
+    setSpecImportRetryPending(false);
+    setSpecImportRetryBlocked(false);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
     setShowSpecImport(true);
@@ -12960,6 +13057,9 @@ export default function Home() {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
         await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
       finishSpecImportOutcome("success");
+      setSpecImportReviewNotice(null);
+      setSpecImportRetryPending(false);
+      setSpecImportRetryBlocked(false);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -13352,11 +13452,9 @@ export default function Home() {
           ? ` Auto-linked ${autoLinkedRecipes} near-duplicate recipe name${autoLinkedRecipes === 1 ? "" : "s"} (word order or minor typo) to an existing recipe.`
           : "";
       toast({
-        title: "Spec sheet imported",
+        title: "Import saved and confirmed",
         description:
-          (importedRecipes
-            ? "Brands, flavors, and recipes have been added."
-            : "Brands and flavors have been added.") +
+          "The server confirmed the reviewed changes." +
           mixNote +
           cheeseNote +
           updatedNote +
@@ -13365,6 +13463,14 @@ export default function Home() {
       specImportOperationRef.current = null;
     } catch (err) {
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
+        if (specImportRetryPending) {
+          setSpecImportRetryBlocked(true);
+          setSpecImportReviewNotice(
+          "The earlier save is still unconfirmed, and the recipe library changed. No new request was sent. Retry the exact earlier save before starting another import.",
+          );
+          setSpecImportError(null);
+          return;
+        }
         const reconfirmation = err as Error & {
           importReview: NonNullable<SpecImportPrepared["importReview"]>;
         };
@@ -13381,7 +13487,42 @@ export default function Home() {
             : current,
         );
         setSpecImportError(null);
-        toast({ title: "Import review updated", description: err.message, variant: "destructive" });
+        setSpecImportReviewNotice(
+          "Nothing was saved. The current recipe library changed this review; check the updated changes below and confirm again.",
+        );
+        toast({
+          title: "Review updated — not saved",
+          description: "Nothing was written. Review the refreshed changes before confirming again.",
+        });
+        return;
+      }
+      if (err instanceof ImportOperationError && err.status === 409 && err.message === "STALE_REVIEWED_STATE") {
+        // The API rejects a stale reviewed-state hash before any domain write.
+        // Retire this unused operation identity so the refreshed review starts
+        // as a new, auditable operation rather than reusing an old payload.
+        clearPendingImportOperation(operationId);
+        specImportOperationRef.current = null;
+        setSpecImportRetryPending(false);
+        setSpecImportRetryBlocked(false);
+        setSpecImportError(null);
+        setSpecImportReviewNotice(
+          "Nothing was saved because the server data changed during review. Confirm again to refresh the review before applying.",
+        );
+        return;
+      }
+      if (
+        err instanceof ImportOperationError &&
+        (err.status === undefined || err.status >= 500)
+      ) {
+        const changedPendingReview = err.message.includes("earlier attempt");
+        setSpecImportRetryPending(true);
+        setSpecImportRetryBlocked(changedPendingReview);
+        setSpecImportReviewNotice(
+          changedPendingReview
+            ? err.message
+            : "The server did not confirm the save. Keep this review unchanged and retry the same save; do not start a new import until its status is known.",
+        );
+        setSpecImportError(null);
         return;
       }
       void recordImportHistory({
@@ -13404,6 +13545,53 @@ export default function Home() {
     }
   }
 
+  async function handleRetryPendingSpecImport() {
+    const operationId = specImportOperationRef.current;
+    if (!operationId || !specImportRetryBlocked || specImportRetryingPending) return;
+    setSpecImportRetryingPending(true);
+    try {
+      await retryPendingImportOperation(operationId);
+      clearPendingImportOperation(operationId);
+      specImportOperationRef.current = null;
+      await cycleCountQc.invalidateQueries();
+      finishSpecImportOutcome("success");
+      setShowSpecImport(false);
+      setSpecImportPrepared(null);
+      specImportBuffersRef.current = [];
+      specImportSourceNamesRef.current = [];
+      setSpecImportError(null);
+      setSpecImportReviewNotice(null);
+      setSpecImportRetryPending(false);
+      setSpecImportRetryBlocked(false);
+      toast({
+        title: "Import saved and confirmed",
+        description: "The server confirmed the exact earlier request. Current app data is being refreshed.",
+      });
+    } catch (err) {
+      if (
+        err instanceof ImportOperationError &&
+        err.status === 409 &&
+        err.message === "STALE_REVIEWED_STATE"
+      ) {
+        clearPendingImportOperation(operationId);
+        specImportOperationRef.current = null;
+        setSpecImportRetryPending(false);
+        setSpecImportRetryBlocked(false);
+        setSpecImportReviewNotice(
+          "The server rejected the earlier review before writing because its source data had changed. Review the refreshed changes before confirming again.",
+        );
+        return;
+      }
+      setSpecImportReviewNotice(
+        err instanceof Error
+          ? `The exact earlier save could not be confirmed: ${err.message}`
+          : "The exact earlier save could not be confirmed. Keep the reviewed changes unchanged and try again.",
+      );
+    } finally {
+      setSpecImportRetryingPending(false);
+    }
+  }
+
   // Premix-sheet importer: read the .xlsx, parse each product tab/block into a
   // Mix deterministically (the AI only disambiguates product names), ground the
   // names, and show a single review/summary screen. Nothing is written until the
@@ -13414,6 +13602,7 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
+    if (!(await recoverPendingImportBeforeNew())) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
@@ -13900,6 +14089,7 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
     if (files.length === 0) return;
+    if (!(await recoverPendingImportBeforeNew())) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
@@ -17061,7 +17251,11 @@ export default function Home() {
               <DropdownMenuContent align="end">
                 {canViewManagerAttention && (
                   <DropdownMenuItem
-                    aria-label="Manager attention"
+                    aria-label={
+                      managerAttentionTotal > 0
+                        ? `Manager attention — ${managerAttentionTotal} manager actions need attention`
+                        : "Manager attention"
+                    }
                     onClick={() => setShowManagerAttention(true)}
                   >
                     <AlertTriangle className="w-4 h-4 mr-2" /> Manager attention
@@ -17961,6 +18155,14 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (specImportRetryPending) {
+              toast({
+                title: "Import status not confirmed",
+                description: "Check the saved operation before closing this review or starting another import.",
+                variant: "destructive",
+              });
+              return;
+            }
             finishSpecImportOutcome("incomplete");
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
@@ -17981,6 +18183,9 @@ export default function Home() {
             specImportBuffersRef.current = [];
             specImportSourceNamesRef.current = [];
             setSpecImportError(null);
+            setSpecImportReviewNotice(null);
+            setSpecImportRetryPending(false);
+            setSpecImportRetryBlocked(false);
             setSpecImportLoading(false);
             setSpecImportProgress(null);
             setSpecPhotoFiles([]);
@@ -17991,6 +18196,11 @@ export default function Home() {
               error: specImportError,
               prepared: specImportPrepared,
               applying: specImportApplying,
+              reviewNotice: specImportReviewNotice,
+              retryPending: specImportRetryPending,
+              retryBlocked: specImportRetryBlocked,
+              retryingPending: specImportRetryingPending,
+              onRetryPending: () => void handleRetryPendingSpecImport(),
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
               aiRetryAvailable: specImportAiRetryCount === 0 &&

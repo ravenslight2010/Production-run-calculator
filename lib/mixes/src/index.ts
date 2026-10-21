@@ -896,6 +896,20 @@ export interface MixScheduledRun {
   ingredientOzPerPizza?: Record<string, number>;
 }
 
+/** Create a name-keyed per-pizza ounce map without inherited object keys. */
+export function createIngredientOzPerPizza(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
+/** Add ounces to one ingredient while treating every name as an own key. */
+export function addIngredientOzPerPizza(
+  totals: Record<string, number>,
+  ingredient: string,
+  ounces: number,
+): void {
+  totals[ingredient] = (totals[ingredient] ?? 0) + ounces;
+}
+
 // One component of a mix, scaled to the run's pizza count.
 export interface MixComponentPlan {
   ingredient: string;
@@ -1245,7 +1259,12 @@ export function buildMixPlan(args: {
               let oz = comp.perPizza; // fallback: mix card value
               if (r.ingredientOzPerPizza) {
                 // Try exact name match first, then case-insensitive.
-                const exact = r.ingredientOzPerPizza[comp.ingredient];
+                const exact = Object.prototype.hasOwnProperty.call(
+                  r.ingredientOzPerPizza,
+                  comp.ingredient,
+                )
+                  ? r.ingredientOzPerPizza[comp.ingredient]
+                  : undefined;
                 if (exact !== undefined) {
                   oz = exact;
                 } else {
@@ -1270,7 +1289,12 @@ export function buildMixPlan(args: {
             if (!hasIngredient) continue;
             let oz = comp.perPizza;
             if (r.ingredientOzPerPizza) {
-              const exact = r.ingredientOzPerPizza[comp.ingredient];
+              const exact = Object.prototype.hasOwnProperty.call(
+                r.ingredientOzPerPizza,
+                comp.ingredient,
+              )
+                ? r.ingredientOzPerPizza[comp.ingredient]
+                : undefined;
               if (exact !== undefined) {
                 oz = exact;
               } else {

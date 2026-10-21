@@ -3,6 +3,7 @@ import {
   text,
   doublePrecision,
   integer,
+  serial,
   boolean,
   jsonb,
   timestamp,
@@ -15,7 +16,7 @@ import {
 // the ledger is the immutable audit trail of every movement.
 //
 // `scope` ("live" | "sandbox") isolates the seeded test account's copy from the
-// real factory data. Item ids stay globally unique (serial), so lots/ledger FKs
+// real factory data. Item IDs stay globally unique, so lots/ledger FKs
 // remain single-column; the `key` identity is unique only WITHIN a scope.
 
 // One tracked material. `key` is a stable identity that lines up with what the

@@ -3,6 +3,20 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-10-20 — Redact tracked operational details
+
+**File(s):** `.agents/memory/codex-fixes.md`
+
+**Problem:** A historical fix log included a deployment base-image tag and a
+narrowly specific persistence-monitoring test detail.
+
+**Fix:** Generalized the image description and both copies of the test detail,
+while retaining the schema-startup and CI-validation lessons.
+
+**History limitation:** These repository edits affect the current tracked
+snapshot only. Repository edits do not rewrite Git history or remove
+previously published copies.
+
 ## 2026-09-23 — Fix Render import: retired Gemini model + cold-start chunk fetch
 
 **File(s):** `lib/integrations-openai-ai-server/src/models.ts`, `lib/integrations-openai-ai-server/src/client.ts`, `artifacts/run-calculator/src/specImport.ts`, `artifacts/run-calculator/src/App.tsx`
@@ -44,6 +58,7 @@ inventory-math, recipe-guide-import). Full root `CI=true pnpm run typecheck`
 is pending on this ARM box — its pretypecheck needs a missing `lightningcss`
 aarch64 binary (the CI Typecheck job covers it). Large-spec harness
 re-verification runs via CI/nightly.
+
 
 ## 2026-10-03 — ARM host: add local toolchain memory (extends existing x64-binary note)
 
@@ -232,7 +247,7 @@ Each entry includes:
 
 **Fix:** Added `applyDatabaseSchema()` to `index.ts` that runs `pnpm --filter @workspace/db run push-force` at boot in production (before `app.listen`). Guarded to `NODE_ENV=production` so tests are unaffected. Fails fast (exit 1) if schema push fails.
 
-**Context:** The `api` Docker image is `FROM builder` (full workspace + pnpm + dev deps), so `pnpm --filter @workspace/db run push-force` works at runtime. Schema push is idempotent.
+**Context:** The runtime API image includes the package tooling needed for its schema step. Schema push is idempotent.
 
 ---
 
@@ -1152,7 +1167,7 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 
 **Verification**:
 - Full root typecheck (`CI=true pnpm run typecheck`) passes on Node 24 (repo now requires `>=24`; vite 8 `native` config loader + TypeScript 7 tooling need it).
-- api-server unit suite (excluding `*.integration.test.ts`): 837/840 pass; 2 failures were the inventory gaps above (now fixed, both files re-run green); the remaining 1 failure (`backgroundOperations.test.ts` "retains sustained degradation") requires a real Postgres for the shared-persistence layer — CI-only, passes there.
+- api-server unit suite (excluding `*.integration.test.ts`): 837/840 pass; 2 failures were the inventory gaps above (now fixed, both files re-run green); the remaining failure depends on shared persistence and is validated in CI.
 - run-calculator regressions: mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84, warehouse set 14/14, sync set 30/30; inventory-math mixSurplus 5/5.
 - Local Postgres is not possible in this sandbox (kernel lacks SysV IPC — `shmget`/`mount` return ENOSYS), so DB-backed integration tests are left to CI, consistent with AGENTS.md.
 - Note for future ARM/Apple-Silicon work: the merged lockfile only declares x64 optional binaries for `lightningcss`, `esbuild`, `@tailwindcss/oxide` (Replit generates it on x64). CI and Render are x64 so this is fine, but ARM machines need the arm64 sibling packages installed manually (done locally in `node_modules/.pnpm` only, not committed). If we want durable ARM support, Replit should add `supportedArchitectures` to `pnpm-workspace.yaml` and regenerate the lockfile.
@@ -1282,7 +1297,7 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 
 **Verification**:
 - Full root typecheck (`CI=true pnpm run typecheck`) passes on Node 24 (repo now requires `>=24`; vite 8 `native` config loader + TypeScript 7 tooling need it).
-- api-server unit suite (excluding `*.integration.test.ts`): 837/840 pass; 2 failures were the inventory gaps above (now fixed, both files re-run green); the remaining 1 failure (`backgroundOperations.test.ts` "retains sustained degradation") requires a real Postgres for the shared-persistence layer — CI-only, passes there.
+- api-server unit suite (excluding `*.integration.test.ts`): 837/840 pass; 2 failures were the inventory gaps above (now fixed, both files re-run green); the remaining failure depends on shared persistence and is validated in CI.
 - run-calculator regressions: mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84, warehouse set 14/14, sync set 30/30; inventory-math mixSurplus 5/5.
 - Local Postgres is not possible in this sandbox (kernel lacks SysV IPC — `shmget`/`mount` return ENOSYS), so DB-backed integration tests are left to CI, consistent with AGENTS.md.
 - Note for future ARM/Apple-Silicon work: the merged lockfile only declares x64 optional binaries for `lightningcss`, `esbuild`, `@tailwindcss/oxide` (Replit generates it on x64). CI and Render are x64 so this is fine, but ARM machines need the arm64 sibling packages installed manually (done locally in `node_modules/.pnpm` only, not committed). If we want durable ARM support, Replit should add `supportedArchitectures` to `pnpm-workspace.yaml` and regenerate the lockfile.

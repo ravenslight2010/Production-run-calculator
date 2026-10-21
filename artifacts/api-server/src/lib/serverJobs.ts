@@ -10,6 +10,8 @@ import type { Capability } from "./roles";
 import type { Scope } from "./requestScope";
 import { pruneServerJobArtifacts } from "./serverJobArtifactCache";
 import {
+  boundedDurationMs,
+  classifyBackgroundFailure,
   createBackgroundOperationBackoff,
   isTransientDatabaseConnectionError,
   recordBackgroundOperationFailure,
@@ -140,7 +142,13 @@ export type ScheduledEvaluationQueueTransition = {
   started: ScheduledEvaluationQueueWarningCode[];
   cleared: ScheduledEvaluationQueueWarningCode[];
   diagnostics: ScheduledEvaluationQueueDiagnostics;
+  sampleTiming?: {
+    durationMs: number;
+    queryDurationsMs: Partial<Record<ScheduledEvaluationQueueQueryStage, number>>;
+  };
 };
+
+export type ScheduledEvaluationQueueQueryStage = "status_aggregate" | "duplicate_group_scan";
 
 type ScheduledEvaluationQueueSample = ScheduledEvaluationQueueSnapshot & { at: number };
 
@@ -155,6 +163,18 @@ const EMPTY_SCHEDULED_EVALUATION_SNAPSHOT: ScheduledEvaluationQueueSnapshot = {
 };
 
 const duplicateInventoryFingerprintKey = randomBytes(32);
+
+export class ScheduledEvaluationQueueReadError extends Error {
+  constructor(
+    readonly failureStage: ScheduledEvaluationQueueQueryStage,
+    readonly queryDurationMs: number,
+    readonly totalDurationMs: number,
+    cause: unknown,
+  ) {
+    super("Scheduled evaluation queue snapshot query failed", { cause });
+    this.name = "ScheduledEvaluationQueueReadError";
+  }
+}
 
 export const SCHEDULED_EVALUATION_DUPLICATE_REVIEW_RULES = [
   "Preserve queued jobs with attempts remaining and running jobs with a valid lease.",
@@ -298,9 +318,29 @@ const scheduledEvaluationQueueMonitor = createScheduledEvaluationQueueMonitor();
  */
 export async function readScheduledEvaluationQueueSnapshot(
   nowMs = Date.now(),
+  onQueryTiming?: (stage: ScheduledEvaluationQueueQueryStage, durationMs: number) => void,
 ): Promise<ScheduledEvaluationQueueSnapshot> {
+  const sampleStartedAt = performance.now();
+  const runQuery = async <T>(
+    stage: ScheduledEvaluationQueueQueryStage,
+    query: () => PromiseLike<T> | T,
+  ): Promise<T> => {
+    const queryStartedAt = performance.now();
+    try {
+      const result = await query();
+      onQueryTiming?.(stage, boundedDurationMs(performance.now() - queryStartedAt));
+      return result;
+    } catch (cause) {
+      throw new ScheduledEvaluationQueueReadError(
+        stage,
+        boundedDurationMs(performance.now() - queryStartedAt),
+        boundedDurationMs(performance.now() - sampleStartedAt),
+        cause,
+      );
+    }
+  };
   const terminalWindowStart = new Date(nowMs - SCHEDULED_EVALUATION_MONITOR_WINDOW_MS);
-  const [aggregate] = await db.select({
+  const [aggregate] = await runQuery("status_aggregate", () => db.select({
     queued: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'queued')::int`,
     running: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'running')::int`,
     succeeded: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'succeeded' and ${serverJobsTable.finishedAt} >= ${terminalWindowStart})::int`,
@@ -309,10 +349,10 @@ export async function readScheduledEvaluationQueueSnapshot(
   }).from(serverJobsTable).where(and(
     eq(serverJobsTable.type, "scheduled-evaluation"),
     gt(serverJobsTable.expiresAt, new Date(nowMs)),
-  ));
+  )));
 
   const idempotencyKey = serverJobsTable.idempotencyKey;
-  const duplicateGroups = await db.select({
+  const duplicateGroups = await runQuery("duplicate_group_scan", () => db.select({
     scope: serverJobsTable.scope,
     idempotencyKey,
     totalDuplicateGroups: sql<number>`count(*) over()::int`,
@@ -360,7 +400,7 @@ export async function readScheduledEvaluationQueueSnapshot(
     sql`${serverJobsTable.idempotencyKey} ~ '^scheduled-evaluation:[^:]+:[0-9]+$'`,
   )).groupBy(serverJobsTable.scope, idempotencyKey).having(sql`count(*) > 1`)
     .orderBy(sql`min(${serverJobsTable.createdAt}) asc`, asc(serverJobsTable.scope), asc(idempotencyKey))
-    .limit(SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS + 1);
+    .limit(SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS + 1));
 
   const boundedDuplicateGroups = duplicateGroups.slice(0, SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS);
   const duplicateBucketInventory = boundedDuplicateGroups.map((group): ScheduledEvaluationDuplicateBucket => {
@@ -433,10 +473,19 @@ export function getScheduledEvaluationQueueDiagnostics(): ScheduledEvaluationQue
 export async function sampleScheduledEvaluationQueue(
   nowMs = Date.now(),
 ): Promise<ScheduledEvaluationQueueTransition> {
-  return scheduledEvaluationQueueMonitor.observe(
-    await readScheduledEvaluationQueueSnapshot(nowMs),
+  const startedAt = performance.now();
+  const queryDurationsMs: Partial<Record<ScheduledEvaluationQueueQueryStage, number>> = {};
+  const snapshot = await readScheduledEvaluationQueueSnapshot(
     nowMs,
+    (stage, durationMs) => { queryDurationsMs[stage] = durationMs; },
   );
+  return {
+    ...scheduledEvaluationQueueMonitor.observe(snapshot, nowMs),
+    sampleTiming: {
+      durationMs: boundedDurationMs(performance.now() - startedAt),
+      queryDurationsMs,
+    },
+  };
 }
 
 export function clearScheduledEvaluationQueueMonitorForTests(): void {
@@ -798,13 +847,36 @@ export type ServerJobLoopOptions = {
   intervalMs?: number;
   pruneIntervalMs?: number;
   now?: () => number;
-  onError?: (error: unknown, operation: "run" | "prune") => void;
+  onError?: (error: unknown, operation: "run" | "prune", durationMs: number) => void;
+  monotonicNow?: () => number;
 };
 
 export type ServerJobLoop = { stop(): void };
 
 const boundedInteger = (value: number | undefined, fallback: number, min: number, max: number): number =>
   Number.isFinite(value) ? Math.min(max, Math.max(min, Math.floor(value!))) : fallback;
+
+export function serverJobBackgroundFailureFields(
+  error: unknown,
+  operation: "run" | "prune",
+  durationMs: number,
+): {
+  operation: "run" | "prune";
+  outcome: "degraded";
+  errorCode: string;
+  failureStage: "run" | "prune";
+  failureReason: ReturnType<typeof classifyBackgroundFailure>;
+  durationMs: number;
+} {
+  return {
+    operation,
+    outcome: "degraded",
+    errorCode: `server_job_${operation}_failed`,
+    failureStage: operation,
+    failureReason: classifyBackgroundFailure(error),
+    durationMs: boundedDurationMs(durationMs),
+  };
+}
 
 /**
  * Starts only when the entrypoint calls it after readiness. Timers are unref'd
@@ -818,8 +890,9 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
   const pruneIntervalMs = boundedInteger(options.pruneIntervalMs ?? Number(process.env.SERVER_JOB_PRUNE_INTERVAL_MS), 60 * 60_000, 60_000, 24 * 60 * 60_000);
   const prune = options.prune ?? (() => pruneExpiredServerJobs());
   const now = options.now ?? Date.now;
-  const runBackoff = createBackgroundOperationBackoff();
-  const pruneBackoff = createBackgroundOperationBackoff();
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
+  const runBackoff = createBackgroundOperationBackoff({ jitter: true });
+  const pruneBackoff = createBackgroundOperationBackoff({ jitter: true });
   let active = 0;
   let stopped = false;
   let lastPruneAt = 0;
@@ -828,21 +901,23 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
     const currentTime = now();
     if (currentTime - lastPruneAt >= pruneIntervalMs && pruneBackoff.isReady(currentTime)) {
       lastPruneAt = currentTime;
+      const startedAt = monotonicNow();
       void runBackgroundOperation("server-job-prune", prune)
         .then(() => pruneBackoff.recordSuccess())
         .catch((error) => {
           pruneBackoff.recordFailure(now());
-          options.onError?.(error, "prune");
+          options.onError?.(error, "prune", boundedDurationMs(monotonicNow() - startedAt));
         });
     }
     if (!runBackoff.isReady(currentTime)) return;
     while (active < concurrency) {
       active++;
+      const startedAt = monotonicNow();
       void runBackgroundOperation("server-job-run", () => worker.runOnce())
         .then(() => runBackoff.recordSuccess())
         .catch((error) => {
           runBackoff.recordFailure(now());
-          options.onError?.(error, "run");
+          options.onError?.(error, "run", boundedDurationMs(monotonicNow() - startedAt));
         })
         .finally(() => { active--; });
     }

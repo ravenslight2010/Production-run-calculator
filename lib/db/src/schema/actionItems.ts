@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   integer,
+  serial,
   timestamp,
   uniqueIndex,
   index,

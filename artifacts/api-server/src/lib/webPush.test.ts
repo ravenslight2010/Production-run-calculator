@@ -3,6 +3,7 @@ import {
   clearScheduledEvaluationQueueMonitorForTests,
   getScheduledEvaluationQueueDiagnostics,
   getServerJobDefinition,
+  ScheduledEvaluationQueueReadError,
 } from "./serverJobs";
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   elapsed: vi.fn(),
   dbSelect: vi.fn(),
   enqueueServerJob: vi.fn(),
+  backoffOptions: [] as Array<{ jitter?: boolean }>,
 }));
 
 vi.mock("@workspace/db", () => ({
@@ -24,18 +26,140 @@ vi.mock("./serverJobs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./serverJobs")>();
   return { ...actual, enqueueServerJob: mocks.enqueueServerJob };
 });
+vi.mock("./backgroundOperations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./backgroundOperations")>();
+  return {
+    ...actual,
+    createBackgroundOperationBackoff: (options: { jitter?: boolean } = {}) => {
+      mocks.backoffOptions.push(options);
+      return actual.createBackgroundOperationBackoff(options);
+    },
+  };
+});
 
 const {
   alertCandidates,
+  classifyPushSubscription,
   deferredCandidate,
   enqueueScheduledWebPushAlerts,
   freezerCandidates,
   pendingFreezerArms,
   scheduledEvaluationIdempotencyKey,
+  sendPushNotification,
   startWebPushAlertScheduler,
+  validPushEndpoint,
+  validSubscription,
 } = await import("./webPush");
 
+describe("web-push endpoint validation", () => {
+  const subscription = (endpoint: unknown) => ({
+    endpoint,
+    keys: { p256dh: "a".repeat(32), auth: "b".repeat(16) },
+  });
+
+  it.each([
+    "https://fcm.googleapis.com/fcm/send/registration-token",
+    "https://updates.push.services.mozilla.com/wpush/v2/endpoint-token",
+    "https://push.services.mozilla.com/wpush/v2/endpoint-token",
+    "https://web.push.apple.com/endpoint-token",
+  ])("accepts supported browser push endpoint %s", (endpoint) => {
+    expect(validPushEndpoint(endpoint)).toBe(true);
+    expect(validSubscription(subscription(endpoint))).toBe(true);
+  });
+
+  it.each([
+    "not a url",
+    "http://fcm.googleapis.com/fcm/send/token",
+    "https://user:password@fcm.googleapis.com/fcm/send/token",
+    "https://@fcm.googleapis.com/fcm/send/token",
+    "https://fcm.googleapis.com:8443/fcm/send/token",
+    "https://127.0.0.1/fcm/send/token",
+    "https://[::1]/fcm/send/token",
+    "https://10.1.2.3/fcm/send/token",
+    "https://localhost/fcm/send/token",
+    "https://fcm.googleapis.com.attacker.example/fcm/send/token",
+    "https://attackerfcm.googleapis.com/fcm/send/token",
+    "https://push.services.mozilla.com.attacker.example/wpush/v2/token",
+    "https://example.com/push/token",
+  ])("rejects unsupported or unsafe endpoint %s", (endpoint) => {
+    expect(validPushEndpoint(endpoint)).toBe(false);
+    expect(validSubscription(subscription(endpoint))).toBe(false);
+  });
+
+  it("permits only the default HTTPS port and enforces the endpoint size cap", () => {
+    expect(validPushEndpoint("https://fcm.googleapis.com:443/fcm/send/token")).toBe(true);
+    expect(validPushEndpoint(`https://fcm.googleapis.com/${"a".repeat(2048)}`)).toBe(false);
+  });
+
+  it("returns only bounded rejection reasons and provider families", () => {
+    expect(classifyPushSubscription(subscription("https://fcm-eu.googleapis.com/endpoint-token"))).toEqual({
+      reason: "unsupported_provider",
+      provider: "google",
+    });
+    expect(classifyPushSubscription(subscription("https://web.push.apple.com.attacker.example/endpoint-token"))).toEqual({
+      reason: "unsupported_provider",
+      provider: "other",
+    });
+    expect(classifyPushSubscription(subscription("http://fcm.googleapis.com/endpoint-token"))).toEqual({
+      reason: "unsafe_endpoint",
+      provider: "google",
+    });
+    expect(classifyPushSubscription(subscription("not a url"))).toEqual({
+      reason: "invalid_endpoint",
+      provider: "unknown",
+    });
+    expect(classifyPushSubscription(subscription("https://push.apple.com/endpoint-token"))).toEqual({
+      reason: "unsupported_provider",
+      provider: "apple",
+    });
+    expect(classifyPushSubscription({ endpoint: "https://fcm.googleapis.com/token", keys: { p256dh: "short", auth: "short" } })).toEqual({
+      reason: "invalid_keys",
+      provider: "google",
+    });
+    expect(classifyPushSubscription({
+      ...subscription("https://fcm.googleapis.com/token"),
+      expirationTime: "invalid",
+    })).toEqual({
+      reason: "invalid_expiration",
+      provider: "google",
+    });
+    expect(classifyPushSubscription(null)).toEqual({ reason: "invalid_subscription", provider: "unknown" });
+  });
+
+  it("never sends to an endpoint that is not in the supported service set", async () => {
+    const { default: webpushMock } = await import("web-push");
+    vi.mocked(webpushMock.sendNotification).mockClear();
+
+    await expect(sendPushNotification({
+      endpoint: "https://fcm.googleapis.com.attacker.example/push/token",
+      keys: { p256dh: "a".repeat(32), auth: "b".repeat(16) },
+    }, "payload")).rejects.toThrow("Invalid push endpoint");
+
+    expect(webpushMock.sendNotification).not.toHaveBeenCalled();
+  });
+});
+
 describe("server web-push alert candidates", () => {
+  it("uses jittered retry timing for scheduled alert enqueue", async () => {
+    vi.useFakeTimers();
+    mocks.backoffOptions = [];
+    const scheduler = startWebPushAlertScheduler({
+      enqueue: async () => ({ examined: 0, enqueued: 0 }),
+      sampleQueue: async () => ({
+        started: [],
+        cleared: [],
+        diagnostics: getScheduledEvaluationQueueDiagnostics(),
+      }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.backoffOptions).toContainEqual({ jitter: true });
+    } finally {
+      scheduler.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps one scheduling timestamp across a transient connection retry", async () => {
     vi.useFakeTimers();
     const now = vi.fn()
@@ -118,6 +242,79 @@ describe("server web-push alert candidates", () => {
     } finally {
       scheduler.stop();
       clearScheduledEvaluationQueueMonitorForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs a bounded queue-sample stage and timeout class without the error message", async () => {
+    vi.useFakeTimers();
+    clearScheduledEvaluationQueueMonitorForTests();
+    const { logger } = await import("../lib/logger");
+    vi.mocked(logger.warn).mockClear();
+    const sampleQueue = vi.fn().mockRejectedValue(new ScheduledEvaluationQueueReadError(
+      "duplicate_group_scan",
+      80,
+      125,
+      Object.assign(new Error("private query details"), { code: "57014" }),
+    ));
+    const scheduler = startWebPushAlertScheduler({
+      enqueue: async () => ({ examined: 0, enqueued: 0 }),
+      sampleQueue,
+      monotonicNow: () => 500,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "scheduled_evaluation_queue_monitor",
+          outcome: "sample_unavailable",
+          failureStage: "duplicate_group_scan",
+          failureReason: "database-timeout",
+          durationMs: 125,
+          queryDurationMs: 80,
+        }),
+        expect.any(String),
+      );
+      expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("private query details");
+    } finally {
+      scheduler.stop();
+      clearScheduledEvaluationQueueMonitorForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs slow queue samples with per-query timing only", async () => {
+    vi.useFakeTimers();
+    const { logger } = await import("../lib/logger");
+    vi.mocked(logger.warn).mockClear();
+    const sampleQueue = vi.fn().mockResolvedValue({
+      started: [],
+      cleared: [],
+      diagnostics: getScheduledEvaluationQueueDiagnostics(),
+      sampleTiming: {
+        durationMs: 1_250,
+        queryDurationsMs: { status_aggregate: 100, duplicate_group_scan: 1_100 },
+      },
+    });
+    const scheduler = startWebPushAlertScheduler({
+      enqueue: async () => ({ examined: 0, enqueued: 0 }),
+      sampleQueue,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "scheduled_evaluation_queue_monitor",
+          outcome: "slow_sample",
+          durationMs: 1_250,
+          queryDurationsMs: { status_aggregate: 100, duplicate_group_scan: 1_100 },
+        }),
+        expect.any(String),
+      );
+    } finally {
+      scheduler.stop();
       vi.useRealTimers();
     }
   });

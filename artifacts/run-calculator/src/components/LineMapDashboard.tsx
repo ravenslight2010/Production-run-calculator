@@ -31,6 +31,20 @@ interface ZoneStatus {
   metrics: { label: string; value: string }[];
   sub?: string;
 }
+type RunLifecycleStatus = "pending" | "running" | "paused" | "ended";
+
+function deriveStationStatus(
+  runStatus: RunLifecycleStatus,
+  hasRun: boolean,
+  isActive: boolean,
+): ZoneStatus["status"] {
+  if (!hasRun) return "idle";
+  if (runStatus === "pending") return "upstream";
+  if (runStatus === "ended") return "stopped";
+  if (runStatus === "paused") return "idle";
+  return isActive ? "active" : "idle";
+}
+
 function statusBadge(status: ZoneStatus["status"]) {
   const map = {
     active:  { cls: "bg-emerald-500", label: "Running" },
@@ -60,16 +74,14 @@ export default function LineMapDashboard() {
 
   const zones = useMemo<ZoneStatus[]>(() => {
     const isRunning = runStatus === "running";
-    const isPaused = runStatus === "paused";
     const hasRun = !!currentRun;
-    const running = isRunning || isPaused;
 
     // Dough station
     const doughStatus = (() => {
-      if (!running) return "idle" as const;
-      if (calc.doughDepletionSec > 0 && calc.doughDepletionSec < 600) return "active" as const;
-      if (v.traysOnLine > 0 || v.batchesReady > 0) return "active" as const;
-      return "idle" as const;
+      const active = calc.doughDepletionSec > 0 && calc.doughDepletionSec < 600
+        || v.traysOnLine > 0
+        || v.batchesReady > 0;
+      return deriveStationStatus(runStatus, hasRun, isRunning && active);
     })();
     const doughMetrics = [
       v.traysOnLine > 0 ? { label: "Trays on line", value: String(v.traysOnLine) } : null,
@@ -79,9 +91,7 @@ export default function LineMapDashboard() {
 
     // Sauce station
     const sauceStatus = (() => {
-      if (!running) return "idle" as const;
-      if (calc.sauceBatches > 0) return "active" as const;
-      return "idle" as const;
+      return deriveStationStatus(runStatus, hasRun, isRunning && calc.sauceBatches > 0);
     })();
     const sauceMetrics = [
       calc.sauceBatches > 0 ? { label: "Batches needed", value: String(calc.sauceBatches) } : null,
@@ -90,8 +100,7 @@ export default function LineMapDashboard() {
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Press/Oven (derived from calc — cases left / completed)
-    const pressActive = running && calc.pressCasesLeft > 0;
-    const pressStatus: "active" | "idle" | "stopped" = pressActive ? "active" : running ? "idle" : "idle";
+    const pressStatus = deriveStationStatus(runStatus, hasRun, isRunning && calc.pressCasesLeft > 0);
     const pressMetrics = [
       calc.pressCasesLeft > 0 ? { label: "Cases left", value: String(calc.pressCasesLeft) } : null,
       calc.casesCompleted > 0 ? { label: "Cases done", value: `${fmtNum(calc.casesCompleted)} / ${fmtNum(v.casesNeeded)}` } : null,
@@ -100,9 +109,7 @@ export default function LineMapDashboard() {
 
     // Frontline (apps + pep)
     const frontlineStatus = (() => {
-      if (!running) return "idle" as const;
-      if (pressStatus === "active") return "active" as const;
-      return "idle" as const;
+      return deriveStationStatus(runStatus, hasRun, isRunning && pressStatus === "active");
     })();
     const hasConfiguredPep = [v.pep1Type, v.pep1TypeB, v.pep2Type, v.pep2TypeB]
       .some((type) => typeof type === "string" && type.trim().length > 0);
@@ -127,8 +134,7 @@ export default function LineMapDashboard() {
     }));
 
     // Freeze Tunnel (derived from calc — cases in freezer)
-    const tunnelActive = running && calc.casesInFreezer > 0;
-    const tunnelStatus: "active" | "idle" | "stopped" = tunnelActive ? "active" : running ? "idle" : "idle";
+    const tunnelStatus = deriveStationStatus(runStatus, hasRun, isRunning && calc.casesInFreezer > 0);
     const tunnelMetrics = [
       calc.casesInFreezer > 0 ? { label: "Cases in tunnel", value: String(calc.casesInFreezer) } : null,
       casesFreezerPct > 0 ? { label: "Fill level", value: `${Math.round(casesFreezerPct * 100)}%` } : null,
@@ -136,8 +142,8 @@ export default function LineMapDashboard() {
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Packaging (derived from calc — cases completed vs needed)
-    const packActive = running && calc.casesCompleted > 0 && calc.casesCompleted < v.casesNeeded;
-    const packStatus: "active" | "idle" | "stopped" = packActive ? "active" : running ? "idle" : "idle";
+    const packActive = calc.casesCompleted > 0 && calc.casesCompleted < v.casesNeeded;
+    const packStatus = deriveStationStatus(runStatus, hasRun, isRunning && packActive);
     const packMetrics = [
       autoTrackSuggestion ? { label: "Skids", value: `${autoTrackSuggestion.skids} full` } : null,
       autoTrackSuggestion ? { label: "Current skid", value: `${autoTrackSuggestion.casesOnSkid} / ${v.casesPerSkid}` } : null,
@@ -156,15 +162,17 @@ export default function LineMapDashboard() {
       { id: "frontline" as ZoneId, label: "Frontline", icon: <Boxes className="w-5 h-5" />, navTab: "frontline", status: frontlineStatus, metrics: frontlineMetrics, sub: "App 1-4 · Pep 1-2" },
       { id: "freezeTunnel" as ZoneId, label: "Freeze Tunnel", icon: <Snowflake className="w-5 h-5" />, navTab: "run", status: tunnelStatus, metrics: tunnelMetrics, sub: `Total ${fmtNum(ve.freezerTime)} min` },
       { id: "packaging" as ZoneId, label: "Packaging", icon: <Package className="w-5 h-5" />, navTab: "packaging", status: packStatus, metrics: packMetrics, sub: `Post-tunnel ${fmtNum(v.postTunnelMin || 2.5)} min` },
-      { id: "warehouse" as ZoneId, label: "Warehouse", icon: <Warehouse className="w-5 h-5" />, navTab: "warehouse", status: "idle", metrics: whMetrics, sub: "Cooler · Freezer" },
+      { id: "warehouse" as ZoneId, label: "Warehouse", icon: <Warehouse className="w-5 h-5" />, navTab: "warehouse", status: deriveStationStatus(runStatus, hasRun, false), metrics: whMetrics, sub: "Cooler · Freezer" },
     ];
   }, [calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct]);
 
   // Overall line status
   const overallStatus = (() => {
+    if (!currentRun) return { label: "NO ACTIVE RUN", cls: "bg-stone-400 text-white" };
+    if (runStatus === "pending") return { label: "LINE WAITING", cls: "bg-gray-400 text-white" };
     if (runStatus === "running") return { label: "LINE RUNNING", cls: "bg-emerald-600 text-white" };
     if (runStatus === "paused") return { label: "LINE PAUSED", cls: "bg-yellow-500 text-black" };
-    return { label: "NO ACTIVE RUN", cls: "bg-stone-400 text-white" };
+    return { label: "RUN ENDED", cls: "bg-stone-500 text-white" };
   })();
 
   return (
