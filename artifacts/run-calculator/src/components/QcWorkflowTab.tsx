@@ -1241,7 +1241,7 @@ export default function QcWorkflowTab({
                 <div className="mt-4"><QueryFailure message="Target settings unavailable." retry={() => void targetsQuery.refetch()} /></div>
               ) : (
                 <>
-                  <div className="mt-4 max-h-48 space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-4 max-h-48 space-y-2 overflow-y-auto pr-1" data-testid="qc-weight-target-list">
                     {(targets ?? []).length === 0 ? (
                       <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">No target rows are configured for this profile.</p>
                     ) : targets?.map((target) => (

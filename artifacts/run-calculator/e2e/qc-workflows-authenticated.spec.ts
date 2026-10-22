@@ -246,7 +246,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await expect(managerPage.page.getByTestId("text-qc-run-id")).toHaveText(runId);
     await expect(managerPage.page.getByText("Reviewed targets", { exact: true })).toBeVisible();
     const targetSection = managerPage.page.locator('section[aria-labelledby="qc-target-title"]');
-    await expect(targetSection.locator("p").filter({ hasText: ingredientName })).toBeVisible();
+    await expect(targetSection.getByTestId("qc-weight-target-list").getByText(ingredientName, { exact: true })).toBeVisible();
     await expect(targetSection.getByText(/1\.25 oz/)).toBeVisible();
     await capture(managerPage.page, testInfo, "manager-reviewed-target-before-override");
 
@@ -275,10 +275,16 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       expect(sectionBounds, `${viewport.name} checklist layout`).not.toBeNull();
       expect(sectionBounds!.x).toBeGreaterThanOrEqual(0);
       expect(sectionBounds!.x + sectionBounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+      const documentWidth = await operatorPage.page.evaluate(() => document.documentElement.scrollWidth);
+      expect(documentWidth, `${viewport.name} page has no horizontal overflow`).toBeLessThanOrEqual(viewport.width);
       await capture(operatorPage.page, testInfo, `operator-component-check-${viewport.name}`);
     }
     await operatorPage.page.setViewportSize(VIEWPORT);
-    await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Dough)`).selectOption("present-correct");
+    const doughObservation = componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Dough)`);
+    await doughObservation.focus();
+    await expect(doughObservation).toBeFocused();
+    await doughObservation.press("ArrowDown");
+    await expect(doughObservation).toHaveValue("present-correct");
     await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Applicator 1)`).selectOption("present-correct");
     const componentResponsePromise = operatorPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/component-checks")
@@ -455,6 +461,14 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       await expect(managerComponentEvent).toContainText("Expected component identities were redacted.");
     }
 
+    const recordsBeforeSignoff = await db.query<{ id: string }>(
+      `SELECT COALESCE(MAX(id), 0)::text AS id
+       FROM qc_workflow_events
+       WHERE scope = 'live' AND run_id = $1
+         AND event_type NOT IN ('run-signoff', 'target-setting')`,
+      [runId],
+    );
+    const expectedReviewedThroughId = Number(recordsBeforeSignoff.rows[0]?.id ?? 0);
     const managerSignoff = managerPage.page.getByRole("button", { name: "Sign off reviewed set", exact: true });
     const managerSignoffResponse = managerPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/run-signoffs")
@@ -462,6 +476,13 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await managerSignoff.click();
     managerSignoffStatus = (await managerSignoffResponse).status();
     expect(managerSignoffStatus).toBe(201);
+    const managerSignoffBody = await managerSignoffResponse.then((response) => response.json()) as {
+      event: { actorId: string; payload: { reviewedThroughId: number } };
+    };
+    expect(managerSignoffBody.event).toMatchObject({
+      actorId: manager.userId,
+      payload: { reviewedThroughId: expectedReviewedThroughId },
+    });
     await expect(managerPage.page.getByText("Signed off", { exact: true })).toBeVisible();
     await capture(managerPage.page, testInfo, "manager-signed-off-history");
 
@@ -485,11 +506,25 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     expect(csv).not.toContain(decoyLot);
     exportSummary = `downloaded ${csv.split(/\r?\n/).filter(Boolean).length - 1} fixture rows; lot/run/sign-off present`;
 
+    if (componentEventId !== null) {
+      const managerComponentEvent = managerPage.page.getByTestId(`qc-history-event-${componentEventId}`);
+      await managerComponentEvent.getByLabel("Correction reason").fill("Correct identity after sign-off");
+      await managerComponentEvent.getByLabel("Replacement payload JSON").fill(JSON.stringify({
+        observations: [{ componentId: "dough:0", observation: "present-correct" }],
+      }));
+      const postSignoffCorrection = managerPage.page.waitForResponse((response) =>
+        response.url().includes(`/api/qc/events/${componentEventId}/corrections`)
+        && response.request().method() === "POST");
+      await managerComponentEvent.getByRole("button", { name: "Append correction", exact: true }).click();
+      expect((await postSignoffCorrection).status()).toBe(201);
+      await expect(managerPage.page.getByText("Reopened", { exact: true })).toBeVisible();
+    }
+
     await managerPage.page.reload({ waitUntil: "domcontentloaded" });
     await managerPage.page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     await openQc(managerPage.page);
     await expect(managerPage.page.getByTestId("text-qc-run-id")).toHaveText(runId);
-    await expect(managerPage.page.getByText("Signed off", { exact: true })).toBeVisible();
+    await expect(managerPage.page.getByText("Reopened", { exact: true })).toBeVisible();
     const persistedHistory = managerPage.page.getByTestId(/^qc-history-event-/);
     const persistedLotEvent = persistedHistory
       .filter({ has: managerPage.page.getByText("lot", { exact: true }) })
@@ -505,6 +540,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       const persistedComponentEvent = managerPage.page.getByTestId(`qc-history-event-${componentEventId}`);
       await persistedComponentEvent.locator("button").first().click();
       await expect(persistedComponentEvent).toContainText("Expected component identities were redacted.");
+      await expect(persistedComponentEvent).toContainText("Corrected");
     }
     await expect(managerPage.page.getByText(/1\.3 oz ±0\.2 · QC override/)).toBeVisible();
     await capture(managerPage.page, testInfo, "manager-qc-state-after-reload");

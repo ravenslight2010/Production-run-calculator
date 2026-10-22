@@ -1,6 +1,6 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Approved Phase 1 implemented; advisory Brix master-program Slice 0 implemented; later gates remain deferred
+**Status:** Approved Phase 1 implemented; advisory Brix master-program Slice 0 and component identity/presence Slice 1 implemented and verified; later gates remain deferred
 **Updated:** 2026-10-22
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
@@ -17,6 +17,20 @@ QC is a durable follow-on product track, not a sync-protocol prerequisite. New Q
 - The focused server, UI, database-retention, and authenticated browser checks use synthetic readings only. No real facility target values were supplied or inferred; reviewed operational configuration is still required before staff use.
 
 This slice does not change weight behavior or add workbook target extraction, cadence alerts, device integrations, holds, run/shipping gates, or regulatory claims. Slice 8 enforcement remains deferred pending explicit owner policy; it is neither shipped nor formally declined. Slice 9 allergen expansion is not adopted by this request. See the retained [Slice 0 coverage map and failure ledger](../.local/tasks/evidence/qc-slice-0-brix/coverage-check-map.md).
+
+## Approved Master-Program Slice 1 — Component Identity and Presence
+
+**Status:** Implemented and verified with synthetic fixtures. This is advisory identity/presence evidence, not a sensory, food-safety, or production-release approval.
+
+- The checklist uses server-resolved effective components from canonical run settings and substitutions. Completed runs retain their immutable component snapshot.
+- Missing or ambiguous expected settings remain not evaluated with actionable explanations. The client records observations but cannot supply or override the expected component list or server-evaluated outcome.
+- QC managers can sign off the exact reviewed event high-water mark. A later component record or correction reopens review; corrections and redactions append events without changing original evidence.
+- Scoped history, manager CSV, and QC ledger reset/purge retention remain in place.
+- No weight, sensory, color, smell, texture, photo, label/date-code, cross-contact, hold/release, or regulatory criteria are included.
+
+Verification: resolver tests 13/13; checklist UI tests 14/14; focused PostgreSQL API role/high-water/correction test 1/1; QC purge-retention tests 3/3; authenticated Chromium and WebKit journeys 2/2, with four responsive viewport checks in each browser; workspace typecheck passed. Physical Android Chrome and iOS Safari/PWA were not run. See the retained [Slice 1 coverage map and failure ledger](../.local/tasks/evidence/qc-slice-1-component-completion/coverage-check-map.md).
+
+Slice 8 enforcement remains deferred pending explicit owner policy; it is neither shipped nor formally declined. Slice 9 allergen expansion is not adopted by this request.
 
 ## QC Phase 1 — Approved and Implemented
 
@@ -45,7 +59,7 @@ This slice does not change weight behavior or add workbook target extraction, ca
 
 ### Deferred from Phase 1
 
-Shipping holds or release enforcement; regulatory or food-label declarations; component, label, and date-code checks; import or recipe approval; trend/analytics; cross-contact analytics; lot-to-customer traceability; line clearance; finished-lot identification; mock recall; and HACCP evidence.
+Shipping holds or release enforcement; regulatory or food-label declarations; shipper-label and date-code checks; import or recipe approval; trend/analytics; cross-contact analytics; lot-to-customer traceability; line clearance; finished-lot identification; mock recall; and HACCP evidence.
 
 ## Critical Requirements
 
@@ -126,7 +140,7 @@ The existing importers stay available under their current permissions. Phase 1 d
 - **Existing tabs**: Quality (photo checks), Incidents, Downtime Trends
 - **Inventory lot tracking**: Basic lot number field on inventory items; separate from Phase 1 run-level QC lots
 - **Phase 1 adds**: weight checks and per-run, per-station QC lot records
-- **Deferred**: component checks, shipper labels, date verification, full lot traceability, and QC analytics dashboards
+- **Deferred**: shipper labels, date verification, full lot traceability, and QC analytics dashboards
 
 ---
 
@@ -148,15 +162,11 @@ The existing importers stay available under their current permissions. Phase 1 d
 **Deferred**: trend graphs, analytics, and any inferred target or tolerance.
 
 ### 3. Component Checks
-**What exists**: Nothing
-**What's needed**:
-- Once-per-run verification of all components (dough, sauce, cheese, apps, pepperoni)
-- Checklist per component (visual pass/fail with photo option)
-- Linked to current run
--历史 history view (what was checked, when, any failures)
+**Status:** Approved master-program Slice 1 is implemented and verified for identity and presence only. See the Slice 1 acceptance and evidence map above.
 
-**Data model additions**:
-- `component_checks` table: run_id, component_type (dough/sauce/cheese/app1-4/pep1-2), check_item (weight/color/smell/texture/label), status (pass/fail/na), notes, photo_url, checked_by, checked_at
+The server resolves expected effective components from canonical run settings and substitutions, preserves completed-run expectations, and leaves incomplete or ambiguous settings not evaluated. Observations and outcomes are recorded in the existing append-only QC event ledger. Manager sign-off is tied to an exact event high-water mark; later run-linked component evidence and corrections reopen review.
+
+**Out of scope:** Weight, sensory, color, smell, texture, photos, labels/date codes, cross-contact, safety conclusions, and production or shipping enforcement.
 
 ### 4. Import Source Management
 **What exists**: Import system (spec, premix, cheese, shipping) — QC is described as "primary source"
@@ -205,7 +215,7 @@ The existing importers stay available under their current permissions. Phase 1 d
 **What exists**: QualityHistoryTab (photo checks only)
 **What's needed**:
 - At-a-glance QC status for current run (all checks pending/passed/failed)
-- Checklist completion tracker (lot tracking ✓, weight checks 2/5, component checks 0/8, etc.)
+- Checklist completion tracker for the applicable lot, weight, and component identity/presence workflows
 - Alert panel (overdue checks, failed checks, expiring lots)
 - Shift summary (what was checked, what failed, what's pending)
 
@@ -221,7 +231,6 @@ The existing importers stay available under their current permissions. Phase 1 d
 5. Existing photo-quality history stays separate.
 
 ### Phase 2: Verification Workflows
-5. **Component checks** — checklist form per run
 6. **Label verification** — shipper label check form
 7. **Date verification** — date code check form
 
@@ -272,4 +281,4 @@ Every path is capability-gated and derives facility scope from the authenticated
 
 ## Deferred API and Workflow Gates
 
-Component checks, shipper labels, date codes, import/recipe approval, dashboards, trend/analytics, PDF export, lot-to-customer traceability, holds, release enforcement, and label/regulatory claims are not part of Phase 1.
+Shipper labels, date codes, import/recipe approval, dashboards, trend/analytics, PDF export, lot-to-customer traceability, holds, release enforcement, and label/regulatory claims remain deferred.

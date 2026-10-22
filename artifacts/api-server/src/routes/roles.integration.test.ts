@@ -3982,6 +3982,44 @@ describe("QC workflows", () => {
       fields: ["payload.expectedComponents"],
     })).status).toBe(201);
 
+    const componentEventsBeforeSignoff = await db.select({
+      id: qcWorkflowEventsTable.id,
+    }).from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, "live"),
+      eq(qcWorkflowEventsTable.runId, runId),
+      sql`${qcWorkflowEventsTable.eventType} <> 'run-signoff'`,
+      sql`${qcWorkflowEventsTable.eventType} <> 'target-setting'`,
+    ));
+    const expectedReviewedThroughId = Math.max(
+      ...componentEventsBeforeSignoff.map((event) => event.id),
+    );
+    const componentSignoffResponse = await req(QC_MANAGER, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(),
+      runId,
+    });
+    expect(componentSignoffResponse.status).toBe(201);
+    const componentSignoff = await componentSignoffResponse.json() as {
+      event: { actorId: string; payload: { reviewedThroughId: number } };
+    };
+    expect(componentSignoff.event).toMatchObject({
+      actorId: QC_MANAGER,
+      payload: { reviewedThroughId: expectedReviewedThroughId },
+    });
+    const signedComponentRun = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await signedComponentRun.json()) as {
+      signoff: { signedOff: boolean; reopened: boolean };
+    }).signoff).toMatchObject({ signedOff: true, reopened: false });
+
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${savedData.event.id}/corrections`, {
+      operationId: randomUUID(),
+      reason: "Correct the observation after sign-off",
+      replacement: { observations: [{ componentId: "dough:0", observation: "present-mismatch" }] },
+    })).status).toBe(201);
+    const reopenedAfterCorrection = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await reopenedAfterCorrection.json()) as {
+      signoff: { signedOff: boolean; reopened: boolean };
+    }).signoff).toMatchObject({ signedOff: false, reopened: true });
+
     const history = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
     const historyItems = (await history.json() as {
       items: Array<{ eventType: string; corrected?: boolean; redactedFields?: string[]; payload: Record<string, unknown> }>;
