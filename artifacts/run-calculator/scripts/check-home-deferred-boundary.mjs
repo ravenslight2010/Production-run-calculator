@@ -174,6 +174,8 @@ function resolveSourceFile(basePath, specifier, readSource) {
 }
 
 const MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH = 400;
+// Workspace package enumeration is normally quick; cap a stalled pnpm process at 30 seconds.
+const WORKSPACE_DISCOVERY_TIMEOUT_MS = 30_000;
 
 function workspaceDiscoveryContext(workspaceRoot) {
   const root = path.resolve(workspaceRoot);
@@ -196,31 +198,43 @@ function safeWorkspaceDiscoveryDetail(value) {
   return `${detail.slice(0, MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH - 1)}…`;
 }
 
-function workspaceDiscoveryError(workspaceRoot, detail) {
+function workspaceDiscoveryError(workspaceRoot, detail, { timedOut = false } = {}) {
   const { root, command } = workspaceDiscoveryContext(workspaceRoot);
   return new Error(
     `Workspace package discovery failed.\n` +
       `Command: ${command}\n` +
       `Workspace root: ${root}\n` +
+      (timedOut
+        ? `Failure: pnpm workspace listing timed out after ${WORKSPACE_DISCOVERY_TIMEOUT_MS}ms.\n`
+        : "") +
       `Action: Run the command above from the workspace root and check pnpm-workspace.yaml.\n` +
       `Details: ${safeWorkspaceDiscoveryDetail(detail)}`,
   );
 }
 
+export function runPnpmWorkspaceList(root, spawn = spawnSync) {
+  return spawn(
+    "pnpm",
+    ["--dir", root, "--recursive", "list", "--json", "--depth", "-1"],
+    { encoding: "utf8", timeout: WORKSPACE_DISCOVERY_TIMEOUT_MS },
+  );
+}
+
 function discoverWorkspacePackageDirectories(
   workspaceRoot,
-  runWorkspaceList = (root) =>
-    spawnSync(
-      "pnpm",
-      ["--dir", root, "--recursive", "list", "--json", "--depth", "-1"],
-      { encoding: "utf8" },
-    ),
+  runWorkspaceList = runPnpmWorkspaceList,
 ) {
   const result = runWorkspaceList(workspaceRoot);
   if (result.error || result.status !== 0) {
-    const detail =
-      result.error?.message || result.stderr?.trim() || `exit status ${result.status}`;
-    throw workspaceDiscoveryError(workspaceRoot, detail);
+    const detail = [
+      result.error?.message,
+      result.stderr?.trim(),
+    ]
+      .filter(Boolean)
+      .join("; ") || `exit status ${result.status}`;
+    throw workspaceDiscoveryError(workspaceRoot, detail, {
+      timedOut: result.error?.code === "ETIMEDOUT",
+    });
   }
 
   let packages;

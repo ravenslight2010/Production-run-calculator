@@ -8,6 +8,7 @@ import {
   checkHomeDeferredSourceBoundary,
   checkHomeDeferredBoundary,
   DEFERRED_HOME_MODULE_SUFFIXES,
+  runPnpmWorkspaceList,
 } from "./check-home-deferred-boundary.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -566,6 +567,62 @@ test("workspace listing launch failures include the actionable command context",
           /Action: Run the command above from the workspace root and check pnpm-workspace\.yaml\./,
         );
         assert.match(error.message, /Details: spawn pnpm ENOENT/);
+        return true;
+      },
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing timeouts include command context and bounded safe details", () => {
+  const timeoutMessage = "spawnSync pnpm ETIMEDOUT";
+  const timeoutStderr =
+    "\u001b[31mhttps://user:password@example.test/error\u001b[0m " +
+    "x".repeat(5000);
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: (workspaceRoot) =>
+      runPnpmWorkspaceList(workspaceRoot, (command, args, options) => {
+        assert.equal(command, "pnpm");
+        assert.deepEqual(args, [
+          "--dir",
+          workspaceRoot,
+          "--recursive",
+          "list",
+          "--json",
+          "--depth",
+          "-1",
+        ]);
+        assert.equal(options.timeout, 30_000);
+        assert.equal(options.encoding, "utf8");
+        return {
+          error: Object.assign(new Error(timeoutMessage), { code: "ETIMEDOUT" }),
+          status: null,
+          stderr: timeoutStderr,
+        };
+      }),
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        assert.match(error.message, /Failure: pnpm workspace listing timed out after 30000ms\./);
+        const details = error.message.match(/Details: (.*)$/)?.[1];
+        assert.ok(details);
+        assert.equal(details.length, 400);
+        assert.match(
+          details,
+          /^spawnSync pnpm ETIMEDOUT; https:\/\/\[redacted\]@example\.test\/error x+/,
+        );
+        assert.ok(!details.includes("user:password"));
         return true;
       },
     );
