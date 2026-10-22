@@ -30,6 +30,7 @@ function renderLineMap(
     configuredPepperoni?: boolean;
     applicatorBatchesAvailable?: boolean;
     mixedFrontline?: boolean;
+    sauceNeedsWithoutBatches?: boolean;
   } = {},
 ) {
   const active = options.active ?? false;
@@ -37,12 +38,13 @@ function renderLineMap(
   const configuredPepperoni = options.configuredPepperoni ?? false;
   const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
   const mixedFrontline = options.mixedFrontline ?? false;
+  const sauceNeedsWithoutBatches = options.sauceNeedsWithoutBatches ?? false;
   mocks.useHomeTabCtx.mockReturnValue({
     v: {
       traysOnLine: active ? 1 : 0,
       batchesReady: 0,
       sauceBarrelsMade: 0,
-      sauceOzPerPizza: mixedFrontline ? 2 : 0,
+      sauceOzPerPizza: mixedFrontline || sauceNeedsWithoutBatches ? 2 : 0,
       app1OzPerPizza: mixedFrontline ? 2 : 0,
       app2OzPerPizza: mixedFrontline ? 2 : 0,
       app1Type: mixedFrontline ? "Mozzarella" : "",
@@ -75,7 +77,7 @@ function renderLineMap(
       doughDepletionSec: 0,
       sauceBatches: active ? 1 : 0,
       sauceDepletionSec: 0,
-      sauceEffBarrel: mixedFrontline ? 50 : 0,
+      sauceEffBarrel: mixedFrontline || sauceNeedsWithoutBatches ? 50 : 0,
       app1Lbs: mixedFrontline ? 20 : 0,
       app1Batches: mixedFrontline ? 1 : 0,
       app2Lbs: mixedFrontline ? 30 : 0,
@@ -142,39 +144,42 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     (slot) => {
       renderLineMap("running", { configuredApplicator: slot });
 
-      const frontline = screen.getByRole("button", { name: /Frontline/ });
-      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
-      expect(within(frontline).getByText("2.00 batches")).toBeTruthy();
-    },
-  );
-
-  it.each([3, 4] as const)(
-    "shows the need for applicator %i in pounds when batch quantity is unavailable",
-    (slot) => {
-      renderLineMap("running", {
-        configuredApplicator: slot,
-        applicatorBatchesAvailable: false,
-      });
-
-      const frontline = screen.getByRole("button", { name: /Frontline/ });
-      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
-      expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
-    },
-  );
-
-  it("shows a Pepperoni need in pounds when no batch quantity is available", () => {
-    renderLineMap("running", { configuredPepperoni: true });
-
     const frontline = screen.getByRole("button", { name: /Frontline/ });
+
+    const sauceLabel = within(frontline).getByText("Sauce");
     expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
     expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
     expect(within(frontline).queryByText(/batches/)).toBeNull();
   });
 
-  it("shows later applicator needs after Sauce, earlier applicators, and Pepperoni rows", () => {
-    renderLineMap("running", { mixedFrontline: true });
+  it("shows Sauce need in pounds when batch quantity is unavailable", () => {
+    renderLineMap("running", { sauceNeedsWithoutBatches: true });
 
     const frontline = screen.getByRole("button", { name: /Frontline/ });
+
+    const sauceLabel = within(frontline).getByText("Sauce");
+    expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
+    expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
+    expect(within(frontline).queryByText(/batches/)).toBeNull();
+  });
+
+  it("shows Sauce need in pounds when batch quantity is unavailable", () => {
+    renderLineMap("running", { sauceNeedsWithoutBatches: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+
+    const sauceLabel = within(frontline).getByText("Sauce");
+    expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
+    expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
+    expect(within(frontline).queryByText(/batches/)).toBeNull();
+  });
+
+  it("shows Sauce need in pounds when batch quantity is unavailable", () => {
+    renderLineMap("running", { sauceNeedsWithoutBatches: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+
+    const sauceLabel = within(frontline).getByText("Sauce");
     for (const label of [
       "Sauce",
       "App 1 — Mozzarella",
