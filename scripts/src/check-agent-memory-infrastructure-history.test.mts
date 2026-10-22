@@ -11,6 +11,7 @@ import {
   main,
   scanHistoricalAgentMemoryInfrastructure,
   scanLocalRefsOutsideAgentMemorySnapshot,
+  scanUnreachableAgentMemoryInfrastructure,
 } from "./check-agent-memory-infrastructure-history.mts";
 
 const execFileAsync = promisify(execFile);
@@ -394,6 +395,214 @@ test("local-ref scan inventories tags and remote refs and respects its cap", asy
     assert.equal(formatted.includes(secondPrivateHost), false);
     assert.equal(JSON.stringify(audit).includes(firstPrivateHost), false);
     assert.equal(JSON.stringify(audit).includes(secondPrivateHost), false);
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("unreachable-commit scan detects and redacts a synthetic commit", async () => {
+  const repositoryRoot = await mkdtemp(
+    join(tmpdir(), "agent-memory-history-unreachable-"),
+  );
+  const privateHost = "unreachable.synthetic.internal";
+  const deploymentImage =
+    "FROM synthetic-registry.invalid/team/api:unreachable-fixture.1";
+
+  try {
+    await git(repositoryRoot, ["init", "-q"]);
+    await git(repositoryRoot, ["config", "user.name", "Synthetic Audit"]);
+    await git(repositoryRoot, ["config", "user.email", "audit@example.invalid"]);
+    const snapshot = await commitFile(
+      repositoryRoot,
+      "README.md",
+      "Pinned fixture snapshot.\n",
+      "Create pinned fixture snapshot",
+    );
+    await git(repositoryRoot, ["switch", "-c", "temporary-unreachable"]);
+    const unreachableCommit = await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      `Endpoint: ${privateHost}\n${deploymentImage}\n`,
+      "Add synthetic unreachable infrastructure",
+    );
+    await commitFile(
+      repositoryRoot,
+      ".agents/memory/codex-fixes.md",
+      `${privateHost}\n${deploymentImage}\n`,
+      "Add excluded fix history",
+    );
+    await commitFile(
+      repositoryRoot,
+      ".agents/memory/not-markdown.txt",
+      `${privateHost}\n`,
+      "Add excluded non-Markdown history",
+    );
+    await git(repositoryRoot, ["switch", "--detach", snapshot]);
+    await git(repositoryRoot, ["branch", "-D", "temporary-unreachable"]);
+
+    const audit = await scanUnreachableAgentMemoryInfrastructure(repositoryRoot);
+    const repeatedAudit =
+      await scanUnreachableAgentMemoryInfrastructure(repositoryRoot);
+    const formatted = audit.findings
+      .map(formatHistoricalAgentMemoryFinding)
+      .join("\n");
+    const refsContainingCommit = await git(repositoryRoot, [
+      "for-each-ref",
+      `--contains=${unreachableCommit}`,
+      "--format=%(refname)",
+    ]);
+
+    assert.equal(refsContainingCommit, "");
+    assert.equal(audit.commitsInventoried, 3);
+    assert.equal(audit.commitsScanned, 3);
+    assert.equal(audit.commitsOmitted, false);
+    assert.equal(
+      audit.commitInventorySha256,
+      repeatedAudit.commitInventorySha256,
+    );
+    assert.match(audit.commitInventorySha256, /^[0-9a-f]{64}$/u);
+    assert.deepEqual(
+      audit.findings.map(({ commit, file, line, category }) => ({
+        commit,
+        file,
+        line,
+        category,
+      })),
+      [
+        {
+          commit: unreachableCommit,
+          file: ".agents/memory/example.md",
+          line: 1,
+          category: "infrastructure host",
+        },
+        {
+          commit: unreachableCommit,
+          file: ".agents/memory/example.md",
+          line: 2,
+          category: "deployment image reference",
+        },
+      ],
+    );
+    assert.equal(formatted.includes(privateHost), false);
+    assert.equal(formatted.includes(deploymentImage), false);
+    assert.equal(JSON.stringify(audit).includes(privateHost), false);
+    assert.equal(JSON.stringify(audit).includes(deploymentImage), false);
+
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...values: unknown[]) => {
+      output.push(values.join(" "));
+    };
+    try {
+      await main(["--", "--unreachable-commits"], repositoryRoot);
+    } finally {
+      console.log = originalLog;
+    }
+    const cliOutput = output.join("\n");
+    assert.equal(cliOutput.includes(unreachableCommit), true);
+    assert.equal(cliOutput.includes(privateHost), false);
+    assert.equal(cliOutput.includes(deploymentImage), false);
+    assert.equal(cliOutput.includes("objects were not changed."), true);
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("unreachable-commit inventory is deterministic and respects its cap", async () => {
+  const repositoryRoot = await mkdtemp(
+    join(tmpdir(), "agent-memory-history-unreachable-cap-"),
+  );
+
+  try {
+    await git(repositoryRoot, ["init", "-q"]);
+    await git(repositoryRoot, ["config", "user.name", "Synthetic Audit"]);
+    await git(repositoryRoot, ["config", "user.email", "audit@example.invalid"]);
+    const snapshot = await commitFile(
+      repositoryRoot,
+      "README.md",
+      "Pinned fixture snapshot.\n",
+      "Create pinned fixture snapshot",
+    );
+    await git(repositoryRoot, ["switch", "-c", "temporary-unreachable"]);
+    await commitFile(
+      repositoryRoot,
+      "first.txt",
+      "First unreachable commit.\n",
+      "Add first unreachable commit",
+    );
+    await commitFile(
+      repositoryRoot,
+      "second.txt",
+      "Second unreachable commit.\n",
+      "Add second unreachable commit",
+    );
+    await git(repositoryRoot, ["switch", "--detach", snapshot]);
+    await git(repositoryRoot, ["branch", "-D", "temporary-unreachable"]);
+
+    const firstAudit =
+      await scanUnreachableAgentMemoryInfrastructure(repositoryRoot, 1);
+    const repeatedAudit =
+      await scanUnreachableAgentMemoryInfrastructure(repositoryRoot, 1);
+    assert.equal(firstAudit.commitsInventoried, 2);
+    assert.equal(firstAudit.commitsScanned, 1);
+    assert.equal(firstAudit.commitLimit, 1);
+    assert.equal(firstAudit.commitsOmitted, true);
+    assert.equal(
+      firstAudit.commitInventorySha256,
+      repeatedAudit.commitInventorySha256,
+    );
+
+    await assert.rejects(
+      scanUnreachableAgentMemoryInfrastructure(repositoryRoot, 0),
+      /commitLimit must be an integer/u,
+    );
+    await assert.rejects(
+      scanUnreachableAgentMemoryInfrastructure(repositoryRoot, 2001),
+      /commitLimit must be an integer/u,
+    );
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("unreachable-commit scan supports SHA-256 Git object IDs", async () => {
+  const repositoryRoot = await mkdtemp(
+    join(tmpdir(), "agent-memory-history-unreachable-sha256-"),
+  );
+  const privateHost = "sha256-unreachable.synthetic.internal";
+
+  try {
+    await git(repositoryRoot, [
+      "init",
+      "-q",
+      "--object-format=sha256",
+    ]);
+    await git(repositoryRoot, ["config", "user.name", "Synthetic Audit"]);
+    await git(repositoryRoot, ["config", "user.email", "audit@example.invalid"]);
+    const snapshot = await commitFile(
+      repositoryRoot,
+      "README.md",
+      "Pinned SHA-256 fixture snapshot.\n",
+      "Create pinned SHA-256 fixture snapshot",
+    );
+    await git(repositoryRoot, ["switch", "-c", "temporary-unreachable"]);
+    const unreachableCommit = await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      `${privateHost}\n`,
+      "Add SHA-256 unreachable host",
+    );
+    await git(repositoryRoot, ["switch", "--detach", snapshot]);
+    await git(repositoryRoot, ["branch", "-D", "temporary-unreachable"]);
+
+    const audit = await scanUnreachableAgentMemoryInfrastructure(repositoryRoot);
+    assert.match(unreachableCommit, /^[0-9a-f]{64}$/u);
+    assert.equal(audit.commitsInventoried, 1);
+    assert.equal(audit.commitsScanned, 1);
+    assert.equal(audit.findings.length, 1);
+    assert.equal(audit.findings[0]?.commit, unreachableCommit);
+    assert.equal(audit.findings[0]?.category, "infrastructure host");
+    assert.equal(JSON.stringify(audit).includes(privateHost), false);
   } finally {
     await rm(repositoryRoot, { recursive: true, force: true });
   }

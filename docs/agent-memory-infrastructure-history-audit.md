@@ -44,3 +44,20 @@ Findings contain only ref, commit, file, line, and category. Matched text is not
 - Findings: 190 metadata-only records across 17 commits and 54 refs. All were categorized as mailing-address matches; no infrastructure-host or deployment-image matches were found. The command above emits only ref, commit, file, line, and category for each record.
 - Disposition: no history edits or automatic remediation. Mailing-address findings require owner review before any action; resource rotation/retirement was not indicated by these match categories.
 - Git history rewritten: no
+
+## Unreachable local commit result
+
+- Local checkout snapshot: `5417b2a065803ed07b393b90d57b60cb8cab5700`
+- Inventory method: `git fsck --no-reflogs --unreachable`; unique unreachable commit IDs sorted lexicographically before applying the limit.
+- Commit inventory: 437; inventory SHA-256 `0ae449677896f435abac96aec33a1a5dbb05266b7c21d66fd01c7363431198c6`
+- Revisions scanned: 437; limit: 2,000; additional commits omitted: no
+- Findings: none. The shared matcher and Markdown-note exclusions were applied; matched text is never emitted.
+- Disposition: no owner action or remediation is indicated by this scan. Any future findings require owner review before changes. No refs, history, or objects were changed or pruned.
+
+Reproduce the metadata-only scan against the current local object database with:
+
+```sh
+pnpm --filter @workspace/scripts run audit:agent-memory-infrastructure-history -- --unreachable-commits
+```
+
+The inventory digest identifies the sorted set of unreachable commit IDs seen at scan time. The object database can change independently of `HEAD`; rerun the command to audit a later local inventory. This result does not cover unreachable tree/blob contents that are not represented by a scanned commit, published copies, external services, or patterns the shared matcher does not recognize.

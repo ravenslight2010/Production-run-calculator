@@ -10,6 +10,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 export const MAX_HISTORY_REVISIONS = 2000;
+export const MAX_UNREACHABLE_COMMITS = 2000;
 
 export type HistoricalAgentMemoryFinding = AgentMemoryFinding & {
   commit: string;
@@ -40,6 +41,15 @@ export type LocalRefHistoricalAgentMemoryAudit = {
   revisionLimit: number;
   olderRevisionsOmitted: boolean;
   findings: LocalRefHistoricalAgentMemoryFinding[];
+};
+
+export type UnreachableAgentMemoryAudit = {
+  commitInventorySha256: string;
+  commitsInventoried: number;
+  commitsScanned: number;
+  commitLimit: number;
+  commitsOmitted: boolean;
+  findings: HistoricalAgentMemoryFinding[];
 };
 
 async function git(
@@ -142,6 +152,78 @@ export async function scanHistoricalAgentMemoryInfrastructure(
     revisionsScanned: selectedRevisions.length,
     revisionLimit,
     olderRevisionsOmitted,
+    findings,
+  };
+}
+
+export async function scanUnreachableAgentMemoryInfrastructure(
+  repositoryRoot: string,
+  commitLimit = MAX_UNREACHABLE_COMMITS,
+): Promise<UnreachableAgentMemoryAudit> {
+  if (
+    !Number.isInteger(commitLimit) ||
+    commitLimit < 1 ||
+    commitLimit > MAX_UNREACHABLE_COMMITS
+  ) {
+    throw new RangeError(
+      `commitLimit must be an integer between 1 and ${MAX_UNREACHABLE_COMMITS}`,
+    );
+  }
+
+  const inventoryOutput = await git(repositoryRoot, [
+    "fsck",
+    "--no-reflogs",
+    "--unreachable",
+  ]);
+  const commits = [
+    ...new Set(
+      inventoryOutput
+        .split(/\r?\n/u)
+        .flatMap((line) => {
+          const match = /^unreachable commit ((?:[0-9a-f]{40}|[0-9a-f]{64}))$/u.exec(
+            line,
+          );
+          return match?.[1] ? [match[1]] : [];
+        }),
+    ),
+  ].sort();
+  const commitInventorySha256 = createHash("sha256")
+    .update(commits.join("\n"))
+    .digest("hex");
+  const selectedCommits = commits.slice(0, commitLimit);
+  const findings: HistoricalAgentMemoryFinding[] = [];
+
+  for (const commit of selectedCommits) {
+    const changedPaths = parseChangedPaths(
+      await git(repositoryRoot, [
+        "diff-tree",
+        "--root",
+        "-m",
+        "--no-commit-id",
+        "--name-status",
+        "--no-renames",
+        "-r",
+        "-z",
+        commit,
+        "--",
+        ".agents/memory",
+      ]),
+    );
+
+    for (const file of changedPaths) {
+      const content = await git(repositoryRoot, ["show", `${commit}:${file}`]);
+      for (const finding of findAgentMemoryInfrastructure(file, content)) {
+        findings.push({ ...finding, commit });
+      }
+    }
+  }
+
+  return {
+    commitInventorySha256,
+    commitsInventoried: commits.length,
+    commitsScanned: selectedCommits.length,
+    commitLimit,
+    commitsOmitted: commits.length > commitLimit,
     findings,
   };
 }
@@ -305,6 +387,7 @@ export async function main(
 ): Promise<void> {
   let ref = "HEAD";
   let refsOutsideSnapshot = false;
+  let unreachableCommits = false;
   const cliArgs = args[0] === "--" ? args.slice(1) : args;
   for (let index = 0; index < cliArgs.length; index += 1) {
     if (cliArgs[index] === "--ref" && cliArgs[index + 1]) {
@@ -317,9 +400,11 @@ export async function main(
       ref = cliArgs[index + 1];
       refsOutsideSnapshot = true;
       index += 1;
+    } else if (cliArgs[index] === "--unreachable-commits") {
+      unreachableCommits = true;
     } else if (cliArgs[index] === "--help") {
       console.log(
-        "Usage: check-agent-memory-infrastructure-history.mts [--ref <git-commit-or-ref> | --refs-outside-snapshot <git-commit-or-ref>]",
+        "Usage: check-agent-memory-infrastructure-history.mts [--ref <git-commit-or-ref> | --refs-outside-snapshot <git-commit-or-ref> | --unreachable-commits]",
       );
       return;
     } else {
@@ -329,6 +414,27 @@ export async function main(
       process.exitCode = 2;
       return;
     }
+  }
+
+  if (unreachableCommits) {
+    const audit = await scanUnreachableAgentMemoryInfrastructure(repositoryRoot);
+    console.log(
+      `Unreachable agent-memory infrastructure audit: ${audit.commitsScanned} commit(s) scanned; inventory=${audit.commitsInventoried}; limit=${audit.commitLimit}; additional commits omitted=${audit.commitsOmitted ? "yes" : "no"}; inventory sha256=${audit.commitInventorySha256}.`,
+    );
+    if (audit.findings.length === 0) {
+      console.log("No historical matches found in the scanned range.");
+      return;
+    }
+    console.log(
+      `Findings (${audit.findings.length}); output includes metadata only:`,
+    );
+    for (const finding of audit.findings) {
+      console.log(formatHistoricalAgentMemoryFinding(finding));
+    }
+    console.log(
+      "Disposition: findings require owner review before any action. Git history and objects were not changed.",
+    );
+    return;
   }
 
   if (refsOutsideSnapshot) {
