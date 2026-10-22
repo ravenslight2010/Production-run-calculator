@@ -12,6 +12,11 @@ export type AgentMemoryFindingCategory =
   | "deployment image reference"
   | "mailing address";
 
+export type AgentMemoryInfrastructureCategory = Exclude<
+  AgentMemoryFindingCategory,
+  "mailing address"
+>;
+
 export type AgentMemoryFinding = {
   file: string;
   line: number;
@@ -69,6 +74,20 @@ function containsPrivateHost(line: string): boolean {
   return false;
 }
 
+export function findAgentMemoryInfrastructureCategories(
+  line: string,
+): AgentMemoryInfrastructureCategory[] {
+  const categories: AgentMemoryInfrastructureCategory[] = [];
+  if (containsPrivateHost(line)) categories.push("infrastructure host");
+
+  deploymentImageReference.lastIndex = 0;
+  if (deploymentImageReference.test(line)) {
+    categories.push("deployment image reference");
+  }
+
+  return categories;
+}
+
 export function isScannedAgentMemoryPath(file: string): boolean {
   const normalized = file.replaceAll("\\", "/").replace(/^\.\//u, "");
   return (
@@ -86,20 +105,11 @@ export function findAgentMemoryInfrastructure(
 
   const findings: AgentMemoryFinding[] = [];
   for (const [index, line] of content.split(/\r?\n/u).entries()) {
-    if (containsPrivateHost(line)) {
+    for (const category of findAgentMemoryInfrastructureCategories(line)) {
       findings.push({
         file,
         line: index + 1,
-        category: "infrastructure host",
-      });
-    }
-
-    deploymentImageReference.lastIndex = 0;
-    if (deploymentImageReference.test(line)) {
-      findings.push({
-        file,
-        line: index + 1,
-        category: "deployment image reference",
+        category,
       });
     }
 

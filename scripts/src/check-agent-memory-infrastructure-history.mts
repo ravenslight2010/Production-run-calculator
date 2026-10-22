@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import {
+  findAgentMemoryInfrastructureCategories,
   findAgentMemoryInfrastructure,
   isScannedAgentMemoryPath,
+  type AgentMemoryInfrastructureCategory,
   type AgentMemoryFinding,
 } from "./check-agent-memory-infrastructure.mts";
 
@@ -41,6 +43,18 @@ export type LocalRefHistoricalAgentMemoryAudit = {
   revisionLimit: number;
   olderRevisionsOmitted: boolean;
   findings: LocalRefHistoricalAgentMemoryFinding[];
+  commitMessageRevisionsScanned: number;
+  commitMessageRevisionLimit: number;
+  commitMessageRevisionsSha256: string;
+  olderCommitMessagesOmitted: boolean;
+  commitMessageFindings: LocalRefCommitMessageFinding[];
+};
+
+export type LocalRefCommitMessageFinding = {
+  ref: string;
+  commit: string;
+  line: number;
+  category: AgentMemoryInfrastructureCategory;
 };
 
 export type UnreachableAgentMemoryAudit = {
@@ -232,6 +246,46 @@ function parseRefInventory(output: string): string[] {
   return output.split(/\r?\n/u).filter(Boolean).sort();
 }
 
+async function scanCommitMessages(
+  repositoryRoot: string,
+  commits: string[],
+): Promise<LocalRefCommitMessageFinding[]> {
+  const findings: LocalRefCommitMessageFinding[] = [];
+  for (const commit of commits) {
+    const message = await git(repositoryRoot, [
+      "show",
+      "-s",
+      "--no-show-signature",
+      "--format=%B",
+      commit,
+    ]);
+    const commitFindings = message
+      .split(/\r?\n/u)
+      .flatMap((line, index) =>
+        findAgentMemoryInfrastructureCategories(line).map((category) => ({
+          commit,
+          line: index + 1,
+          category,
+        })),
+      );
+    if (commitFindings.length === 0) continue;
+
+    const containingRefs = parseRefInventory(
+      await git(repositoryRoot, [
+        "for-each-ref",
+        `--contains=${commit}`,
+        "--format=%(refname)",
+      ]),
+    );
+    for (const candidateRef of containingRefs) {
+      for (const finding of commitFindings) {
+        findings.push({ ...finding, ref: candidateRef });
+      }
+    }
+  }
+  return findings;
+}
+
 export async function scanLocalRefsOutsideAgentMemorySnapshot(
   repositoryRoot: string,
   ref = "HEAD",
@@ -265,6 +319,7 @@ export async function scanLocalRefsOutsideAgentMemorySnapshot(
   ]);
   const inventoryRows = parseRefInventory(inventoryOutput);
   const refs = inventoryRows.map((row) => row.split(" ", 1)[0] ?? "");
+  const refObjects = inventoryRows.map((row) => row.split(" ")[1] ?? "");
   const localBranchRefs = refs.filter((candidate) =>
     candidate.startsWith("refs/heads/"),
   ).length;
@@ -292,8 +347,33 @@ export async function scanLocalRefsOutsideAgentMemorySnapshot(
       revisionLimit,
       olderRevisionsOmitted: false,
       findings: [],
+      commitMessageRevisionsScanned: 0,
+      commitMessageRevisionLimit: revisionLimit,
+      commitMessageRevisionsSha256: createHash("sha256").digest("hex"),
+      olderCommitMessagesOmitted: false,
+      commitMessageFindings: [],
     };
   }
+
+  const allRevisionOutput = await git(repositoryRoot, [
+    "log",
+    "--full-history",
+    "--topo-order",
+    `--max-count=${revisionLimit + 1}`,
+    "--format=%H",
+    ...refObjects,
+    "--not",
+    snapshot,
+  ]);
+  const allRevisions = allRevisionOutput
+    .split(/\r?\n/u)
+    .filter((revision) => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(revision));
+  const olderCommitMessagesOmitted = allRevisions.length > revisionLimit;
+  const selectedMessageRevisions = allRevisions.slice(0, revisionLimit);
+  const commitMessageFindings = await scanCommitMessages(
+    repositoryRoot,
+    selectedMessageRevisions,
+  );
 
   const revisionOutput = await git(repositoryRoot, [
     "log",
@@ -301,7 +381,7 @@ export async function scanLocalRefsOutsideAgentMemorySnapshot(
     "--topo-order",
     `--max-count=${revisionLimit + 1}`,
     "--format=%H",
-    ...refs,
+    ...refObjects,
     "--not",
     snapshot,
     "--",
@@ -354,6 +434,16 @@ export async function scanLocalRefsOutsideAgentMemorySnapshot(
     }
   }
 
+  const finalInventoryRows = parseRefInventory(
+    await git(repositoryRoot, [
+      "for-each-ref",
+      "--format=%(refname) %(objectname)",
+    ]),
+  );
+  if (inventoryRows.join("\n") !== finalInventoryRows.join("\n")) {
+    throw new Error("Local refs changed during the audit; rerun with stable refs.");
+  }
+
   return {
     snapshot,
     refsInventoried: refs.length,
@@ -366,6 +456,13 @@ export async function scanLocalRefsOutsideAgentMemorySnapshot(
     revisionLimit,
     olderRevisionsOmitted,
     findings,
+    commitMessageRevisionsScanned: selectedMessageRevisions.length,
+    commitMessageRevisionLimit: revisionLimit,
+    commitMessageRevisionsSha256: createHash("sha256")
+      .update(selectedMessageRevisions.join("\n"))
+      .digest("hex"),
+    olderCommitMessagesOmitted,
+    commitMessageFindings,
   };
 }
 
@@ -379,6 +476,12 @@ export function formatLocalRefHistoricalAgentMemoryFinding(
   finding: LocalRefHistoricalAgentMemoryFinding,
 ): string {
   return `${finding.ref} ${finding.commit} ${finding.file}:${finding.line}: ${finding.category}`;
+}
+
+export function formatLocalRefCommitMessageFinding(
+  finding: LocalRefCommitMessageFinding,
+): string {
+  return `${finding.ref} ${finding.commit} message line ${finding.line}: ${finding.category}`;
 }
 
 export async function main(
@@ -448,15 +551,30 @@ export async function main(
     console.log(
       `Local refs inventoried: ${audit.refsInventoried} (heads=${audit.localBranchRefs}, tags=${audit.tagRefs}, remote-tracking=${audit.remoteTrackingRefs}, other=${audit.otherRefs}); inventory sha256=${audit.refInventorySha256}.`,
     );
-    if (audit.findings.length === 0) {
+    console.log(
+      `Commit messages scanned: ${audit.commitMessageRevisionsScanned}; limit=${audit.commitMessageRevisionLimit}; older commits omitted=${audit.olderCommitMessagesOmitted ? "yes" : "no"}; selected revisions sha256=${audit.commitMessageRevisionsSha256}.`,
+    );
+    if (audit.findings.length === 0 && audit.commitMessageFindings.length === 0) {
       console.log("No historical matches found in the scanned range.");
       return;
     }
-    console.log(
-      `Findings (${audit.findings.length}); output includes metadata only:`,
-    );
-    for (const finding of audit.findings) {
-      console.log(formatLocalRefHistoricalAgentMemoryFinding(finding));
+    if (audit.findings.length > 0) {
+      console.log(
+        `Memory-note findings (${audit.findings.length}); output includes metadata only:`,
+      );
+      for (const finding of audit.findings) {
+        console.log(formatLocalRefHistoricalAgentMemoryFinding(finding));
+      }
+    }
+    if (audit.commitMessageFindings.length > 0) {
+      console.log(
+        `Commit-message findings (${audit.commitMessageFindings.length}); output includes metadata only:`,
+      );
+      for (const finding of audit.commitMessageFindings) {
+        console.log(formatLocalRefCommitMessageFinding(finding));
+      }
+    } else {
+      console.log("No commit-message matches found in the scanned range.");
     }
     console.log(
       "Disposition: review each reference with the responsible owner; take owner-approved remediation only when warranted. Git history was not changed.",

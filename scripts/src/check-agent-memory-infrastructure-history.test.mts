@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { test } from "node:test";
 import {
   formatHistoricalAgentMemoryFinding,
+  formatLocalRefCommitMessageFinding,
   formatLocalRefHistoricalAgentMemoryFinding,
   main,
   scanHistoricalAgentMemoryInfrastructure,
@@ -294,6 +295,98 @@ test("local-ref scan finds and redacts a synthetic branch-only match", async () 
   }
 });
 
+test("local-ref scan detects and redacts synthetic branch-only commit messages", async () => {
+  const repositoryRoot = await mkdtemp(
+    join(tmpdir(), "agent-memory-history-message-refs-"),
+  );
+  const privateHost = "branch-message.synthetic.internal";
+  const deploymentImage =
+    "FROM synthetic-registry.invalid/team/api:private-build.1";
+
+  try {
+    await git(repositoryRoot, ["init", "-q"]);
+    await git(repositoryRoot, ["config", "user.name", "Synthetic Audit"]);
+    await git(repositoryRoot, ["config", "user.email", "audit@example.invalid"]);
+    const snapshot = await commitFile(
+      repositoryRoot,
+      "README.md",
+      "Synthetic pinned snapshot.\n",
+      "Create pinned snapshot with snapshot-only.synthetic.internal",
+    );
+    await git(repositoryRoot, ["switch", "-c", "message-audit-only"]);
+    const branchOnlyCommit = await commitFile(
+      repositoryRoot,
+      "config/example.txt",
+      "Synthetic configuration without infrastructure details.\n",
+      [
+        "Update synthetic configuration",
+        "",
+        `Internal endpoint: ${privateHost}`,
+        deploymentImage,
+      ].join("\n"),
+    );
+
+    const audit = await scanLocalRefsOutsideAgentMemorySnapshot(
+      repositoryRoot,
+      snapshot,
+    );
+    const formatted = audit.commitMessageFindings
+      .map(formatLocalRefCommitMessageFinding)
+      .join("\n");
+
+    assert.equal(audit.snapshot, snapshot);
+    assert.equal(audit.revisionsScanned, 0);
+    assert.equal(audit.commitMessageRevisionsScanned, 1);
+    assert.match(audit.commitMessageRevisionsSha256, /^[0-9a-f]{64}$/u);
+    assert.equal(audit.olderCommitMessagesOmitted, false);
+    assert.deepEqual(audit.commitMessageFindings, [
+      {
+        ref: "refs/heads/message-audit-only",
+        commit: branchOnlyCommit,
+        line: 3,
+        category: "infrastructure host",
+      },
+      {
+        ref: "refs/heads/message-audit-only",
+        commit: branchOnlyCommit,
+        line: 4,
+        category: "deployment image reference",
+      },
+    ]);
+    assert.equal(formatted.includes(privateHost), false);
+    assert.equal(formatted.includes(deploymentImage), false);
+    assert.equal(JSON.stringify(audit).includes(privateHost), false);
+    assert.equal(JSON.stringify(audit).includes(deploymentImage), false);
+
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...values: unknown[]) => {
+      output.push(values.join(" "));
+    };
+    try {
+      await main(
+        ["--", "--refs-outside-snapshot", snapshot],
+        repositoryRoot,
+      );
+    } finally {
+      console.log = originalLog;
+    }
+    const cliOutput = output.join("\n");
+    assert.equal(cliOutput.includes(privateHost), false);
+    assert.equal(cliOutput.includes(deploymentImage), false);
+    assert.equal(cliOutput.includes("refs/heads/message-audit-only"), true);
+    assert.equal(cliOutput.includes(branchOnlyCommit), true);
+    assert.equal(cliOutput.includes("message line 3: infrastructure host"), true);
+    assert.equal(
+      cliOutput.includes("message line 4: deployment image reference"),
+      true,
+    );
+    assert.equal(cliOutput.includes("Git history was not changed."), true);
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
 test("local-ref scan inventories tags and remote refs and respects its cap", async () => {
   const repositoryRoot = await mkdtemp(
     join(tmpdir(), "agent-memory-history-ref-cap-"),
@@ -322,7 +415,7 @@ test("local-ref scan inventories tags and remote refs and respects its cap", asy
       repositoryRoot,
       ".agents/memory/example.md",
       `Endpoint: ${secondPrivateHost}\n`,
-      "Add second branch-only host",
+      `Add second branch-only host ${secondPrivateHost}`,
     );
     await git(repositoryRoot, ["tag", "--annotate", "audit-tag", "-m", "test"]);
     await git(repositoryRoot, [
@@ -349,6 +442,27 @@ test("local-ref scan inventories tags and remote refs and respects its cap", asy
     assert.equal(audit.otherRefs, 1);
     assert.equal(audit.revisionsScanned, 1);
     assert.equal(audit.olderRevisionsOmitted, true);
+    assert.equal(audit.commitMessageRevisionsScanned, 1);
+    assert.equal(audit.olderCommitMessagesOmitted, true);
+    assert.deepEqual(
+      audit.commitMessageFindings.map(({ ref, commit, line, category }) => ({
+        ref,
+        commit,
+        line,
+        category,
+      })),
+      [
+        "refs/custom/audit-only",
+        "refs/heads/audit-only",
+        "refs/remotes/origin/audit-only",
+        "refs/tags/audit-tag",
+      ].map((ref) => ({
+        ref,
+        commit: latestCommit,
+        line: 1,
+        category: "infrastructure host",
+      })),
+    );
     assert.deepEqual(
       audit.findings.map(({ ref, commit, file, line, category }) => ({
         ref,
