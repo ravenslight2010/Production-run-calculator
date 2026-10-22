@@ -8,11 +8,13 @@ export function ApplicatorStockRow(props: {
   disabled?: boolean;
   disabledReason?: string;
   testId: string;
+  initialDraft?: string;
+  onDraftChange?: (draft: string | undefined) => void;
   onSave: (stockLbs: number) => void;
 }) {
-  const { label, stockLbs, capacityLbs, disabled, disabledReason, testId, onSave } = props;
-  const [draft, setDraft] = useState(String(stockLbs));
-  const [dirty, setDirty] = useState(false);
+  const { label, stockLbs, capacityLbs, disabled, disabledReason, testId, initialDraft, onDraftChange, onSave } = props;
+  const [draft, setDraft] = useState(initialDraft ?? String(stockLbs));
+  const [dirty, setDirty] = useState(initialDraft !== undefined);
 
   useEffect(() => {
     if (!dirty) setDraft(String(stockLbs));
@@ -22,11 +24,13 @@ export function ApplicatorStockRow(props: {
     if (!Number.isFinite(value) || value < 0 || value > capacityLbs) {
       setDraft(String(stockLbs));
       setDirty(false);
+      onDraftChange?.(undefined);
       return;
     }
     onSave(value);
     setDraft(String(value));
     setDirty(false);
+    onDraftChange?.(undefined);
   };
 
   return (
@@ -50,6 +54,7 @@ export function ApplicatorStockRow(props: {
           onChange={(event) => {
             setDraft(event.target.value);
             setDirty(true);
+            onDraftChange?.(event.target.value);
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {

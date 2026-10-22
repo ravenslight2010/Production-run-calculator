@@ -617,6 +617,50 @@ describe("live station startup", () => {
     expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
   });
 
+  it("restores an unfinished Pep 2 stock draft after combined mode hides its rows", async () => {
+    const values: FormValues = {
+      ...STATION_VALUES,
+      pep1Type: "Pepperoni",
+      pep1TypeB: "Cup Pepperoni",
+      pep2Type: "Cup Pepperoni",
+      pep2TypeB: "Mini Cup Pepperoni",
+      pep1Combined: false,
+      pep1StockLbs: 12.5,
+      pep1bStockLbs: 15.5,
+      pep2StockLbs: 22.5,
+      pep2bStockLbs: 25.5,
+    };
+    render(
+      <StationProviders status="running" values={values}>
+        <>
+          <LiveFrontlineTabContent />
+          <PepperoniSetupEditor />
+        </>
+      </StationProviders>,
+    );
+
+    fireEvent.change(screen.getByTestId("stock-pep2-lbs"), { target: { value: "34.25" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    await waitFor(() => expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull());
+    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
+    expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("15.5");
+    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
+    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
+
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    const restoredInput = await screen.findByTestId("stock-pep2-lbs") as HTMLInputElement;
+    expect(restoredInput.value).toBe("34.25");
+    expect(within(restoredInput.parentElement!).getByRole("button", { name: "Save" }).disabled).toBe(false);
+    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
+    expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("15.5");
+    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
+    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
+
+    fireEvent.click(within(restoredInput.parentElement!).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("pep2StockLbs").textContent).toBe("34.25"));
+  });
+
   it("keeps the fixed pepperoni cap for manual adjustments on the current visible slot", async () => {
     const values: FormValues = {
       ...STATION_VALUES,
