@@ -221,7 +221,12 @@ function discoverWorkspacePackageDirectories(workspaceRoot) {
   });
 }
 
-function workspacePackageRoot(packageName, readSource, workspacePackageDirectories) {
+function workspacePackageRoot(
+  packageName,
+  workspaceRoot,
+  readSource,
+  workspacePackageDirectories,
+) {
   const matches = [];
   for (const candidateDirectory of workspacePackageDirectories) {
     const manifestPath = path.join(candidateDirectory, "package.json");
@@ -229,7 +234,12 @@ function workspacePackageRoot(packageName, readSource, workspacePackageDirectori
     if (manifest.name === packageName) matches.push(candidateDirectory);
   }
   if (matches.length > 1) {
-    throw new Error(`Workspace package "${packageName}" has multiple local manifests.`);
+    const conflictingDirectories = matches
+      .map((directory) => normalize(path.relative(workspaceRoot, directory)))
+      .sort();
+    throw new Error(
+      `Workspace package "${packageName}" has multiple local manifests: ${conflictingDirectories.join(", ")}.`,
+    );
   }
   return matches[0] ?? null;
 }
@@ -303,6 +313,7 @@ function resolveWorkspaceSource(
   const [, packageName, packageSubpath = ""] = match;
   const packageRoot = workspacePackageRoot(
     packageName,
+    workspaceRoot,
     readSource,
     getWorkspacePackageDirectories(),
   );

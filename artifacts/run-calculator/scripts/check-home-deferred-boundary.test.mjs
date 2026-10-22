@@ -427,7 +427,7 @@ test("source boundary clearly rejects ambiguous local workspace package names", 
   try {
     assert.throws(
       () => checkHomeDeferredSourceBoundary(fixture),
-      /Workspace package "@workspace\/home-bridge" has multiple local manifests/,
+      /Workspace package "@workspace\/home-bridge" has multiple local manifests: modules\/one\/packages\/home-bridge, modules\/two\/packages\/home-bridge/,
     );
   } finally {
     fixture.cleanup();
