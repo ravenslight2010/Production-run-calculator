@@ -4575,6 +4575,14 @@ export default function Home() {
   const [ignoredMergeBusy, setIgnoredMergeBusy] = useState(false);
   const [ignoredMergeError, setIgnoredMergeError] = useState("");
   const [restoringIgnoredMergeKey, setRestoringIgnoredMergeKey] = useState("");
+  const [recentlyIgnoredMerge, setRecentlyIgnoredMerge] = useState<{
+    key: string;
+    scopeKey: string;
+    category: MergeSuggestCategory;
+    brand?: string;
+    pairs: DeniedMerge[];
+    status: "ignored" | "restoring" | "restored" | "error" | "save-error";
+  } | null>(null);
   // Checked suggestion groups for batch apply, keyed by target+sources (stable
   // across list re-renders; stale keys from removed suggestions are harmless
   // because counts intersect against the live list).
@@ -5534,17 +5542,63 @@ export default function Home() {
       persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
     }
     const scope = mergeSuggestScope;
+    const scopeKey = ignoredMergeScopeKey;
+    const key = mergeSuggestKey(s);
     try {
-      await denyMerge(s.target, sources, scope.category, scope.brand);
+      const pairs = await denyMerge(s.target, sources, scope.category, scope.brand);
+      if (canManageProfiles) {
+        setRecentlyIgnoredMerge({
+          key,
+          scopeKey,
+          category: scope.category,
+          brand: scope.brand,
+          pairs,
+          status: "ignored",
+        });
+      }
     } catch {
-      // Non-fatal: the suggestion is already hidden for this session; it may
-      // reappear on a later scan if the deny didn't persist.
+      setRecentlyIgnoredMerge(canManageProfiles ? {
+        key,
+        scopeKey,
+        category: scope.category,
+        brand: scope.brand,
+        pairs: [],
+        status: "save-error",
+      } : null);
     }
     if (mergeCategory === "ingredients") {
       void resolvePendingDuplicateReview(
         duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
         "ignored",
       ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
+    }
+  }
+
+  async function undoRecentlyIgnoredMerge() {
+    const recent = recentlyIgnoredMerge;
+    if (
+      !canManageProfiles ||
+      !recent ||
+      recent.scopeKey !== ignoredMergeScopeKey ||
+      recent.pairs.length === 0 ||
+      (recent.status !== "ignored" && recent.status !== "error")
+    ) return;
+
+    setRecentlyIgnoredMerge({ ...recent, status: "restoring" });
+    setRestoringIgnoredMergeKey(recent.key);
+    try {
+      const remaining = await restoreDeniedMerges(
+        recent.pairs,
+        recent.category,
+        recent.brand,
+      );
+      setIgnoredMergeState({ scopeKey: recent.scopeKey, pairs: remaining });
+      setRecentlyIgnoredMerge({ ...recent, status: "restored" });
+      setMergeSuggestNote("Match restored. Scan again to see it in suggestions.");
+    } catch {
+      setRecentlyIgnoredMerge({ ...recent, status: "error" });
+    } finally {
+      setRestoringIgnoredMergeKey("");
     }
   }
 
@@ -16654,6 +16708,47 @@ export default function Home() {
                     {mergeSuggestScope.universe.length > 0 &&
                       !(mergeCategory === "brandflavor" && mergeBfMode === "flavors" && !mergeBfBrand) && (
                       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
+                        {canManageProfiles &&
+                          recentlyIgnoredMerge?.scopeKey === ignoredMergeScopeKey && (
+                          <div
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/70 px-2.5 py-2"
+                            role={
+                              recentlyIgnoredMerge.status === "error" ||
+                              recentlyIgnoredMerge.status === "save-error"
+                                ? "alert"
+                                : "status"
+                            }
+                          >
+                            <span className="min-w-0 break-words text-xs">
+                              {recentlyIgnoredMerge.status === "save-error"
+                                ? "Couldn't save this ignore. It may appear again on a later scan."
+                                : recentlyIgnoredMerge.status === "error"
+                                ? "Couldn't undo this ignore. Please retry."
+                                : recentlyIgnoredMerge.status === "restored"
+                                ? "Ignore undone. Scan again to see this match in suggestions."
+                                : `Ignored: ${recentlyIgnoredMerge.pairs
+                                    .map((pair) => `${pair.nameA} ↔ ${pair.nameB}`)
+                                    .join(", ")}`}
+                            </span>
+                            {(recentlyIgnoredMerge.status === "ignored" ||
+                              recentlyIgnoredMerge.status === "restoring" ||
+                              recentlyIgnoredMerge.status === "error") && (
+                              <button
+                                type="button"
+                                aria-label={`Undo ignore ${recentlyIgnoredMerge.pairs
+                                  .map((pair) => `${pair.nameA} and ${pair.nameB}`)
+                                  .join(", ")}`}
+                                disabled={recentlyIgnoredMerge.status === "restoring"}
+                                onClick={() => void undoRecentlyIgnoredMerge()}
+                                className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-semibold hover:bg-muted disabled:opacity-50"
+                              >
+                                {recentlyIgnoredMerge.status === "restoring"
+                                  ? "Undoing…"
+                                  : "Undo ignore"}
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>

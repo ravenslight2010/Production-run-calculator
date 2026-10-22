@@ -227,9 +227,9 @@ export async function denyMerge(
   sources: string[],
   category?: MergeSuggestCategory,
   brand?: string,
-): Promise<void> {
+): Promise<DeniedMerge[]> {
   const pairs = collectDeniedPairs(target, sources);
-  if (pairs.length === 0) return;
+  if (pairs.length === 0) return pairs;
   const res = await fetch("/api/denied-merges", {
     method: "POST",
     headers: {
@@ -246,6 +246,7 @@ export async function denyMerge(
   // A prior scan may still be cached for this exact scope. Once the server
   // confirms the denial, force the next scan to reload its denied-pair list.
   clearMergeSuggestionCache();
+  return pairs;
 }
 
 export async function fetchPendingDuplicateReviews(
