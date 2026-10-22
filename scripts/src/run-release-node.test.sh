@@ -471,6 +471,7 @@ set -euo pipefail
 
 printf 'npx-invoked\n' >>"\$RUN_LOG"
 printf 'npx-node-options=%s\n' "\${NODE_OPTIONS:-unset}" >>"\$RUN_LOG"
+printf 'npx-node-system-ca=%s\n' "\${NODE_USE_SYSTEM_CA:-unset}" >>"\$RUN_LOG"
 printf 'npx-registry=%s\n' "\${npm_config_registry:-unset}" >>"\$RUN_LOG"
 fallback_dir=\$(dirname "\$RELEASE_NODE_FALLBACK_MARKER")
 if [[ "\${npm_config_cache:-}" == "\$fallback_dir/npm-cache" &&
@@ -599,7 +600,7 @@ test_matching_node_skips_npx() {
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" \
     "node-options=--require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
-  assert_contains "$events" "node-system-ca=1"
+  assert_contains "$events" "node-system-ca=0"
   assert_contains "$events" "ssl-cert-file-readable=yes"
   assert_contains "$events" "ssl-cert-dir-readable=yes"
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
@@ -627,6 +628,8 @@ test_mismatching_node_uses_npx() {
   local events
   events=$(cat "$log_path")
   assert_contains "$events" "npx-invoked"
+  assert_contains "$events" "npx-node-system-ca=0"
+  assert_contains "$events" "node-system-ca=0"
   assert_contains "$events" \
     "npx-node-options=--trace-warnings --require=\"${workspace}/scripts/src/release-node-https-only.cjs\""
   assert_contains "$events" "npx-registry=https://registry.npmjs.org/"

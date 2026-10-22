@@ -6,10 +6,10 @@
 
 set -euo pipefail
 
-# Replit's system trust store contains the certificates needed for verified
-# HTTPS requests from the pinned Node runtime. Keep certificate verification on;
-# do not replace this with NODE_TLS_REJECT_UNAUTHORIZED=0.
-export NODE_USE_SYSTEM_CA=1
+# The pinned Node build selects OpenSSL's CA store; enabling Node's separate
+# system-CA mode conflicts with it and exits with code 9. Keep OpenSSL's verified
+# trust enabled, using the readable host bundle selected below.
+export NODE_USE_SYSTEM_CA=0
 
 # The pinned Node/OpenSSL build can have a default CA directory inside an
 # immutable Nix store path that is not present in this workspace. Point OpenSSL

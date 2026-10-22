@@ -26,3 +26,9 @@ Concurrent task merges can launch multiple pinned-Node `npx` acquisitions agains
 **Why:** Parallel post-merge hooks share the user npm cache even when each task has an isolated workspace, so one wait can exceed npm's lock deadline.
 
 **How to apply:** Give each short-lived Node bootstrap a private temporary npm cache and remove it with the bootstrap's temporary marker directory. Do not clear or mutate the shared cache to recover from a lock timeout.
+
+The npm-provisioned Node build can select OpenSSL CA mode by default. Enabling `NODE_USE_SYSTEM_CA=1` then fails even for `node --version` with mutually exclusive CA modes.
+
+**Why:** Disabling system-CA mode only during acquisition did not fix the failure: the selected executable failed again as soon as the release child restored it.
+
+**How to apply:** Keep Node system-CA mode disabled throughout the launcher and children, retain certificate verification, and supply readable host CA file/directory paths for OpenSSL. Verify both bootstrap and the selected runtime, not just npm's download.
