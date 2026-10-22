@@ -19,3 +19,9 @@ Generated API checks can fail earlier if Orval output drifts from the OpenAPI so
 **Why:** A clean focused check does not close a configured workspace-wide gate, and generated-contract drift can mask a separate compiler failure.
 
 **How to apply:** Preserve the exact failing command and log, isolate the affected package, repair only source-supported generated drift, and leave the root validation unresolved until the full command passes.
+
+If `run-release-node.sh` exits before a check starts with Node's conflicting `--use-openssl-ca` / `--use-system-ca` options error, inspect inherited `NODE_OPTIONS`. A clean invocation with that inherited option removed allowed the configured isolated browser suite to run in this workspace.
+
+**Why:** The release runner adds its own Node preload while inheriting shell options; a CA-option conflict can prevent validation from reaching the project scripts.
+
+**How to apply:** Preserve the original failure, remove only the conflicting inherited Node option for the retry (for example, `env -u NODE_OPTIONS`), and keep the release runner's own checks and HTTPS protections enabled.

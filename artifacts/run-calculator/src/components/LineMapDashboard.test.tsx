@@ -24,7 +24,7 @@ type Lifecycle = "pending" | "running" | "paused" | "ended";
 function renderLineMap(
   runStatus: Lifecycle,
   options: {
-    currentRun?: object | null;
+    currentRun?: { id?: string; brand?: string; flavor?: string } | null;
     active?: boolean;
     scheduledDays?: ScheduledDay[];
     configuredApplicator?: 3 | 4;
@@ -44,7 +44,7 @@ function renderLineMap(
   const mixedFrontline = options.mixedFrontline ?? false;
   const sauceNeedsWithoutBatches = options.sauceNeedsWithoutBatches ?? false;
   const confirmStationActivity = options.confirmStationActivity ?? vi.fn().mockResolvedValue(undefined);
-  mocks.useHomeTabCtx.mockReturnValue({
+  const context = {
     v: {
       traysOnLine: active ? 1 : 0,
       batchesReady: 0,
@@ -78,7 +78,8 @@ function renderLineMap(
     navigate: vi.fn(),
     confirmStationActivity,
     isOnline: true,
-  });
+  };
+  mocks.useHomeTabCtx.mockReturnValue(context);
   mocks.useLiveRun.mockReturnValue({
     calc: {
       doughDepletionSec: 0,
@@ -119,7 +120,7 @@ function renderLineMap(
     stationActivityNowMs: options.stationActivityNowMs ?? 100_000,
   });
 
-  return render(<LineMapDashboard />);
+  return { ...render(<LineMapDashboard />), context };
 }
 
 function dateOffset(days: number): string {
@@ -153,6 +154,70 @@ function getZoneNavigationButton(zoneName: RegExp): HTMLElement {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+describe("LineMapDashboard current product identity", () => {
+  it("shows the active run's brand and flavor in the header", () => {
+    renderLineMap("running", {
+      currentRun: { id: "run-1", brand: "Acme", flavor: "Supreme" },
+    });
+
+    expect(screen.getByTestId("line-map-current-product").textContent).toBe(
+      "Acme – Supreme",
+    );
+  });
+
+  it.each([
+    [{ id: "run-1", brand: "Acme", flavor: "" }, "Acme"],
+    [{ id: "run-1", brand: "", flavor: "Supreme" }, "Supreme"],
+    [{ id: "run-1", brand: "  Acme  ", flavor: "   " }, "Acme"],
+  ])("shows only non-empty name parts", (currentRun, expected) => {
+    renderLineMap("running", { currentRun });
+
+    expect(screen.getByTestId("line-map-current-product").textContent).toBe(
+      expected,
+    );
+    expect(screen.getByTestId("line-map-current-product").textContent).not.toMatch(
+      /[–-]\s*$|^\s*[–-]/,
+    );
+  });
+
+  it("updates the header when the selected run changes", () => {
+    const rendered = renderLineMap("running", {
+      currentRun: { id: "run-1", brand: "Acme", flavor: "Supreme" },
+    });
+
+    expect(screen.getByTestId("line-map-current-product").textContent).toBe(
+      "Acme – Supreme",
+    );
+
+    mocks.useHomeTabCtx.mockReturnValue({
+      ...rendered.context,
+      currentRun: { id: "run-2", brand: "Northstar", flavor: "Pepperoni" },
+    });
+    rendered.rerender(<LineMapDashboard />);
+
+    expect(screen.getByTestId("line-map-current-product").textContent).toBe(
+      "Northstar – Pepperoni",
+    );
+    expect(screen.queryByText("Acme – Supreme")).toBeNull();
+  });
+
+  it("keeps the no-run empty state without a product label", () => {
+    renderLineMap("pending", { currentRun: null });
+
+    expect(screen.queryByTestId("line-map-current-product")).toBeNull();
+    expect(screen.getByText("Start a run to see the line map")).toBeTruthy();
+    expect(screen.getByText("NO ACTIVE RUN")).toBeTruthy();
+  });
+
+  it("omits the product label when the selected run has no name parts", () => {
+    renderLineMap("pending", {
+      currentRun: { id: "run-1", brand: " ", flavor: "" },
+    });
+
+    expect(screen.queryByTestId("line-map-current-product")).toBeNull();
+  });
 });
 
 describe("LineMapDashboard station lifecycle statuses", () => {

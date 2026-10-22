@@ -66,6 +66,14 @@ function scheduledRunLabel(run: ScheduledRun): string {
   return [run.brand.trim(), run.flavor.trim()].filter(Boolean).join(" – ");
 }
 
+function currentProductLabel(
+  currentRun: { brand?: string; flavor?: string } | null | undefined,
+): string {
+  if (!currentRun) return "";
+  return [currentRun.brand?.trim(), currentRun.flavor?.trim()]
+    .filter(Boolean)
+    .join(" – ");
+}
 interface ZoneStatus {
   id: ZoneId;
   label: string;
@@ -160,6 +168,7 @@ export default function LineMapDashboard() {
   } = useLiveRun();
 
   const goToTab = navigate ?? (() => {});
+  const productLabel = currentProductLabel(currentRun);
   const nextScheduledRun = !currentRun
     ? findNextScheduledRun(scheduledDays, todayStr())
     : null;
@@ -289,9 +298,19 @@ export default function LineMapDashboard() {
   return (
     <div className="w-full space-y-4 p-2 sm:p-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Production Line Map</h2>
-        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${overallStatus.cls}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold">Production Line Map</h2>
+          {productLabel && (
+            <p
+              className="truncate text-sm font-medium text-muted-foreground"
+              data-testid="line-map-current-product"
+            >
+              {productLabel}
+            </p>
+          )}
+        </div>
+        <span className={`shrink-0 px-3 py-1 rounded-full text-xs font-bold uppercase ${overallStatus.cls}`}>
           {overallStatus.label}
         </span>
       </div>
