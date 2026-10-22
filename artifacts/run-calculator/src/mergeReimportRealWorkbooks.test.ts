@@ -16,6 +16,8 @@
 //      confirming the import updates B instead of resurrecting A.
 // Plus a dough/sauce spot-check: merge-built "recipeName" alias rows resolve
 // through pickAlias exactly as the spec importer's assignment pass consults it.
+// Positive cheese checks use a formatting-range-compacted copy; an independent
+// check below retains rejection of the unmodified oversized source.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as XLSX from "xlsx";
@@ -98,6 +100,7 @@ vi.mock("./aiCorrections", () => ({ saveAiCorrections: async () => {} }));
 import { preparePremixImport } from "./premixImport";
 import { prepareCheeseImport } from "./cheeseImport";
 import { buildRecipeNameChangeAliases } from "./specImportAliases";
+import { compactWorkbookFixture } from "./test/compactWorkbookFixture";
 
 const LIB = resolve(__dirname, "../../../attached_assets/source-library");
 
@@ -130,10 +133,11 @@ function cleanPremixBuf(): ArrayBuffer {
   new Uint8Array(result).set(bytes);
   return result;
 }
-const cheeseBuf = () =>
+const rawCheeseBuf = () =>
   readAsArrayBuffer(
     resolve(LIB, "cheese/Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26_1784339826076.xlsx"),
   );
+const cheeseBuf = () => compactWorkbookFixture(rawCheeseBuf());
 
 /**
  * Simulate handleApplyRecipeNameMerge's alias learning: build the exact rows
@@ -227,6 +231,13 @@ describe("merge → workbook re-import lands on the survivor (mixes)", () => {
 });
 
 describe("merge → real workbook re-import lands on the survivor (cheese)", () => {
+  it("rejects the unmodified source's oversized formatted range without pool writes", async () => {
+    await expect(prepareCheeseImport([rawCheeseBuf()])).rejects.toThrow(
+      /worksheet range exceeds import limits/i,
+    );
+    expect(cheesePool.rows).toEqual([]);
+  });
+
   it("pre-links the merged-away blend onto the surviving recipe and does not resurrect it", async () => {
     const first = await prepareCheeseImport([cheeseBuf()]);
     expect(first.recipes.length).toBeGreaterThan(5);

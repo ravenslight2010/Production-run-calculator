@@ -1,7 +1,9 @@
 // @vitest-environment node
 //
-// End-to-end checks for real source workbooks. The Cheese workbook exercises
-// successful customer rename/re-import. The retained premix source workbook
+// End-to-end checks for real source workbooks. A copy of the Cheese workbook
+// with formatting-only ranges compacted exercises customer rename/re-import.
+// The original source bytes and production import limits are unchanged.
+// The retained premix source workbook
 // has conflicting same-key blocks, so its supported behavior is to fail closed
 // before any pool write rather than choosing one formula.
 
@@ -96,6 +98,7 @@ vi.mock("./aiCorrections", () => ({ saveAiCorrections: async () => {} }));
 import { preparePremixImport } from "./premixImport";
 import { prepareCheeseImport } from "./cheeseImport";
 import { buildBrandRenameAliases } from "./specImportAliases";
+import { compactWorkbookFixture } from "./test/compactWorkbookFixture";
 
 const LIB = resolve(__dirname, "../../../attached_assets/source-library");
 
@@ -109,9 +112,9 @@ function readAsArrayBuffer(path: string): ArrayBuffer {
 const premixBuf = () =>
   readAsArrayBuffer(resolve(LIB, "premix/Updated_Pre_Mix_Sheets_1784339838726.xlsx"));
 const cheeseBuf = () =>
-  readAsArrayBuffer(
+  compactWorkbookFixture(readAsArrayBuffer(
     resolve(LIB, "cheese/Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26_1784339826076.xlsx"),
-  );
+  ));
 
 /** Simulate maybeLearnBrandRename's fire-and-forget alias write. */
 function learnBrandRename(from: string, to: string) {

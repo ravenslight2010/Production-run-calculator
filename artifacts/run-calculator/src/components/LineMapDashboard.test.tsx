@@ -385,15 +385,35 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expect(within(frontline).queryByTestId("frontline-components-3")).toBeNull();
   });
 
-  it("confirms activity at the warehouse station", async () => {
+  it("keeps the aggregate applicator need when recipe components are not usable", () => {
+    renderLineMap("running", {
+      configuredApplicator: 3,
+      applicatorRecipes: {
+        3: [
+          { ingredient: "", lbs: 20 },
+          { ingredient: "Zero-weight ingredient", lbs: 0 },
+        ],
+      },
+    });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    expect(within(frontline).getByText("App 3 — Cheese").parentElement?.textContent)
+      .toContain("2.00 batches");
+    expect(within(frontline).queryByTestId("frontline-components-3")).toBeNull();
+  });
+
+  it.each([
+    ["freezeTunnel", /Confirm activity at Freeze Tunnel/],
+    ["warehouse", /Confirm activity at Warehouse/],
+  ] as const)("sends explicit confirmation for %s", async (station, accessibleName) => {
     const confirmStationActivity = vi.fn().mockResolvedValue(undefined);
     renderLineMap("running", { confirmStationActivity });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Confirm activity at Warehouse" }),
+      screen.getByRole("button", { name: accessibleName }),
     );
     await waitFor(() =>
-      expect(confirmStationActivity).toHaveBeenCalledWith("warehouse"),
+      expect(confirmStationActivity).toHaveBeenCalledWith(station),
     );
   });
 
@@ -461,6 +481,49 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     }
     expectZoneStatus(/Press \/ Oven/, "Idle");
     expectZoneReason(/Press \/ Oven/, "No current station activity");
+  });
+
+  it("shows elapsed time for fresh evidence bound to the selected run", () => {
+    renderLineMap("running", {
+      stationActivity: {
+        press: { runId: "run-1", eventAtServerMs: 99_000, source: "automatic" },
+      },
+      stationActivityNowMs: 100_000,
+    });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: 1s");
+  });
+
+  it("shows a long gap for old station activity while the projection remains fresh", () => {
+    renderLineMap("running", {
+      stationActivity: {
+        press: { runId: "run-1", eventAtServerMs: 40_000, source: "manual" },
+      },
+      stationActivityNowMs: 100_000,
+    });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: 1m 0s");
+  });
+
+  it("shows unknown for evidence from a different run", () => {
+    renderLineMap("running", {
+      stationActivity: {
+        press: { runId: "another-run", eventAtServerMs: 99_000, source: "automatic" },
+      },
+      stationActivityNowMs: 100_000,
+    });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: unknown");
+  });
+
+  it.each(["stale", "unavailable"])("shows unknown when projection evidence is %s", () => {
+    renderLineMap("running", { stationActivity: null });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: unknown");
   });
 
   it("does not show an activity age for active stations or non-running lifecycle states", () => {

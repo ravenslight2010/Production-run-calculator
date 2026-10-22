@@ -699,9 +699,9 @@ describe("spec Apply source evidence", () => {
       [["Brand", "Flavor"], ["Acme", "Classic"]],
       "Profiles",
     );
-    // The XLSX reader throws on an empty byte buffer, before source evidence
-    // can be added to the per-file list.
-    const unreadableFile = new ArrayBuffer(0);
+    // A truncated ZIP passes the non-empty-file preflight but fails workbook
+    // decoding, before evidence can be added to the per-file list.
+    const unreadableFile = new Uint8Array([0x50, 0x4b, 0x03, 0x04]).buffer;
     const prepared = await prepareSpecImportMultiWithAi(
       [goodFile, unreadableFile],
       undefined,

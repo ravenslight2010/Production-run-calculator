@@ -155,3 +155,4 @@
 - [Vitest hooks](vitest-hook-cleanup.md) + [Playwright 304s](playwright-304-responses.md) — avoid implicit cleanup returns; HTTP 304 cache hits are valid, but request failures remain fatal.
 - [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.
 - [Deployment log fallback](deployment-log-fallback.md) — if revision-scoped runtime logs are unavailable, verify the live build first and use only a time-bounded current-serving log query.
+- [Workflow configuration side effects](workflow-configuration-side-effects.md) — after updating an individual workflow, inspect whether the aggregate Project workflow picked it up.
