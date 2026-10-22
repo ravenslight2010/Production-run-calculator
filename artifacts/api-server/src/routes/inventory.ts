@@ -99,6 +99,18 @@ import {
   buildMixSurplusRecording,
 } from "@workspace/inventory-math";
 import { mixesTable } from "@workspace/db";
+import { toMixScheduledRun } from "../lib/mixPlanSnapshot";
+import {
+  applyPreparedMixHandoffs,
+  buildPreparedMixRunHandoffs,
+  matchesPrepIngredient,
+  parsePreparedMixHandoff,
+  preparedMixHandoffClaimId,
+  preparedMixItemKey,
+  serializePreparedMixHandoff,
+  PreparedMixHandoffConfigurationError,
+  type PrepRunSource,
+} from "../lib/preparedMixHandoff";
 
 
 const router: IRouter = Router();
@@ -1379,9 +1391,39 @@ async function findExpectedConsumptionForRun(
       runId,
       initialConsumptionOptions,
     );
-    if (expected) return expected;
+    if (expected) return applyStoredPreparedMixHandoffs(executor, runId, scope, expected);
   }
   return null;
+}
+
+async function applyStoredPreparedMixHandoffs(
+  tx: typeof db | InventoryExecutor,
+  runId: string,
+  scope: ReturnType<typeof currentScope>,
+  lines: Map<string, number>,
+): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({
+      itemKey: inventoryItemsTable.key,
+      note: inventoryLedgerTable.note,
+    })
+    .from(inventoryLedgerTable)
+    .innerJoin(inventoryItemsTable, eq(inventoryItemsTable.id, inventoryLedgerTable.itemId))
+    .where(and(
+      eq(inventoryLedgerTable.runId, runId),
+      eq(inventoryLedgerTable.scope, scope),
+      eq(inventoryLedgerTable.type, "prep-handoff"),
+    ))
+    .for("update");
+  if (rows.length === 0) return lines;
+  const contracts = rows.map((row) => {
+    const contract = parsePreparedMixHandoff(row.note);
+    if (!contract || contract.preparedItemKey !== row.itemKey) {
+      throw new Error("Prepared-stock handoff does not match its inventory ledger item");
+    }
+    return contract;
+  });
+  return applyPreparedMixHandoffs(lines, contracts);
 }
 
 function canonicalIngredientId(
@@ -1552,11 +1594,9 @@ export async function reconcileRunConsumptionInTransaction(
   nextSnapshot: unknown,
 ): Promise<boolean> {
   const scope = currentScope();
-  const previousExpected = expectedConsumptionFromSnapshot(previousSnapshot, runId);
-  const nextExpected = expectedConsumptionFromSnapshot(nextSnapshot, runId);
-  if (!previousExpected || !nextExpected || sameConsumptionLines(previousExpected, nextExpected)) {
-    return false;
-  }
+  const previousRaw = expectedConsumptionFromSnapshot(previousSnapshot, runId);
+  const nextRaw = expectedConsumptionFromSnapshot(nextSnapshot, runId);
+  if (!previousRaw || !nextRaw) return false;
 
   const [claim] = await tx.select().from(inventoryConsumedRunsTable)
     .where(and(
@@ -1565,6 +1605,10 @@ export async function reconcileRunConsumptionInTransaction(
     ))
     .for("update");
   if (!claim) return false;
+
+  const previousExpected = await applyStoredPreparedMixHandoffs(tx, runId, scope, previousRaw);
+  const nextExpected = await applyStoredPreparedMixHandoffs(tx, runId, scope, nextRaw);
+  if (sameConsumptionLines(previousExpected, nextExpected)) return false;
 
   let baselineLines = claim.baselineLines;
   if (!Array.isArray(baselineLines)) {
@@ -2555,6 +2599,125 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+type PreparedMixStock = {
+  itemId: number;
+  key: string;
+  amountOnHand: number;
+};
+
+async function ensurePreparedMixStock(
+  tx: InventoryExecutor,
+  scope: ReturnType<typeof currentScope>,
+  date: string,
+  mix: Mix,
+): Promise<PreparedMixStock> {
+  const key = preparedMixItemKey(mix.id);
+  const name = `Prepared mix stock: ${mix.name}`;
+  const [created] = await tx
+    .insert(inventoryItemsTable)
+    .values({ scope, key, category: "ingredient", name, unit: "lbs" })
+    .onConflictDoNothing({
+      target: [inventoryItemsTable.key, inventoryItemsTable.scope],
+    })
+    .returning({ id: inventoryItemsTable.id });
+  const [item] = await tx
+    .select()
+    .from(inventoryItemsTable)
+    .where(and(
+      eq(inventoryItemsTable.scope, scope),
+      eq(inventoryItemsTable.key, key),
+    ))
+    .for("update");
+  if (
+    !item ||
+    item.category !== "ingredient" ||
+    item.unit !== "lbs" ||
+    item.productionIngredientId != null ||
+    item.conversionFactor != null
+  ) {
+    throw new PreparedMixHandoffConfigurationError(
+      `Prepared-stock item for "${mix.name}" is not a confirmed unlinked pounds item`,
+    );
+  }
+
+  // The legacy amountAlreadyMade value is already-paid carry. Materialize it
+  // once, when the dedicated stock identity is first created; never re-seed it
+  // when a later day happens to have no prepared stock left.
+  const openingCarry = created
+    ? Math.max(0, Number(mix.amountAlreadyMade) || 0)
+    : 0;
+  if (openingCarry > 0) {
+    const [lot] = await tx.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      scope,
+      locationId: null,
+      lotNumber: `prep-opening:${date}`,
+      qtyReceived: openingCarry,
+      qtyRemaining: openingCarry,
+      receivedDate: date,
+      expirationDate: null,
+    }).returning({ id: inventoryLotsTable.id });
+    await tx.insert(inventoryLedgerTable).values({
+      itemId: item.id,
+      scope,
+      lotId: lot.id,
+      type: "restock",
+      qtyDelta: openingCarry,
+      runId: `day-start:${date}`,
+      note: `Prepared mix carry-forward:v1:${JSON.stringify({
+        mixId: mix.id,
+        eventDate: date,
+        source: "saved amountAlreadyMade; no raw component deduction",
+      })}`,
+    });
+  }
+
+  const [onsite] = await tx.select({ id: inventoryLocationsTable.id })
+    .from(inventoryLocationsTable)
+    .where(and(
+      eq(inventoryLocationsTable.scope, scope),
+      eq(inventoryLocationsTable.isOnsite, true),
+    ))
+    .limit(1);
+  const onsiteCondition = onsiteLotCond(onsite?.id ?? null);
+  const stockConditions = [
+    eq(inventoryLotsTable.scope, scope),
+    eq(inventoryLotsTable.itemId, item.id),
+  ];
+  if (onsiteCondition) stockConditions.push(onsiteCondition);
+  const lots = await tx.select({ qtyRemaining: inventoryLotsTable.qtyRemaining })
+    .from(inventoryLotsTable)
+    .where(and(...stockConditions));
+  return {
+    itemId: item.id,
+    key,
+    amountOnHand: lots.reduce((sum, lot) => sum + lot.qtyRemaining, 0),
+  };
+}
+
+function runSourceUnitPounds(
+  itemKey: string,
+  values: Record<string, unknown>,
+): number | undefined {
+  const match = itemKey.match(/^ingredient:(.*):(lbs|batches)$/);
+  if (!match) return undefined;
+  if (match[2] === "lbs") return 1;
+  const sourceName = match[1].trim().toLowerCase();
+  const candidates: number[] = [];
+  for (let index = 1; index <= 4; index += 1) {
+    const type = String(values[`app${index}Type`] ?? "").trim().toLowerCase();
+    if (type !== sourceName) continue;
+    const batches = Number(values[`app${index}Batches`]) || 0;
+    const poundsPerBatch = Number(values[`app${index}BatchLbs`]) || 0;
+    if (batches > 0) candidates.push(poundsPerBatch);
+  }
+  if (candidates.length === 0) return undefined;
+  const first = candidates[0];
+  return Number.isFinite(first) && first > 0 && candidates.every((value) => value === first)
+    ? first
+    : undefined;
+}
+
 
 // ── Feature B+E7: Daily mix component + supply consumption ─────────────────
 //
@@ -2596,7 +2759,9 @@ export async function consumeDayStart(
     const runId = `day-start:${dateStr}`;
     const scope = currentScope();
 
-    const result = await db.transaction(async (tx) => {
+    let result: { applied: boolean; consumed: number; lines: number };
+    try {
+      result = await db.transaction(async (tx) => {
     // ── Idempotency gate ──────────────────────────────────────────────────
     const [claim] = await tx.insert(inventoryConsumedRunsTable)
       .values({ runId, scope })
@@ -2617,11 +2782,27 @@ export async function consumeDayStart(
         .where(and(
           eq(dailySyncTable.scope, scope),
           eq(dailySyncTable.date, dateStr),
-        ));
+        ))
+        .for("update");
     const scheduledRuns: MixScheduledRun[] = [];
+    const preparationRuns: Array<PrepRunSource & {
+      brand: string;
+      flavor: string;
+      values: Record<string, unknown>;
+      casesNeeded: number;
+      actualCases?: number;
+    }> = [];
     for (const row of rows) {
       const data = row.data as {
-        dayState?: { runs?: Array<{ id?: string; brand?: string; flavor?: string; actualCases?: number }> };
+        dayState?: {
+          runs?: Array<{
+            id?: string;
+            brand?: string;
+            flavor?: string;
+            actualCases?: number;
+            endedAt?: number;
+          }>;
+        };
         runValues?: Record<string, unknown>;
       } | null;
       const dayRuns = data?.dayState?.runs ?? [];
@@ -2641,9 +2822,55 @@ export async function consumeDayStart(
           pizzas: casesNeeded * pizzasPerCase,
           cases: casesNeeded,
         });
+        const expected = expectedConsumptionFromSnapshot(data, run.id, {
+          treatZeroActualCasesAsPlanned: true,
+        });
+        if (expected && !run.endedAt) {
+          const mixInput = toMixScheduledRun({
+            date: dateStr,
+            brand: String(run.brand ?? ""),
+            flavor: String(run.flavor ?? ""),
+            values: v,
+          });
+          const actualCases = Number(run.actualCases);
+          preparationRuns.push({
+            runId: run.id,
+            date: dateStr,
+            brand: String(run.brand ?? ""),
+            flavor: String(run.flavor ?? ""),
+            // Keep the existing day-start basis: planned cases × pizzas/case.
+            // toMixScheduledRun supplies only its ingredient names/oz map here;
+            // its cases-per-layer buffer is intentionally not a day-start input.
+            pizzas: casesNeeded * pizzasPerCase,
+            cases: casesNeeded,
+            productionScale: Number.isFinite(actualCases) && actualCases > 0
+              ? actualCases / casesNeeded
+              : 1,
+            ingredients: mixInput.ingredients,
+            ingredientOzPerPizza: mixInput.ingredientOzPerPizza,
+            sourceLines: expected,
+            sourceUnitPounds: new Map(
+              [...expected.keys()].flatMap((itemKey) => {
+                const pounds = runSourceUnitPounds(itemKey, v);
+                return pounds == null ? [] : [[itemKey, pounds] as const];
+              }),
+            ),
+            values: v,
+            casesNeeded,
+            ...(run.actualCases != null ? { actualCases: run.actualCases } : {}),
+          });
+        }
       }
     }
     if (scheduledRuns.length > 0) {
+      const priorClaims = await tx.select({ runId: inventoryConsumedRunsTable.runId })
+        .from(inventoryConsumedRunsTable)
+        .where(eq(inventoryConsumedRunsTable.scope, scope));
+      const claimedRunIds = new Set(priorClaims.map((row) => row.runId));
+      const freshPreparationRuns = preparationRuns.filter((run) =>
+        !claimedRunIds.has(run.runId) &&
+        !claimedRunIds.has(preparedMixHandoffClaimId(run.runId)),
+      );
       // Fetch mixes for scope
       const mixRows = await tx
         .select()
@@ -2657,9 +2884,40 @@ export async function consumeDayStart(
         // Build a lookup from mix.id to the DB mix row for amountActualMade + carry
         const mixById = new Map<string, (typeof mixRows)[number]>();
         for (const r of mixRows) mixById.set(r.id, r);
-        const plan = buildMixPlan({ runs: scheduledRuns, mixes, today: dateStr });
+        const productMixes = mixes.filter((mix) => !mix.isPrep);
+        const prepMixes = mixes.filter((mix) => mix.isPrep);
+        const productPlan = buildMixPlan({
+          runs: scheduledRuns,
+          mixes: productMixes,
+          today: dateStr,
+        });
+        const candidatePrepPlan = buildMixPlan({
+          runs: freshPreparationRuns,
+          mixes: prepMixes,
+          today: dateStr,
+        });
+        const candidatePrepIds = new Set(
+          candidatePrepPlan.flatMap((group) => group.prepMixes.map((entry) => entry.mixId)),
+        );
+        const preparedStocks = new Map<string, PreparedMixStock>();
+        for (const mix of prepMixes) {
+          if (!candidatePrepIds.has(mix.id)) continue;
+          preparedStocks.set(
+            mix.id,
+            await ensurePreparedMixStock(tx, scope, dateStr, mix),
+          );
+        }
+        const mixesWithPreparedBalances = mixes.map((mix) => {
+          const stock = preparedStocks.get(mix.id);
+          return stock ? { ...mix, amountAlreadyMade: stock.amountOnHand } : mix;
+        });
+        const prepPlan = buildMixPlan({
+          runs: freshPreparationRuns,
+          mixes: mixesWithPreparedBalances.filter((mix) => mix.isPrep),
+          today: dateStr,
+        });
         const mixesToUpdate: Array<{ id: string; amountAlreadyMade: number }> = [];
-        for (const group of plan) {
+        for (const group of productPlan) {
           for (const run of group.runs) {
             for (const entry of run.mixes) {
               // Feature B2: if mixer entered amountActualMade, use it as the
@@ -2692,13 +2950,118 @@ export async function consumeDayStart(
               }
             }
           }
+        }
+
+        const handoffClaims = new Set<string>();
+        const mappedSourcesByRun = new Map<string, Map<string, string>>();
+        for (const group of prepPlan) {
           for (const entry of group.prepMixes) {
-            const mixLines = computeMixComponentConsumptionLines(
+            const mix = mixes.find((candidate) => candidate.id === entry.mixId);
+            const stock = preparedStocks.get(entry.mixId);
+            const dbMix = mixById.get(entry.mixId);
+            if (!mix || !stock || !dbMix) continue;
+
+            const actualMade = Number(dbMix.amountActualMade) || 0;
+            const freshLbs = actualMade > 0 ? actualMade : entry.remainingLbs;
+            lines.push(...computeMixComponentConsumptionLines(
               entry.components,
               entry.totalLbs,
-              entry.remainingLbs,
-            );
-            lines.push(...mixLines);
+              freshLbs,
+            ));
+
+            let receiptLotId: number | null = null;
+            if (freshLbs > 0) {
+              const [lot] = await tx.insert(inventoryLotsTable).values({
+                itemId: stock.itemId,
+                scope,
+                locationId: null,
+                lotNumber: `prep:${dateStr}:${mix.id}`,
+                qtyReceived: freshLbs,
+                qtyRemaining: freshLbs,
+                receivedDate: dateStr,
+                expirationDate: null,
+              }).returning({ id: inventoryLotsTable.id });
+              receiptLotId = lot.id;
+              await tx.insert(inventoryLedgerTable).values({
+                itemId: stock.itemId,
+                scope,
+                lotId: lot.id,
+                type: "restock",
+                qtyDelta: freshLbs,
+                runId,
+                note: `Prepared mix made:v1:${JSON.stringify({
+                  mixId: mix.id,
+                  mixName: mix.name,
+                  eventDate: dateStr,
+                })}`,
+              });
+            }
+
+            const mixComponentByName = entry.components.map((planComponent) => {
+              const component = mix.components.find((candidate) =>
+                matchesPrepIngredient(candidate.ingredient, planComponent.ingredient),
+              );
+              return [planComponent.ingredient.toLowerCase(), component?.perPizza] as const;
+            });
+            const fallbackOzByName = new Map(mixComponentByName);
+            const runHandoffs = buildPreparedMixRunHandoffs({
+              eventDate: dateStr,
+              mixId: mix.id,
+              mixName: mix.name,
+              preparedItemKey: stock.key,
+              totalLbs: entry.totalLbs,
+              startupLbs: entry.startupLbs,
+              components: entry.components.map((component) => ({
+                ingredient: component.ingredient,
+                lbs: component.lbs,
+                fallbackOzPerPizza: fallbackOzByName.get(component.ingredient.toLowerCase()),
+              })),
+              runs: freshPreparationRuns,
+            });
+            for (const handoff of runHandoffs) {
+              const assigned = mappedSourcesByRun.get(handoff.runId) ?? new Map<string, string>();
+              for (const mapping of handoff.contract.sourceFactors) {
+                const previousMixId = assigned.get(mapping.itemKey);
+                if (previousMixId && previousMixId !== mix.id) {
+                  throw new PreparedMixHandoffConfigurationError(
+                    `A production ingredient is assigned to more than one prepared mix (${mix.name})`,
+                  );
+                }
+                assigned.set(mapping.itemKey, mix.id);
+              }
+              mappedSourcesByRun.set(handoff.runId, assigned);
+              if (!handoffClaims.has(handoff.runId)) {
+                const [handoffClaim] = await tx.insert(inventoryConsumedRunsTable)
+                  .values({ runId: preparedMixHandoffClaimId(handoff.runId), scope })
+                  .onConflictDoNothing({
+                    target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+                  })
+                  .returning({ runId: inventoryConsumedRunsTable.runId });
+                if (!handoffClaim) {
+                  throw new PreparedMixHandoffConfigurationError(
+                    "A run's prepared-stock handoff is already assigned to another day",
+                  );
+                }
+                handoffClaims.add(handoff.runId);
+              }
+              await tx.insert(inventoryLedgerTable).values({
+                itemId: stock.itemId,
+                scope,
+                lotId: receiptLotId,
+                type: "prep-handoff",
+                qtyDelta: 0,
+                runId: handoff.runId,
+                note: serializePreparedMixHandoff(handoff.contract),
+              });
+            }
+            const alreadyMadeAfterPrep = stock.amountOnHand + freshLbs;
+            await tx.update(mixesTable)
+              .set({
+                amountAlreadyMade: alreadyMadeAfterPrep,
+                amountActualMade: 0,
+                updatedAt: new Date(),
+              })
+              .where(and(eq(mixesTable.id, mix.id), eq(mixesTable.scope, scope)));
           }
         }
         // Persist surplus carry-forwards (update amountAlreadyMade on each mix)
@@ -2719,7 +3082,7 @@ export async function consumeDayStart(
         // is a ledger action only — never a second draw-down.
         const actualMadeByMixId: Record<string, number> = {};
         for (const r of mixRows) actualMadeByMixId[r.id] = Number(r.amountActualMade) || 0;
-        const surplusRecording = buildMixSurplusRecording(plan, actualMadeByMixId);
+        const surplusRecording = buildMixSurplusRecording(productPlan, actualMadeByMixId);
         if (surplusRecording.length > 0) {
           const existingLots = await tx
             .select()
@@ -2787,6 +3150,17 @@ export async function consumeDayStart(
     if (options.failBeforeCommit) throw new Error("test day-start pre-commit failpoint");
     return { ...consumption, lines: lines.length };
     });
+    } catch (error) {
+      if (error instanceof PreparedMixHandoffConfigurationError) {
+        req.log.warn(
+          { date: dateStr, reason: error.message },
+          "day_start_prepared_mix_handoff_not_applied",
+        );
+        res.status(409).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
     if (result.applied) broadcast(headerSenderId(req), scope);
     res.json(result.applied
       ? { applied: true, consumed: result.consumed, lines: result.lines }

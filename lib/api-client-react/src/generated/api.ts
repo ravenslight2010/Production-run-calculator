@@ -58,6 +58,7 @@ import type {
   ConfirmStationActivityParams,
   ConsumeInput,
   ConsumeInventoryDayStart200,
+  ConsumeInventoryDayStart409,
   ConsumeInventoryDayStartInput,
   ConsumeResult,
   CreateInventoryItemInput,
@@ -2590,7 +2591,7 @@ export const getConsumeInventoryDayStartUrl = () => {
 }
 
 /**
- * Idempotent by production date; retries of the same date have no physical effect.
+ * Idempotent by production date; retries of the same date have no physical effect. Ambiguous prepared-mix source units reject the full transaction.
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
 export const consumeInventoryDayStart = async (consumeInventoryDayStartInput?: ConsumeInventoryDayStartInput, options?: Parameters<typeof customFetch>[1]): Promise<ConsumeInventoryDayStart200> => {
@@ -2624,7 +2625,7 @@ return customFetch<ConsumeInventoryDayStart200>(getConsumeInventoryDayStartUrl()
 
 export const getConsumeInventoryDayStartMutationKey = () => ['consumeInventoryDayStart'] as const;
 
-export const getConsumeInventoryDayStartMutationOptions = <TError = ErrorType<void>,
+export const getConsumeInventoryDayStartMutationOptions = <TError = ErrorType<void | ConsumeInventoryDayStart409>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext> => {
 
@@ -2653,13 +2654,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConsumeInventoryDayStartMutationResult = NonNullable<Awaited<ReturnType<typeof consumeInventoryDayStart>>>
     export type ConsumeInventoryDayStartMutationBody = BodyType<ConsumeInventoryDayStartInput> | undefined
-    export type ConsumeInventoryDayStartMutationError = ErrorType<void>
+    export type ConsumeInventoryDayStartMutationError = ErrorType<void | ConsumeInventoryDayStart409>
     export type ConsumeInventoryDayStartMutationVariables = {data?: BodyType<ConsumeInventoryDayStartInput>}
 
     /**
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
-export const useConsumeInventoryDayStart = <TError = ErrorType<void>,
+export const useConsumeInventoryDayStart = <TError = ErrorType<void | ConsumeInventoryDayStart409>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof consumeInventoryDayStart>>,

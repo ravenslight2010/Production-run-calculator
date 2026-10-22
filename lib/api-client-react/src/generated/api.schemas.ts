@@ -8536,6 +8536,10 @@ export type ConsumeInventoryDayStart200 = {
   message?: string;
 };
 
+export type ConsumeInventoryDayStart409 = {
+  error: string;
+};
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };

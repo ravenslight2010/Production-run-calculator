@@ -1,18 +1,28 @@
 # Inventory System — Gap Analysis
 
-**Current status reconciliation: 2026-10-08.** The analysis below is a 2026-09-19 snapshot and is retained as historical context, not as the active implementation backlog.
+**Current status reconciliation: 2026-10-22.** The September analysis below is historical, not a build specification. See [bounded revision-bound evidence](evidence/inventory-accounting-2026-10-22.md) for execution results and remaining business decisions. This is not a production accounting certification.
 
 | Area | Current status | Evidence / remaining work |
 |---|---|---|
-| Actual-case consumption | **Implemented in source; verification partial** | Completed-run consumption uses persisted `actualCases` when positive, with planned-value fallback; a direct scaling assertion was not located. |
-| Prep-mix deduction | **Implemented for recorded day-start events** | Server-owned, idempotent drawdown and surplus creation are covered by `inventory.integration.test.ts`; broader reconciliation remains. |
-| Packaging | **Formula paths exist; verification partial** | Run and daily-supply lines are present; focused tests do not assert every item/mode combination. |
-| Freezer pull | **Core allocation/inventory paths exist; parity verification partial** | The server updates surplus allocations and finished-case stock; add combined balance/stock assertions for replacement/release and reset scope. |
-| Waste, stoppage loss, returns, final-total reconciliation | **Open** | Require defined physical events, accepted quantities, correction rules, and audit boundaries. |
+| Actual-case consumption | **Implemented; existing DB regressions passed** | Below/above plan and absent/initial-zero fallback covered. Explicit saved-zero correction is a different contract. |
+| Saved final-total reconciliation | **Implemented; selected sync regressions passed** | Delta-only increases/decreases/zero, packaging edits, baseline merges and rollback/retry already exist. |
+| Product mix deduction | **Recorded day-start path implemented** | Existing concurrency, scope, surplus and rollback tests passed; added fresh/carry/date-boundary assertions. |
+| Ingredient-linked prep mix | **Implemented; disposable DB regressions passed** | Prep is charged at day start, and an immutable run-to-prepared-stock handoff keeps completion and saved corrections from charging its raw components a second time. Fresh, partial/full carry, date-boundary retries, correction, and ambiguous batch-conversion rollback are covered. |
+| Packaging | **Released formulas plus material/mode persistence mapping** | Circles, shippers, cartons, sheets, top/bottom labels, pallets, shipper labels and fixed daily supplies mapped. See exact executed results; current production usage remains unknown. |
+| Freezer pull | **Implemented; existing multi-lot parity regressions passed** | Confirm/allocation/retry/replacement/release, over-allocation and scope covered. Not universal reset evidence. |
+| Finished-case damage, return and correction | **Implemented, including manager UX and immutable audit** | Existing scoped, authorized, quantity-bounded events and separate manager audit endpoint; do not rebuild this UI. |
+| Conversions | **Positive linked factors and legacy factor-one are distinct** | Invalid/missing linked factors are excluded with the existing Warehouse “Conversion needed” soft diagnostic. Conflicting prep batch sizes return a documented 409 and structured warning; no conversion is guessed. Unlinked legacy canonical keys intentionally retain factor one. |
+| Dedicated waste/spoilage and mid-run stoppage accounting | **Policy-gated, not implemented by this verification** | Generic manual adjustments and recorded waste pounds are not dedicated physical waste/stoppage events; each needs approved physical accounting rules. |
+| Ingredient returns | **Separate policy-gated gap** | Finished-case returns do not establish raw-ingredient return policy. |
 
 Use the dated status above and [inventory auto-deduction plan](inventory-autodeduction-plan.md) for current work. Do not repeat the old planned-case, missing-mix-deduction, or missing-packaging claims below as current facts.
 
-## What Inventory Currently Covers
+## Historical September snapshot (superseded; not current behavior)
+
+All “current,” “problem,” “fix,” severity and sequencing language below belongs to
+the old snapshot. The table above and the linked evidence report supersede it.
+
+## What Inventory Covered in the Historical Snapshot
 
 The `computeRunLines` function in `lib/inventory-math/src/index.ts` computes consumption for these categories at **run-end** only:
 
@@ -39,9 +49,9 @@ The `computeRunLines` function in `lib/inventory-math/src/index.ts` computes con
 **Fix**: When surplus is confirmed, deduct the overproduced ingredients separately (already planned in overproduction surplus plan).
 
 ### Gap 2: Mix / Prep Mix Ingredients (Critical)
-**Problem**: Mix plan is purely advisory — when prep mixes are made, nothing deducts from inventory.
-**Impact**: Mix ingredients (cheese, sauce, veggies, spices) disappear from stock without a record.
-**Fix**: When "Already Made" is entered or a new mix-made action fires, deduct component ingredients (already planned in mix plan backlog).
+**Historical problem (resolved)**: Day-start previously omitted the run ingredient map, so ingredient-linked prep recipes did not match and their components were not deducted.
+**Current behavior**: The scoped day-start event charges fresh prep components and receives prepared pounds. A versioned ledger handoff maps canonical run source lines to prepared stock for completion and saved corrections. Legacy carry is materialized once as an opening prepared-stock lot; it is not charged again.
+**Coverage**: Disposable DB tests cover fresh, partial/full carry, yesterday-to-today retries, a completed-run correction decrease/increase/zero/retry, missing unit ambiguity rollback, and raw-stock non-duplication.
 
 ### Gap 3: Waste & Spoilage (Medium)
 **Problem**: No tracking of:
@@ -100,7 +110,7 @@ Ingredient arrives (restock ✓)
 ## Recommended Fix Order
 
 1. **Overproduction inventory deduction** (already planned — highest impact)
-2. **Mix/prep mix inventory deduction** (already planned — second highest)
+2. **Mix/prep mix inventory deduction** (implemented and verified at prep, completion, and correction boundaries)
 3. **Freezer pull → inventory deduction** (prevents double-counting)
 4. **Waste/spoilage logging** (manual but audited)
 5. **Use actual cases instead of planned** (cleaner long-term fix)

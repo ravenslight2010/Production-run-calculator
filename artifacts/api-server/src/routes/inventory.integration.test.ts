@@ -41,6 +41,7 @@ let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let mixesTable: DbModule["mixesTable"];
 let mixSurplusLotsTable: DbModule["mixSurplusLotsTable"];
+let ingredientsTable: DbModule["ingredientsTable"];
 let consumeRun: InvModule["consumeRun"];
 let consumeDayStart: InvModule["consumeDayStart"];
 let drawDown: InvModule["drawDown"];
@@ -96,6 +97,7 @@ beforeAll(async () => {
   dailySyncTable = dbMod.dailySyncTable;
   mixesTable = dbMod.mixesTable;
   mixSurplusLotsTable = dbMod.mixSurplusLotsTable;
+  ingredientsTable = dbMod.ingredientsTable;
   consumeRun = invMod.consumeRun;
   consumeDayStart = invMod.consumeDayStart;
   drawDown = invMod.drawDown;
@@ -137,7 +139,7 @@ afterAll(async () => {
 beforeEach(async () => {
   // Each test starts from an empty inventory.
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryLocationsTable}, ${inventoryItemsTable}, ${mixSurplusLotsTable}, ${mixesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryLocationsTable}, ${inventoryItemsTable}, ${mixSurplusLotsTable}, ${mixesTable}, ${ingredientsTable} RESTART IDENTITY CASCADE`,
   );
 });
 
@@ -326,6 +328,49 @@ describe("inventory auto-deduct against a real database", () => {
     const totalDrawn = draws.reduce((acc, n) => acc + n, 0);
     expect(totalDrawn).toBe(8);
     expect(await onHand(itemId)).toBe(0);
+  });
+});
+
+describe("inventory conversion resolution against a real database", () => {
+  it.each([
+    { label: "linked positive", linked: true, factor: 20, expected: 2 },
+    { label: "linked missing", linked: true, factor: null, expected: 0 },
+    { label: "linked zero", linked: true, factor: 0, expected: 0 },
+    { label: "linked negative", linked: true, factor: -2, expected: 0 },
+    { label: "legacy factor-one", linked: false, factor: null, expected: 40 },
+    { label: "unlinked explicit factor is not a confirmed link", linked: false, factor: 20, expected: 0 },
+  ])("$label preserves stock, baseline and ledger agreement", async ({ linked, factor, expected }) => {
+    await db.insert(ingredientsTable).values({
+      id: "conversion-cheese", name: "Conversion Cheese", scope: "live",
+    });
+    const [item] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:Conversion Cheese:lbs", category: "ingredient",
+      name: "Conversion product", unit: "boxes", scope: "live",
+      productionIngredientId: linked ? "conversion-cheese" : null,
+      conversionFactor: factor,
+    }).returning();
+    const [sandbox] = await db.insert(inventoryItemsTable).values({
+      key: item.key, category: "ingredient", name: "Sandbox conversion", unit: "boxes",
+      scope: "sandbox", productionIngredientId: "conversion-cheese", conversionFactor: 1,
+    }).returning();
+    await addLot(item.id, 100);
+    await db.insert(inventoryLotsTable).values({
+      scope: "sandbox", itemId: sandbox.id, qtyReceived: 100, qtyRemaining: 100,
+    });
+    const lines = [{ itemKey: item.key, qty: 40 }];
+    expect(await consumeRun("conversion-run", lines)).toMatchObject({ applied: true, consumed: expected > 0 ? 1 : 0 });
+    expect(await consumeRun("conversion-run", lines)).toMatchObject({ applied: false });
+    expect(await onHand(item.id)).toBe(100 - expected);
+    expect(await onHand(sandbox.id)).toBe(100);
+    const ledger = await db.select().from(inventoryLedgerTable);
+    expect(ledger).toHaveLength(expected > 0 ? 1 : 0);
+    if (expected > 0) {
+      expect(ledger[0]).toMatchObject({ itemId: item.id, qtyDelta: -expected, scope: "live" });
+      // Linked products identify the actual stock lot; legacy compatibility retains null.
+      expect(ledger[0].lotId != null).toBe(linked);
+    }
+    const [claim] = await db.select().from(inventoryConsumedRunsTable);
+    expect(claim.baselineLines).toEqual(expected > 0 ? [{ itemId: item.id, qty: expected }] : []);
   });
 });
 
@@ -1084,6 +1129,87 @@ describe("POST /api/inventory/consume — server-side authorization of client-su
     await db.execute(sql`TRUNCATE ${dailySyncTable} RESTART IDENTITY CASCADE`);
   });
 
+  // Explicit expected quantities, not computed by the implementation under test.
+  // Includes released proportional actual-case scaling AFTER whole-unit rounding.
+  it.each([
+    { mode: "cartoned", cartonSize: 1, label: "top", grip: "every other layer", scale: 1, cartons: 14 },
+    { mode: "yes", cartonSize: 2, label: "bottom", grip: "3rd and 5th", scale: 1, cartons: 7 },
+    { mode: "cartoned", cartonSize: 3, label: "both", grip: "none", scale: 1, cartons: 5 },
+    { mode: "labeled", cartonSize: 1, label: "both", grip: "3rd and 5th", scale: 1, cartons: 0 },
+    { mode: "labeled", cartonSize: 1, label: "top", grip: "none", scale: 1, cartons: 0 },
+    { mode: "labeled", cartonSize: 1, label: "bottom", grip: "every other layer", scale: 1, cartons: 0 },
+    { mode: "no", cartonSize: 1, label: "both", grip: "3rd and 5th", scale: 1, cartons: 0 },
+    { mode: "n-a", cartonSize: 1, label: "both", grip: "3rd and 5th", scale: 1, cartons: 0 },
+    { mode: "cartoned", cartonSize: 2, label: "both", grip: "every other layer", scale: 0.5, cartons: 7 },
+    { mode: "cartoned", cartonSize: 2, label: "both", grip: "every other layer", scale: 1.5, cartons: 7 },
+  ])("persists each packaging line once: $mode size=$cartonSize label=$label grip=$grip scale=$scale", async ({
+    mode, cartonSize, label, grip, scale, cartons,
+  }) => {
+    const enabled = mode !== "no" && mode !== "n-a";
+    const cartoned = mode === "cartoned" || mode === "yes";
+    const expected: Record<string, number> = {
+      "packaging:circles:12in": enabled ? 28 : 0,
+      "packaging:shippers:Std": cartoned ? 14 : 0,
+      "packaging:cartons:cases": cartons,
+      "packaging:shipper-labels:count": cartoned ? 14 : 0,
+      "packaging:slip-sheets:count": enabled ? 3 : 0,
+      "packaging:grip-sheets:count": !enabled || grip === "none" ? 0 : grip === "3rd and 5th" ? 4 : 2,
+      "packaging:labels-top:rolls": enabled && label !== "bottom" ? 2 : 0,
+      "packaging:labels-bottom:rolls": enabled && label !== "top" ? 3 : 0,
+      "packaging:pallets:count": enabled ? 2 : 0,
+    };
+    const onsite = await makeLocation("Line", true);
+    const offsite = await makeLocation("Offsite", false);
+    const freezer = await makeLocation("Freezer", false);
+    const ids = new Map<string, number>();
+    for (const key of Object.keys(expected)) {
+      const [item] = await db.insert(inventoryItemsTable).values({
+        key, name: key, category: "packaging", unit: "count", scope: "live",
+      }).returning();
+      ids.set(key, item.id);
+      await addLotAt(item.id, onsite, 100);
+      await addLotAt(item.id, offsite, 100);
+      await addLotAt(item.id, freezer, 100);
+      const [sandbox] = await db.insert(inventoryItemsTable).values({
+        key, name: key, category: "packaging", unit: "count", scope: "sandbox",
+      }).returning();
+      await db.insert(inventoryLotsTable).values({
+        scope: "sandbox", itemId: sandbox.id, qtyReceived: 100, qtyRemaining: 100,
+      });
+    }
+    const vals = {
+      ...MINIMAL_RUN_VALS, doughballWeightOz: 0, doughBatchYield: 0,
+      casesNeeded: 14, pizzasPerCase: 2, casesPerLayer: 5, casesPerSkid: 10,
+      cartoned: mode, circles: "12in", shipper: "Std", cartonsPerCase: 2, cartonSize,
+      slipSheets: "yes", gripSheets: grip, labelPosition: label,
+      topLabelsPerRoll: 20, bottomLabelsPerRoll: 10,
+    };
+    await seedDaySyncRun("packaging-ledger", vals, { actualCases: 14 * scale });
+    const finalize = () => fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "packaging-ledger", lines: [] }),
+    });
+    expect(await (await finalize()).json()).toMatchObject({ applied: true });
+    expect(await (await finalize()).json()).toMatchObject({ applied: false });
+    const ledger = await db.select().from(inventoryLedgerTable);
+    const lots = await db.select().from(inventoryLotsTable);
+    for (const [key, qty] of Object.entries(expected)) {
+      const itemId = ids.get(key)!;
+      const rows = ledger.filter((row) => row.itemId === itemId);
+      expect(rows, key).toHaveLength(qty > 0 ? 1 : 0);
+      if (qty > 0) expect(rows[0]).toMatchObject({
+        scope: "live", type: "consume", runId: "packaging-ledger", qtyDelta: -qty * scale,
+      });
+      expect(lots.find((lot) => lot.itemId === itemId && lot.locationId === onsite)?.qtyRemaining, key)
+        .toBe(100 - qty * scale);
+      for (const locationId of [offsite, freezer]) {
+        expect(lots.find((lot) => lot.itemId === itemId && lot.locationId === locationId)?.qtyRemaining).toBe(100);
+      }
+    }
+    expect(lots.filter((lot) => lot.scope === "sandbox").every((lot) => lot.qtyRemaining === 100)).toBe(true);
+    expect(ledger.every((row) => row.scope === "live")).toBe(true);
+  });
+
   it("rejects a runId that doesn't match any known scheduled run", async () => {
     const itemId = await makeItem("ingredient:Dough:batches");
     await addLot(itemId, 100);
@@ -1332,6 +1458,7 @@ function dayStartRequest(date: string) {
   return {
     body: { date },
     headers: {},
+    log: { warn() {}, error() {}, info() {}, debug() {} },
     header() {
       return undefined;
     },
@@ -1369,6 +1496,300 @@ async function callDayStart(
 describe("day-start physical inventory event against a real database", () => {
   beforeEach(async () => {
     await db.execute(sql`TRUNCATE ${dailySyncTable} RESTART IDENTITY CASCADE`);
+  });
+
+  it.each([
+    { isPrep: false, alreadyMade: 0, expected: 12.5 },
+    { isPrep: false, alreadyMade: 17.1875, expected: 6.25 },
+    { isPrep: false, alreadyMade: 40, expected: 0 },
+    { isPrep: true, alreadyMade: 0, expected: 12.5 },
+    { isPrep: true, alreadyMade: 17.1875, expected: 6.25 },
+    { isPrep: true, alreadyMade: 40, expected: 0 },
+  ])("charges fresh raw components and carries prepared stock isPrep=$isPrep carry=$alreadyMade", async ({ isPrep, alreadyMade, expected }) => {
+    const onionId = await makeItem("ingredient:Carry Onion:lbs");
+    await addLot(onionId, 100);
+    await db.insert(dailySyncTable).values({
+      date: "2026-07-03", scope: "live",
+      data: {
+        dayState: { date: "2026-07-03", runs: [{ id: "carry-run", brand: "Test", flavor: "Deluxe" }] },
+        runValues: { "carry-run": {
+          ...MINIMAL_RUN_VALS, doughballWeightOz: 0, doughBatchYield: 0,
+          casesNeeded: 10, pizzasPerCase: 10,
+          app1Type: isPrep ? "Carry Onion" : "Carry Mix", app1OzPerPizza: 2,
+        } },
+      },
+    });
+    // 100 pizzas * 2 oz / 16 = 12.5 component pounds;
+    // total mix need = 12.5 * 1.15 + 20 = 34.375 pounds.
+    await db.insert(mixesTable).values({
+      id: "carry-mix", scope: "live", name: "Carry Mix", brand: "Test", flavor: "Deluxe",
+      batchSize: 40, daysEarly: 0, notes: "", amountAlreadyMade: alreadyMade,
+      amountActualMade: 0, components: [{ ingredient: "Carry Onion", perPizza: 2 }],
+      isPrep, enabled: true,
+    });
+    expect((await callDayStart("2026-07-03")).body).toMatchObject({ applied: true });
+    expect((await callDayStart("2026-07-03")).body).toMatchObject({ applied: false });
+    expect(await onHand(onionId)).toBe(100 - expected);
+    const ledger = await db.select().from(inventoryLedgerTable);
+    expect(await db.select().from(mixSurplusLotsTable)).toHaveLength(0);
+    if (isPrep) {
+      const preparedKey = `ingredient:Prepared mix [${encodeURIComponent("carry-mix")}]:lbs`;
+      const [preparedItem] = await db.select().from(inventoryItemsTable)
+        .then((items) => items.filter((item) => item.key === preparedKey));
+      expect(preparedItem).toMatchObject({
+        category: "ingredient",
+        unit: "lbs",
+        productionIngredientId: null,
+        conversionFactor: null,
+      });
+      expect(await onHand(preparedItem!.id)).toBeCloseTo(Math.max(alreadyMade, 34.375), 3);
+      expect(ledger.filter((row) => row.itemId === onionId && row.type === "consume"))
+        .toHaveLength(expected > 0 ? 1 : 0);
+      const sourceConsumption = ledger.find((row) =>
+        row.itemId === onionId && row.type === "consume");
+      if (expected > 0) {
+        expect(sourceConsumption).toMatchObject({ qtyDelta: -expected, runId: "day-start:2026-07-03" });
+      }
+      expect(ledger.filter((row) => row.itemId === preparedItem!.id && row.type === "prep-handoff"))
+        .toHaveLength(1);
+      expect(ledger.filter((row) => row.itemId === preparedItem!.id && row.type === "restock")
+        .reduce((sum, row) => sum + row.qtyDelta, 0)).toBeCloseTo(
+        Math.max(alreadyMade, 34.375),
+        3,
+      );
+
+      const beforeCompletion = await db.select().from(inventoryLedgerTable);
+      const result = await fetch(`${baseUrl}/api/inventory/consume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: "carry-run", lines: [] }),
+      });
+      expect(result.status).toBe(200);
+      // `consumed` reports the number of distinct stock items, not pounds.
+      expect(await result.json()).toMatchObject({ applied: true, consumed: 1 });
+      expect(await onHand(onionId)).toBe(100 - expected);
+      expect(await onHand(preparedItem!.id)).toBeCloseTo(Math.max(alreadyMade - 34.375, 0), 3);
+      expect((await db.select().from(inventoryLedgerTable))
+        .filter((row) => row.itemId === onionId && row.type === "consume"))
+        .toHaveLength(expected > 0 ? 1 : 0);
+
+      const afterCompletion = await db.select().from(inventoryLedgerTable);
+      const retry = await fetch(`${baseUrl}/api/inventory/consume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: "carry-run", lines: [] }),
+      });
+      expect(await retry.json()).toMatchObject({ applied: false });
+      expect(await db.select().from(inventoryLedgerTable)).toEqual(afterCompletion);
+      expect(afterCompletion.length).toBeGreaterThan(beforeCompletion.length);
+    } else {
+      expect(ledger).toHaveLength(expected > 0 ? 1 : 0);
+      if (expected > 0) {
+        expect(ledger[0]).toMatchObject({ qtyDelta: -expected, runId: "day-start:2026-07-03" });
+      }
+      // A finished run consumes the prepared mix identity, not its raw components.
+      // No prepared-stock inventory item is configured in this fixture.
+      const result = await fetch(`${baseUrl}/api/inventory/consume`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: "carry-run", lines: [] }),
+      });
+      expect(result.status).toBe(200);
+      expect(await result.json()).toMatchObject({ applied: true, consumed: 0 });
+      expect(await onHand(onionId)).toBe(100 - expected);
+      expect(await db.select().from(inventoryLedgerTable)).toEqual(ledger);
+    }
+  });
+
+  it("uses yesterday's prepared balance for today's fresh mix and keeps dated retries idempotent", async () => {
+    const rawId = await makeItem("ingredient:Carry Onion:lbs");
+    await addLot(rawId, 100);
+    for (const date of ["2026-07-03", "2026-07-04"]) {
+      const runId = date === "2026-07-03" ? "prep-yesterday" : "prep-today";
+      await db.insert(dailySyncTable).values({
+        date,
+        scope: "live",
+        data: {
+          dayState: {
+            date,
+            runs: [{ id: runId, brand: "Test", flavor: "Deluxe" }],
+          },
+          runValues: {
+            [runId]: {
+              ...MINIMAL_RUN_VALS,
+              doughballWeightOz: 0,
+              doughBatchYield: 0,
+              casesNeeded: 10,
+              pizzasPerCase: 10,
+              app1Type: "Carry Onion",
+              app1OzPerPizza: 2,
+            },
+          },
+        },
+      });
+    }
+    await db.insert(mixesTable).values({
+      id: "carry-mix",
+      scope: "live",
+      name: "Carry Mix",
+      brand: "Test",
+      flavor: "Deluxe",
+      batchSize: 40,
+      daysEarly: 0,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 50,
+      components: [{ ingredient: "Carry Onion", perPizza: 2 }],
+      isPrep: true,
+      enabled: true,
+    });
+
+    expect((await callDayStart("2026-07-03")).body).toMatchObject({ applied: true });
+    const [prepared] = await db.select().from(inventoryItemsTable)
+      .then((items) => items.filter((item) => item.key.includes("carry-mix")));
+    expect(prepared).toBeDefined();
+    expect(await onHand(prepared!.id)).toBe(50);
+
+    const yesterdayRun = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "prep-yesterday", lines: [] }),
+    });
+    expect(yesterdayRun.status).toBe(200);
+    expect(await onHand(prepared!.id)).toBeCloseTo(15.625, 3);
+
+    // The previous event is a retry, not today's event. Today's fresh need is
+    // based on the prepared stock actually left after yesterday's run.
+    expect((await callDayStart("2026-07-03")).body).toMatchObject({ applied: false });
+    expect((await callDayStart("2026-07-04")).body).toMatchObject({ applied: true });
+    expect(await onHand(prepared!.id)).toBeCloseTo(34.375, 3);
+    expect(await onHand(rawId)).toBeCloseTo(100 - 18.182 - 6.818, 3);
+    const beforeRetries = {
+      lots: await db.select().from(inventoryLotsTable),
+      ledger: await db.select().from(inventoryLedgerTable),
+      claims: await db.select().from(inventoryConsumedRunsTable),
+    };
+    expect((await callDayStart("2026-07-03")).body).toMatchObject({ applied: false });
+    expect((await callDayStart("2026-07-04")).body).toMatchObject({ applied: false });
+    expect(await db.select().from(inventoryLotsTable)).toEqual(beforeRetries.lots);
+    expect(await db.select().from(inventoryLedgerTable)).toEqual(beforeRetries.ledger);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toEqual(beforeRetries.claims);
+
+    const todayRun = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: "prep-today", lines: [] }),
+    });
+    expect(await todayRun.json()).toMatchObject({ applied: true, consumed: 1 });
+    expect(await onHand(prepared!.id)).toBe(0);
+    expect(await onHand(rawId)).toBeCloseTo(100 - 18.182 - 6.818, 3);
+  });
+
+  it("reports conflicting prep batch sizes and rolls back the whole day-start event", async () => {
+    const rawId = await makeItem("ingredient:Audit Onion:lbs");
+    await addLot(rawId, 100);
+    await db.insert(dailySyncTable).values({
+      date: "2026-07-03",
+      scope: "live",
+      data: {
+        dayState: { date: "2026-07-03", runs: [{ id: "prep-batch-run", brand: "Test", flavor: "Deluxe" }] },
+        runValues: {
+          "prep-batch-run": {
+            ...MINIMAL_RUN_VALS,
+            doughballWeightOz: 0,
+            doughBatchYield: 0,
+            casesNeeded: 10,
+            pizzasPerCase: 10,
+            app1Type: "Audit Onion",
+            app1OzPerPizza: 2,
+            app1BatchLbs: 1,
+            app2Type: "Audit Onion",
+            app2OzPerPizza: 2,
+            app2BatchLbs: 2,
+          },
+        },
+      },
+    });
+    await db.insert(mixesTable).values({
+      id: "audit-batch-prep",
+      scope: "live",
+      name: "Audit Batch Prep",
+      brand: "Test",
+      flavor: "Deluxe",
+      batchSize: 40,
+      daysEarly: 0,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 0,
+      components: [{ ingredient: "Audit Onion", perPizza: 2 }],
+      isPrep: true,
+      enabled: true,
+    });
+
+    const result = await callDayStart("2026-07-03");
+    expect(result.statusCode).toBe(409);
+    expect(result.body).toMatchObject({
+      error: expect.stringContaining("unmapped production unit"),
+    });
+    expect(await onHand(rawId)).toBe(100);
+    expect(await db.select().from(inventoryItemsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+    expect(await db.select().from(inventoryLotsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(0);
+    const [mix] = await db.select().from(mixesTable);
+    expect(mix.amountAlreadyMade).toBe(0);
+  });
+
+  it("keeps yesterday and today claims independent across retries and scopes", async () => {
+    const tapeId = await makeItem("packaging:tape:count");
+    const onionId = await makeItem("ingredient:Boundary Onion:lbs");
+    await addLot(tapeId, 20);
+    await addLot(onionId, 100);
+    for (const date of ["2026-07-03", "2026-07-04"]) {
+      await db.insert(dailySyncTable).values({
+        date, scope: "live", data: {
+          dayState: { date, runs: [{ id: `boundary-${date}`, brand: "Test", flavor: "Boundary" }] },
+          runValues: { [`boundary-${date}`]: { casesNeeded: 10, pizzasPerCase: 10 } },
+        },
+      });
+    }
+    await db.insert(mixesTable).values({
+      id: "boundary-mix", scope: "live", name: "Boundary Mix", brand: "Test", flavor: "Boundary",
+      batchSize: 40, daysEarly: 0, notes: "", amountAlreadyMade: 0,
+      // 50 fresh pounds on yesterday's event creates 15.625 surplus -> 15.63 carry.
+      amountActualMade: 50, components: [{ ingredient: "Boundary Onion", perPizza: 2 }],
+      isPrep: false, enabled: true,
+    });
+    expect((await callDayStart("2026-07-03")).body).toMatchObject({ applied: true });
+    const yesterdayStock = await onHand(onionId);
+    expect(yesterdayStock).toBeCloseTo(100 - 18.182, 3);
+    // New day's fresh production is unspecified, so use only remaining need after carry.
+    await db.update(mixesTable).set({ amountActualMade: 0 });
+    expect((await callDayStart("2026-07-04")).body).toMatchObject({ applied: true });
+    expect(await onHand(tapeId)).toBe(12);
+    // 12.5 * ((34.375 - 15.63) / 34.375), rounded to 3 dp.
+    expect(await onHand(onionId)).toBeCloseTo(yesterdayStock - 6.816, 3);
+    const stock = await db.select().from(inventoryLotsTable);
+    const ledger = await db.select().from(inventoryLedgerTable);
+    const surplus = await db.select().from(mixSurplusLotsTable);
+    for (const date of ["2026-07-03", "2026-07-04", "2026-07-03"]) {
+      expect((await callDayStart(date)).body).toMatchObject({ applied: false });
+    }
+    expect(await db.select().from(inventoryLotsTable)).toEqual(stock);
+    expect(await db.select().from(inventoryLedgerTable)).toEqual(ledger);
+    expect(await db.select().from(mixSurplusLotsTable)).toEqual(surplus);
+    const [sandboxTape] = await db.insert(inventoryItemsTable).values({
+      scope: "sandbox", key: "packaging:tape:count", category: "packaging", name: "Sandbox tape", unit: "count",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      scope: "sandbox", itemId: sandboxTape.id, qtyReceived: 20, qtyRemaining: 20,
+    });
+    expect((await runWithScope("sandbox", () => callDayStart("2026-07-04"))).body).toMatchObject({ applied: true });
+    expect(await onHand(sandboxTape.id)).toBe(16);
+    expect(await onHand(tapeId)).toBe(12);
+    const claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.map((claim) => `${claim.scope}:${claim.runId}`).sort()).toEqual([
+      "live:day-start:2026-07-03", "live:day-start:2026-07-04", "sandbox:day-start:2026-07-04",
+    ]);
   });
 
   it("applies a concurrent same-date mix and supply event exactly once", async () => {

@@ -326,6 +326,44 @@ describe("ready-made sauce consumption", () => {
 });
 
 describe("computeRunConsumptionLines — packaging", () => {
+  it.each([
+    { cartonSize: 1, cartons: 13 },
+    { cartonSize: 2, cartons: 7 },
+    { cartonSize: 3, cartons: 5 },
+  ])("rounds carton cases for size $cartonSize without changing other materials", ({ cartonSize, cartons }) => {
+    const lines = computeRunConsumptionLines(baseVals({
+      casesNeeded: 13, pizzasPerCase: 2, cartoned: "yes",
+      cartonSize, cartonsPerCase: 2,
+    }) as unknown as RunLinesInput, PEP);
+    expect(lines).toEqual([
+      { itemKey: "packaging:cartons:cases", qty: cartons },
+      { itemKey: "packaging:shipper-labels:count", qty: 13 },
+    ]);
+  });
+
+  it("includes configured sheets and pallets on labeled runs, not cartons or shippers", () => {
+    expect(computeRunConsumptionLines(baseVals({
+      casesNeeded: 13, pizzasPerCase: 2, casesPerLayer: 5, casesPerSkid: 10,
+      cartoned: "labeled", slipSheets: "yes", gripSheets: "3rd and 5th",
+      cartonsPerCase: 2, shipper: "Std",
+    }) as unknown as RunLinesInput, PEP)).toEqual([
+      { itemKey: "packaging:slip-sheets:count", qty: 3 },
+      { itemKey: "packaging:grip-sheets:count", qty: 4 },
+      { itemKey: "packaging:pallets:count", qty: 2 },
+    ]);
+  });
+
+  it("omits optional materials without valid package denominators or selections", () => {
+    expect(computeRunConsumptionLines(baseVals({
+      cartoned: "yes", circles: "none", shipper: "none",
+      slipSheets: "yes", gripSheets: "every other layer",
+      casesPerLayer: 0, casesPerSkid: 0, cartonsPerCase: 0,
+      labelPosition: "both", labelsPerRoll: 0,
+    }) as unknown as RunLinesInput, PEP)).toEqual([
+      { itemKey: "packaging:shipper-labels:count", qty: 10 },
+    ]);
+  });
+
   it("calculates cartoned demand for sheets, labels, cartons, shippers, and pallets", () => {
     const lines = computeRunConsumptionLines(
       baseVals({

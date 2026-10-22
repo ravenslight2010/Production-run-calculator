@@ -1,7 +1,7 @@
 # Inventory Auto-Deduction — Comprehensive Plan
 
-**Status:** Core physical-event accounting is implemented; remaining work is bounded verification, final-total reconciliation, and approved waste/return flows
-**Updated:** 2026-10-08
+**Status:** Core physical-event accounting, finished-case adjustments, and ingredient-linked prep-mix handoffs are implemented and verified on disposable data. This is not a production accounting sign-off.
+**Updated:** 2026-10-22
 **Related:** [Idea backlog](idea-backlog.md#4-inventory-system-gap-fixes), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 **Authority rule:** each physical inventory event uses one server-authoritative, idempotent transaction. Do not add an independent client-side stock mutation path.
@@ -15,19 +15,22 @@
 - **Finished-case damage and returns:** an inventory manager records a reasoned, idempotent event against one dated surplus lot. Damage may remove only currently available cases. A return must cite a started/completed run allocation from that same lot and cannot exceed its not-yet-returned cases.
 - **Finished-case corrections:** accepted events are immutable. A manager corrects a mistake by appending a linked correction for up to the original event's uncorrected quantity; reversing a return also requires the cases to remain available in that lot.
 - **Adjustment audit:** the scoped event history records the stable event ID, event type, lot, quantity, reason, authenticated actor, timestamp, and any run or correction link. The event and both stock representations commit or roll back together.
-- **Prep mix and already-made mix:** the day-start event charges components for fresh mix actually made. `amountAlreadyMade` reduces fresh production and therefore does not trigger a second component charge.
+- **Product mix and already-made mix:** day start charges fresh product-mix components; `amountAlreadyMade` reduces fresh need. For ingredient-linked prep mixes, components are charged when prep is made and subsequent runs draw a prepared-stock item through an immutable ledger handoff. Previously recorded carry is an opening prepared-stock lot and is never charged as new raw use.
 - **Packaging:** packaging lines are part of the same completed-run consumption event and use the same actual-case scale and onsite drawdown.
+- **Saved completed-run corrections:** canonical sync writes reconcile only the remaining stock delta against the original baseline plus the run's ledger, atomically with the saved snapshot. Explicit corrected zero restores the prior charge; initial zero still means planned quantity. Identical retries are no-ops.
 
-## Current reconciliation (2026-10-08)
+## Current reconciliation (2026-10-22)
 
 The status and priorities below supersede the implementation-status snapshot in the older proposal sections that follow.
+See [revision-bound accounting evidence](evidence/inventory-accounting-2026-10-22.md)
+for exact executed commands, coverage limits, and the failure/decision ledger.
 
 | Area | Current status | Evidence / remaining work |
 |---|---|---|
-| Actual-case run consumption | **Implemented in source; verification partial** | Server uses persisted `actualCases` when positive, with planned-value fallback; focused integration coverage for the scaled quantity was not located. |
-| Mix/prep-mix and surplus | **Implemented for recorded day-start events** | `inventory.integration.test.ts` covers idempotent drawdown, rollback/retry, and surplus creation; broader reconciliation remains. |
+| Actual-case run consumption | **Implemented; focused DB regressions executed** | Existing below/above/absent/zero assertions passed. Saved increases/decreases/zero, packaging edits, merged baselines and atomic failure/retry passed in the selected sync groups. This is proportional scaling, not a new physical rounding policy. |
+| Mix and surplus | **Product and prep paths implemented; focused DB regressions passed** | Prep day start charges fresh components and records prepared pounds; canonical run completion and saved corrections use the stored per-run mapping, so the raw source is not charged a second time. Existing concurrent day-start, scope and rollback tests plus fresh/partial/full carry, date-boundary, correction, retry, and ambiguity rollback checks passed. |
 | Freezer pull | **Core path implemented; allocation parity verified** | `freezerSurplus.integration.test.ts` verifies dated surplus and finished-case stock through confirmation, allocation, identical retry, replacement, release, and over-allocation rejection, including inventory-ledger movement counts. |
-| Packaging | **Formula paths implemented; verification partial** | `computeRunLines` covers package lines and `computeDailySupplyConsumptionLines` covers daily supplies; focused tests do not assert every item/mode combination. |
+| Packaging | **Formula paths and bounded persistence matrix present** | Unit assertions retained; matrix covers each supported material, carton sizes, labeled positions, grip patterns, exemption modes, actual-case scaling, stock/ledger parity and excluded stock locations/scopes. Execution results are recorded separately in the evidence report. Actual production material usage is unknown, not approved unused. |
 | Finished-case damage, returns, and corrections | **Defined and implemented** | Manager-authorized, idempotent events keep dated surplus and freezer inventory in the same transaction. Returns are bounded by a started/completed run allocation; corrections are linked compensating events. Server integration coverage verifies stock parity, authorization, scope, audit data, retry safety, and rejected quantities. |
 | QC packaging lots | **Gated** | Depends on approved QC lot/check scope. |
 
@@ -38,8 +41,8 @@ In particular, surplus confirmation creates a finished-case asset and does **not
 | Physical event | Stable identity | Server effect |
 |---|---|---|
 | Completed run, including confirmed excess production | Run ID | Scale all run ingredient and packaging lines to authoritative actual cases, lock onsite lots, append stock ledger rows |
-| Day-start prep/fresh mix and daily supplies | Production date | Lock mix rows and onsite lots, update mix carry/surplus, append stock ledger rows |
-| Already-made mix reuse | Existing mix surplus allocation/carry | Reduce fresh mix need only; no new component charge |
+| Day-start prep/fresh mix and daily supplies | Scoped `day-start:date` claim | Lock mix/date rows and onsite lots, deduct fresh raw components, receive prepared-stock lots, record immutable run handoffs, and append daily-supply rows in one transaction |
+| Already-made prep mix reuse | Existing prepared-stock lots; legacy scalar is seeded once on first prepared-item creation | Consume prepared pounds through the run handoff; no second raw component charge |
 | Finished-case surplus confirmation | Surplus lot ID | Create the dated freezer asset and matching freezer inventory lot; no ingredient charge |
 | Finished-case freezer allocation | Run and surplus lot identity | Reduce freezer finished-case stock only; no ingredient charge |
 | Finished-case damage, return, or correction | Caller-supplied event ID and dated lot | Append the actor/reason audit event and update dated surplus plus freezer inventory; no ingredient charge |
@@ -75,9 +78,9 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 
 ---
 
-## B. Mix / Prep Mix Deduction (current day-start path; historical run-end proposal follows)
+## B. Mix / Prep Mix Deduction
 
-**Status**: Built for recorded day-start events; see the current reconciliation above.
+**Status**: Product and ingredient-linked prep mixes use the recorded day-start event. The prep path freezes the relationship between a run's canonical ingredient lines and prepared-stock pounds so run completion and later corrections cannot deduct the same raw ingredient twice.
 
 **What**: When prep mixes are made, the component ingredients need to be accounted for. Also, leftover ("Already Made") mix needs to offset future deductions without double-charging.
 
@@ -91,7 +94,7 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 freshMixNeeded = plannedMixNeed - alreadyMade
 ```
 
-The ingredients for "Already Made" were already deducted when the mix was originally made. No new ingredient charge.
+The ingredients for "Already Made" were already deducted when the mix was originally made. No new ingredient charge. For prep mixes, the on-hand prepared-stock item is authoritative after initialization; legacy `amountAlreadyMade` is converted to one opening lot only when the item is first created.
 
 **UI**: When "Already Made" is entered for a mix slot, the system adjusts the deduction to only cover `freshMixNeeded`. If `alreadyMade > plannedMixNeed`, `freshMixNeeded = 0` (no fresh mix made).
 
@@ -114,6 +117,34 @@ Similar to Feature A but for mixes specifically.
 - Run 2: "Already Made: 25 lbs" → fresh mix needed = 100 - 25 = 75 lbs → deduct for 75 lbs
 
 **Surplus mix tracking**: When leftover mix exists after a run, store it in the freezer as a surplus asset with a reminder: "You have 25 lbs of {mix name} in the freezer."
+
+---
+
+### B3. Ingredient-linked prep mix handoff (implemented)
+
+At scoped day start, the planner receives saved run ingredient names and
+per-pizza amounts while preserving the existing basis of planned cases × pizzas
+per case. Fresh component pounds use the released prep-mix formula and the
+existing actual-made/fresh-need behavior. Raw component consumption and the
+prepared-stock receipt commit together.
+
+Prepared stock uses an unlinked pounds item keyed to the stable mix ID. Its
+versioned ledger handoff note freezes source run keys and their pounds factors.
+Run completion replaces only those frozen source lines with the prepared-stock
+line; unrelated packaging and ingredients remain untouched. Saved-run
+corrections apply the same frozen mapping to both snapshots, including corrected
+zero. A per-run claim prevents a repeated or historical day-start from assigning
+the same run to another prep event. These metadata-only handoff rows have zero
+quantity delta and do not change stock.
+
+Existing positive source-unit conversions are used only when unambiguous.
+Conflicting batch sizes fail the day-start transaction with HTTP 409 and a
+structured server warning; no conversion is guessed. Unlinked canonical legacy
+items retain their existing factor-one behavior. No database table or column
+was added; OpenAPI documents the conflict response.
+
+Waste/spoilage events, mid-run stoppage use, ingredient returns, and new
+packaging-rounding policies remain separate policy-gated decisions.
 
 ---
 
@@ -141,32 +172,34 @@ Every request includes a stable UUID event ID and a non-empty reason. Replaying 
 
 ---
 
-## D. Actual cases instead of planned (source path implemented; verification partial)
+## D. Actual cases instead of planned (implemented; focused regressions executed)
 
-**Status**: Source implementation exists; direct actual-case scaling coverage was not located.
+**Status**: Existing direct actual-case scaling regressions were located and executed successfully.
 
 **Current behavior**: At `POST /inventory/consume`, the server reads the run's persisted `actualCases`. When it is positive and differs from `casesNeeded`, all consumption lines are scaled by `actualCases / casesNeeded`. If `actualCases` is absent or zero, planned cases remain the backward-compatible basis.
 
-**Evidence gap**: Existing integration tests cover server-authoritative finalization and idempotency, but do not directly assert the scaled quantity for `actualCases`. Add that focused regression before marking this behavior fully verified.
+**Evidence**: `inventory.integration.test.ts` asserts both dough and circles below/above plan and absent/zero fallback. `sync.integration.test.ts`'s completed-run correction group asserts saved increases, decreases, explicit zero, packaging edits, retries, baseline remapping and rollback. See the evidence report for bounded results; do not rebuild these paths.
 
 ---
 
-## E. Full packaging consumption (formula paths exist; tests partial)
+## E. Supported packaging contracts (released formulas; no policy changes)
 
-**Status**: Formula paths exist; direct test coverage is partial.
+**Status**: Formula and persistence assertions are mapped in the evidence report. Source coverage is not an executed pass unless its result is listed there.
 
-**Evidence gap**: The formula paths include circles, shippers, cartons, slip/grip sheets, labels, pallets, shipper labels, and daily supplies. Focused tests do not yet assert every item and supported packaging mode.
+Run lines apply to `cartoned`/legacy `yes` and `labeled`; `no`/`n-a` are exemptions.
+Circles, configured sheets, labels and pallets apply to both enabled modes. Shippers,
+cartons and shipper labels are cartoned-only. No bags or other guessed materials are added.
+Unknown production-use lists are not an owner-approved won't-do.
 
 ### E1. Carton Size
 
 `cartonSize` is already part of the form/profile input used by the packaging calculation:
-- "single" (default) = 1 pizza per carton
-- "double" = 2 pizzas per carton
-- "triple" = 3 pizzas per carton
+- `1` (single/default) = 1 pizza per carton
+- `2` (double) = 2 pizzas per carton
+- `3` (triple) = 3 pizzas per carton
 
 **Carton consumption** (revised):
 ```
-cartonsPerSkid = casesPerSkid × cartonSize × cartonsPerCase
 casesOfCartons = ceil(totalPizzas / (cartonSize × cartonsPerCase))
 ```
 
@@ -175,7 +208,7 @@ Key: `packaging:cartons:cases` (unchanged key, new quantity)
 ### E2. Slip Sheets
 
 - When `slipSheets = "yes"`: 1 slip sheet per layer
-- `layers = totalCases / casesPerLayer`
+- `sheets = ceil(totalCases / casesPerLayer)` when `casesPerLayer > 0`
 - Key: `packaging:slip-sheets:count`
 - Unit: count
 
@@ -197,9 +230,9 @@ Unit: count
 - If `labelPosition = "top"`: 1 label per pizza
 - If `labelPosition = "bottom"`: 1 label per pizza
 - If `labelPosition = "both"`: 2 labels per pizza (1 top + 1 bottom)
-- Rolls consumed = `totalPizzas × labelMultiplier / labelsPerRoll`
-  - `labelMultiplier = labelPosition === "both" ? 2 : 1`
-- Key: `packaging:labels:{position}` (position = top/bottom/both)
+- Each selected position consumes `ceil(totalPizzas / positionLabelsPerRoll)`.
+- Top and bottom roll capacities are independent, falling back to `labelsPerRoll`; absent/nonpositive capacity emits no line.
+- Keys: `packaging:labels-top:rolls` and `packaging:labels-bottom:rolls`; `both` emits both keys, not one combined key.
 - Unit: rolls
 
 ### E5. Pallets
@@ -217,30 +250,31 @@ Unit: count
 
 ### E7. Daily Reset Supplies (Tape, Glue, Ink)
 
-Deducted at daily reset for that day's production runs (not per-run).
+Deducted by the explicit manager-authorized day-start event, not the sync reset endpoint and not per-run.
 
 | Item | Rate | Calculation | Key |
 |------|------|-------------|-----|
 | Tape | 4 per day | 4 | `packaging:tape:count` |
-| Glue/glue sticks | ~1 per 3.5 days | 1/3.5 ≈ 0.286 per day | `packaging:glue:count` |
-| Ink | ~1 per month | 1/(4.3 × 3) ≈ 0.078 per day | `packaging:ink:count` |
+| Glue/glue sticks | Released fixed rate | 0.286 per event date | `packaging:glue:count` |
+| Ink | Released fixed rate | 0.078 per event date | `packaging:ink:count` |
 
-**Trigger**: Daily reset function (`POST /reset-day`) or app load after midnight.
-**Scaling**: Rates are per production day. If multiple runs happen, these are consumed once per day (not per run).
-**Ink special case**: One pizza is dated without carton — but ink consumption is so small (0.078/day) that the per-day rate covers this without separate tracking.
+**Trigger**: `POST /api/inventory/consume-day-start`, requested on Home mount (except station screens). The route requires `manage-inventory`; a mount by staff does not itself authorize deduction.
+**Scaling**: One scoped `day-start:YYYY-MM-DD` claim. Supplies are emitted even if that date has no matching runs; only configured matching inventory items with available onsite stock move. These are fixed approximations, not measured physical daily usage.
+**Compatibility**: Quantities are not recomputed into whole packages after actual-case scaling. Fractional post-scaling pallets/rolls are a released proportional contract, not proof of floor rounding policy.
 
 ---
 
 ## F. Daily Reset: Yesterday → Today
 
-**Status**: Already partially implemented
+**Status**: Separate dated claims and retries are tested; this is not proof of every reset/startup journey.
 
-**What happens at daily reset**:
-1. Yesterday's completed runs are archived (or saved for QC audit trail)
-2. Day-state resets for today
-3. Tape/glue/ink deducted from inventory for today's production day
-4. Surplus mix from yesterday shows as "Available in Freezer" reminder
-5. QC-related items preserved for audit (lot tracking, weights, etc.)
+The sync reset/rollover and the inventory day-start event are distinct authorities.
+Day-start reads only the requested date's saved runs and scope. Yesterday's accepted
+claim cannot deduct again on retry, and today's independent claim does not rescan
+yesterday's demand. This does not prove that a historical unclaimed date or a stale
+global `amountActualMade` value is automatically rejected; no such guard is added here.
+See the evidence report for the exact yesterday/today carry scenario and its explicit
+reset of the entered fresh-made amount.
 
 ---
 
@@ -267,7 +301,13 @@ Deducted at daily reset for that day's production runs (not per-run).
 
 ---
 
-## Key Code References
+## Historical proposed changes (not instructions to build)
+
+The remaining reference/field/API lists below describe the old proposal, not live endpoints.
+In particular, do not add `consume-overproduction`, a parallel surplus deduction, or a
+`reset-day` inventory writer. Current authorities and verified tests are listed above.
+
+## Historical Key Code References
 
 | File | Change |
 |------|--------|

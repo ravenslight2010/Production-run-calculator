@@ -19,8 +19,9 @@
 - [Inventory merge](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) + [stock corrections](completed-run-stock-corrections.md) — serialize drawdowns and reconcile edits against a durable ledger.
 - [DB fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, workflow roles, and writable sockets.
 - [Browser](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
-- [Browser checks](browser-check-boundaries.md) + [isolated matrices](browser-matrix-isolation.md) + [picker assertions](browser-evidence-assertions.md) — auth timing, profile isolation, active-dialog selectors.
-- [Browser storage/forms](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable storage and missing query parameters.
+- [Isolated browser matrices](browser-matrix-isolation.md) — when a multi-project suite times out after its first profile, rerun the failed profile alone before treating it as a browser defect.
+- [Browser picker assertions](browser-evidence-assertions.md) — scope queries to the active touch dialog; hidden closed-dialog inputs may match global selectors.
+- [Browser storage](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable localStorage and missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
 - [Spec export integrity](spec-export.md) — fresh server snapshots; keep per-pizza oz and batch lbs separate; blanks are unknown, and conflicts remain visible.
@@ -150,9 +151,6 @@
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
 - [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.
+- [Prep inventory accounting](prep-inventory-accounting.md) — raw ingredients charge when prep is made; later runs use prepared stock, including previously made carry.
 - [Release guide authority claims](release-guide-authority-claims.md) — check provider/action/live-target claims, preserving explicit negatives, examples, and historical context.
-- [Import Gold approval](import-gold-owner-authorization.md) + [review layers](import-review-dialog-layering.md) — require source-use approval for real cases; keep review controls above shell overlays.
-- [Runtime/CLI](runtime-library-cli-boundaries.md) + [Docker smoke](docker-browser-smoke-runtime.md) — isolate CLI side effects; keep DNS/healthcheck workarounds test-only.
-- [Brix targets](qc-brix-targets.md) + [Line Map activity](line-map-station-activity.md) — Brix is separately manager-reviewed; station status needs fresh run evidence.
-- [WebKit push](local-browser-suite-routing.md) + [304 handling](playwright-304-responses.md) — scope push fixtures; valid 304 cache hits are not errors.
 - [Vitest hook returns](vitest-hook-cleanup.md) — implicitly returning a mock from a setup hook registers it as cleanup and can create post-assertion failures.

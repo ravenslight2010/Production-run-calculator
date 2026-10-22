@@ -620,7 +620,9 @@ paths:
       operationId: consumeInventoryDayStart
       tags: [inventory]
       summary: Deduct the scheduled day's mix components and daily supplies
-      description: Idempotent by production date; retries of the same date have no physical effect.
+      description: >-
+        Idempotent by production date; retries of the same date have no physical
+        effect. Ambiguous prepared-mix source units reject the full transaction.
       requestBody:
         required: false
         content:
@@ -646,6 +648,18 @@ paths:
                     type: string
         "400":
           description: Invalid production date
+        "403":
+          description: Manager role required
+        "409":
+          description: Prepared-mix source unit conversion is ambiguous; no day-start stock effects were applied
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
 
   /inventory/merge:
     post:

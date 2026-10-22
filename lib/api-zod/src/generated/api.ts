@@ -1445,7 +1445,7 @@ export const ConsumeInventoryResponse = zod.object({
 
 
 /**
- * Idempotent by production date; retries of the same date have no physical effect.
+ * Idempotent by production date; retries of the same date have no physical effect. Ambiguous prepared-mix source units reject the full transaction.
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
 

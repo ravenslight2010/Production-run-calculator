@@ -97,7 +97,7 @@ export const inventoryLedgerTable = pgTable("inventory_ledger", {
   lotId: integer("lot_id").references(() => inventoryLotsTable.id, {
     onDelete: "set null",
   }),
-  type: text("type").notNull(), // "restock" | "consume" | "adjust"
+    type: text("type").notNull(), // "restock" | "consume" | "adjust" | metadata-only "prep-handoff"
   qtyDelta: doublePrecision("qty_delta").notNull(),
   runId: text("run_id"), // set for auto-consumption; idempotency key
   note: text("note").notNull().default(""),

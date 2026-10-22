@@ -45,6 +45,7 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let mixesTable: DbModule["mixesTable"];
 let qualityChecksTable: DbModule["qualityChecksTable"];
 let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
@@ -129,6 +130,7 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  mixesTable = dbMod.mixesTable;
   qualityChecksTable = dbMod.qualityChecksTable;
   qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
@@ -229,7 +231,7 @@ function dayRow(date: string) {
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
   clearServerTickDateBackoffsForTests();
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${mixesTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -397,6 +399,43 @@ describe("completed-run inventory corrections from sync writes", () => {
         },
       }));
 
+    if (actualCases === 15) {
+      // Fail after the correction updates stock, at its audit insert boundary.
+      // The entire saved snapshot and stock/ledger delta must roll back together.
+      const originalLedger = await db.select().from(inventoryLedgerTable);
+      await db.execute(sql`
+        CREATE FUNCTION fail_inventory_correction_audit() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.note LIKE 'Run consumption correction:%' THEN
+            RAISE EXCEPTION 'synthetic correction audit failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+      `);
+      await db.execute(sql`
+        CREATE TRIGGER fail_inventory_correction_audit
+        BEFORE INSERT ON ${inventoryLedgerTable}
+        FOR EACH ROW EXECUTE FUNCTION fail_inventory_correction_audit()
+      `);
+      try {
+        const failed = await saveActualCases(actualCases, "inventory-correction-failpoint");
+        expect(failed.status).toBe(500);
+        expect(await onHandForItem(dough.id)).toBe(98);
+        expect(await onHandForItem(circles.id)).toBe(880);
+        expect(await db.select().from(inventoryLedgerTable)).toEqual(originalLedger);
+        const [persisted] = await db.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+        expect(persisted.data).toMatchObject({
+          dayState: { runs: [{ id: runId, actualCases: 10 }] },
+        });
+      } finally {
+        await db.execute(sql`DROP TRIGGER fail_inventory_correction_audit ON ${inventoryLedgerTable}`);
+        await db.execute(sql`DROP FUNCTION fail_inventory_correction_audit()`);
+      }
+    }
+
     const saved = await saveActualCases(actualCases, "inventory-correction-test");
     expect(saved.status).toBe(200);
     expect(await saved.json()).toMatchObject({
@@ -459,6 +498,159 @@ describe("completed-run inventory corrections from sync writes", () => {
       120,
       -120,
     ]);
+  });
+
+  it("reconciles a prepared-mix run decrease, increase, and zero without recharging raw components", async () => {
+    const runId = "inventory-correction-prepared-mix";
+    const rawKey = "ingredient:Audit Onion:lbs";
+    const [rawIngredient] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: rawKey,
+      category: "ingredient",
+      name: "Audit Onion",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      scope: "live",
+      itemId: rawIngredient.id,
+      qtyReceived: 100,
+      qtyRemaining: 100,
+      lotNumber: "",
+      receivedDate: DATE,
+    });
+    const runValues = {
+      ...RUN_VALUES,
+      app1Type: "Audit Onion",
+      app1OzPerPizza: 2,
+    };
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{ id: runId, brand: "Acme", flavor: "Cheese", actualCases: 10 }],
+          substitutions: [],
+        },
+        runValues: { [runId]: runValues },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    await db.insert(mixesTable).values({
+      id: "audit-prep-mix",
+      scope: "live",
+      name: "Audit Prep Mix",
+      brand: "Acme",
+      flavor: "Cheese",
+      batchSize: 40,
+      daysEarly: 0,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 0,
+      components: [{ ingredient: "Audit Onion", perPizza: 2 }],
+      isPrep: true,
+      enabled: true,
+    });
+
+    const dayStart = await fetch(`${baseUrl}/api/inventory/consume-day-start`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ date: DATE }),
+    });
+    expect(dayStart.status).toBe(200);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+    const preparedItem = (await db.select().from(inventoryItemsTable))
+      .find((item) => item.key === "ingredient:Prepared mix [audit-prep-mix]:lbs");
+    expect(preparedItem).toBeDefined();
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(37.25, 3);
+
+    // The run becomes completed after prep and then its original claim draws
+    // only the prepared stock; the raw ingredient is already charged by prep.
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            actualCases: 10,
+            startedAt: 1_000,
+            endedAt: 2_000,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: runValues },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+    const consumed = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ runId, lines: [] }),
+    });
+    expect(await consumed.json()).toMatchObject({ applied: true, consumed: 1 });
+    expect(await onHandForItem(preparedItem!.id)).toBe(0);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+
+    const saveActualCases = async (nextActualCases: number, senderId: string) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: managerAuthHeaders(),
+      });
+      expect(read.status).toBe(200);
+      const current = await read.json() as Record<string, any>;
+      const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+      const payload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId,
+        dayState: {
+          ...current.dayState,
+          runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+            run.id === runId ? { ...run, actualCases: nextActualCases } : run,
+          ),
+        },
+        runValues: current.runValues,
+        runValuesUpdatedAt: current.runValuesUpdatedAt,
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    };
+    const afterDecrease = await saveActualCases(5, "prepared-mix-decrease");
+    expect(afterDecrease.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(18.625, 3);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+
+    const decreaseRetry = await saveActualCases(5, "prepared-mix-decrease-retry");
+    expect(decreaseRetry.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(18.625, 3);
+
+    const afterIncrease = await saveActualCases(10, "prepared-mix-increase");
+    expect(afterIncrease.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBe(0);
+
+    const afterZero = await saveActualCases(0, "prepared-mix-zero");
+    expect(afterZero.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(37.25, 3);
+    const afterZeroRetry = await saveActualCases(0, "prepared-mix-zero-retry");
+    expect(afterZeroRetry.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBeCloseTo(37.25, 3);
+
+    const afterZeroIncrease = await saveActualCases(10, "prepared-mix-zero-increase");
+    expect(afterZeroIncrease.status).toBe(200);
+    expect(await onHandForItem(preparedItem!.id)).toBe(0);
+    expect(await onHandForItem(rawIngredient.id)).toBe(85);
+    const corrections = (await db.select().from(inventoryLedgerTable)).filter((entry) =>
+      entry.itemId === preparedItem!.id &&
+      entry.runId === runId &&
+      entry.note.startsWith("Run consumption correction:"),
+    );
+    expect(corrections).toHaveLength(4);
+    expect(corrections.reduce((sum, entry) => sum + entry.qtyDelta, 0)).toBeCloseTo(0, 3);
+    expect((await db.select().from(inventoryLedgerTable)).filter((entry) =>
+      entry.itemId === rawIngredient.id && entry.type === "consume",
+    )).toHaveLength(1);
   });
 
   it("keeps multiple merged source and target baselines combined for later run corrections", async () => {

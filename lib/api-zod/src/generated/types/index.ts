@@ -94,6 +94,7 @@ export * from './confirmFreezerSurplusInput';
 export * from './confirmStationActivityParams';
 export * from './consumeInput';
 export * from './consumeInventoryDayStart200';
+export * from './consumeInventoryDayStart409';
 export * from './consumeInventoryDayStartInput';
 export * from './consumeLine';
 export * from './consumeResult';
