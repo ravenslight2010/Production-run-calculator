@@ -128,6 +128,16 @@ function storeSubscriptionId(id: string | undefined): void {
   } catch { /* private-mode storage is optional */ }
 }
 
+async function activePushRegistration(): Promise<ServiceWorkerRegistration> {
+  // `ready` can remain pending in WebKit even when the app already has an
+  // activated registration. PushManager operates on that registration directly.
+  const registration = await navigator.serviceWorker.getRegistration();
+  if (!registration?.active || registration.active.state !== "activated") {
+    throw new Error("The service worker is not active for Web Push.");
+  }
+  return registration;
+}
+
 function hasRegistrationRejectionMarker(): boolean {
   try { return localStorage.getItem(REGISTRATION_REJECTED_KEY) === "1"; } catch { return false; }
 }
@@ -143,9 +153,7 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
   const support = browserPushSupport();
   if (support.error) return support.error;
   try {
-    // `ready`, unlike getRegistration(), waits for the controlling worker that
-    // can actually receive a push and show a notification.
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await activePushRegistration();
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
       storeRegistrationRejectionMarker(false);
@@ -178,7 +186,7 @@ export async function enableWebPush(vapidPublicKey: string): Promise<WebPushStat
     if (permission === "default") permission = await support.notification!.requestPermission();
     if (permission === "denied") return { state: "denied" };
     if (permission !== "granted") return { state: "error", error: "Browser notification permission was not granted." };
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await activePushRegistration();
     const existing = await registration.pushManager.getSubscription();
     subscriptionWasExisting = existing !== null;
     subscription = existing ?? await registration.pushManager.subscribe({
@@ -222,7 +230,7 @@ export async function recoverWebPush(
   let currentId = subscriptionId ?? storedSubscriptionId();
   let replacement: PushSubscription | null = null;
   try {
-    const registration = await navigator.serviceWorker.ready;
+    const registration = await activePushRegistration();
     current ??= await registration.pushManager.getSubscription();
     if (current && subscriptionWasExisting && !currentId) {
       throw new Error("This saved device subscription cannot be identified safely, so it was not replaced.");
@@ -266,7 +274,7 @@ export async function recoverWebPush(
 
 export async function disableWebPush(subscription?: PushSubscription | null, subscriptionId?: string): Promise<WebPushStatus> {
   try {
-    const current = subscription ?? await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    const current = subscription ?? await (await activePushRegistration()).pushManager.getSubscription();
     if (current) {
       // Revoke remotely first; a failed revoke leaves the local subscription
       // intact so the operator can retry instead of silently losing control.

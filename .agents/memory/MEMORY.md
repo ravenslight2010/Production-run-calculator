@@ -147,6 +147,7 @@
 - [SSE reader timeouts](sse-test-reader-timeouts.md) + [listener stop](sync-listener-stop-diagnostics.md) — retain pending reads across timeouts; fence in-flight metrics after shutdown.
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [WebKit GIO TLS](webkit-gio-tls-runtime.md) + [IPv6 loopback](ipv6-loopback-test-environment.md) — keep trust enabled; load Nix TLS modules and block unsupported AF_INET6 identity checks.
+- [WebKit push tests](local-browser-suite-routing.md) — WPE can hang on push APIs; use active registrations and clearly scoped empty-subscription fixtures.
 - [Local production graph builds](local-production-graph-build.md) — use development identity mode for local bundle analysis; keep publish-source identity changes in release workflows.
 - [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.

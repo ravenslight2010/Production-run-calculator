@@ -4289,6 +4289,12 @@ export default function Home() {
   const [showFloorMode, setShowFloorMode] = useState(false);
   // Combined per-user "Alerts & Floor Mode" settings panel (header menu).
   const [showAlertSettings, setShowAlertSettings] = useState(false);
+  const [headerMoreMenuOpen, setHeaderMoreMenuOpen] = useState(false);
+  const openAlertSettingsAfterMenuCloseRef = useRef(false);
+  const queueAlertSettingsOpenAfterMenuClose = (source: "click" | "select") => {
+    openAlertSettingsAfterMenuCloseRef.current = true;
+    setHeaderMoreMenuOpen(false);
+  };
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
   const [showManagerAttention, setShowManagerAttention] = useState(false);
@@ -17574,7 +17580,9 @@ export default function Home() {
             </button>
             {/* Header overflow menu */}
             <DropdownMenu
+              open={headerMoreMenuOpen}
               onOpenChange={(open) => {
+                setHeaderMoreMenuOpen(open);
                 if (open && (canManageStaff || canApproveResets)) {
                   preloadStaffManagementSurface();
                 }
@@ -17603,7 +17611,17 @@ export default function Home() {
                   )}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                onCloseAutoFocus={(event) => {
+                  if (!openAlertSettingsAfterMenuCloseRef.current) return;
+                  openAlertSettingsAfterMenuCloseRef.current = false;
+                  event.preventDefault();
+                  window.requestAnimationFrame(() => {
+                    setShowAlertSettings(true);
+                  });
+                }}
+              >
                 {canViewManagerAttention && (
                   <DropdownMenuItem
                     aria-label={
@@ -17684,7 +17702,10 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
+                <DropdownMenuItem
+                  onSelect={() => queueAlertSettingsOpenAfterMenuClose("select")}
+                  onClick={() => queueAlertSettingsOpenAfterMenuClose("click")}
+                >
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
                 <DropdownMenuItem

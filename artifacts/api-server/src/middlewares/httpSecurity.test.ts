@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import express, { type Express } from "express";
@@ -79,4 +79,13 @@ describe("HTTP security headers", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("https://api.qrserver.com");
     expect(CONTENT_SECURITY_POLICY).not.toMatch(/(?:^|\s)https:(?:\s|;|$)/);
   });
+});
+
+it("keeps the Caddy policy aligned with the Express policy", async () => {
+  const caddyfile = await readFile(
+    new URL("../../../../docker/Caddyfile", import.meta.url),
+    "utf8",
+  );
+  const caddyPolicy = caddyfile.match(/Content-Security-Policy\s+"([^"]+)"/)?.[1];
+  expect(caddyPolicy).toBe(CONTENT_SECURITY_POLICY);
 });
