@@ -8,6 +8,7 @@ import {
   EXPECTED_PRODUCTION_PROMPT_SHA256,
   appendMetadataMaintenanceEntry,
   appendMetadataMaintenanceEntryFile,
+  assertMetadataMaintenancePlatformSupported,
   loadProductionContract,
   runMetadataMaintenanceCommand,
   runBackfill,
@@ -26,6 +27,14 @@ const contract = {
   currentParseVersion: "41",
 };
 const digest = "a".repeat(64);
+
+assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("linux"));
+for (const unsupportedPlatform of ["darwin", "win32"] as const) {
+  assert.throws(
+    () => assertMetadataMaintenancePlatformSupported(unsupportedPlatform),
+    /supported only on Linux.*supported Linux x64 environment.*leave existing metadata locks untouched/u,
+  );
+}
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const currentProductionContract = await loadProductionContract(workspaceRoot);

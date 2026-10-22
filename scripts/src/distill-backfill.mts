@@ -266,9 +266,19 @@ type MetadataLockOwner = {
   identity?: LinuxProcessIdentity;
 };
 
+export function assertMetadataMaintenancePlatformSupported(
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== "linux") {
+    throw new Error(
+      "metadata updates are supported only on Linux by this repository; macOS and Windows do not have the verified flock and process-identity contract. Run this command in a supported Linux x64 environment and leave existing metadata locks untouched.",
+    );
+  }
+}
+
 function readLinuxProcessIdentity(pid: number): LinuxProcessIdentity {
   if (process.platform !== "linux") {
-    throw new Error("metadata locks require Linux process identity support; leave the lock untouched on this platform");
+    assertMetadataMaintenancePlatformSupported();
   }
 
   let statContents: string;
@@ -463,6 +473,7 @@ export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   decisionPath: string,
   entry: unknown,
 ): DecisionFile {
+  assertMetadataMaintenancePlatformSupported();
   const resolvedPath = fs.realpathSync(decisionPath);
   const fileStat = fs.statSync(resolvedPath);
   if (!fileStat.isFile()) throw new Error("decision file must be a regular file");
@@ -518,6 +529,7 @@ export function appendMetadataMaintenanceEntryFile(
   decisionPath: string,
   entry: unknown,
 ): DecisionFile {
+  assertMetadataMaintenancePlatformSupported();
   const resolvedPath = fs.realpathSync(decisionPath);
   const recoveryGatePath = `${resolvedPath}.metadata-maintenance.lock.recovery.gate`;
   let gateFd: number | undefined;
