@@ -72,6 +72,11 @@ describe("MixesTabContent reserved ingredient names", () => {
       app3CheeseRecipe: [
         { ingredient: "Mozzarella", lbs: 1 },
         { ingredient: "valueOf", lbs: 1 },
+        { ingredient: "toLocaleString", lbs: 1 },
+        { ingredient: "isPrototypeOf", lbs: 1 },
+        { ingredient: "propertyIsEnumerable", lbs: 1 },
+        { ingredient: "__defineGetter__", lbs: 1 },
+        { ingredient: "__defineSetter__", lbs: 1 },
       ],
       app4Type: "Mozzarella",
       app4OzPerPizza: 2,
@@ -101,6 +106,11 @@ describe("MixesTabContent reserved ingredient names", () => {
             { ingredient: "toString", perPizza: 0 },
             { ingredient: "hasOwnProperty", perPizza: 0 },
             { ingredient: "valueOf", perPizza: 0 },
+            { ingredient: "toLocaleString", perPizza: 0 },
+            { ingredient: "isPrototypeOf", perPizza: 0 },
+            { ingredient: "propertyIsEnumerable", perPizza: 0 },
+            { ingredient: "__defineGetter__", perPizza: 0 },
+            { ingredient: "__defineSetter__", perPizza: 0 },
           ],
         },
       ),
@@ -144,16 +154,26 @@ describe("MixesTabContent reserved ingredient names", () => {
       "toString",
       "hasOwnProperty",
       "valueOf",
+      "toLocaleString",
+      "isPrototypeOf",
+      "propertyIsEnumerable",
+      "__defineGetter__",
+      "__defineSetter__",
     ]);
 
     expect(prepRows.map((row) => row.lastElementChild?.textContent?.trim())).toEqual([
       "1.25 lbs",
       "1.25 lbs",
-      "1.88 lbs",
+      "1.43 lbs",
       "1.88 lbs",
       "0.31 lbs",
       "0.63 lbs",
-      "0.63 lbs",
+      "0.18 lbs",
+      "0.18 lbs",
+      "0.18 lbs",
+      "0.18 lbs",
+      "0.18 lbs",
+      "0.18 lbs",
     ]);
     expect(within(plan).getByText(/Total 28\.98 lbs/)).toBeTruthy();
   });
