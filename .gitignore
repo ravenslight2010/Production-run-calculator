@@ -28,6 +28,9 @@ node_modules
 !.vscode/extensions.json
 
 # misc
+# Materialized only from the protected CI input; never commit operational bytes.
+/attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json
+/attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256
 /.sass-cache
 /connect.lock
 /coverage
