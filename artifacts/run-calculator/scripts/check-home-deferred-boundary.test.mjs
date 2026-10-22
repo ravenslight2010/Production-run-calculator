@@ -687,6 +687,59 @@ test("workspace listing rejects valid JSON with an invalid package-list shape", 
   }
 });
 
+test("workspace listing rejects package folders outside the root before reading manifests", () => {
+  const reportedFolder = path.resolve(
+    os.tmpdir(),
+    "outside-home-workspace",
+    "home-bridge",
+  );
+  const manifestReads = [];
+  let workspaceListCalls = 0;
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: () => {
+      workspaceListCalls += 1;
+      return {
+        status: 0,
+        stdout: JSON.stringify([{ path: reportedFolder }]),
+      };
+    },
+  });
+
+  try {
+    assert.throws(
+      () =>
+        checkHomeDeferredSourceBoundary({
+          ...fixture,
+          readSource: (filePath) => {
+            if (path.basename(filePath) === "package.json") {
+              manifestReads.push(filePath);
+            }
+            return fs.readFileSync(filePath, "utf8");
+          },
+        }),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        const details = error.message.match(/Details: (.*)$/)?.[1];
+        assert.ok(details);
+        assert.ok(details.length <= 400);
+        assert.match(details, /pnpm reported a workspace package outside the root:/);
+        assert.ok(details.includes(reportedFolder));
+        return true;
+      },
+    );
+    assert.equal(workspaceListCalls, 1);
+    assert.deepEqual(manifestReads, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("source boundary inventories helper dynamic imports and ignores import-type syntax", () => {
   const fixture = createSourceFixture({
     homeSource: (sourceRoot) =>
