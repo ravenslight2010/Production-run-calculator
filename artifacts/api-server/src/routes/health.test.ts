@@ -252,6 +252,31 @@ describe("GET /readyz optional AI capability", () => {
 });
 
 describe("GET /readyz contention behavior", () => {
+  it.each([
+    { nodeEnv: "production", enabled: "1" },
+    { nodeEnv: "development", enabled: "1" },
+    { nodeEnv: "test", enabled: "0" },
+  ])("keeps disposable instrumentation disabled for $nodeEnv with flag $enabled", async ({
+    nodeEnv,
+    enabled,
+  }) => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousInstrumentation = process.env.API_LOAD_READINESS_INSTRUMENTATION;
+    try {
+      process.env.NODE_ENV = nodeEnv;
+      process.env.API_LOAD_READINESS_INSTRUMENTATION = enabled;
+      const response = await fetch(`${baseUrl}/readyz`);
+      expect(response.status).toBe(200);
+      expect([...response.headers.keys()].some((key) => key.startsWith("x-test-readiness-")))
+        .toBe(false);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousInstrumentation === undefined) delete process.env.API_LOAD_READINESS_INSTRUMENTATION;
+      else process.env.API_LOAD_READINESS_INSTRUMENTATION = previousInstrumentation;
+    }
+  });
+
   it("coalesces shared reads while keeping core checks independent and surviving client cancellation", async () => {
     let releaseDiagnostics!: () => void;
     const diagnosticsGate = new Promise<void>((resolve) => {

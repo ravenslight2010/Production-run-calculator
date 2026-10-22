@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { performance } from "node:perf_hooks";
 import { GetBuildInfoResponse, HealthCheckResponse } from "@workspace/api-zod";
@@ -30,14 +30,51 @@ type SharedReadinessDiagnostics = {
 };
 
 let sharedReadinessDiagnosticsInFlight: Promise<SharedReadinessDiagnostics> | undefined;
+// Disposable load fixtures use bounded delay/counters to observe overlapping
+// reads in real processes. Neither headers nor delay are enabled outside test.
+const readinessTestCounters = {
+  databaseChecks: 0,
+  auditProtectionChecks: 0,
+  backgroundOperationReads: 0,
+  cacheMaintenanceReads: 0,
+};
+
+function readinessTestInstrumentationEnabled(): boolean {
+  return process.env.NODE_ENV === "test" &&
+    process.env.API_LOAD_READINESS_INSTRUMENTATION === "1";
+}
+
+function readinessTestOptionalDelayMs(): number {
+  if (!readinessTestInstrumentationEnabled()) return 0;
+  const parsed = Number(process.env.API_LOAD_READINESS_OPTIONAL_DELAY_MS);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 500 ? parsed : 0;
+}
+
+function attachReadinessTestMetrics(res: Response): void {
+  if (!readinessTestInstrumentationEnabled()) return;
+  res.setHeader("X-Test-Readiness-Process", String(process.pid));
+  res.setHeader("X-Test-Readiness-Database-Checks", String(readinessTestCounters.databaseChecks));
+  res.setHeader("X-Test-Readiness-Audit-Checks", String(readinessTestCounters.auditProtectionChecks));
+  res.setHeader("X-Test-Readiness-Background-Reads", String(readinessTestCounters.backgroundOperationReads));
+  res.setHeader("X-Test-Readiness-Cache-Reads", String(readinessTestCounters.cacheMaintenanceReads));
+  res.setHeader("X-Test-Readiness-Pool-Waiters", String(pool.waitingCount));
+}
 
 function readSharedReadinessDiagnostics(): Promise<SharedReadinessDiagnostics> {
   if (sharedReadinessDiagnosticsInFlight) return sharedReadinessDiagnosticsInFlight;
 
-  const pending = Promise.all([
-    getBackgroundOperationDiagnostics(),
-    getCacheMaintenanceDiagnostics(),
-  ]).then(([backgroundOperationDiagnostics, cacheMaintenance]) => ({
+  const pending = Promise.resolve().then(async () => {
+    const delayMs = readinessTestOptionalDelayMs();
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    readinessTestCounters.backgroundOperationReads += 1;
+    readinessTestCounters.cacheMaintenanceReads += 1;
+    return Promise.all([
+      getBackgroundOperationDiagnostics(),
+      getCacheMaintenanceDiagnostics(),
+    ]);
+  }).then(([backgroundOperationDiagnostics, cacheMaintenance]) => ({
     backgroundOperationDiagnostics,
     cacheMaintenance,
     scheduledEvaluationQueue: getScheduledEvaluationQueueDiagnostics(),
@@ -129,8 +166,10 @@ async function readiness(req: Request, res: Response): Promise<void> {
     // temporary initialization window into a misleading DB 500.
     const databaseCheckStartedAt = performance.now();
     try {
+      readinessTestCounters.databaseChecks += 1;
       await db.execute(sql`SELECT 1`);
       checks.database = { status: "ok" };
+      readinessTestCounters.auditProtectionChecks += 1;
       const auditProtection = await getAuditLogProtectionCheck();
       checks.auditProtection = auditProtection;
       res.locals.auditProtection = auditProtection;
@@ -251,6 +290,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     },
     "health check completed",
   );
+  attachReadinessTestMetrics(res);
 
   if (coreReady) {
     res.json(HealthCheckResponse.parse({
