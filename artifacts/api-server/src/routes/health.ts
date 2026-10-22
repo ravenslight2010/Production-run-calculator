@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { performance } from "node:perf_hooks";
 import { GetBuildInfoResponse, HealthCheckResponse } from "@workspace/api-zod";
 import { getBuildInfo } from "../lib/buildInfo";
 import { isGeminiProviderConfigured } from "@workspace/integrations-openai-ai-server";
@@ -13,12 +14,44 @@ import {
 } from "../lib/health";
 import {
   backgroundOperationsDegraded,
+  boundedDurationMs,
   getBackgroundOperationDiagnostics,
 } from "../lib/backgroundOperations";
 import { getScheduledEvaluationQueueDiagnostics } from "../lib/serverJobs";
 import { getSyncOutboxLagDiagnostics } from "../lib/syncOutbox";
 
 const router: IRouter = Router();
+
+type SharedReadinessDiagnostics = {
+  backgroundOperationDiagnostics: Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>;
+  cacheMaintenance: Awaited<ReturnType<typeof getCacheMaintenanceDiagnostics>>;
+  scheduledEvaluationQueue: ReturnType<typeof getScheduledEvaluationQueueDiagnostics>;
+  syncOutboxLag: ReturnType<typeof getSyncOutboxLagDiagnostics>;
+};
+
+let sharedReadinessDiagnosticsInFlight: Promise<SharedReadinessDiagnostics> | undefined;
+
+function readSharedReadinessDiagnostics(): Promise<SharedReadinessDiagnostics> {
+  if (sharedReadinessDiagnosticsInFlight) return sharedReadinessDiagnosticsInFlight;
+
+  const pending = Promise.all([
+    getBackgroundOperationDiagnostics(),
+    getCacheMaintenanceDiagnostics(),
+  ]).then(([backgroundOperationDiagnostics, cacheMaintenance]) => ({
+    backgroundOperationDiagnostics,
+    cacheMaintenance,
+    scheduledEvaluationQueue: getScheduledEvaluationQueueDiagnostics(),
+    syncOutboxLag: getSyncOutboxLagDiagnostics(),
+  }));
+  sharedReadinessDiagnosticsInFlight = pending;
+  const clearInFlight = () => {
+    if (sharedReadinessDiagnosticsInFlight === pending) {
+      sharedReadinessDiagnosticsInFlight = undefined;
+    }
+  };
+  void pending.then(clearInFlight, clearInFlight);
+  return pending;
+}
 
 router.get("/build-info", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
@@ -63,6 +96,7 @@ async function probeLocalModelHost(): Promise<"ok" | "error"> {
 
 
 async function readiness(req: Request, res: Response): Promise<void> {
+  const readinessStartedAt = performance.now();
   const startup = getStartupHealth();
   const correlationId = String(
     (req as Request & { correlationId?: string }).correlationId ??
@@ -80,6 +114,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
   const capabilities: { ai: { status: AiCapabilityStatus; detail?: string } } = {
     ai: { status: "pending" },
   };
+  let databaseCheckDurationMs: number | undefined;
+  let optionalDiagnosticsDurationMs: number | undefined;
+  let localModelProbeDurationMs: number | undefined;
 
   if (startup.phase !== "ready") {
     checks.startup = {
@@ -90,6 +127,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     // Verify the DB only after required startup work has completed. During a
     // cold start this keeps the platform probe fast and avoids turning a
     // temporary initialization window into a misleading DB 500.
+    const databaseCheckStartedAt = performance.now();
     try {
       await db.execute(sql`SELECT 1`);
       checks.database = { status: "ok" };
@@ -104,6 +142,8 @@ async function readiness(req: Request, res: Response): Promise<void> {
       };
       checks.auditProtection = auditProtection;
       res.locals.auditProtection = auditProtection;
+    } finally {
+      databaseCheckDurationMs = boundedDurationMs(performance.now() - databaseCheckStartedAt);
     }
 
     // This is a credential-configuration signal, not a remote provider probe.
@@ -122,7 +162,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
       ? { status: "configured" }
       : { status: "not_configured", detail: "ai_provider_not_configured" };
     if (aiConfigured && process.env.LOCAL_AI_BASE_URL) {
+      const localModelProbeStartedAt = performance.now();
       const probeStatus = await probeLocalModelHost();
+      localModelProbeDurationMs = boundedDurationMs(performance.now() - localModelProbeStartedAt);
       if (probeStatus !== "ok") {
         checks.dependencies = {
           status: "error",
@@ -134,9 +176,17 @@ async function readiness(req: Request, res: Response): Promise<void> {
         };
       }
     }
-    const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
-    const scheduledEvaluationQueue = getScheduledEvaluationQueueDiagnostics();
-    const syncOutboxLag = getSyncOutboxLagDiagnostics();
+    const optionalDiagnosticsStartedAt = performance.now();
+    const {
+      backgroundOperationDiagnostics,
+      cacheMaintenance,
+      scheduledEvaluationQueue,
+      syncOutboxLag,
+    } = await readSharedReadinessDiagnostics();
+    res.locals.cacheMaintenanceDiagnostics = cacheMaintenance;
+    optionalDiagnosticsDurationMs = boundedDurationMs(
+      performance.now() - optionalDiagnosticsStartedAt,
+    );
     const backgroundOperationsWarning = backgroundOperationsDegraded(backgroundOperationDiagnostics);
     const scheduledQueueUnavailable = scheduledEvaluationQueue.sampleAvailability === "unavailable";
     checks.backgroundWorkers = backgroundOperationsWarning || scheduledQueueUnavailable ||
@@ -170,7 +220,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
   const diagnostics =
     startup.phase === "ready"
       ? {
-        cacheMaintenance: await getCacheMaintenanceDiagnostics(),
+        cacheMaintenance: res.locals.cacheMaintenanceDiagnostics,
         auditProtection: res.locals.auditProtection,
         backgroundOperations: res.locals.backgroundOperationDiagnostics,
         scheduledEvaluationQueue: res.locals.scheduledEvaluationQueue,
@@ -182,6 +232,12 @@ async function readiness(req: Request, res: Response): Promise<void> {
       event: "health_check",
       correlationId,
       probe: "readiness",
+      durationMs: boundedDurationMs(performance.now() - readinessStartedAt),
+      stageDurationsMs: {
+        ...(databaseCheckDurationMs === undefined ? {} : { databaseCheck: databaseCheckDurationMs }),
+        ...(optionalDiagnosticsDurationMs === undefined ? {} : { optionalDiagnostics: optionalDiagnosticsDurationMs }),
+        ...(localModelProbeDurationMs === undefined ? {} : { localModelProbe: localModelProbeDurationMs }),
+      },
       outcome: coreReady ? "success" : "degraded",
       checks: flatChecks,
       capabilities: { ai: capabilities.ai.status },

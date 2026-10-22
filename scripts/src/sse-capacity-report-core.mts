@@ -56,6 +56,8 @@ type CapacitySample = {
     superuserReservedSlots?: number;
     roleReservedSlots?: number;
     serverClientBackends?: number;
+    activeWaitingBackends?: number;
+    lockWaitingBackends?: number;
   };
 };
 
@@ -271,6 +273,22 @@ function parseCapacitySample(value: JsonRecord): CapacitySample {
     sample.database.serverClientBackends = safeCount(
       database.serverClientBackends, "database client backends",
     );
+    const activeWaitingBackends = nullableCount(
+      database.activeWaitingBackends, "active waiting backends",
+    );
+    const lockWaitingBackends = nullableCount(
+      database.lockWaitingBackends, "lock-waiting backends",
+    );
+    if ((activeWaitingBackends === null) !== (lockWaitingBackends === null)) {
+      throw new Error("Capacity sample has incomplete wait-event counts.");
+    }
+    if (activeWaitingBackends !== null && lockWaitingBackends !== null) {
+      if (lockWaitingBackends > activeWaitingBackends) {
+        throw new Error("Capacity sample wait-event counts are inconsistent.");
+      }
+      sample.database.activeWaitingBackends = activeWaitingBackends;
+      sample.database.lockWaitingBackends = lockWaitingBackends;
+    }
   }
   return sample;
 }
@@ -451,6 +469,19 @@ export function buildSseCapacityReport(input: {
   const poolWaiters = samples.filter((sample) => sample.pool.waiting > 0).length;
   const maxPoolWaiters = samples.length
     ? Math.max(...samples.map((sample) => sample.pool.waiting)) : null;
+  const waitEventSamples = observed.filter((sample) =>
+    sample.database.activeWaitingBackends !== undefined &&
+    sample.database.lockWaitingBackends !== undefined);
+  const samplesWithActiveWaiters = waitEventSamples.filter((sample) =>
+    sample.database.activeWaitingBackends! > 0).length;
+  const maximumActiveWaiters = waitEventSamples.length
+    ? Math.max(...waitEventSamples.map((sample) => sample.database.activeWaitingBackends!))
+    : null;
+  const samplesWithLockWaiters = waitEventSamples.filter((sample) =>
+    sample.database.lockWaitingBackends! > 0).length;
+  const maximumLockWaiters = waitEventSamples.length
+    ? Math.max(...waitEventSamples.map((sample) => sample.database.lockWaitingBackends!))
+    : null;
   const configuredMaximumApiProcesses =
     configuredMaximumMachines !== null && platform.apiProcessesPerMachine !== null
       ? configuredMaximumMachines * platform.apiProcessesPerMachine : null;
@@ -604,6 +635,13 @@ export function buildSseCapacityReport(input: {
       poolMaximumConsistent: poolMaximums.size === 1,
       samplesWithPoolWaiters: poolWaiters,
       maximumPoolWaiters: maxPoolWaiters,
+      postgresWaitEvents: {
+        sampleCount: waitEventSamples.length,
+        samplesWithActiveWaiters,
+        maximumActiveWaiters,
+        samplesWithLockWaiters,
+        maximumLockWaiters,
+      },
       postgresMaximumConnections: maxConnections,
       postgresOrdinarySlotsAfterKnownReservations: postgresOrdinarySlots,
       sampledPeakDatabaseClientBackends: sampledPeakClients,

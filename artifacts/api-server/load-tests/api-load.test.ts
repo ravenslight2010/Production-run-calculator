@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express, { type Express } from "express";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { performance } from "node:perf_hooks";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { signLegacyTokenForTests } from "../src/lib/auth";
+import { collectDatabaseCapacity } from "../src/lib/databaseCapacity";
 
 type DbModule = typeof import("@workspace/db");
 type ExpressRouter = typeof import("../src/routes/index");
@@ -27,6 +29,7 @@ let peakConcurrentRequests = 0;
 
 const MAX_CLIENTS = 4;
 const ROUNDS = 4;
+const READINESS_PROBES_PER_ROUND = 4;
 const MAX_CONCURRENT_REQUESTS = 12;
 const MAX_SYNC_WRITE_ATTEMPTS_PER_RUN = MAX_CLIENTS;
 const MAX_TOTAL_REQUESTS =
@@ -34,7 +37,8 @@ const MAX_TOTAL_REQUESTS =
   + ROUNDS * 2
   + 3
   + MAX_CLIENTS * ROUNDS * 2
-  + MAX_CLIENTS * ROUNDS;
+  + MAX_CLIENTS * ROUNDS
+  + READINESS_PROBES_PER_ROUND * ROUNDS;
 const REQUEST_TIMEOUT_MS = 10_000;
 const DATE = "2032-04-09";
 const SCHEDULED_DATE = "2032-04-10";
@@ -53,6 +57,10 @@ const metrics = {
   consumeRequests: 0,
   adjustmentRequests: 0,
   verificationRequests: 0,
+  healthProbeCount: 0,
+  healthProbeElapsedMs: 0,
+  healthProbeP95Ms: 0,
+  maxPoolWaitingCount: 0,
   totalRequests: 0,
   peakConcurrentRequests: 0,
   syncElapsedMs: 0,
@@ -134,6 +142,17 @@ async function requestJson(
   options: { method?: string; body?: unknown; manager?: boolean } = {},
 ): Promise<unknown> {
   return (await requestApi(path, options)).body;
+}
+
+async function probeReadiness(durations: number[]): Promise<void> {
+  const startedAt = performance.now();
+  try {
+    const result = await requestJson("/api/readyz") as { status?: string };
+    expect(result.status).toBe("ok");
+    metrics.healthProbeCount += 1;
+  } finally {
+    durations.push(Math.max(0, performance.now() - startedAt));
+  }
 }
 
 function buildRunPayload(
@@ -305,7 +324,8 @@ async function writeMetrics(): Promise<void> {
     + metrics.syncSnapshotReads
     + metrics.consumeRequests
     + metrics.adjustmentRequests
-    + metrics.verificationRequests;
+    + metrics.verificationRequests
+    + metrics.healthProbeCount;
   await mkdir(dirname(METRICS_PATH), { recursive: true });
   await writeFile(METRICS_PATH, `${JSON.stringify(metrics, null, 2)}\n`, {
     encoding: "utf8",
@@ -387,6 +407,10 @@ afterAll(async () => {
 describe("bounded API application workload against disposable PostgreSQL", () => {
   it("preserves live and scheduled sync data while inventory mutations remain consistent", async () => {
     workloadStartedAt = Date.now();
+    const healthProbeDurations: number[] = [];
+    const poolWaitSampler = setInterval(() => {
+      metrics.maxPoolWaitingCount = Math.max(metrics.maxPoolWaitingCount, pool.waitingCount);
+    }, 5);
     try {
       const syncStartedAt = Date.now();
       for (let round = 0; round < ROUNDS; round += 1) {
@@ -394,28 +418,44 @@ describe("bounded API application workload against disposable PostgreSQL", () =>
           readSyncSnapshot(DATE),
           readSyncSnapshot(SCHEDULED_DATE),
         ]);
-        await Promise.all(
-          Array.from({ length: MAX_CLIENTS }, (_, client) =>
-            Promise.all([
-              writeSyncRun(
-                DATE,
-                `api-load-live-${client}-${round}`,
-                client,
-                round,
-                liveSnapshotId,
-              ),
-              writeSyncRun(
-                SCHEDULED_DATE,
-                `api-load-scheduled-${client}-${round}`,
-                client,
-                round,
-                scheduledSnapshotId,
-              ),
-            ]),
+        await Promise.all([
+          Promise.all(
+            Array.from({ length: MAX_CLIENTS }, (_, client) =>
+              Promise.all([
+                writeSyncRun(
+                  DATE,
+                  `api-load-live-${client}-${round}`,
+                  client,
+                  round,
+                  liveSnapshotId,
+                ),
+                writeSyncRun(
+                  SCHEDULED_DATE,
+                  `api-load-scheduled-${client}-${round}`,
+                  client,
+                  round,
+                  scheduledSnapshotId,
+                ),
+              ]),
+            ),
           ),
-        );
+          Promise.all(
+            Array.from({ length: READINESS_PROBES_PER_ROUND }, () =>
+              probeReadiness(healthProbeDurations),
+            ),
+          ),
+        ]);
       }
       metrics.syncElapsedMs = Date.now() - syncStartedAt;
+      const sortedHealthProbeDurations = [...healthProbeDurations].sort((a, b) => a - b);
+      metrics.healthProbeElapsedMs = healthProbeDurations.reduce((sum, duration) => sum + duration, 0);
+      metrics.healthProbeP95Ms = Math.ceil(
+        sortedHealthProbeDurations.length * 0.95,
+      ) > 0
+        ? sortedHealthProbeDurations[
+          Math.min(sortedHealthProbeDurations.length - 1, Math.ceil(sortedHealthProbeDurations.length * 0.95) - 1)
+        ]!
+        : 0;
 
       const [live, scheduled, scheduledList] = await Promise.all([
         requestJson(`/api/sync/today?today=${DATE}`),
@@ -512,7 +552,8 @@ describe("bounded API application workload against disposable PostgreSQL", () =>
         + metrics.syncSnapshotReads
         + metrics.consumeRequests
         + metrics.adjustmentRequests
-        + metrics.verificationRequests;
+        + metrics.verificationRequests
+        + metrics.healthProbeCount;
       expect(metrics.syncWrites).toBe(MAX_CLIENTS * ROUNDS * 2);
       expect(metrics.syncWriteAttempts).toBeLessThanOrEqual(
         MAX_CLIENTS * ROUNDS * 2 * MAX_SYNC_WRITE_ATTEMPTS_PER_RUN,
@@ -524,15 +565,66 @@ describe("bounded API application workload against disposable PostgreSQL", () =>
       metrics.assertionFailures = 1;
       throw error;
     } finally {
+      clearInterval(poolWaitSampler);
       metrics.peakConcurrentRequests = peakConcurrentRequests;
       metrics.totalRequests =
         metrics.syncWriteAttempts
         + metrics.syncSnapshotReads
         + metrics.consumeRequests
         + metrics.adjustmentRequests
-        + metrics.verificationRequests;
+        + metrics.verificationRequests
+        + metrics.healthProbeCount;
       metrics.durationMs = Math.max(0, Date.now() - workloadStartedAt);
       await writeMetrics();
     }
   }, 180_000);
+
+  it("attributes a controlled PostgreSQL lock wait without exposing query text", async () => {
+    const blocker = await pool.connect();
+    const waiter = await pool.connect();
+    const lockKey = "3463202610";
+    let lockAcquired = false;
+    let waitingQuery: Promise<unknown> | undefined;
+
+    try {
+      await blocker.query("SELECT pg_advisory_lock($1::bigint)", [lockKey]);
+      lockAcquired = true;
+      waitingQuery = waiter.query("SELECT pg_advisory_lock($1::bigint)", [lockKey]);
+      void waitingQuery.catch(() => undefined);
+
+      const deadline = Date.now() + 2_500;
+      let measurement: Awaited<ReturnType<typeof collectDatabaseCapacity>> | undefined;
+      while (Date.now() < deadline) {
+        measurement = await collectDatabaseCapacity(pool);
+        if (
+          measurement.status === "observed" &&
+          measurement.lockWaitingBackends >= 1 &&
+          measurement.activeWaitingBackends >= 1
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(measurement).toMatchObject({ status: "observed" });
+      expect(measurement?.activeWaitingBackends).toBeGreaterThanOrEqual(1);
+      expect(measurement?.lockWaitingBackends).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(measurement)).not.toMatch(/pg_advisory_lock|3463202610|queryText|pid/i);
+    } finally {
+      try {
+        if (lockAcquired) {
+          await blocker.query("SELECT pg_advisory_unlock($1::bigint)", [lockKey]);
+        }
+      } finally {
+        try {
+          if (waitingQuery) await waitingQuery;
+        } finally {
+          waiter.release();
+          blocker.release();
+        }
+      }
+    }
+
+    expect(pool.waitingCount).toBe(0);
+  }, 15_000);
 });

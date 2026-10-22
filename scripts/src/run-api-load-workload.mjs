@@ -27,7 +27,8 @@ const MAX_TOTAL_REQUESTS =
   + MAX_ROUNDS * 2
   + 3
   + MAX_CLIENTS * MAX_ROUNDS * 2
-  + MAX_CLIENTS * MAX_ROUNDS;
+  + MAX_CLIENTS * MAX_ROUNDS
+  + MAX_ROUNDS * 4;
 
 let activeChild;
 let receivedSignal;
@@ -123,6 +124,10 @@ function parseMetrics(value) {
     "consumeRequests",
     "adjustmentRequests",
     "verificationRequests",
+    "healthProbeCount",
+    "healthProbeElapsedMs",
+    "healthProbeP95Ms",
+    "maxPoolWaitingCount",
     "totalRequests",
     "peakConcurrentRequests",
     "syncElapsedMs",
@@ -147,7 +152,17 @@ function parseMetrics(value) {
     || value.consumeRequests !== MAX_CLIENTS * MAX_ROUNDS * 2
     || value.adjustmentRequests !== MAX_CLIENTS * MAX_ROUNDS
     || value.verificationRequests !== 3
-    || value.totalRequests !== value.syncWriteAttempts + value.syncSnapshotReads + value.consumeRequests + value.adjustmentRequests + value.verificationRequests
+    || value.healthProbeCount !== MAX_ROUNDS * 4
+    || !Number.isFinite(value.healthProbeElapsedMs)
+    || value.healthProbeElapsedMs < 0
+    || value.healthProbeElapsedMs > MAX_ROUNDS * 4 * TEST_TIMEOUT_MS
+    || !Number.isFinite(value.healthProbeP95Ms)
+    || value.healthProbeP95Ms < 0
+    || value.healthProbeP95Ms > 10_000
+    || !Number.isInteger(value.maxPoolWaitingCount)
+    || value.maxPoolWaitingCount < 0
+    || value.maxPoolWaitingCount > MAX_CONCURRENT_REQUESTS
+    || value.totalRequests !== value.syncWriteAttempts + value.syncSnapshotReads + value.consumeRequests + value.adjustmentRequests + value.verificationRequests + value.healthProbeCount
     || value.totalRequests > MAX_TOTAL_REQUESTS
     || !Number.isInteger(value.peakConcurrentRequests)
     || value.peakConcurrentRequests < 1
@@ -198,6 +213,10 @@ async function writeResult({ startedAt, revision, status, failureKind, metrics }
           consumeRequests: metrics.consumeRequests,
           adjustmentRequests: metrics.adjustmentRequests,
           verificationRequests: metrics.verificationRequests,
+          healthProbeCount: metrics.healthProbeCount,
+          healthProbeElapsedMs: Math.round(metrics.healthProbeElapsedMs),
+          healthProbeP95Ms: Math.round(metrics.healthProbeP95Ms),
+          maxPoolWaitingCount: metrics.maxPoolWaitingCount,
           totalRequests: metrics.totalRequests,
           peakConcurrentRequests: metrics.peakConcurrentRequests,
           syncElapsedMs: Math.round(metrics.syncElapsedMs),

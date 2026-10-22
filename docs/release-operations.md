@@ -154,8 +154,10 @@ background-worker warnings remain warnings and do not fail core readiness.
 ### Automatic capacity report
 
 The offline report generator summarizes allowlisted `database_capacity_sample`
-JSONL records and a small Replit-metrics JSON file. It performs no database
-queries or writes and does not call a Replit metrics API. Copy
+JSONL records, including bounded PostgreSQL active/lock-wait counts when present,
+and a small Replit-metrics JSON file. Older samples without wait counts remain
+unknown for that signal. It performs no database queries or writes and does not
+call a Replit metrics API. Copy
 [`sse-capacity-platform-metrics.template.json`](evidence/sse-capacity-platform-metrics.template.json),
 set both files to the same representative monitoring window, and supply:
 
