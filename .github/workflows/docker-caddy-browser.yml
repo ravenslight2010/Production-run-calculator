@@ -25,6 +25,7 @@ on:
       - scripts/src/finalize-build-identity.mjs
       - scripts/src/prepare-publish-source.mjs
       - scripts/src/run-docker-caddy-browser-smoke.mjs
+      - scripts/src/restore-reviewed-build-inputs*
   pull_request:
     paths:
       - .dockerignore
@@ -47,6 +48,7 @@ on:
       - scripts/src/finalize-build-identity.mjs
       - scripts/src/prepare-publish-source.mjs
       - scripts/src/run-docker-caddy-browser-smoke.mjs
+      - scripts/src/restore-reviewed-build-inputs*
 
 permissions:
   contents: read
@@ -56,8 +58,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  input-contract:
+    name: Secret-free reviewed-input contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+      - name: Test protected-input validation and workflow boundary
+        run: node --test scripts/src/restore-reviewed-build-inputs.test.mjs
+
   docker-caddy-browser:
     name: Chromium and WebKit across desktop, phone, and tablet
+    needs: input-contract
+    # The report is operational data, not a public/fork PR fixture. Only reviewed
+    # main-branch code may receive it. PRs still run the secret-free contract.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: docker-caddy-reviewed-inputs
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -81,6 +106,11 @@ jobs:
       - name: Confirm Docker Compose is available
         run: docker compose version
 
+      - name: Restore hash-pinned reviewed build inputs
+        env:
+          SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
+        run: node scripts/src/restore-reviewed-build-inputs.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -95,3 +125,7 @@ jobs:
             exit 1
           fi
           PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$chromium_path" pnpm --filter @workspace/run-calculator run test:e2e:docker-caddy
+
+      - name: Remove materialized reviewed inputs
+        if: always()
+        run: node scripts/src/restore-reviewed-build-inputs.mjs --cleanup

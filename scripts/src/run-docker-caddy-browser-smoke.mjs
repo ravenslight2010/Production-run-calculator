@@ -15,6 +15,7 @@ import https from "node:https";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const calculatorDir = path.join(repoRoot, "artifacts/run-calculator");
+const overallStartedAt = performance.now();
 const tempDir = mkdtempSync(path.join(tmpdir(), "docker-caddy-browser-"));
 const envPath = path.join(tempDir, "compose.env");
 const composePath = path.join(tempDir, "compose.yml");
@@ -23,6 +24,11 @@ const startupTimeoutMs = 5 * 60_000;
 
 let composeCreated = false;
 let cleanupStarted = false;
+
+function reportTiming(label, startedAt) {
+  const seconds = (performance.now() - startedAt) / 1_000;
+  console.log(`TIMING ${label}: ${seconds.toFixed(1)}s`);
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -97,6 +103,7 @@ function writeIsolatedCompose(httpPort, httpsPort, databasePort) {
       "    healthcheck:\n      disable: true",
     ],
     ["condition: service_healthy", "condition: service_started"],
+    ["target: api-migrate", "target: api-migrate-smoke"],
     ['- "80:80"', `- "127.0.0.1:${httpPort}:80"`],
     ['- "443:443"', `- "127.0.0.1:${httpsPort}:443"`],
   ];
@@ -202,6 +209,7 @@ async function waitForReady(url) {
 function cleanup() {
   if (cleanupStarted) return;
   cleanupStarted = true;
+  const cleanupStartedAt = performance.now();
   if (composeCreated) {
     try {
       compose(["down", "--volumes", "--remove-orphans"], { stdio: "inherit" });
@@ -213,6 +221,8 @@ function cleanup() {
     }
   }
   rmSync(tempDir, { recursive: true, force: true });
+  reportTiming("cleanup", cleanupStartedAt);
+  reportTiming("total", overallStartedAt);
 }
 
 process.once("SIGINT", () => {
@@ -225,12 +235,14 @@ process.once("SIGTERM", () => {
 });
 
 try {
+  const preflightStartedAt = performance.now();
   const preflight = run(
     "node",
     ["e2e/docker-caddy-browser-preflight.mjs"],
     { cwd: calculatorDir, stdio: "pipe" },
   );
   console.log(preflight.trim());
+  reportTiming("browser preflight", preflightStartedAt);
   const availableMatch = preflight.match(/^AVAILABLE_ENGINES=(.*)$/m);
   const blockedMatch = preflight.match(/^BLOCKED_ENGINES=(.*)$/m);
   const availableEngines = (availableMatch?.[1] ?? "")
@@ -254,18 +266,52 @@ try {
     writeIsolatedEnvironment();
     writeIsolatedCompose(httpPort, httpsPort, databasePort);
 
+    const composeConfigStartedAt = performance.now();
     compose(["config", "--quiet"], { stdio: "inherit" });
+    reportTiming("isolated Compose validation", composeConfigStartedAt);
     composeCreated = true;
+
+    const databaseStartedAt = performance.now();
     console.log("Starting isolated PostgreSQL before the Docker/Caddy application.");
     compose(["up", "--detach", "db", "caddy-storage-init"], { stdio: "inherit" });
     await waitForDatabase(databasePort);
     console.log("PASS isolated PostgreSQL accepts a host TCP connection.");
+    reportTiming("database and storage-helper startup", databaseStartedAt);
 
-    console.log("Building and starting the isolated migration, API, and Docker/Caddy services.");
-    compose(["up", "--detach", "--build"], { stdio: "inherit" });
+    const buildStartedAt = performance.now();
+    console.log("Building the isolated migration, API, and Docker/Caddy images.");
+    if (process.env.DOCKER_CADDY_NO_CACHE === "1") {
+      console.log(
+        "Cold migration-image measurement: rebuild the test-only migration image without cache; API and web builds use normal caching and still build on cache misses.",
+      );
+      compose(["build", "--no-cache", "migrate"], { stdio: "inherit" });
+      compose(["build", "api", "web"], { stdio: "inherit" });
+    } else {
+      compose(["build"], { stdio: "inherit" });
+    }
+    reportTiming("Docker image build and export", buildStartedAt);
+
+    const migrationStartedAt = performance.now();
+    console.log("Applying the real database migrations to the disposable PostgreSQL database.");
+    compose(
+      ["up", "--exit-code-from", "migrate", "migrate"],
+      { stdio: "inherit" },
+    );
+    console.log("PASS disposable PostgreSQL migrations completed successfully.");
+    reportTiming("database migration", migrationStartedAt);
+
+    const serviceStartupStartedAt = performance.now();
+    console.log("Starting the isolated API and Docker/Caddy services.");
+    compose(["up", "--detach", "--no-deps", "api", "web"], {
+      stdio: "inherit",
+    });
+    reportTiming("API and Docker/Caddy service startup", serviceStartupStartedAt);
+
     const baseURL = `https://localhost:${httpsPort}`;
+    const readinessStartedAt = performance.now();
     await waitForReady(`${baseURL}/api/readyz`);
     console.log(`PASS Docker/Caddy HTTPS readiness: ${baseURL}/api/readyz`);
+    reportTiming("HTTPS/API readiness", readinessStartedAt);
 
     const testEnv = {
       ...process.env,
@@ -276,6 +322,7 @@ try {
       ? `Available browser engines: ${availableEngines.join(", ")}.`
       : "Both supported browser engines are available.";
     console.log(selected);
+    const browserStartedAt = performance.now();
     run(
       "pnpm",
       [
@@ -286,6 +333,7 @@ try {
       ],
       { cwd: calculatorDir, env: testEnv, stdio: "inherit" },
     );
+    reportTiming("Chromium/WebKit browser matrix", browserStartedAt);
 
     if (blockedEngines.length > 0) {
       for (const engine of blockedEngines) {

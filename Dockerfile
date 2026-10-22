@@ -117,6 +117,45 @@ FROM builder AS api-migrate-runtime
 RUN rm -rf /app/migration \
   && CI=true pnpm --filter @workspace/db deploy --legacy /app/migration
 
+########## api-migrate-smoke-builder: isolated migration package build ##########
+# The browser smoke only needs @workspace/db and its workspace dependency. Keep
+# this test-only builder off the full application builder path so cold smoke
+# runs do not install native build tools or build the web/API bundles first.
+FROM ${NODE_IMAGE} AS api-migrate-smoke-builder
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .nvmrc ./
+COPY lib/db/package.json ./lib/db/package.json
+COPY lib/factory-constants/package.json ./lib/factory-constants/package.json
+RUN set -eu; \
+  expected_node_version="$(tr -d '\r\n' < .nvmrc)"; \
+  actual_node_version="$(node --version | sed 's/^v//')"; \
+  if [ "$actual_node_version" != "$expected_node_version" ]; then \
+    echo "Docker migration Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2; \
+    exit 1; \
+  fi; \
+  pnpm_version="$(node -e 'const match = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(require("./package.json").packageManager ?? ""); if (!match) throw new Error("packageManager must pin pnpm exactly"); console.log(match[1]);')"; \
+  actual_pnpm_version="$(corepack pnpm --version)"; \
+  if [ "$actual_pnpm_version" != "$pnpm_version" ]; then \
+    echo "Docker migration pnpm version ${actual_pnpm_version} does not match packageManager (${pnpm_version})." >&2; \
+    exit 1; \
+  fi; \
+  corepack pnpm install --filter '@workspace/db...' --frozen-lockfile
+COPY lib/db ./lib/db
+COPY lib/factory-constants ./lib/factory-constants
+RUN CI=true corepack pnpm --filter @workspace/db deploy --legacy /app/migration
+
+########## api-migrate-smoke: slim image for the isolated Docker/Caddy browser check ##########
+# The smoke runner needs the same deployed migration package and protection
+# script as the API image, but not the full builder workspace carried by
+# api-migrate. Keep this target test-only; production Compose still uses
+# api-migrate.
+FROM ${NODE_IMAGE} AS api-migrate-smoke
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --chown=node:node --from=api-migrate-smoke-builder /app/migration ./migration
+USER node
+CMD ["sh", "-c", "cd /app/migration && node node_modules/drizzle-kit/bin.cjs push --force --config ./drizzle.config.ts && node ./migrations/apply-audit-log-protection.mjs"]
+
 ########## api-migrate: full workspace image for local/CI one-shot schema pushes ##########
 # Keep this target compatible with `pnpm --filter @workspace/db run push-force`.
 # It intentionally retains the source and development dependencies that the

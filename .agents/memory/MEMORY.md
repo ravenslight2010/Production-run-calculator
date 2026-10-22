@@ -146,7 +146,7 @@
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
 - [Prep mixes](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) — Hot Giardiniera Mix, Pineapples, Spinach are prep mixes; charge raw ingredients at prep, then use prepared stock and carry later.
-- [Docker browser smoke runtime](docker-browser-smoke-runtime.md) — keep Replit Docker DNS and healthcheck workarounds test-only; verify the app and API before browser checks.
+- [Smoke images/inputs](docker-caddy-smoke-image.md) + [runtime](docker-browser-smoke-runtime.md) — slim test-only migrations; protected CI inputs stay out of PRs; preserve real readiness and coverage.
 - [Release guide authority claims](release-guide-authority-claims.md) — check provider/action/live-target claims, preserving explicit negatives, examples, and historical context.
 - [Vitest hooks](vitest-hook-cleanup.md) + [Playwright 304s](playwright-304-responses.md) — avoid implicit cleanup returns; HTTP 304 cache hits are valid, but request failures remain fatal.
 - [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.
