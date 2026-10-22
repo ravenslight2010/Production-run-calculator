@@ -57,6 +57,8 @@ function createSourceFixture({
   packageSource,
   workspacePatterns = ["lib/*"],
   packageLocations = packageSource === undefined ? [] : ["lib/home-bridge"],
+  packageNames = {},
+  packageSources = {},
   packageExports,
   browserPackageSource,
   runWorkspaceList,
@@ -93,11 +95,14 @@ function createSourceFixture({
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
       JSON.stringify({
-        name: "@workspace/home-bridge",
+        name: packageNames[packageLocation] ?? "@workspace/home-bridge",
         exports: packageExports ?? { ".": "./src/index.ts" },
       }),
     );
-    fs.writeFileSync(path.join(packageRoot, "src/index.ts"), packageSource ?? "");
+    fs.writeFileSync(
+      path.join(packageRoot, "src/index.ts"),
+      packageSources[packageLocation] ?? packageSource ?? "",
+    );
     if (browserPackageSource !== undefined) {
       fs.writeFileSync(path.join(packageRoot, "browser.ts"), browserPackageSource);
     }
@@ -408,6 +413,46 @@ test("source boundary clearly rejects unresolved local workspace package names",
     assert.throws(
       () => checkHomeDeferredSourceBoundary(fixture),
       /Unable to find local workspace package "@workspace\/missing-package"/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary resolves a longer workspace package name without matching its prefix", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge-extra";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource:
+      'export { default as bridge } from "../../../src/components/SetupContent";',
+    packageLocations: ["lib/home-bridge", "lib/home-bridge-extra"],
+    packageNames: {
+      "lib/home-bridge-extra": "@workspace/home-bridge-extra",
+    },
+    packageSources: {
+      "lib/home-bridge-extra": "export const bridge = true;",
+    },
+  });
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary does not resolve an absent full workspace package name by prefix", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge-extra";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Unable to find local workspace package "@workspace\/home-bridge-extra"/,
     );
   } finally {
     fixture.cleanup();
