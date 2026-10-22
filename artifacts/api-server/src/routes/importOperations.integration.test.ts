@@ -30,6 +30,16 @@ const originalGoldRetentionApproved = process.env.IMPORT_GOLD_RETENTION_APPROVED
 const originalGoldLocalEnabled = process.env.IMPORT_GOLD_LOCAL_ENABLED;
 const originalGoldLocalBaseUrl = process.env.IMPORT_GOLD_LOCAL_BASE_URL;
 const sessionTokens = new Map<string, string>();
+type PreviewBody = {
+  expectedStateHash: string;
+  before: Record<string, Record<string, unknown>[]>;
+  after: Record<string, Record<string, unknown>[]>;
+  baseline: { status: string; operationId?: string; before: Record<string, Record<string, unknown>[]> };
+};
+type ReceiptBody = {
+  import: { summary: { appliedValues?: Record<string, Record<string, unknown>[]> } };
+  imports: Array<{ summary: { appliedValues?: Record<string, Record<string, unknown>[]> } }>;
+};
 
 beforeAll(async () => {
   originalUrl = process.env.DATABASE_URL;
@@ -134,6 +144,102 @@ async function apply(
 }
 
 describe("atomic import operations", () => {
+  it("previews the actual normalized write set without learning, applying or writing audit/stock", async () => {
+    const body = { ...change(), sourceKey: "synthetic-source" };
+    const response = await fetch(`${baseUrl}/api/import-operations/preview`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(200);
+    const preview = await response.json() as PreviewBody;
+    expect(preview.expectedStateHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(preview.before.mixes).toEqual([]);
+    expect(preview.after.mixes[0]).toMatchObject({ id: "mix-atomic", name: "Atomic Mix", batchSize: 1 });
+    expect(preview.baseline.status).toBe("unavailable");
+    expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+    expect(await db.select().from(tables.importOperationsTable)).toHaveLength(0);
+    expect(await db.select().from(tables.importHistoryTable)).toHaveLength(0);
+    expect(await db.select().from(tables.specImportAliasesTable)).toHaveLength(0);
+    expect(await db.select().from(tables.auditLogsTable)).toHaveLength(0);
+    const applied = await apply("reviewed-preview-apply", { ...body, expectedStateHash: preview.expectedStateHash });
+    expect(applied.status).toBe(200);
+    const operation = (await db.select().from(tables.importOperationsTable))[0];
+    expect((operation.afterSnapshot as Record<string, unknown[]>).mixes[0]).toMatchObject(preview.after.mixes[0]);
+  });
+
+  it("rejects a stale reviewed fingerprint without changing the peer's data", async () => {
+    expect((await apply("preview-peer-initial", change())).status).toBe(200);
+    const proposal = change();
+    proposal.changes.mixes.upsert[0].batchSize = 2;
+    const response = await fetch(`${baseUrl}/api/import-operations/preview`, {
+      method: "POST", headers: headers(), body: JSON.stringify(proposal),
+    });
+    const preview = await response.json() as PreviewBody;
+    const peer = change();
+    peer.changes.mixes.upsert[0].batchSize = 7;
+    expect((await apply("preview-peer-edit", peer)).status).toBe(200);
+    const rejected = await apply("preview-stale-review", { ...proposal, expectedStateHash: preview.expectedStateHash });
+    expect(rejected.status).toBe(409);
+    expect((await rejected.json() as { error: string }).error).toMatch(/changed|review/i);
+    expect((await db.select().from(tables.mixesTable))[0].batchSize).toBe(7);
+    expect(await db.select().from(tables.importOperationsTable).where(eq(tables.importOperationsTable.id, "preview-stale-review"))).toHaveLength(0);
+  });
+
+  it("selects only the last successful same-scope/source/type Apply and skips undone operations", async () => {
+    const body = { ...change(), sourceKey: "source-A" };
+    expect((await apply("preview-source-first", body)).status).toBe(200);
+    const second = { ...change(), sourceKey: "source-A" };
+    second.changes.mixes.upsert[0].batchSize = 3;
+    expect((await apply("preview-source-second", second)).status).toBe(200);
+    const undo = await fetch(`${baseUrl}/api/import-operations/preview-source-second/undo`, {
+      method: "POST", headers: headers(), body: JSON.stringify({ reason: "Synthetic review verification" }),
+    });
+    expect(undo.status).toBe(200);
+    expect((await apply("preview-sandbox-source", { ...change("sandbox-row"), sourceKey: "source-A" }, "sandbox")).status).toBe(200);
+    expect((await apply("preview-other-source", { ...change("other-row"), sourceKey: "source-B" })).status).toBe(200);
+    const response = await fetch(`${baseUrl}/api/import-operations/preview`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    const preview = await response.json() as PreviewBody;
+    expect(preview.baseline.operationId).toBe("preview-source-first");
+    expect(preview.baseline.before.mixes[0].batchSize).toBe(1);
+    expect(JSON.stringify(preview)).not.toContain("sandbox-row");
+    expect(JSON.stringify(preview)).not.toContain("other-row");
+  });
+
+  it("bounds preview requests and requires both importer and entity capabilities", async () => {
+    for (const [body, status] of [
+      [{ ...change(), changes: { unknown: { upsert: [] } } }, 400],
+      [{ ...change(), sourceKey: "x".repeat(301) }, 400],
+      [{ ...change(), changes: { mixes: { upsert: Array.from({ length: 501 }, () => ({ id: "x" })) } } }, 400],
+    ] as const) {
+      const response = await fetch(`${baseUrl}/api/import-operations/preview`, { method: "POST", headers: headers(), body: JSON.stringify(body) });
+      expect(response.status).toBe(status);
+    }
+    const denied = await fetch(`${baseUrl}/api/import-operations/preview`, { method: "POST", headers: headers("profiles"), body: JSON.stringify(change()) });
+    expect(denied.status).toBe(403);
+    const unauthenticated = await fetch(`${baseUrl}/api/import-operations/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(change()) });
+    expect(unauthenticated.status).toBe(401);
+  });
+
+  it("keeps bounded local applied-value receipts scoped and excludes source/formula fields", async () => {
+    const input = {
+      importType: "shipping", operationId: "preview-local-receipt", sourceKey: "guide-A", sourceLabel: "Synthetic guide",
+      status: "complete", summary: { appliedValues: { profiles: [{ key: "A", brand: "A", flavor: "", pizzasPerCase: 12 }] }, persistence: "local-verified" },
+    };
+    const saved = await fetch(`${baseUrl}/api/import-history`, { method: "POST", headers: headers(), body: JSON.stringify(input) });
+    expect(saved.status).toBe(201);
+    const rows = await fetch(`${baseUrl}/api/import-history?type=shipping&status=complete&sourceKey=guide-A`, { headers: headers() });
+    expect((await rows.json() as ReceiptBody).imports[0].summary.appliedValues?.profiles[0].pizzasPerCase).toBe(12);
+    const sandbox = await fetch(`${baseUrl}/api/import-history?type=shipping&sourceKey=guide-A`, { headers: headers("sandbox") });
+    expect((await sandbox.json() as ReceiptBody).imports).toEqual([]);
+    const otherSource = await fetch(`${baseUrl}/api/import-history?type=shipping&sourceKey=guide-B`, { headers: headers() });
+    expect((await otherSource.json() as ReceiptBody).imports).toEqual([]);
+    const unsafe = await fetch(`${baseUrl}/api/import-history`, { method: "POST", headers: headers(), body: JSON.stringify({
+      ...input, operationId: "preview-unsafe-receipt", summary: { appliedValues: { profiles: [{ key: "A", formula: "=SUM(B1:B9)" }] }, persistence: "local-verified" },
+    }) });
+    expect(unsafe.status).toBe(201);
+    expect((await unsafe.json() as ReceiptBody).import.summary.appliedValues).toBeUndefined();
+  });
   it("records value-free imported create, update, and delete events for cheese, dough, sauce, and mix recipes", async () => {
     const dough = {
       id: "import-audit-dough",

@@ -9,11 +9,13 @@ import type { AiRetentionReport } from './aiRetentionReport';
 import type { DataHealthFinding } from './dataHealthFinding';
 import type { ProfileDataHealthRepair } from './profileDataHealthRepair';
 import type { ProfileDataHealthWorkspaceCleanupHistory } from './profileDataHealthWorkspaceCleanupHistory';
+import type { ProfileDataHealthWorkspaceImportCoverage } from './profileDataHealthWorkspaceImportCoverage';
 import type { ProfileDataHealthWorkspaceRepairBatchesItem } from './profileDataHealthWorkspaceRepairBatchesItem';
 import type { ProfileDataHealthWorkspaceSummary } from './profileDataHealthWorkspaceSummary';
 import type { SourceLibraryReconciliationStatus } from './sourceLibraryReconciliationStatus';
 
 export interface ProfileDataHealthWorkspace {
+  importCoverage?: ProfileDataHealthWorkspaceImportCoverage;
   findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;

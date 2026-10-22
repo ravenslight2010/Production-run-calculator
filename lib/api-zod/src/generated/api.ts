@@ -390,6 +390,11 @@ export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchD
 export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemSourceNameMax = 256;
 export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemDifferingFieldsMax = 8;
 export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsMax = 10;
+export const getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageScannedMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageScannedMax = 200;
+export const getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageSourcesItemObservedRecordsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageSourcesItemObservedRecordsMax = 200;
+export const getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageSourcesMax = 7;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
@@ -460,6 +465,7 @@ export const applyScheduledJobCleanupPlanResponseDeletedCountMax = 50;
 export const applyScheduledJobCleanupPlanResponseCandidateIdsMax = 50;
 export const cancelServerJobResponseProgressMin = 0;
 export const cancelServerJobResponseProgressMax = 100;
+export const listImportHistoryQuerySourceKeyMax = 300;
 export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
 export const recordImportHistoryBodySummaryCountsMinOne = 0;
 export const recordImportHistoryResponseImportSummaryCountsMinOne = 0;
@@ -697,6 +703,13 @@ export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin =
 export const listImportGoldCasesQueryLimitDefault = 50;
 export const listImportGoldCasesQueryLimitMax = 100;
 export const scoreImportGoldCasesBodyCaseIdsMax = 3;
+export const previewImportOperationBodyImportTypeMax = 40;
+export const previewImportOperationBodySourceKeyMax = 300;
+export const previewImportOperationBodySourceLabelMax = 300;
+export const previewImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const previewImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const previewImportOperationBodySourceEvidenceSourceTextMax = 100000;
+export const previewImportOperationBodySourceEvidenceParseVersionMax = 24;
 export const applyImportOperationPathOperationIdMin = 16;
 export const applyImportOperationPathOperationIdMax = 120;
 export const applyImportOperationBodyImportTypeMax = 40;
@@ -6047,8 +6060,25 @@ export const GetPublishedSourceLibraryReconciliationDiagnosticsResponse = zod.ob
 
 
 
+
+
+
 export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "workspace": zod.object({
+  "importCoverage": zod.object({
+  "scanned": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageScannedMin).max(getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageScannedMax),
+  "truncated": zod.boolean(),
+  "limitation": zod.string(),
+  "detectors": zod.record(zod.string(), zod.unknown()),
+  "sources": zod.array(zod.object({
+  "importType": zod.enum(['spec', 'premix', 'cheese', 'shipping', 'sauce', 'dough', 'schedule']),
+  "status": zod.enum(['observed', 'missing-evidence']),
+  "lastSuccessfulAt": zod.number().nullable(),
+  "recognizedSource": zod.boolean(),
+  "recovery": zod.enum(['atomic-guarded-undo', 'local-or-sync-only']),
+  "observedRecords": zod.int().min(getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageSourcesItemObservedRecordsMin).max(getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageSourcesItemObservedRecordsMax)
+})).max(getProfileDataHealthWorkspaceResponseWorkspaceImportCoverageSourcesMax)
+}).optional(),
   "findings": zod.array(zod.object({
   "id": zod.string(),
   "category": zod.string(),
@@ -7005,7 +7035,11 @@ export const CancelServerJobResponse = zod.object({
 /**
  * @summary List recent workbook import review records
  */
+
+
+
 export const ListImportHistoryQueryParams = zod.object({
+  "sourceKey": zod.coerce.string().min(1).max(listImportHistoryQuerySourceKeyMax).optional().describe('Exact scoped source identity, bounded to 300 characters'),
   "type": zod.enum(['spec', 'premix', 'cheese', 'sauce', 'dough', 'schedule', 'shipping', 'recipe']).optional(),
   "status": zod.enum(['complete', 'partial', 'failed']).optional(),
   "customer": zod.coerce.string().optional()
@@ -7023,6 +7057,8 @@ export const ListImportHistoryResponse = zod.object({
   "customerScope": zod.string().nullish(),
   "status": zod.enum(['complete', 'partial', 'failed']),
   "summary": zod.looseObject({
+  "appliedValues": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.'),
+  "persistence": zod.enum(['local-verified', 'sync-acknowledged']).optional(),
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(listImportHistoryResponseImportsItemSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7052,6 +7088,8 @@ export const RecordImportHistoryBody = zod.object({
   "status": zod.enum(['complete', 'partial', 'failed']),
   "operationId": zod.string().describe('Client-generated idempotency key for safely retrying an audit write.'),
   "summary": zod.looseObject({
+  "appliedValues": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.'),
+  "persistence": zod.enum(['local-verified', 'sync-acknowledged']).optional(),
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryBodySummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -7074,6 +7112,8 @@ export const RecordImportHistoryResponse = zod.object({
   "customerScope": zod.string().nullish(),
   "status": zod.enum(['complete', 'partial', 'failed']),
   "summary": zod.looseObject({
+  "appliedValues": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.'),
+  "persistence": zod.enum(['local-verified', 'sync-acknowledged']).optional(),
   "phases": zod.record(zod.string(), zod.string()).optional(),
   "counts": zod.record(zod.string(), zod.int().min(recordImportHistoryResponseImportSummaryCountsMinOne)).optional(),
   "warnings": zod.array(zod.string()).optional(),
@@ -9174,6 +9214,50 @@ export const ScoreImportGoldCasesResponse = zod.object({
 })),
   "scoredCount": zod.int(),
   "errorCount": zod.int()
+})
+
+
+/**
+ * Read-only review of an explicit atomic import write set. Does not learn aliases, repair data, or change stock. Pass expectedStateHash to Apply to reject stale reviews.
+ * @summary Read affected current values and the last successful scoped source Apply
+ */
+
+
+
+
+
+
+
+export const PreviewImportOperationBody = zod.object({
+  "importType": zod.string().max(previewImportOperationBodyImportTypeMax),
+  "sourceKey": zod.string().max(previewImportOperationBodySourceKeyMax).nullish(),
+  "sourceLabel": zod.string().max(previewImportOperationBodySourceLabelMax),
+  "requestHash": zod.string().regex(previewImportOperationBodyRequestHashRegExp).nullish(),
+  "expectedStateHash": zod.string().regex(previewImportOperationBodyExpectedStateHashRegExp).nullish(),
+  "goldCapture": zod.object({
+  "input": zod.looseObject({
+
+})
+}).optional().describe('Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.'),
+  "sourceEvidence": zod.object({
+  "sourceText": zod.string().min(1).max(previewImportOperationBodySourceEvidenceSourceTextMax),
+  "parseVersion": zod.string().min(1).max(previewImportOperationBodySourceEvidenceParseVersionMax)
+}).optional().describe('Exact bounded source text retained privately with a live spec Apply.'),
+  "changes": zod.record(zod.string(), zod.unknown()).describe('Reviewed entity batches keyed by supported master-data domain.')
+})
+
+export const PreviewImportOperationResponse = zod.object({
+  "expectedStateHash": zod.string(),
+  "before": zod.record(zod.string(), zod.unknown()),
+  "after": zod.record(zod.string(), zod.unknown()),
+  "baseline": zod.object({
+  "status": zod.enum(['available', 'unavailable']),
+  "operationId": zod.string().optional(),
+  "appliedAt": zod.number().optional(),
+  "before": zod.record(zod.string(), zod.unknown()).optional(),
+  "after": zod.record(zod.string(), zod.unknown()).optional(),
+  "limitation": zod.string()
+})
 })
 
 

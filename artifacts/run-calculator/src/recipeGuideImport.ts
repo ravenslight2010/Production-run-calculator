@@ -22,6 +22,7 @@ import {
 import { gridSanityIssue } from "@workspace/spec-import";
 import { applyPackagingPatchToProfile, loadBrandFlavors, loadSpecImportKnown } from "./storage";
 import { readWorkbookGrids } from "./specImport";
+import { assertImportFileBytes } from "@workspace/spec-import/import-preflight";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,7 @@ async function readDocxText(buffer: ArrayBuffer): Promise<string> {
 
     const compressionMethod = view.getUint16(cdPos + 10, true);
     const compressedSize = view.getUint32(cdPos + 20, true);
+    const expandedSize = view.getUint32(cdPos + 24, true);
     const fileNameLen = view.getUint16(cdPos + 28, true);
     const extraLen = view.getUint16(cdPos + 30, true);
     const commentLen = view.getUint16(cdPos + 32, true);
@@ -81,10 +83,15 @@ async function readDocxText(buffer: ArrayBuffer): Promise<string> {
     const fileName = new TextDecoder().decode(bytes.slice(cdPos + 46, cdPos + 46 + fileNameLen));
 
     if (fileName === "word/document.xml") {
+      const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+      if (expandedSize > MAX_DOCUMENT_BYTES || localHeaderOffset + 30 > bytes.length) {
+        throw new Error("Sauce guide document is too large or has an invalid ZIP header. Split the guide or resave it as a valid .docx.");
+      }
       // Local file header: skip to data
       const lhFileNameLen = view.getUint16(localHeaderOffset + 26, true);
       const lhExtraLen = view.getUint16(localHeaderOffset + 28, true);
       const dataOffset = localHeaderOffset + 30 + lhFileNameLen + lhExtraLen;
+      if (dataOffset + compressedSize > bytes.length) throw new Error("Sauce guide document is truncated. Resave the .docx file.");
       const compressed = bytes.slice(dataOffset, dataOffset + compressedSize);
 
       let xml: string;
@@ -97,9 +104,15 @@ async function readDocxText(buffer: ArrayBuffer): Promise<string> {
         writer.write(compressed);
         writer.close();
         const chunks: Uint8Array[] = [];
+        let expandedBytes = 0;
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          expandedBytes += value.length;
+          if (expandedBytes > MAX_DOCUMENT_BYTES) {
+            await reader.cancel();
+            throw new Error("Sauce guide expands beyond the 5 MB text limit. Split the guide.");
+          }
           chunks.push(value);
         }
         const total = chunks.reduce((s, c) => s + c.length, 0);
@@ -158,6 +171,7 @@ export async function prepareSauceGuideImport(
   buffer: ArrayBuffer,
   extraSauceNames: string[] = [],
 ): Promise<SauceGuideImportPrepared> {
+  assertImportFileBytes(buffer.byteLength, "Sauce guide");
   const text = await readDocxText(buffer);
   const rows = parseSauceGuide(text);
   if (rows.length === 0) {

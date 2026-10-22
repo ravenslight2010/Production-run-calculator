@@ -4525,6 +4525,10 @@ paths:
       tags: [specImport]
       summary: List recent workbook import review records
       parameters:
+        - name: sourceKey
+          in: query
+          description: Exact scoped source identity, bounded to 300 characters
+          schema: { type: string, minLength: 1, maxLength: 300 }
         - name: type
           in: query
           schema: { type: string, enum: [spec, premix, cheese, sauce, dough, schedule, shipping, recipe] }
@@ -5872,6 +5876,31 @@ paths:
               schema: { $ref: "#/components/schemas/ImportGoldScoreResponse" }
         "403": { description: Manager capability required }
         "503": { description: Provider is not configured }
+  /import-operations/preview:
+    post:
+      operationId: previewImportOperation
+      tags: [imports]
+      summary: Read affected current values and the last successful scoped source Apply
+      description: Read-only review of an explicit atomic import write set. Does not learn aliases, repair data, or change stock. Pass expectedStateHash to Apply to reject stale reviews.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportOperationApplyInput"
+      responses:
+        "200":
+          description: Current proposal and bounded prior successful Apply evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportOperationPreview"
+        "400":
+          description: Invalid or oversized review
+        "401":
+          description: Sign-in required
+        "403":
+          description: Missing importer or entity capability
   /import-operations/{operationId}/apply:
     post:
       operationId: applyImportOperation
@@ -6288,6 +6317,37 @@ components:
         canonical: { type: integer, minimum: 0, maximum: 1000000 }
         stale: { type: integer, minimum: 0, maximum: 1000000 }
         nonCanonical: { type: integer, minimum: 0, maximum: 1000000 }
+    ImportOperationPreview:
+      type: object
+      required: [expectedStateHash, before, after, baseline]
+      properties:
+        expectedStateHash:
+          type: string
+        before:
+          type: object
+          additionalProperties: true
+        after:
+          type: object
+          additionalProperties: true
+        baseline:
+          type: object
+          required: [status, limitation]
+          properties:
+            status:
+              type: string
+              enum: [available, unavailable]
+            operationId:
+              type: string
+            appliedAt:
+              type: number
+            before:
+              type: object
+              additionalProperties: true
+            after:
+              type: object
+              additionalProperties: true
+            limitation:
+              type: string
     ImportOperationApplyInput:
       type: object
       required: [importType, sourceLabel, changes]
@@ -10391,6 +10451,13 @@ components:
       type: object
       additionalProperties: true
       properties:
+        appliedValues:
+          type: object
+          description: Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.
+          additionalProperties: true
+        persistence:
+          type: string
+          enum: [local-verified, sync-acknowledged]
         phases:
           type: object
           additionalProperties: { type: string }
@@ -10818,6 +10885,27 @@ components:
       type: object
       required: [findings, safeRepairs, summary, cleanupHistory, repairBatches, aiRetention, sourceReconciliation]
       properties:
+        importCoverage:
+          type: object
+          required: [scanned, truncated, limitation, sources, detectors]
+          properties:
+            scanned: { type: integer, minimum: 0, maximum: 200 }
+            truncated: { type: boolean }
+            limitation: { type: string }
+            detectors: { type: object, additionalProperties: true }
+            sources:
+              type: array
+              maxItems: 7
+              items:
+                type: object
+                required: [importType, status, lastSuccessfulAt, recognizedSource, recovery, observedRecords]
+                properties:
+                  importType: { type: string, enum: [spec, premix, cheese, shipping, sauce, dough, schedule] }
+                  status: { type: string, enum: [observed, missing-evidence] }
+                  lastSuccessfulAt: { type: number, nullable: true }
+                  recognizedSource: { type: boolean }
+                  recovery: { type: string, enum: [atomic-guarded-undo, local-or-sync-only] }
+                  observedRecords: { type: integer, minimum: 0, maximum: 200 }
         findings: { type: array, items: { $ref: "#/components/schemas/DataHealthFinding" } }
         safeRepairs: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthRepair" } }
         summary: { type: object, additionalProperties: { type: integer } }

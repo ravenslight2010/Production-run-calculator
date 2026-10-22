@@ -533,6 +533,38 @@ export interface SourceLibraryReconciliationDiagnostics {
   mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
 }
 
+export type ImportOperationPreviewBefore = { [key: string]: unknown };
+
+export type ImportOperationPreviewAfter = { [key: string]: unknown };
+
+export type ImportOperationPreviewBaselineStatus = typeof ImportOperationPreviewBaselineStatus[keyof typeof ImportOperationPreviewBaselineStatus];
+
+
+export const ImportOperationPreviewBaselineStatus = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type ImportOperationPreviewBaselineBefore = { [key: string]: unknown };
+
+export type ImportOperationPreviewBaselineAfter = { [key: string]: unknown };
+
+export type ImportOperationPreviewBaseline = {
+  status: ImportOperationPreviewBaselineStatus;
+  operationId?: string;
+  appliedAt?: number;
+  before?: ImportOperationPreviewBaselineBefore;
+  after?: ImportOperationPreviewBaselineAfter;
+  limitation: string;
+};
+
+export interface ImportOperationPreview {
+  expectedStateHash: string;
+  before: ImportOperationPreviewBefore;
+  after: ImportOperationPreviewAfter;
+  baseline: ImportOperationPreviewBaseline;
+}
+
 export type ImportOperationApplyInputGoldCaptureInput = { [key: string]: unknown };
 
 /**
@@ -5088,11 +5120,27 @@ export interface ImportAliasList {
   aliases: ImportAlias[];
 }
 
+/**
+ * Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.
+ */
+export type ImportHistorySummaryAppliedValues = { [key: string]: unknown };
+
+export type ImportHistorySummaryPersistence = typeof ImportHistorySummaryPersistence[keyof typeof ImportHistorySummaryPersistence];
+
+
+export const ImportHistorySummaryPersistence = {
+  'local-verified': 'local-verified',
+  'sync-acknowledged': 'sync-acknowledged',
+} as const;
+
 export type ImportHistorySummaryPhases = {[key: string]: string};
 
 export type ImportHistorySummaryCounts = {[key: string]: number};
 
 export interface ImportHistorySummary {
+  /** Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence. */
+  appliedValues?: ImportHistorySummaryAppliedValues;
+  persistence?: ImportHistorySummaryPersistence;
   phases?: ImportHistorySummaryPhases;
   counts?: ImportHistorySummaryCounts;
   warnings?: string[];
@@ -5442,6 +5490,64 @@ export interface ProfileDataHealthApplyResult {
   summary: ProfileDataHealthApplyResultSummary;
 }
 
+export type ProfileDataHealthWorkspaceImportCoverageDetectors = { [key: string]: unknown };
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType = typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType[keyof typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType];
+
+
+export const ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+  shipping: 'shipping',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+} as const;
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus = typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus[keyof typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus];
+
+
+export const ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus = {
+  observed: 'observed',
+  'missing-evidence': 'missing-evidence',
+} as const;
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery = typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery[keyof typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery];
+
+
+export const ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery = {
+  'atomic-guarded-undo': 'atomic-guarded-undo',
+  'local-or-sync-only': 'local-or-sync-only',
+} as const;
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItem = {
+  importType: ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType;
+  status: ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus;
+  /** @nullable */
+  lastSuccessfulAt: number | null;
+  recognizedSource: boolean;
+  recovery: ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery;
+  /**
+     * @minimum 0
+     * @maximum 200
+     */
+  observedRecords: number;
+};
+
+export type ProfileDataHealthWorkspaceImportCoverage = {
+  /**
+     * @minimum 0
+     * @maximum 200
+     */
+  scanned: number;
+  truncated: boolean;
+  limitation: string;
+  detectors: ProfileDataHealthWorkspaceImportCoverageDetectors;
+  /** @maxItems 7 */
+  sources: ProfileDataHealthWorkspaceImportCoverageSourcesItem[];
+};
+
 export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
 
 /**
@@ -5721,6 +5827,7 @@ export interface SourceLibraryReconciliationStatus {
 }
 
 export interface ProfileDataHealthWorkspace {
+  importCoverage?: ProfileDataHealthWorkspaceImportCoverage;
   findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
@@ -8485,6 +8592,12 @@ export type SavePremixSheet200 = SavedPremixSheetList & {
 };
 
 export type ListImportHistoryParams = {
+/**
+ * Exact scoped source identity, bounded to 300 characters
+ * @minLength 1
+ * @maxLength 300
+ */
+sourceKey?: string;
 type?: ListImportHistoryType;
 status?: ListImportHistoryStatus;
 customer?: string;

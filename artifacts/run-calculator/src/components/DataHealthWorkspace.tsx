@@ -177,6 +177,33 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
+        {workspace?.importCoverage && (
+          <section className="space-y-2 rounded-md border border-border p-3" aria-label="Cross-import health" data-testid="cross-import-health">
+            <h3 className="text-sm font-semibold">Cross-import health</h3>
+            <p className="text-xs text-muted-foreground">{workspace.importCoverage.limitation}</p>
+            <p className="text-xs">
+              {workspace.importCoverage.scanned} recent history records inspected
+              {workspace.importCoverage.truncated ? " · History coverage is truncated at 200 records." : "."}
+              {(workspace.importCoverage.detectors.findingsTruncated || workspace.importCoverage.detectors.payloadsTruncated ||
+                Object.values(workspace.importCoverage.detectors.tables ?? {}).some((table) => table.truncated)) &&
+                " Detector coverage is incomplete; absence of findings does not establish health."}
+            </p>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {workspace.importCoverage.sources.map((source) => (
+                <li key={source.importType} className="rounded border border-border p-2 text-xs">
+                  <span className="font-semibold capitalize">{source.importType}</span>
+                  <p>{source.status === "observed"
+                    ? `Successful history observed · ${source.lastSuccessfulAt ? new Date(source.lastSuccessfulAt).toLocaleString() : "date unavailable"}`
+                    : "Missing source evidence — not a confirmed defect"}</p>
+                  <p className="text-muted-foreground">{source.recovery === "atomic-guarded-undo" ? "Atomic Apply / guarded Undo" : "Local or per-day sync / no atomic Undo"}
+                    {" · "}{source.recognizedSource ? "Recognized source key" : "No successful source key observed"}</p>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">Required name-link, orphan-recipe and alias findings are in the existing list below. Valid direct ingredients and shared recipes are not missing-import defects.</p>
+            {onNavigate && <Button type="button" size="sm" variant="outline" onClick={() => onNavigate("import")}>Open import review and history</Button>}
+          </section>
+        )}
         <div data-testid="sync-health-sentinel" className="rounded border border-border/70 bg-muted/20 p-2.5 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>

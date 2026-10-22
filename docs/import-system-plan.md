@@ -1,7 +1,7 @@
 # Import System — Comprehensive Plan
 
-**Status:** Partial — history, source-versus-landed reporting, deterministic-first supported workbook parsing, and transactional apply/guarded undo for spec/premix/cheese are implemented
-**Updated:** 2026-10-08
+**Status:** Audited safety implementation integrated across seven importers. See [support, verification and explicit coverage limits](evidence/audited-import-safety.md). Batch Apply, templates, scheduling and QC remain separate work.
+**Updated:** 2026-10-22
 **Related:** [Idea backlog](idea-backlog.md#15-import-system-improvements), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 Spec, premix, and cheese now apply server-owned master-data changes through one operation identity and transaction. The server retains bounded before/after snapshots, returns a canonical result for idempotent retries, and permits undo only while affected rows still match that result. Saved review snapshots remain source-review artifacts, not rollback snapshots. Local-only shipping, sauce-guide, dough-guide, and schedule projections retain their existing sync boundaries.
@@ -32,18 +32,36 @@ Spec, premix, and cheese now apply server-owned master-data changes through one 
 - **Source-versus-landed report** — importer history reports source/landed counts and keeps non-comparable source-only or landed-only values explicit
 - **Deterministic-first supported workbook parsing** — supported layouts parse deterministically; unsupported/ambiguous sources remain explicit review/fallback cases
 
-### Remaining work (reconciled 2026-10-08)
+### Support and remaining work (reconciled 2026-10-22)
 
 1. **QC approval gate — gated** — owned by the QC department; do not build before QC Phase 1 prerequisites are resolved.
 2. **Atomic undo — complete for spec/premix/cheese only** — local-only guide and schedule projections retain separate recovery boundaries.
-3. **Universal structured preview diff — partial** — importer review and operation history exist; a consistent before/after factory-data diff across importers remains.
+3. **Structured preview diff — implemented with bounded authority** — all seven paths share the final review. Atomic, local profile and per-day sync guarantees remain distinct.
 4. **Batch import — partial** — spec multi-file parsing exists; mixed/all-importer batch application remains.
 5. **Template download — open** — no maintained template-download workflow for every importer.
-6. **Shared validation pre-check — partial** — individual guards exist; comprehensive importer preflight is not established.
+6. **Shared validation pre-check — implemented for bounded supported inputs** — recognized-table rules validate canonical headers/types; unfamiliar layouts retain format-specific parsing/review/fallback.
 7. **Import scheduling — deferred** — revisit only if a recurring source and approved workflow exist.
-8. **Cross-import health — partial** — spec/mix reconciliation exists; a unified health view across all importer types remains.
-9. **Import → inventory impact — open** — preview projected demand from reviewed recipe changes; do not mutate stock.
-10. **Re-import version diff — open** — source-keyed prior-versus-current changes are not shown.
+8. **Cross-import health — implemented, bounded and read-only** — existing profile/master/source findings plus seven-source history coverage and review navigation; missing evidence is not a confirmed defect.
+9. **Import → inventory impact — existing read-only support** — unchanged by this work; no stock writer or multi-profile projection is introduced here.
+10. **Re-import version diff — implemented with evidence limits** — successful applied business facts are compared separately from factory changes; missing legacy receipts and source-only facts are not guessed.
+
+### Importer support / recovery matrix
+
+| Importer | Current-state comparison | Successful source baseline | Apply / recovery authority |
+|---|---|---|---|
+| Spec | Normalized reviewed multi-entity write set; server affected-state hash | Same scoped type/source, latest retained successful non-undone operation | Transaction / original-ID retry / guarded Undo |
+| Premix | Same final review after inclusion/matching/prune choices | Same operation resolver | Transaction / original-ID retry / guarded Undo |
+| Cheese | Same final review after inclusion/matching choices | Same operation resolver | Transaction / original-ID retry / guarded Undo |
+| Shipping | Exact selected brand/flavor patches; device raw-profile/flavor-map recheck | New locally verified applied-value receipt; legacy unavailable | Existing local writes/queue/sync; no atomic Undo or remote-delivery assertion |
+| Sauce | Only commit-eligible rows and actual assignment/oz patches | New locally verified applied-value receipt; legacy unavailable | Same local-only boundary |
+| Dough | Only commit-eligible rows and actual dough-name patches | New locally verified applied-value receipt; legacy unavailable | Same local-only boundary |
+| Schedule | Appended/replaced run IDs, protected retained runs, explicit tombstones; editor-only identified | Acknowledged successful history, date-scoped applied values; legacy unavailable | Each day separately fenced; editor changes require Save; no atomic batch Undo |
+
+Source identity is the existing normalized filename-set key, scoped by facility and import type; renaming a source creates a different identity. New guide/schedule history retains only allowlisted applied business fields (500 rows / 100 KB), not workbook bytes, raw source cells, formulas, citations or full profiles. Local receipts are not atomic or remote-delivery proof. The newest successful legacy record is never silently replaced by an older comparable record. Source absence means “not included in this candidate,” not factory deletion.
+
+Bounds: 25 MB/file, 100 worksheets, 20,000 rows/sheet, 300 columns/sheet and 500,000 cells/workbook; spec multi-file sets additionally cap 100 files / 50 MB total. Sauce DOCX bounds expanded document text at 5 MB. Unknown layouts, blank values and unsupported packaging strings retain explicit review rather than a guessed canonical interpretation.
+
+The manager Data health workspace uses existing bounded reconcilers and adds up to 200 recent history records of source coverage. Valid shared recipes and direct ingredient slots do not require their own source workbook. Unreferenced recipe findings indicate missing reference evidence, not automatic deletion/repair authority.
 
 ---
 
@@ -72,19 +90,19 @@ Spec, premix, and cheese now apply server-owned master-data changes through one 
 - Guard: later edits to affected rows return a conflict and require manual review; unrelated edits do not block undo
 
 ### 3. Structured Preview Diff (new)
-**Status (2026-10-08): Partial.** Review steps, persisted source/landed reports, and scoped operation snapshots exist; one consistent before/after factory-data diff across importer types remains open.
+**Status (2026-10-22): Implemented.** The final shared review follows the original per-importer choices. Atomic proposals use the same normalization as Apply; local/sync reviews show their lower guarantees. Only actual delete instructions produce factory removals; repeated component rows retain identity and unknowns remain explicit.
 **What**: Before applying, show exactly what will change in the factory data.
 
 **View** (per change):
 ```
 CREATE  Brand "Bobo's" + flavor "Deluxe"  (new profile)
 UPDATE  Recipe "Deluxe Sauce" → sauce recipe rows (2 added, 1 changed)
-LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
+LINK    Sauce recipe "Deluxe" → "Shared Sauce" (was unlinked)
 ```
 
 **How**: Compare the "current factory state" vs. "post-import state" for each entity kind the importer touches. Reuse `savedSpecSheets`/profile snapshots + the change manifest.
 
-**Benefit**: QC review becomes a real diff review, not a "trust the parse" review.
+**Boundary**: This is human import review, not implementation or approval of the separately owned QC queue.
 
 ### 4. Batch Import (new)
 **Status (2026-10-08): Partial.** Spec multi-file parsing exists; a mixed/all-importer batch review and apply workflow does not.
@@ -108,7 +126,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 - Templates live server-side (`GET /api/import/templates/{type}`) so they never drift from the parser
 
 ### 6. Validation Rules Pre-Check (new)
-**Status:** Partial — importer-specific guards exist; shared preflight across supported files is not established.
+**Status:** Implemented with conservative format recognition and shared bounds, plus existing importer-specific rules. Unknown layouts do not inherit assumed canonical columns; blank amounts remain review-required unknowns, not inferred zero.
 **What**: Pre-flight validation before the AI parse even runs.
 
 **Examples**:
@@ -129,7 +147,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **Status**: Lower priority — requires auth/session handling for async apply. Keep as a "later" idea unless the facility has a recurring file source.
 
 ### 8. Cross-Importer Linking (new)
-**Status:** Partial — spec/mix reconciliation and name-link paths exist; a unified health view across all importer types remains.
+**Status:** Implemented in the existing manager Data health workspace: seven-source coverage, bounded existing profile/master/source findings, and navigation to review. Reads never repair records, learn aliases or write stock.
 **What**: One import informs another.
 
 **Examples**:
@@ -148,20 +166,22 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **Current scope**: In step 2 of the spec import review, show changed ingredient and packaging demand for the selected run's planned cases, plus shortages, untracked items, or unavailable stock. Other products in a multi-profile workbook are not projected. Missing run quantities or inventory data are identified rather than guessed. The preview does not reserve stock or write inventory/consumption records.
 
 ### 10. Data Versioning / Change Detection (new)
-**Status:** Open — no source-keyed prior-versus-current change report is established.
+**Status:** Implemented with explicit evidence/authority limits; see the support matrix.
 **What**: When a known sheet is re-imported, show what changed vs. the last time.
 
-**How**: Compare new parse vs. the previous snapshot for the same sourceKey:
+**How**: Compare reviewed candidate business values against the last successful Apply for the same scoped type/sourceKey, separately from current factory-state changes:
 - New products added
-- Products removed/merged
+- Previously included products absent from this candidate (source coverage change, not factory deletion)
 - Recipe weights changed
 - Packaging settings changed
 
-**Benefit**: "Re-importing this sheet will change 3 recipes and add 1 new flavor" — no silent overwrites.
+**Boundary**: Failed/undone atomic operations cannot become baselines. Review-only snapshots and counts cannot establish successful Apply facts. Missing legacy/over-limit baselines and local-versus-remote guarantees are visible.
 
 ---
 
-## Recommended Build Order
+## Historical build order and separate remaining ownership
+
+The audited implementation order was final structured proposal, shared preflight, unified health, then successful source comparison. The earlier phases below are retained as a roadmap, not a claim that their formerly open items remain unimplemented. Gold Lab capture/scoring is owned by #3406 and its approval/browser follow-ups by #3492/#3493; advisory Import QC Review Queue belongs to #3468. Learned-name cross-manager propagation belongs to #3439. No lifecycle or completion claim for those separate tasks is made here.
 
 ### Phase 1: Foundation (standalone — no QC dependency)
 1. Complete cell-source provenance tracked by active task #2854.
@@ -189,7 +209,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 
 | File | Purpose |
 |------|---------|
-| `artifacts/run-calculator/src/components/SpecImportDialog.tsx` | Spec importer (2017 lines) |
+| `artifacts/run-calculator/src/components/SpecImportDialog.tsx` | Spec importer |
 | `artifacts/run-calculator/src/components/PremixImportDialog.tsx` | Premix importer |
 | `artifacts/run-calculator/src/components/CheeseImportDialog.tsx` | Cheese importer |
 | `artifacts/run-calculator/src/components/ShippingImportDialog.tsx` | Shipping importer |
@@ -205,7 +225,15 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 | `lib/spec-reconcile/src/index.ts` | Spec reconcile (cross-import health) |
 | `lib/mix-reconcile/src/index.ts` | Mix reconcile (cross-import health) |
 | `artifacts/run-calculator/src/importAccess.ts` | Import capability gates |
-| `lib/db/src/schema/` | Import/audit tables (extend) |
+| `lib/db/src/schema/` | Existing import/audit storage; no schema addition for this work |
+| `lib/spec-import/src/importChanges.ts` | Pure structured current/source comparisons |
+| `lib/spec-import/src/importPreflight.ts` | Shared bounded format-aware preflight |
+| `lib/spec-import/src/importAppliedValues.ts` | Allowlisted applied business receipts; excludes source evidence |
+| `artifacts/run-calculator/src/components/ImportSafetyReviewHost.tsx` | Shared searchable final review |
+| `artifacts/run-calculator/src/importProfileReview.ts` | Exact local targets and stale/verification checks |
+| `artifacts/run-calculator/src/importScheduleReview.ts` | Per-day proposals and source comparison |
+| `artifacts/api-server/src/routes/importOperations.ts` | Read-only preview; existing transactional Apply/Undo |
+| `artifacts/api-server/src/routes/profileDataHealth.ts` | Existing scoped health workspace plus source coverage |
 
 ## New Database Tables / Fields
 **Historical design sketch only:** scoped import operation/history storage already exists for spec, premix, and cheese. Do not add these proposed tables/fields without checking current schema and an approved scope.
@@ -213,11 +241,17 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 - `import_undo_snapshots` table: snapshot_id, entity kind, before-state JSON, imported_by, created_at
 - (QC review queue reuses the QC dept tables/API)
 
-## API Routes to Add
+## Existing safety APIs and separately proposed routes
+- `POST /api/import-operations/preview` — normalized bounded proposal and scoped successful baseline; read-only.
+- `POST /api/import-operations/:operationId/apply` — existing atomic commit with reviewed affected-state hash.
+- `GET /api/profile-data/health-workspace` — existing manager-only read-only health workspace with source coverage.
+- `GET /api/import-history?type=...&sourceKey=...&status=complete` — bounded scoped source history.
+
+The remaining endpoints below are historical proposals, not implemented contracts of this task:
 - `GET /api/qc/import-reviews` — QC pending queue
 - `POST /api/qc/import-reviews/:id/approve` — verify
 - `POST /api/qc/import-reviews/:id/reject` — reject + rollback offer
 - Generic rollback is **not** an open feature for spec/premix/cheese; their guarded undo is implemented. Local-only guides and schedules retain separate recovery boundaries.
-- `GET /api/imports/:id/diff` — structured preview diff
+- Structured preview uses the existing operation boundary above rather than a separate generic diff endpoint.
 - `GET /api/import/templates/{type}` — download blank template
-- `POST /api/import/validate` — pre-flight validation
+- Shared file preflight runs locally before expensive parser/provider work; no unnecessary validation-upload endpoint was added.

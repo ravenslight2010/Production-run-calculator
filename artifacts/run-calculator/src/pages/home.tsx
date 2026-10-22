@@ -1,5 +1,8 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
 import { DEFAULT_RUN_TO_TIME } from "../runToTime";
+import { reviewProfileImport } from "../importProfileReview";
+import { ImportReviewCancelledError } from "../importSafetyReview";
+import { reviewScheduleImport, scheduleAppliedValues } from "../importScheduleReview";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -1808,6 +1811,8 @@ export default function Home() {
   }
   const premixImportOperationRef = useRef<string | null>(null);
   const cheeseImportOperationRef = useRef<string | null>(null);
+  const sauceGuideSourceKeyRef = useRef<string | undefined>(undefined);
+  const doughGuideSourceKeyRef = useRef<string | undefined>(undefined);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
   useEffect(() => {
     visibleTabScheduler.start();
@@ -6265,6 +6270,8 @@ export default function Home() {
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
+  const scheduleEditorReviewIdentityRef = useRef("");
+  scheduleEditorReviewIdentityRef.current = JSON.stringify([scheduleEditorRuns, scheduleEditorRunValues]);
   const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
   const [scheduleBreaksExpanded, setScheduleBreaksExpanded] = useState(false);
   const scheduleBreakSummary = useMemo(
@@ -13585,6 +13592,12 @@ export default function Home() {
       });
       specImportOperationRef.current = null;
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) {
+        specImportOperationRef.current = null;
+        setSpecImportError(null);
+        setSpecImportReviewNotice(null);
+        return;
+      }
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
         if (specImportRetryPending) {
           setSpecImportRetryBlocked(true);
@@ -13905,6 +13918,7 @@ export default function Home() {
         });
       }
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) return;
       void recordImportHistory({
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared?.sourceNames ?? []),
@@ -13972,7 +13986,11 @@ export default function Home() {
     }
     setShippingImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).shippingImport.commitShippingImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review shipping guide changes", rows, "shipping", deriveSourceKey(shippingImportFileNameRef.current ? [shippingImportFileNameRef.current] : []));
+      if (!reviewed) return;
+      const result = workflow.shippingImport.commitShippingImport(rows, acknowledged);
+      reviewed.verify();
       const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
       void recordImportHistory({
         importType: "shipping",
@@ -13980,6 +13998,7 @@ export default function Home() {
         sourceLabel: buildShippingGuideLabel(rows.length, shippingImportFileNameRef.current),
         status: shippingSkipped > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed brand links", commit: "committed profile patches" },
           source: { rows: rows.length, fields: rows.reduce((n, r) => n + Object.keys(r.patch).length, 0) },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -14056,6 +14075,7 @@ export default function Home() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    sauceGuideSourceKeyRef.current = deriveSourceKey([file.name]);
     const gen = ++sauceGuideImportGenRef.current;
     setSauceGuideImportPrepared(null);
     setSauceGuideImportError(null);
@@ -14094,12 +14114,20 @@ export default function Home() {
     }
     setSauceGuideImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review sauce guide changes", rows
+        .filter((row) => row.brand.trim() && row.recipeName.trim() && row.ozPerPizza > 0 && !(row.wasNullBrand && row.wasNullRecipe))
+        .map((row) => ({ ...row, patch: { frontlineRecipeName: row.recipeName.trim(), sauceOzPerPizza: row.ozPerPizza } })), "sauce", sauceGuideSourceKeyRef.current);
+      if (!reviewed) return;
+      const result = workflow.recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
+      reviewed.verify();
       void recordImportHistory({
         importType: "sauce",
+        sourceKey: sauceGuideSourceKeyRef.current,
         sourceLabel: "Sauce recipe guide",
         status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
           source: { rows: rows.length },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -14131,6 +14159,7 @@ export default function Home() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    doughGuideSourceKeyRef.current = deriveSourceKey([file.name]);
     const gen = ++doughGuideImportGenRef.current;
     setDoughGuideImportPrepared(null);
     setDoughGuideImportError(null);
@@ -14171,12 +14200,20 @@ export default function Home() {
     }
     setDoughGuideImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review dough guide changes", rows
+        .filter((row) => row.brand.trim() && row.doughRecipeName.trim() && !(row.wasNullBrand && row.wasNullRecipe))
+        .map((row) => ({ ...row, patch: { doughRecipeName: row.doughRecipeName.trim() } })), "dough", doughGuideSourceKeyRef.current);
+      if (!reviewed) return;
+      const result = workflow.recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
+      reviewed.verify();
       void recordImportHistory({
         importType: "dough",
+        sourceKey: doughGuideSourceKeyRef.current,
         sourceLabel: "Dough recipe guide",
         status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
           source: { rows: rows.length },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -14404,6 +14441,7 @@ export default function Home() {
       // recipes by name, and refresh pending runs + the open form.
       void propagateCheeseRecipeUpdates(result.saved);
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) return;
       void recordImportHistory({
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared?.sourceNames ?? []),
@@ -14453,8 +14491,6 @@ export default function Home() {
   }
 
   async function commitExcelImport(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const date = payload.date;
     // Fetch the existing day payload so we can append additively WITHOUT
     // dropping any existing run metadata (started/ended times, stoppages,
@@ -14505,6 +14541,19 @@ export default function Home() {
       deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
       undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
     };
+    const appliedValues = scheduleAppliedValues(date, payload.runs);
+    if (!await reviewScheduleImport(date,
+      { runs: existingRuns.map((run) => ({ ...run, casesPlanned: existingRunValues[run.id]?.casesNeeded })) },
+      {
+        runs: runs.map((run) => ({ ...run, casesPlanned: runValues[run.id]?.casesNeeded })),
+        brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+        flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+      }, false, payload.sourceKey, appliedValues,
+    )) return;
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+    outPayload.brands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+    outPayload.brandFlavors = loadBrandFlavors();
     let ok = false;
     try {
       // Key the day boundary + live-view broadcast on the operator's local
@@ -14541,11 +14590,14 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     if (ok) {
+      payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
         status: "complete",
         summary: {
+          ...(appliedValues ? { appliedValues, persistence: "sync-acknowledged" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed brand/flavor links", commit: "saved schedule day" },
           source: { runs: payload.runs.length, brands: payload.createBrands.length, flavors: payload.createFlavors.length },
           landed: { runs: payload.runs.length },
@@ -14566,9 +14618,7 @@ export default function Home() {
     }
   }
 
-  function importExcelIntoEditor(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+  async function importExcelIntoEditor(payload: ImportCommit) {
     const newRuns: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
     const newVals: Record<string, FormValues> = {};
     for (const r of payload.runs) {
@@ -14577,6 +14627,20 @@ export default function Home() {
       newVals[id] = { ...(profile ?? DEFAULT_VALUES), casesNeeded: r.casesPlanned };
       newRuns.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: r.casesPlanned });
     }
+    const originalEditor = JSON.stringify([scheduleEditorRuns, scheduleEditorRunValues]);
+    if (!await reviewScheduleImport(payload.date,
+      { runs: scheduleEditorRuns.map((run) => ({ ...run, casesPlanned: run.casesNeeded })) },
+      {
+        runs: [...scheduleEditorRuns.filter(r => r.brand || r.casesNeeded), ...newRuns].map((run) => ({ ...run, casesPlanned: run.casesNeeded })),
+        brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+        flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+      }, true)) return;
+    if (originalEditor !== scheduleEditorReviewIdentityRef.current) {
+      toast({ title: "Schedule changed", description: "Review the import again before adding it to the editor.", variant: "destructive" });
+      return;
+    }
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     setScheduleEditorRunValues(prev => ({ ...prev, ...newVals }));
     // Drop any empty placeholder rows so the imported rows don't leave a blank
     // run that blocks the Save Schedule validation.
@@ -14585,6 +14649,7 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     setImportIntoEditor(false);
+    // No learning or successful-Apply receipt: the editor still needs Save.
   }
 
   // Multi-sheet schedule planner commit: each date in `payload.byDate` is written
@@ -14594,14 +14659,14 @@ export default function Home() {
   // in-progress day isn't wiped). Only dates present in the file are touched.
   async function commitMultiDayImport(payload: ImportCommit) {
     const { runExcel } = await loadWorkbookWorkflow();
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const byDate = payload.byDate ?? [];
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
     let failed = 0;
+    let confirmedDays = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
+    const appliedScheduleRows: NonNullable<ReturnType<typeof scheduleAppliedValues>>["runs"] = [];
     // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
@@ -14692,6 +14757,50 @@ export default function Home() {
         deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
         undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
       };
+      const appliedValues = scheduleAppliedValues(date, dayRuns);
+      if (!await reviewScheduleImport(date,
+        { runs: existingRuns.map((run) => ({ ...run, casesPlanned: existingRunValues[run.id]?.casesNeeded })) },
+        {
+          runs: runs.map((run) => ({ ...run, casesPlanned: runValues[run.id]?.casesNeeded })),
+          brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+          flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+        }, false, payload.sourceKey, appliedValues,
+      )) {
+        setImportProgress(null);
+        if (done > 0) {
+          // Days are independently acknowledged. Cancelling a later proposal
+          // cannot roll back earlier writes or claim the whole file was cancelled.
+          void recordImportHistory({
+            importType: "schedule",
+            sourceKey: payload.sourceKey,
+            sourceLabel: "Schedule workbook",
+            status: "partial",
+            summary: {
+              counts: { confirmedDays, unconfirmedDays: failed, processedDays: done },
+              warnings: [`Stopped after ${done} processed days; ${confirmedDays} were confirmed saved. Earlier unconfirmed requests may still have reached the server.`],
+              followUp: ["Reload the schedule before importing again. The cancelled day and remaining days were not sent; earlier saves were not undone."],
+            },
+          }).catch(() => {});
+          void fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(async (response) => {
+            if (!response.ok) throw new Error("Could not refresh the partially imported schedule.");
+            setScheduledDays(normalizeScheduledDays(await response.json()));
+          }).catch(() => {
+            toast({ title: "Reload the schedule", description: "Earlier day saves were not undone. The planner could not be refreshed.", variant: "destructive" });
+          });
+          setShowImportDialog(false);
+          setImportResult(null);
+          setImportIntoEditor(false);
+          toast({
+            title: "Schedule import stopped partway through",
+            description: `${confirmedDays} days were confirmed saved; ${failed} day requests were not confirmed. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
+          });
+        }
+        return;
+      }
+      for (const b of payload.createBrands) addBrand(b);
+      for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+      outPayload.brands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+      outPayload.brandFlavors = loadBrandFlavors();
       let dayOk = false;
       try {
         // Pass the client's local `today` so the server keys the day boundary
@@ -14749,6 +14858,10 @@ export default function Home() {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
       if (!dayOk) failed += 1;
+      else {
+        confirmedDays += 1;
+        if (appliedValues) appliedScheduleRows.push(...appliedValues.runs);
+      }
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
@@ -14760,11 +14873,15 @@ export default function Home() {
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
     if (failed === 0) {
+      payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
         status: skippedToday > 0 ? "partial" : "complete",
         summary: {
+          ...(appliedScheduleRows.length <= 500 && JSON.stringify(appliedScheduleRows).length <= 95_000
+            ? { appliedValues: { runs: appliedScheduleRows }, persistence: "sync-acknowledged" as const } : {}),
           phases: { parse: "deterministic multi-day parse", linking: "reviewed brand/flavor links", commit: "saved schedule days" },
           source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
           landed: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) - skippedToday },
@@ -18345,9 +18462,12 @@ export default function Home() {
               canCreate: isSupervisor,
               defaultDate: importDefaultDate,
               onConfirm: (payload) => {
-                if (payload.multiDay) { void commitMultiDayImport(payload); return; }
-                if (importIntoEditor) importExcelIntoEditor(payload);
-                else void commitExcelImport(payload);
+                const work = payload.multiDay ? commitMultiDayImport(payload)
+                  : importIntoEditor ? importExcelIntoEditor(payload) : commitExcelImport(payload);
+                void work.catch((error: unknown) => {
+                  setImportProgress(null);
+                  toast({ title: "Schedule import needs review", description: error instanceof Error ? error.message : "The schedule could not be verified. No automatic retry was made.", variant: "destructive" });
+                });
               },
               progress: importProgress,
             }}

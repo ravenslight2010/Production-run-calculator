@@ -25,6 +25,7 @@ import { normalizeNamedRecipe } from "@workspace/named-recipes";
 import { normalizeFreezerPullItem } from "@workspace/freezer-pull";
 import { broadcastMasterDataChanged } from "./sync";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
+import { projectImportWrites, type ImportSnapshot, type ImportWriteSet } from "@workspace/spec-import/import-changes";
 import { isGeminiProviderConfigured, openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import {
   writeAuditEvent,
@@ -531,6 +532,16 @@ async function auditImportedRecipeChanges(
   }
 }
 
+function normalizeImportRow(name: string, raw: Record<string, unknown>): Record<string, unknown> {
+  const normalized = name === "mixes" ? normalizeMix(raw)
+    : name === "cheeseRecipes" ? normalizeCheeseRecipe(raw)
+      : name === "freezerPullItems" ? normalizeFreezerPullItem(raw)
+        : name === "doughRecipes" || name === "sauceRecipes" ? normalizeNamedRecipe(raw)
+          : raw;
+  if (!normalized || typeof normalized !== "object") throw new Error(`Invalid ${name} entity`);
+  return normalized as Record<string, unknown>;
+}
+
 async function applyRows(tx: any, changes: ChangeSet, scope: string): Promise<void> {
   for (const [name, config] of Object.entries(TABLES) as [EntityName, typeof TABLES[EntityName]][]) {
     const change = changes[name];
@@ -540,15 +551,7 @@ async function applyRows(tx: any, changes: ChangeSet, scope: string): Promise<vo
     const existing = await tx.select().from(table).where(eq(table.scope, scope)).for("update");
     const existingByKey = new Map<string, any>(existing.map((row: any) => [String(row[config.key]), row]));
     for (const raw of rows(change.upsert)) {
-      const normalized = name === "mixes"
-        ? normalizeMix(raw)
-        : name === "cheeseRecipes"
-          ? normalizeCheeseRecipe(raw)
-          : name === "freezerPullItems"
-            ? normalizeFreezerPullItem(raw)
-            : name === "doughRecipes" || name === "sauceRecipes"
-              ? normalizeNamedRecipe(raw)
-              : raw;
+      const normalized = normalizeImportRow(name, raw);
       if (!normalized || typeof normalized !== "object") throw new Error(`Invalid ${name} entity`);
       const key = String((normalized as Record<string, unknown>)[config.key] ?? "").trim();
       if (!key || key.length > 300) throw new Error(`Invalid ${name} identity`);
@@ -681,6 +684,78 @@ function operationApi(row: any) {
     updatedAt: row.updatedAt.getTime(), undoneAt: row.undoneAt?.getTime() ?? null,
   };
 }
+
+// Reads exactly the affected rows. No alias learning, repair, write or stock path.
+router.post("/import-operations/preview", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req, res) => {
+  const body = objectBody(req);
+  const importType = String(body?.importType ?? "");
+  const changes = body?.changes as ChangeSet | undefined;
+  if (!body || !["spec", "premix", "cheese"].includes(importType) || !changes || Array.isArray(changes) || typeof changes !== "object") {
+    res.status(400).json({ error: "Invalid import review request" }); return;
+  }
+  const allowed = new Set([...Object.keys(TABLES), "specImportAliases"]);
+  if (Object.keys(changes).some((key) => !allowed.has(key))) {
+    res.status(400).json({ error: "Unsupported import entity" }); return;
+  }
+  const limitError = validateChangeLimits(changes);
+  if (limitError) { res.status(400).json({ error: limitError }); return; }
+  if (!requireOperationCapability(req, res, importType)) return;
+  for (const entity of Object.keys(changes)) {
+    if (!(req.capabilities ?? []).includes(entityCapability(entity))) {
+      res.status(403).json({ error: "Missing import entity capability" }); return;
+    }
+  }
+  if (body.sourceKey != null && (typeof body.sourceKey !== "string" || body.sourceKey.length > 300)) {
+    res.status(400).json({ error: "Invalid source identity" }); return;
+  }
+  const scope = currentScope();
+  const writes: ImportWriteSet = {};
+  for (const [entity, change] of Object.entries(changes)) {
+    writes[entity] = {
+      upsert: rows(change.upsert).map((row) => {
+        if (entity !== "specImportAliases") return normalizeImportRow(entity, row);
+        return {
+          kind: String(row.kind ?? "").trim(),
+          externalName: String(row.externalName ?? "").trim().slice(0, 200),
+          canonicalName: String(row.canonicalName ?? "").trim().slice(0, 200),
+          context: row.context == null ? null : String(row.context).trim().slice(0, 200) || null,
+        };
+      }),
+      delete: entity === "specImportAliases"
+        ? (change.delete ?? []).map(aliasKey).filter((key) => key !== null)
+        : change.delete ?? [],
+    };
+  }
+  const before = await capture(db, changes, scope) as ImportSnapshot;
+  const after = projectImportWrites(before, writes);
+  const prior = body.sourceKey ? await db.select({
+    id: importOperationsTable.id,
+    createdAt: importOperationsTable.createdAt,
+    after: importOperationsTable.afterSnapshot,
+  }).from(importOperationsTable).where(and(
+    eq(importOperationsTable.scope, scope),
+    eq(importOperationsTable.importType, importType),
+    eq(importOperationsTable.sourceKey, body.sourceKey),
+    eq(importOperationsTable.status, "applied"),
+  )).orderBy(desc(importOperationsTable.createdAt), desc(importOperationsTable.id)).limit(1) : [];
+  const baseline = prior[0];
+  res.json({
+    expectedStateHash: hash(before), before, after,
+    baseline: baseline ? {
+      status: "available",
+      operationId: baseline.id,
+      appliedAt: baseline.createdAt.getTime(),
+      before: Object.fromEntries(Object.keys(writes).map((entity) => [entity, (baseline.after as ImportSnapshot)[entity] ?? []])),
+      after: Object.fromEntries(Object.entries(writes).map(([entity, change]) => [entity, change.upsert ?? []])),
+      limitation: "Previous successful Apply landed values, not raw source. Only currently authorized reviewed entity types are compared. Prior-only rows indicate source coverage changes, not deletion instructions. Fields absent from a candidate are unknown, not instructions to clear current factory fields.",
+    } : {
+      status: "unavailable",
+      limitation: body.sourceKey
+        ? "No retained successful, non-undone Apply for this scoped source. Legacy review snapshots are not successful Apply evidence."
+        : "This import has no recognized source identity.",
+    },
+  });
+});
 
 router.post("/import-operations/:operationId/apply", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req: Request, res: Response) => {
   const body = objectBody(req);

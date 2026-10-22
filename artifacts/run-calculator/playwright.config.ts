@@ -47,6 +47,8 @@ export default defineConfig({
   // configs. Keep them out of the destructive full suite so that suite retains
   // its existing case/runtime budget instead of duplicating focused coverage.
   testIgnore: [
+    // Focused importer safety matrix has its own Chromium/WebKit config.
+    "**/task3494-audited-import.spec.ts",
     "calendar.spec.ts",
     "release-webkit-smoke.spec.ts",
     // Physical iOS evidence is collected by its dedicated device lane.

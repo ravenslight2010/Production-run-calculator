@@ -122,6 +122,7 @@ import type {
   ImportHistoryList,
   ImportHistoryResponse,
   ImportOperationApplyInput,
+  ImportOperationPreview,
   ImportOperationResponse,
   ImportOperationUndoInput,
   Incident,
@@ -22349,6 +22350,95 @@ export const useScoreImportGoldCases = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getScoreImportGoldCasesMutationOptions(options), queryClient);
+    }
+
+export const getPreviewImportOperationUrl = () => {
+
+
+
+
+  return `/api/import-operations/preview`
+}
+
+/**
+ * Read-only review of an explicit atomic import write set. Does not learn aliases, repair data, or change stock. Pass expectedStateHash to Apply to reject stale reviews.
+ * @summary Read affected current values and the last successful scoped source Apply
+ */
+export const previewImportOperation = async (importOperationApplyInput: ImportOperationApplyInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationPreview> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportOperationPreview>(getPreviewImportOperationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importOperationApplyInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewImportOperationMutationKey = () => ['previewImportOperation'] as const;
+
+export const getPreviewImportOperationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewImportOperation>>, TError,PreviewImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewImportOperation>>, TError,PreviewImportOperationMutationVariables, TContext> => {
+
+const mutationKey = getPreviewImportOperationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewImportOperation>>, PreviewImportOperationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewImportOperation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewImportOperationMutationResult = NonNullable<Awaited<ReturnType<typeof previewImportOperation>>>
+    export type PreviewImportOperationMutationBody = BodyType<ImportOperationApplyInput>
+    export type PreviewImportOperationMutationError = ErrorType<void>
+    export type PreviewImportOperationMutationVariables = {data: BodyType<ImportOperationApplyInput>}
+
+    /**
+ * @summary Read affected current values and the last successful scoped source Apply
+ */
+export const usePreviewImportOperation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewImportOperation>>, TError,PreviewImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof previewImportOperation>>,
+        TError,
+        PreviewImportOperationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPreviewImportOperationMutationOptions(options), queryClient);
     }
 
 export const getApplyImportOperationUrl = (operationId: string,) => {

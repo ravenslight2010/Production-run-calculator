@@ -407,13 +407,25 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
       "This legacy brand-level setup record is retained for its operational defaults; an import-review owner must assign a product identity before it is used for a scheduled run.",
     )));
     const values = boundedData(p.values);
+    // Applicator recipes share a picker across cheese/mix pools. Empty names
+    // are valid for direct ingredients; unbranded recipes are valid shared rows.
+    for (const field of ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"]) {
+      const name = key(values[field]);
+      if (name && !recipeNamesByKind.cheese.has(name) && !recipeNamesByKind.mixes.has(name) && !ingredientNames.has(name)) {
+        out.push(finding(scope, "profiles", "warning", `${stable}:${field}:${name}`,
+          `Profile references missing applicator recipe "${String(values[field])}".`,
+          false, true, "stale", "import-review",
+          "Review the explicit cheese/mix name-link. Direct ingredient slots need no recipe; shared unbranded pool recipes are valid targets.", "orphaned"));
+      }
+    }
     for (const field of ["doughRecipeName", "frontlineRecipeName"]) {
       const name = key(values[field]);
       const recipeKind = field === "doughRecipeName" ? "dough" : "sauce";
       const matchingRows = recipeKind === "dough"
         ? doughRows.filter((row) => key(row.name) === name)
         : sauceRows.filter((row) => key(row.name) === name);
-      if (name && matchingRows.length === 0) {
+      const readyMadeIngredient = recipeKind === "sauce" && ingredientNames.has(name);
+      if (name && matchingRows.length === 0 && !readyMadeIngredient) {
         const findingId = `${stable}:${field}:${name}`;
         const confirmed = confirmedLinks.get(`${key(p.brand)}\u0000${key(p.flavor)}\u0000${field}\u0000${name}`);
         const saved = savedProfileNames.get(`${key(p.brand)}\u0000${key(p.flavor)}`);
@@ -449,6 +461,25 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
       }
     }
   });
+
+  const observedRecipeReferences = new Set<string>();
+  for (const profile of profilesRows) {
+    const values = boundedData(profile.values);
+    for (const field of ["doughRecipeName", "frontlineRecipeName", "app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName",
+      "app1Type", "app2Type", "app3Type", "app4Type"]) {
+      if (key(values[field])) observedRecipeReferences.add(key(values[field]));
+    }
+  }
+  for (const [category, rows] of [["dough", doughRows], ["sauce", sauceRows], ["cheese", cheeseRows], ["mixes", mixesRows]] as const) {
+    for (const row of rows) {
+      if (key(row.name) && !observedRecipeReferences.has(key(row.name))) {
+        out.push(finding(scope, category, "info", `unreferenced:${row.id}`,
+          `No current profile reference was observed for ${category} recipe "${row.name}".`,
+          false, true, "valid", "import-review",
+          "Missing link evidence is not a confirmed orphan defect: shared, standalone, retained historical and future-use recipes are valid. Check bounded coverage and import review; do not delete automatically.", "orphaned"));
+      }
+    }
+  }
 
   const inspectRecipes = (category: "dough" | "sauce" | "cheese" | "mixes", rows: Array<{ id: string; name: string; components: unknown; enabled: boolean }>) => {
     rows.forEach((row) => {
@@ -642,7 +673,7 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
       const values = boundedRecord(runValues[runId], () => { payloadState.truncated = true; });
       for (const [field, recipeKind] of [["doughRecipeName", "dough"], ["frontlineRecipeName", "sauce"]] as const) {
         const recipeName = key(values[field]);
-        if (recipeName && !recipeNamesByKind[recipeKind].has(recipeName)) {
+        if (recipeName && !recipeNamesByKind[recipeKind].has(recipeName) && !(recipeKind === "sauce" && ingredientNames.has(recipeName))) {
           out.push(finding(scope, "scheduled-runs", "warning", `${day.date}:${runId}:${field}:${recipeName}`, `Run on ${day.date} references missing ${recipeKind} recipe "${String(values[field])}".`, false, true, "stale", "master-data", "This historical run reference is protected; a manager must confirm the intended replacement.", "orphaned"));
         }
       }
