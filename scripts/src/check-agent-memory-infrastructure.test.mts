@@ -86,12 +86,23 @@ test("flags synthetic mailing addresses without echoing them and allows technica
   const streetAddress = "4827 W. Cedarbrook Avenue";
   const mailingAddress = "91 Maple Street, Sampletown, IL 60614";
   const postOfficeBox = "P.O. Box 4821";
+  const frenchAddress = "22 avenue des Tilleuls, 75008 Paris";
+  const germanAddress = "Musterstraße 12, 10115 Berlin";
+  const ukAddress = "221B Baker Street, London NW1 6XE";
+  const canadianAddress = "123 rue Sainte-Catherine O, Montréal, QC H3B 1A1";
   const content = [
     `Synthetic street: ${streetAddress}.`,
     `Synthetic full mailing address: ${mailingAddress}.`,
     `Synthetic PO Box: ${postOfficeBox}.`,
+    `French-format address: ${frenchAddress}.`,
+    `German-format address: ${germanAddress}.`,
+    `UK-format address: ${ukAddress}.`,
+    `Canadian-format address: ${canadianAddress}.`,
     "Technical path: scripts/src/check-agent-memory-infrastructure.mts.",
+    "Technical path: docs/221B-Baker-Street.md.",
+    "Technical response example: String 12, 404 Not Found.",
     "Runtime Node 22.4.1, API v2, reviewed 2026-10-21.",
+    "Postal-code example: H3B 1A1; version: v1.2.3; date: 2026-10-21.",
   ].join("\n");
   const findings = findAgentMemoryInfrastructure(
     ".agents/memory/example.md",
@@ -104,6 +115,10 @@ test("flags synthetic mailing addresses without echoing them and allows technica
       { line: 1, category: "mailing address" },
       { line: 2, category: "mailing address" },
       { line: 3, category: "mailing address" },
+      { line: 4, category: "mailing address" },
+      { line: 5, category: "mailing address" },
+      { line: 6, category: "mailing address" },
+      { line: 7, category: "mailing address" },
     ],
   );
 
@@ -114,6 +129,10 @@ test("flags synthetic mailing addresses without echoing them and allows technica
     streetAddress,
     mailingAddress,
     postOfficeBox,
+    frenchAddress,
+    germanAddress,
+    ukAddress,
+    canadianAddress,
     "Sampletown",
     "60614",
   ]) {

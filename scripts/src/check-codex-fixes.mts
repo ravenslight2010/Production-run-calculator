@@ -33,6 +33,25 @@ const phoneNumber =
   /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?!\w)|(?<!\w)\d{3}[-.]\d{4}(?!\w)/;
 const mailingAddress =
   /\bP(?:ost)?\.?\s*O(?:ffice)?\.?\s+Box\s+\d{1,8}\b|(?<![\w./-])\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\.?\s+)?[a-z0-9.'’-]+(?:\s+[a-z0-9.'’-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|circle|cir\.?|parkway|pkwy\.?|place|pl\.?|terrace|ter\.?|highway|hwy\.?|way)\b/i;
+const internationalStreetWord = String.raw`[\p{L}\p{M}][\p{L}\p{M}.'’'-]{0,39}`;
+const internationalStreetName =
+  `${internationalStreetWord}(?:\\s+${internationalStreetWord}){0,5}`;
+const preposedStreetType =
+  String.raw`(?:rue|avenue|av\.?|boulevard|bd\.?|chemin|route|place|impasse|allée|allee|quai|cours|passage)`;
+const internationalPlaceName =
+  `${internationalStreetWord}(?:\\s+${internationalStreetWord}){0,3}`;
+// Deliberately bounded international coverage: French/Canadian preposed street
+// types, German street names before house numbers, and UK street names with
+// house numbers attached to letters; each requires its national postal format.
+const internationalMailingAddress = new RegExp(
+  String.raw`(?<![\p{L}\p{N}./-])(?:` +
+    String.raw`\d{1,5}\s+${preposedStreetType}\s+${internationalStreetName}\s*,\s*\d{5}\s+${internationalPlaceName}` +
+    String.raw`|\d{1,5}\s+${preposedStreetType}\s+${internationalStreetName}\s*,\s*${internationalPlaceName}(?:,\s*[A-Z]{2})?\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d` +
+    String.raw`|[\p{L}\p{M}][\p{L}\p{M}.'’-]{0,39}(?:straße|strasse|str\.?|weg|platz|allee|gasse|damm|ufer)\s+\d{1,5}[a-z]?\s*,\s*\d{5}\s+${internationalPlaceName}` +
+    String.raw`|\d{1,5}[a-z]?\s+${internationalStreetName}\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|place|pl\.?|terrace|ter\.?)\s*,\s*${internationalPlaceName}\s+[a-z]{1,2}\d[a-z\d]?\s+\d[a-z]{2}` +
+    String.raw`)`,
+  "iu",
+);
 const wrappedStreetAddressLine =
   /^\s*(?:[-*]\s+)?\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\.?\s+)?[a-z0-9.'’-]+(?:\s+[a-z0-9.'’-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|circle|cir\.?|parkway|pkwy\.?|place|pl\.?|terrace|ter\.?|highway|hwy\.?|way)\s*[.,]?\s*$/i;
 const wrappedCityPostalLine =
@@ -146,7 +165,7 @@ function hasEmailAddress(line: string): boolean {
 }
 
 export function hasMailingAddress(line: string): boolean {
-  return mailingAddress.test(line);
+  return mailingAddress.test(line) || internationalMailingAddress.test(line);
 }
 
 function isPrivateOrLocalIpv4(address: string): boolean {
