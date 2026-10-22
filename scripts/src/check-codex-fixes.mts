@@ -139,6 +139,10 @@ function hasEmailAddress(line: string): boolean {
   return true;
 }
 
+export function hasMailingAddress(line: string): boolean {
+  return mailingAddress.test(line);
+}
+
 function isPrivateOrLocalIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
   if (octets.length !== 4 || octets.some((octet) => octet < 0 || octet > 255)) {
@@ -202,7 +206,7 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
       findings.push({ line: index + 1, category: "contact detail" });
     }
 
-    if (mailingAddress.test(line) || wrappedMailingAddressLines.has(index)) {
+    if (hasMailingAddress(line) || wrappedMailingAddressLines.has(index)) {
       findings.push({ line: index + 1, category: "mailing address" });
     }
 

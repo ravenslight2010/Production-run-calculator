@@ -3,12 +3,14 @@ import { execFile } from "node:child_process";
 import { isIP } from "node:net";
 import { promisify } from "node:util";
 import { relative, resolve } from "node:path";
+import { hasMailingAddress } from "./check-codex-fixes.mts";
 
 const execFileAsync = promisify(execFile);
 
 export type AgentMemoryFindingCategory =
   | "infrastructure host"
-  | "deployment image reference";
+  | "deployment image reference"
+  | "mailing address";
 
 export type AgentMemoryFinding = {
   file: string;
@@ -100,6 +102,14 @@ export function findAgentMemoryInfrastructure(
         category: "deployment image reference",
       });
     }
+
+    if (hasMailingAddress(line)) {
+      findings.push({
+        file,
+        line: index + 1,
+        category: "mailing address",
+      });
+    }
   }
 
   return findings;
@@ -141,7 +151,7 @@ export async function main(): Promise<void> {
 
   if (findings.length > 0) {
     console.error(
-      "Agent-memory infrastructure check failed (tracked notes only; fix-history note excluded):",
+      "Agent-memory check failed (tracked current notes only; fix-history note excluded; Git history is not inspected or removed):",
     );
     for (const finding of findings) {
       console.error(formatAgentMemoryFinding(finding, repositoryRoot));
@@ -151,7 +161,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "Agent-memory infrastructure check passed (tracked notes only; fix-history note excluded).",
+    "Agent-memory check passed (tracked current notes only; fix-history note excluded; Git history is not inspected or removed).",
   );
 }
 

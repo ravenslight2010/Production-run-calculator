@@ -82,6 +82,45 @@ test("allows loopback examples and templated development URLs", () => {
   );
 });
 
+test("flags synthetic mailing addresses without echoing them and allows technical text", () => {
+  const streetAddress = "4827 W. Cedarbrook Avenue";
+  const mailingAddress = "91 Maple Street, Sampletown, IL 60614";
+  const postOfficeBox = "P.O. Box 4821";
+  const content = [
+    `Synthetic street: ${streetAddress}.`,
+    `Synthetic full mailing address: ${mailingAddress}.`,
+    `Synthetic PO Box: ${postOfficeBox}.`,
+    "Technical path: scripts/src/check-agent-memory-infrastructure.mts.",
+    "Runtime Node 22.4.1, API v2, reviewed 2026-10-21.",
+  ].join("\n");
+  const findings = findAgentMemoryInfrastructure(
+    ".agents/memory/example.md",
+    content,
+  );
+
+  assert.deepEqual(
+    findings.map(({ line, category }) => ({ line, category })),
+    [
+      { line: 1, category: "mailing address" },
+      { line: 2, category: "mailing address" },
+      { line: 3, category: "mailing address" },
+    ],
+  );
+
+  const diagnostic = findings
+    .map((finding) => formatAgentMemoryFinding(finding, "/repo"))
+    .join("\n");
+  for (const matchedValue of [
+    streetAddress,
+    mailingAddress,
+    postOfficeBox,
+    "Sampletown",
+    "60614",
+  ]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
 test("scans only Markdown memory notes and excludes fix history", () => {
   assert.equal(isScannedAgentMemoryPath(".agents/memory/lesson.md"), true);
   assert.equal(
