@@ -2123,6 +2123,35 @@ export const OperationalProjectionVersion = {
   NUMBER_1: 1,
 } as const;
 
+export type StationActivityEvidenceSource = typeof StationActivityEvidenceSource[keyof typeof StationActivityEvidenceSource];
+
+
+export const StationActivityEvidenceSource = {
+  automatic: 'automatic',
+  manual: 'manual',
+  confirmed: 'confirmed',
+} as const;
+
+export interface StationActivityEvidence {
+  runId: string;
+  /** @minimum 1 */
+  eventAtServerMs: number;
+  source: StationActivityEvidenceSource;
+}
+
+/**
+ * Latest server-accepted station events for the projection's run; absent keys have no evidence.
+ */
+export interface StationActivityMap {
+  dough?: StationActivityEvidence;
+  sauce?: StationActivityEvidence;
+  press?: StationActivityEvidence;
+  frontline?: StationActivityEvidence;
+  freezeTunnel?: StationActivityEvidence;
+  packaging?: StationActivityEvidence;
+  warehouse?: StationActivityEvidence;
+}
+
 export type OperationalProjectionFactsRunStatus = typeof OperationalProjectionFactsRunStatus[keyof typeof OperationalProjectionFactsRunStatus];
 
 
@@ -2201,6 +2230,7 @@ export interface OperationalProjection {
   /** @minimum 0 */
   calculationRevision: number;
   effectiveElapsedSec: number;
+  stationActivity: StationActivityMap | null;
   timers: OperationalProjectionTimers;
   counters: OperationalProjectionCounters;
   facts: OperationalProjectionFacts;
@@ -2282,6 +2312,55 @@ export interface ManualSectionLockEvent {
   date: string;
   /** @minimum 0 */
   serverTime: number;
+}
+
+export type StationActivityConfirmationRequestStation = typeof StationActivityConfirmationRequestStation[keyof typeof StationActivityConfirmationRequestStation];
+
+
+export const StationActivityConfirmationRequestStation = {
+  freezeTunnel: 'freezeTunnel',
+  warehouse: 'warehouse',
+} as const;
+
+export interface StationActivityConfirmationRequest {
+  /**
+     * @minLength 8
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  id: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  runId: string;
+  station: StationActivityConfirmationRequestStation;
+  /** @maxLength 160 */
+  senderId: string;
+}
+
+export type StationActivityConfirmationResponseStation = typeof StationActivityConfirmationResponseStation[keyof typeof StationActivityConfirmationResponseStation];
+
+
+export const StationActivityConfirmationResponseStation = {
+  freezeTunnel: 'freezeTunnel',
+  warehouse: 'warehouse',
+} as const;
+
+export interface StationActivityConfirmationResponse {
+  ok: true;
+  duplicate: boolean;
+  runId: string;
+  station: StationActivityConfirmationResponseStation;
+  /** @minimum 1 */
+  eventAtServerMs: number;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 1 */
+  serverTime: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+  operationalProjection: OperationalProjection | null;
 }
 
 export interface SyncUnchangedResponse {
@@ -8782,6 +8861,14 @@ snapshot?: string;
 };
 
 export type ClaimAutoTrackEventParams = {
+today?: ClientTodayParameter;
+/**
+ * @minimum 0
+ */
+epoch?: number;
+};
+
+export type ConfirmStationActivityParams = {
 today?: ClientTodayParameter;
 /**
  * @minimum 0

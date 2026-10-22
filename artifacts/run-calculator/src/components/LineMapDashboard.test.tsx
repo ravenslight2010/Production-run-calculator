@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ScheduledDay } from "../scheduledDays";
+import type { StationActivityEvidence } from "@workspace/live-calc";
 import { todayStr } from "../utils";
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +32,9 @@ function renderLineMap(
     applicatorBatchesAvailable?: boolean;
     mixedFrontline?: boolean;
     sauceNeedsWithoutBatches?: boolean;
+    stationActivity?: Record<string, StationActivityEvidence> | null;
+    stationActivityNowMs?: number;
+    confirmStationActivity?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const active = options.active ?? false;
@@ -39,6 +43,7 @@ function renderLineMap(
   const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
   const mixedFrontline = options.mixedFrontline ?? false;
   const sauceNeedsWithoutBatches = options.sauceNeedsWithoutBatches ?? false;
+  const confirmStationActivity = options.confirmStationActivity ?? vi.fn().mockResolvedValue(undefined);
   mocks.useHomeTabCtx.mockReturnValue({
     v: {
       traysOnLine: active ? 1 : 0,
@@ -64,13 +69,15 @@ function renderLineMap(
       postTunnelMin: 2.5,
     },
     ve: { freezerTime: 10 },
-    currentRun: options.currentRun === undefined ? {} : options.currentRun,
+    currentRun: options.currentRun === undefined ? { id: "run-1" } : options.currentRun,
     dayState: {},
     runStatus,
     scheduledDays: options.scheduledDays ?? [],
     activePackagingRows: [],
     activeWarehouseRows: [],
     navigate: vi.fn(),
+    confirmStationActivity,
+    isOnline: true,
   });
   mocks.useLiveRun.mockReturnValue({
     calc: {
@@ -108,6 +115,8 @@ function renderLineMap(
     casesPct: 0,
     casesFreezerPct: 0,
     autoTrackSuggestion: null,
+    stationActivity: options.stationActivity ?? null,
+    stationActivityNowMs: options.stationActivityNowMs ?? 100_000,
   });
 
   return render(<LineMapDashboard />);
@@ -124,13 +133,21 @@ function dateOffset(days: number): string {
 }
 
 function expectZoneStatus(zoneName: RegExp, label: string) {
-  const zone = screen.getByRole("button", { name: zoneName });
+  const zone = getZoneNavigationButton(zoneName);
   expect(within(zone).getByText(label)).toBeTruthy();
 }
 
 function expectZoneReason(zoneName: RegExp, reason: string) {
-  const zone = screen.getByRole("button", { name: zoneName });
+  const zone = getZoneNavigationButton(zoneName);
   expect(within(zone).getByText(reason)).toBeTruthy();
+}
+
+function getZoneNavigationButton(zoneName: RegExp): HTMLElement {
+  const card = screen.getAllByTestId(/^station-card-/).find((candidate) =>
+    zoneName.test(candidate.textContent ?? ""),
+  );
+  if (!card) throw new Error(`No station card matched ${zoneName}`);
+  return within(card).getAllByRole("button")[0]!;
 }
 
 afterEach(() => {
@@ -144,9 +161,30 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     (slot) => {
       renderLineMap("running", { configuredApplicator: slot });
 
-    const frontline = screen.getByRole("button", { name: /Frontline/ });
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
+      expect(within(frontline).getByText("2.00 batches")).toBeTruthy();
+    },
+  );
 
-    const sauceLabel = within(frontline).getByText("Sauce");
+  it.each([3, 4] as const)(
+    "shows the need for applicator %i in pounds when batch quantity is unavailable",
+    (slot) => {
+      renderLineMap("running", {
+        configuredApplicator: slot,
+        applicatorBatchesAvailable: false,
+      });
+
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
+      expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
+    },
+  );
+
+  it("shows a Pepperoni need in pounds when no batch quantity is available", () => {
+    renderLineMap("running", { configuredPepperoni: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
     expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
     expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
     expect(within(frontline).queryByText(/batches/)).toBeNull();
@@ -156,30 +194,15 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     renderLineMap("running", { sauceNeedsWithoutBatches: true });
 
     const frontline = screen.getByRole("button", { name: /Frontline/ });
-
-    const sauceLabel = within(frontline).getByText("Sauce");
-    expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
-    expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
+    expect(within(frontline).getByText("Sauce")).toBeTruthy();
+    expect(within(frontline).getByText("50.00 lbs")).toBeTruthy();
     expect(within(frontline).queryByText(/batches/)).toBeNull();
   });
 
-  it("shows Sauce need in pounds when batch quantity is unavailable", () => {
-    renderLineMap("running", { sauceNeedsWithoutBatches: true });
+  it("shows later applicator needs after Sauce, earlier applicators, and Pepperoni rows", () => {
+    renderLineMap("running", { mixedFrontline: true });
 
     const frontline = screen.getByRole("button", { name: /Frontline/ });
-
-    const sauceLabel = within(frontline).getByText("Sauce");
-    expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
-    expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
-    expect(within(frontline).queryByText(/batches/)).toBeNull();
-  });
-
-  it("shows Sauce need in pounds when batch quantity is unavailable", () => {
-    renderLineMap("running", { sauceNeedsWithoutBatches: true });
-
-    const frontline = screen.getByRole("button", { name: /Frontline/ });
-
-    const sauceLabel = within(frontline).getByText("Sauce");
     for (const label of [
       "Sauce",
       "App 1 — Mozzarella",
@@ -263,6 +286,60 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     }
     expectZoneStatus(/Press \/ Oven/, "Idle");
     expectZoneReason(/Press \/ Oven/, "No current station activity");
+  });
+
+  it("shows elapsed time for fresh evidence bound to the selected run", () => {
+    renderLineMap("running", {
+      stationActivity: {
+        press: { runId: "run-1", eventAtServerMs: 99_000, source: "automatic" },
+      },
+      stationActivityNowMs: 100_000,
+    });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: 1s");
+  });
+
+  it("shows a long gap for old station activity while the projection remains fresh", () => {
+    renderLineMap("running", {
+      stationActivity: {
+        press: { runId: "run-1", eventAtServerMs: 40_000, source: "manual" },
+      },
+      stationActivityNowMs: 100_000,
+    });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: 1m 0s");
+  });
+
+  it("shows unknown for evidence from a different run", () => {
+    renderLineMap("running", {
+      stationActivity: {
+        press: { runId: "another-run", eventAtServerMs: 99_000, source: "automatic" },
+      },
+      stationActivityNowMs: 100_000,
+    });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: unknown");
+  });
+
+  it.each(["stale", "unavailable"])("shows unknown when projection evidence is %s", () => {
+    renderLineMap("running", { stationActivity: null });
+
+    expect(screen.getByTestId("station-activity-age-press").textContent)
+      .toBe("Time since last confirmed activity: unknown");
+  });
+
+  it.each([
+    ["freezeTunnel", /Confirm activity at Freeze Tunnel/],
+    ["warehouse", /Confirm activity at Warehouse/],
+  ] as const)("sends explicit confirmation for %s", async (station, accessibleName) => {
+    const confirmStationActivity = vi.fn().mockResolvedValue(undefined);
+    renderLineMap("running", { confirmStationActivity });
+
+    fireEvent.click(screen.getByRole("button", { name: accessibleName }));
+    await waitFor(() => expect(confirmStationActivity).toHaveBeenCalledWith(station));
   });
 
   it("does not show an activity age for active stations or non-running lifecycle states", () => {

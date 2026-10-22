@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
 import { fmtCountdownParts, fmtNum, todayStr } from "../utils";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import type { HomeTab } from "../hooks/useHomeNavigation";
 import type { ScheduledDay, ScheduledRun } from "../scheduledDays";
+import type { StationActivityEvidence } from "@workspace/live-calc";
 import {
   Layers, Droplets, Flame, Boxes, Snowflake, Package, Warehouse,
   ArrowRight, Play, Pause, Square, Clock, AlertTriangle,
@@ -74,8 +75,36 @@ interface ZoneStatus {
   reason?: string;
   metrics: { label: string; value: string }[];
   sub?: string;
+  activityAge?: string;
+  confirmActivity?: boolean;
 }
 type RunLifecycleStatus = "pending" | "running" | "paused" | "ended";
+
+function formatStationActivityAge(
+  evidence: StationActivityEvidence | undefined,
+  runId: string | undefined,
+  serverNowMs: number,
+): string {
+  if (
+    !evidence
+    || !runId
+    || evidence.runId !== runId
+    || !Number.isFinite(evidence.eventAtServerMs)
+    || evidence.eventAtServerMs <= 0
+    || !Number.isFinite(serverNowMs)
+    || serverNowMs < evidence.eventAtServerMs
+  ) return "Time since last confirmed activity: unknown";
+  const totalSeconds = Math.floor((serverNowMs - evidence.eventAtServerMs) / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const age = hours > 0
+    ? `${hours}h ${minutes}m`
+    : minutes > 0
+      ? `${minutes}m ${seconds}s`
+      : `${seconds}s`;
+  return `Time since last confirmed activity: ${age}`;
+}
 
 function deriveStationStatus(
   runStatus: RunLifecycleStatus,
@@ -120,13 +149,14 @@ function statusBadge(status: ZoneStatus["status"]) {
 export default function LineMapDashboard() {
   const {
     v, ve, currentRun, dayState, runStatus, activePackagingRows,
-    activeWarehouseRows, scheduledDays, navigate,
+    activeWarehouseRows, scheduledDays, navigate, confirmStationActivity, isOnline,
   } = useHomeTabCtx();
   const {
     calc, nowTime, elapsedBatchSec,
     liveFreezerMin, casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     autoTrackProgress, autoTrackSuggestion,
+    stationActivity, stationActivityNowMs,
   } = useLiveRun();
 
   const goToTab = navigate ?? (() => {});
@@ -234,8 +264,18 @@ export default function LineMapDashboard() {
     return stationZones.map((zone) => ({
       ...zone,
       reason: deriveStationReason(zone.status, runStatus, hasRun),
+      activityAge: formatStationActivityAge(
+        stationActivity?.[zone.id],
+        typeof currentRun?.id === "string" ? currentRun.id : undefined,
+        stationActivityNowMs,
+      ),
+      confirmActivity: hasRun && isRunning
+        && (zone.id === "freezeTunnel" || zone.id === "warehouse"),
     }));
-  }, [calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct]);
+  }, [
+    calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct,
+    stationActivity, stationActivityNowMs,
+  ]);
 
   // Overall line status
   const overallStatus = (() => {
@@ -277,7 +317,13 @@ export default function LineMapDashboard() {
         {/* Top row: Dough → Sauce → Press/Oven → Frontline */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-0">
           {zones.slice(0, 4).map((zone) => (
-            <ZoneCard key={zone.id} zone={zone} onClick={() => goToTab(zone.navTab)} />
+            <ZoneCard
+              key={zone.id}
+              zone={zone}
+              onClick={() => goToTab(zone.navTab)}
+              canConfirm={!!isOnline}
+              onConfirmActivity={confirmStationActivity}
+            />
           ))}
         </div>
 
@@ -291,7 +337,13 @@ export default function LineMapDashboard() {
         {/* Bottom row: Warehouse ← Packaging ← Freeze Tunnel */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {zones.slice(4).map((zone) => (
-            <ZoneCard key={zone.id} zone={zone} onClick={() => goToTab(zone.navTab)} />
+            <ZoneCard
+              key={zone.id}
+              zone={zone}
+              onClick={() => goToTab(zone.navTab)}
+              canConfirm={!!isOnline}
+              onConfirmActivity={confirmStationActivity}
+            />
           ))}
         </div>
       </div>
@@ -334,70 +386,112 @@ export default function LineMapDashboard() {
 }
 
 // ── Zone card sub-component ───────────────────────────────────────────────
-function ZoneCard({ zone, onClick }: { zone: ZoneStatus; onClick: () => void }) {
+function ZoneCard({
+  zone,
+  onClick,
+  canConfirm,
+  onConfirmActivity,
+}: {
+  zone: ZoneStatus;
+  onClick: () => void;
+  canConfirm: boolean;
+  onConfirmActivity?: (station: "freezeTunnel" | "warehouse") => Promise<void>;
+}) {
   const colors = ZONE_COLORS[zone.id];
+  const [confirming, setConfirming] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
+  const confirm = async () => {
+    if (!onConfirmActivity || (zone.id !== "freezeTunnel" && zone.id !== "warehouse")) return;
+    setConfirmationError(null);
+    setConfirming(true);
+    try {
+      await onConfirmActivity(zone.id);
+    } catch (error) {
+      setConfirmationError(error instanceof Error ? error.message : "Activity could not be confirmed.");
+    } finally {
+      setConfirming(false);
+    }
+  };
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`
-        rounded-xl border-2 ${colors.border} ${colors.bg}
-        p-3 text-left transition-all hover:scale-[1.02] hover:shadow-md
-        active:scale-[0.98] cursor-pointer
-      `}
+    <div
+      data-testid={`station-card-${zone.id}`}
+      className={`overflow-hidden rounded-xl border-2 ${colors.border} ${colors.bg}`}
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className={`flex items-center gap-1.5 ${colors.icon}`}>
-          {zone.icon}
-          <span className="text-sm font-bold truncate">{zone.label}</span>
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full p-3 text-left transition-all hover:scale-[1.02] hover:shadow-md active:scale-[0.98] cursor-pointer"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className={`flex items-center gap-1.5 ${colors.icon}`}>
+            {zone.icon}
+            <span className="text-sm font-bold truncate">{zone.label}</span>
+          </div>
+          {statusBadge(zone.status)}
         </div>
-        {statusBadge(zone.status)}
-      </div>
-      {zone.sub && (
-        <p className="text-[10px] text-muted-foreground mb-1.5 truncate">{zone.sub}</p>
-      )}
-      {zone.reason && (
-        <p
-          className="text-[11px] text-muted-foreground mb-1.5"
-          data-testid={`status-reason-${zone.id}`}
-        >
-          {zone.reason}
-        </p>
-      )}
-      {/* Run-wide edit stamps and projection capture times are not station events. */}
-      {zone.reason === "No current station activity" && (
-        <p
-          className="text-[11px] text-muted-foreground mb-1.5"
-          data-testid={`station-activity-age-${zone.id}`}
-        >
-          Time since last confirmed activity: unknown
-        </p>
-      )}
-      {zone.metrics.length > 0 && (
-        <div className={zone.id === "frontline" ? "space-y-1" : "space-y-0.5"}>
-          {zone.metrics.map((m) => (
-            <div
-              key={m.label}
-              className={`flex justify-between text-xs ${zone.id === "frontline" ? "items-start gap-x-2" : ""}`}
-            >
-              <span className={
-                zone.id === "frontline"
-                  ? "min-w-0 whitespace-normal break-words text-muted-foreground"
-                  : "text-muted-foreground truncate"
-              }>
-                {m.label}
-              </span>
-              <span className={
-                zone.id === "frontline"
-                  ? "shrink-0 text-right font-medium tabular-nums"
-                  : "font-medium tabular-nums ml-1"
-              }>
-                {m.value}
-              </span>
-            </div>
-          ))}
+        {zone.sub && (
+          <p className="text-[10px] text-muted-foreground mb-1.5 truncate">{zone.sub}</p>
+        )}
+        {zone.reason && (
+          <p
+            className="text-[11px] text-muted-foreground mb-1.5"
+            data-testid={`status-reason-${zone.id}`}
+          >
+            {zone.reason}
+          </p>
+        )}
+        {zone.reason === "No current station activity" && (
+          <p
+            className="text-[11px] text-muted-foreground mb-1.5"
+            data-testid={`station-activity-age-${zone.id}`}
+          >
+            {zone.activityAge}
+          </p>
+        )}
+        {zone.metrics.length > 0 && (
+          <div className={zone.id === "frontline" ? "space-y-1" : "space-y-0.5"}>
+            {zone.metrics.map((m) => (
+              <div
+                key={m.label}
+                className={`flex justify-between text-xs ${zone.id === "frontline" ? "items-start gap-x-2" : ""}`}
+              >
+                <span className={
+                  zone.id === "frontline"
+                    ? "min-w-0 whitespace-normal break-words text-muted-foreground"
+                    : "text-muted-foreground truncate"
+                }>
+                  {m.label}
+                </span>
+                <span className={
+                  zone.id === "frontline"
+                    ? "shrink-0 text-right font-medium tabular-nums"
+                    : "font-medium tabular-nums ml-1"
+                }>
+                  {m.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </button>
+      {zone.confirmActivity && (
+        <div className="px-3 pb-3">
+          <button
+            type="button"
+            onClick={() => void confirm()}
+            disabled={!canConfirm || confirming}
+            aria-label={`Confirm activity at ${zone.label}`}
+            className="min-h-9 rounded-md border bg-background px-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {confirming ? "Saving…" : "Confirm activity"}
+          </button>
+          {confirmationError && (
+            <p role="alert" className="mt-1 text-[11px] text-destructive">
+              {confirmationError}
+            </p>
+          )}
         </div>
       )}
-    </button>
+    </div>
   );
 }

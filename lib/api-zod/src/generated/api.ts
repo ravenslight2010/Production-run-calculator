@@ -596,6 +596,15 @@ export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
 export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const claimAutoTrackEventResponseCanonicalRevisionMin = 0;
 export const claimAutoTrackEventResponseServerTimeMin = 0;
+export const confirmStationActivityQueryEpochMin = 0;
+export const confirmStationActivityBodyIdMin = 8;
+export const confirmStationActivityBodyIdMax = 160;
+export const confirmStationActivityBodyIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const confirmStationActivityBodyRunIdMax = 160;
+export const confirmStationActivityBodySenderIdMax = 160;
+export const confirmStationActivityResponseCanonicalRevisionMin = 0;
+export const confirmStationActivityResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const confirmStationActivityResponseOperationalProjectionOneCalculationRevisionMin = 0;
 export const submitManualSectionEditBodyOneOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodyOneOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditBodyOneOneObservedGenerationMax = 160;
@@ -8411,6 +8420,13 @@ export const GetSyncTodayQueryParams = zod.object({
 
 
 
+
+
+
+
+
+
+
 export const GetSyncTodayResponse = zod.union([zod.looseObject({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
@@ -8432,6 +8448,43 @@ export const GetSyncTodayResponse = zod.union([zod.looseObject({
   "capturedAtServerMs": zod.number(),
   "calculationRevision": zod.int().min(getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin),
   "effectiveElapsedSec": zod.number(),
+  "stationActivity": zod.union([zod.object({
+  "dough": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "sauce": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "press": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "frontline": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "freezeTunnel": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "packaging": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "warehouse": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional()
+}).describe('Latest server-accepted station events for the projection\'s run; absent keys have no evidence.'),zod.null()]),
   "timers": zod.object({
   "nextBatchInSec": zod.number(),
   "pressRemainingSec": zod.number(),
@@ -8507,6 +8560,13 @@ export const PutSyncTodayBody = zod.object({
 
 
 
+
+
+
+
+
+
+
 export const PutSyncTodayResponse = zod.object({
   "ok": zod.boolean().optional(),
   "data": zod.looseObject({
@@ -8528,6 +8588,43 @@ export const PutSyncTodayResponse = zod.object({
   "capturedAtServerMs": zod.number(),
   "calculationRevision": zod.int().min(putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin),
   "effectiveElapsedSec": zod.number(),
+  "stationActivity": zod.union([zod.object({
+  "dough": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "sauce": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "press": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "frontline": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "freezeTunnel": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "packaging": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "warehouse": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional()
+}).describe('Latest server-accepted station events for the projection\'s run; absent keys have no evidence.'),zod.null()]),
   "timers": zod.object({
   "nextBatchInSec": zod.number(),
   "pressRemainingSec": zod.number(),
@@ -8656,6 +8753,141 @@ export const ClaimAutoTrackEventResponse = zod.object({
   "duplicate": zod.boolean().optional(),
   "canonicalRevision": zod.int().min(claimAutoTrackEventResponseCanonicalRevisionMin),
   "serverTime": zod.int().min(claimAutoTrackEventResponseServerTimeMin)
+})
+
+
+/**
+ * @summary Confirm activity at the Freeze Tunnel or Warehouse for the active run
+ */
+
+
+
+export const ConfirmStationActivityQueryParams = zod.object({
+  "today": zod.date().optional(),
+  "epoch": zod.coerce.number().int().min(confirmStationActivityQueryEpochMin).optional()
+})
+
+
+
+
+
+
+
+export const ConfirmStationActivityBody = zod.object({
+  "id": zod.string().min(confirmStationActivityBodyIdMin).max(confirmStationActivityBodyIdMax).regex(confirmStationActivityBodyIdRegExp),
+  "runId": zod.string().min(1).max(confirmStationActivityBodyRunIdMax),
+  "station": zod.enum(['freezeTunnel', 'warehouse']),
+  "senderId": zod.string().max(confirmStationActivityBodySenderIdMax)
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const ConfirmStationActivityResponse = zod.object({
+  "ok": zod.literal(true),
+  "duplicate": zod.boolean(),
+  "runId": zod.string(),
+  "station": zod.enum(['freezeTunnel', 'warehouse']),
+  "eventAtServerMs": zod.int().min(1),
+  "canonicalRevision": zod.int().min(confirmStationActivityResponseCanonicalRevisionMin),
+  "serverTime": zod.int().min(1),
+  "snapshotId": zod.string().regex(confirmStationActivityResponseSnapshotIdRegExp),
+  "operationalProjection": zod.union([zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string(),
+  "lifecycleGeneration": zod.string(),
+  "serverTimeMs": zod.number(),
+  "capturedAtServerMs": zod.number(),
+  "calculationRevision": zod.int().min(confirmStationActivityResponseOperationalProjectionOneCalculationRevisionMin),
+  "effectiveElapsedSec": zod.number(),
+  "stationActivity": zod.union([zod.object({
+  "dough": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "sauce": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "press": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "frontline": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "freezeTunnel": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "packaging": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional(),
+  "warehouse": zod.object({
+  "runId": zod.string(),
+  "eventAtServerMs": zod.number().min(1),
+  "source": zod.enum(['automatic', 'manual', 'confirmed'])
+}).optional()
+}).describe('Latest server-accepted station events for the projection\'s run; absent keys have no evidence.'),zod.null()]),
+  "timers": zod.object({
+  "nextBatchInSec": zod.number(),
+  "pressRemainingSec": zod.number(),
+  "freezerElapsedSec": zod.number(),
+  "freezerRemainingSec": zod.number()
+}),
+  "counters": zod.object({
+  "casesCompleted": zod.number(),
+  "casesInFreezer": zod.number(),
+  "casesOnLine": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressCasesLeft": zod.number(),
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number(),
+  "sauceBarrelsMade": zod.number(),
+  "app1BatchesMade": zod.number(),
+  "app2BatchesMade": zod.number(),
+  "app3BatchesMade": zod.number(),
+  "app4BatchesMade": zod.number()
+}),
+  "facts": zod.object({
+  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
+  "pressDone": zod.boolean(),
+  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
+  "paceDelta": zod.number()
+}),
+  "calc": zod.record(zod.string(), zod.unknown()),
+  "due": zod.object({
+  "runId": zod.string(),
+  "generation": zod.string(),
+  "atMs": zod.number(),
+  "entries": zod.array(zod.object({
+  "channel": zod.string(),
+  "dueAt": zod.number(),
+  "dueNow": zod.boolean(),
+  "nextDueAt": zod.number(),
+  "canonical": zod.boolean(),
+  "sequence": zod.number().optional()
+}))
+})
+}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()])
 })
 
 

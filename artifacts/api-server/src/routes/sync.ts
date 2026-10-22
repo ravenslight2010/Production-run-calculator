@@ -45,7 +45,7 @@ import {
   operationalIntentLedgerTable,
   completedRunHistoryTable,
 } from "@workspace/db";
-import { and, eq, gt, gte, lte, asc, sql, inArray } from "drizzle-orm";
+import { and, eq, gt, gte, lte, asc, desc, sql, inArray } from "drizzle-orm";
 import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
@@ -111,11 +111,13 @@ import {
   type AutoTrackScheduleInput,
   type OperationalProjection,
   type ServerCalcResult,
+  type StationActivityId,
   APPLICATOR_STOCK_REGISTERS,
   applicatorStockFields,
   computeApplicatorStockCapacityLbs,
   capSauceStock,
 } from "@workspace/live-calc";
+import { deriveStationActivity } from "../lib/stationActivity";
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
   buildLiveCalcTickFrame,
@@ -576,7 +578,96 @@ function computeServerLiveState(
   }
 }
 
-function broadcast(
+const STATION_MANUAL_COMMAND_TYPES = [
+  "auto-track",
+  "manual-section:dough",
+  "manual-section:sauce",
+  "manual-section:sauce-stock",
+  "manual-section:packaging",
+  "manual-section:app1",
+  "manual-section:app2",
+  "manual-section:app3",
+  "manual-section:app4",
+  "manual-section:pep1",
+  "manual-section:pep2",
+  "station-activity-confirmation",
+] as const;
+const stationActivityRowsCache = new Map<string, {
+  expiresAt: number;
+  rows: Array<{ commandType: string; actionData: unknown; serverReceivedAt: Date; outcome: string }>;
+}>();
+
+async function readStationActivityRows(scope: Scope, date: string, runId: string) {
+  const cacheNow = Date.now();
+  const key = `${scope}:${date}:${runId}`;
+  const cached = stationActivityRowsCache.get(key);
+  if (cached && cached.expiresAt > cacheNow) return cached.rows;
+  const rows = await db.select({
+    commandType: operationalIntentLedgerTable.commandType,
+    actionData: operationalIntentLedgerTable.actionData,
+    serverReceivedAt: operationalIntentLedgerTable.serverReceivedAt,
+    outcome: operationalIntentLedgerTable.outcome,
+  }).from(operationalIntentLedgerTable).where(and(
+    eq(operationalIntentLedgerTable.scope, scope),
+    eq(operationalIntentLedgerTable.date, date),
+    eq(operationalIntentLedgerTable.outcome, "accepted"),
+    inArray(operationalIntentLedgerTable.commandType, [...STATION_MANUAL_COMMAND_TYPES]),
+    sql`${operationalIntentLedgerTable.actionData}->>'runId' = ${runId}`,
+  )).orderBy(desc(operationalIntentLedgerTable.serverReceivedAt));
+  const normalized = rows.map((row) => ({
+    commandType: row.commandType,
+    actionData: row.actionData,
+    serverReceivedAt: row.serverReceivedAt,
+    outcome: row.outcome,
+  }));
+  stationActivityRowsCache.set(key, { expiresAt: cacheNow + 1_000, rows: normalized });
+  if (stationActivityRowsCache.size > 256) {
+    const oldestKey = stationActivityRowsCache.keys().next().value;
+    if (oldestKey) stationActivityRowsCache.delete(oldestKey);
+  }
+  return normalized;
+}
+
+function invalidateStationActivityRows(scope: Scope, date: string): void {
+  const prefix = `${scope}:${date}:`;
+  for (const key of stationActivityRowsCache.keys()) {
+    if (key.startsWith(prefix)) stationActivityRowsCache.delete(key);
+  }
+}
+
+async function computeServerLiveStateWithStationActivity(
+  data: unknown,
+  nowMs: number,
+  calculationRevision: number,
+  scope: Scope,
+  date: string,
+  evidenceNowMs = nowMs,
+) {
+  const liveState = computeServerLiveState(data, nowMs, calculationRevision);
+  const projection = liveState.operationalProjection;
+  if (!projection) return liveState;
+  try {
+    const rows = await readStationActivityRows(scope, date, projection.runId);
+    const stationActivity = deriveStationActivity({
+      runId: projection.runId,
+      rows,
+      nowMs: evidenceNowMs,
+    });
+    return {
+      ...liveState,
+      operationalProjection: { ...projection, stationActivity },
+    };
+  } catch (error) {
+    logger.warn({ err: error, event: "station_activity_projection_read" },
+      "Station activity evidence is unavailable");
+    return {
+      ...liveState,
+      operationalProjection: { ...projection, stationActivity: null },
+    };
+  }
+}
+
+async function broadcast(
   data: unknown,
   senderId: string,
   scope: Scope,
@@ -590,16 +681,30 @@ function broadcast(
     force?: boolean;
     onlyClient?: SseClient;
   } = {},
-): void {
+): Promise<void> {
   data = completeSyncData(data);
+  invalidateStationActivityRows(scope, date);
   const snapshotId = data == null ? undefined : syncSnapshotId(data);
-  const computedLiveState = computeServerLiveState(
+  const computedLiveState = await computeServerLiveStateWithStationActivity(
     data,
     meta.serverTime ?? Date.now(),
     meta.canonicalRevision ?? 0,
+    scope,
+    date,
   );
   const liveState = Object.prototype.hasOwnProperty.call(meta, "operationalProjection")
-    ? { ...computedLiveState, operationalProjection: meta.operationalProjection ?? null }
+    ? {
+        ...computedLiveState,
+        operationalProjection: meta.operationalProjection
+          ? {
+              ...meta.operationalProjection,
+              stationActivity: meta.operationalProjection.stationActivity
+                ?? (meta.operationalProjection.runId === computedLiveState.operationalProjection?.runId
+                  ? computedLiveState.operationalProjection.stationActivity
+                  : null),
+            }
+          : null,
+      }
     : computedLiveState;
   for (const client of clients) {
     if (meta.onlyClient && client !== meta.onlyClient) continue;
@@ -844,7 +949,7 @@ async function reconcileOutboxGap(scope: Scope, latestCursor: number): Promise<v
       eq(dailySyncTable.scope, scope),
       eq(dailySyncTable.date, date),
     ));
-    broadcast(
+    await broadcast(
       completeSyncData(row?.data ?? emptySyncData(date)),
       "",
       scope,
@@ -868,7 +973,7 @@ async function dispatchSyncOutboxEvent(event: StoredSyncOutboxEvent): Promise<vo
         eq(dailySyncTable.date, event.date),
       ));
       if (row) {
-        broadcast(row.data, event.senderId, event.scope, event.date, {
+        await broadcast(row.data, event.senderId, event.scope, event.date, {
           canonicalRevision: row.canonicalRevision,
         });
       }
@@ -884,7 +989,21 @@ async function dispatchSyncOutboxEvent(event: StoredSyncOutboxEvent): Promise<vo
         eq(dailySyncTable.date, event.date),
       ));
       if (row) {
-        broadcast(row.data, "", event.scope, event.date, {
+        await broadcast(row.data, "", event.scope, event.date, {
+          canonicalRevision: row.canonicalRevision,
+          force: true,
+        });
+      }
+      return;
+    }
+    case "station-activity": {
+      stationActivityRowsCache.clear();
+      const [row] = await db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, event.scope),
+        eq(dailySyncTable.date, event.date),
+      ));
+      if (row) {
+        await broadcast(row.data, event.senderId, event.scope, event.date, {
           canonicalRevision: row.canonicalRevision,
           force: true,
         });
@@ -1636,7 +1755,9 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
-  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
+  const liveState = await computeServerLiveStateWithStationActivity(
+    data, serverTime, canonicalRevision, scope, clientToday(req),
+  );
   if (unchangedResponse(res, data, requestedSnapshot(req), {
     resetEpoch: resetState.epoch,
     rollover: resetState.rollover,
@@ -1778,7 +1899,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
-  if (result.wrote) broadcast(merged, senderId, scope, today, result);
+  if (result.wrote) await broadcast(merged, senderId, scope, today, result);
   if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
@@ -1810,7 +1931,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   });
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
   const liveState = merged
-    ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
+    ? await computeServerLiveStateWithStationActivity(
+        merged, result.serverTime, result.canonicalRevision, scope, today,
+      )
     : null;
   // Fixed names, numeric durations, no document identities or payload values.
   // acquisition includes BEGIN; lock-read includes its SQL round trips.
@@ -2069,7 +2192,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     return { status: 200, data: next, revision, duplicate: false, serverTime };
     });
     if (result.status === 200 && !result.duplicate) {
-      broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
+      await broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
     }
   } finally {
     await recordSyncOutboxEvent({
@@ -2100,6 +2223,144 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     data: result.data,
     snapshotId: syncSnapshotId(result.data),
   });
+});
+
+// Explicit activity confirmations are durable, run-bound events. They do not
+// edit counters or the persisted day-state snapshot.
+router.post("/sync/station-activity", async (req: Request, res: Response): Promise<void> => {
+  const id = req.body?.id;
+  const runId = req.body?.runId;
+  const station = req.body?.station;
+  const senderId = typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "";
+  const rawEpoch = req.query.epoch;
+  const suppliedEpoch = rawEpoch === undefined ? 0 : Number(rawEpoch);
+  if (
+    typeof id !== "string" || id.length < 8 || id.length > 160
+    || !/^[A-Za-z0-9:_-]+$/.test(id)
+    || typeof runId !== "string" || runId.length < 1 || runId.length > 160
+    || (station !== "freezeTunnel" && station !== "warehouse")
+    || !Number.isSafeInteger(suppliedEpoch) || suppliedEpoch < 0
+  ) {
+    res.status(400).json({ error: "Invalid station activity confirmation." });
+    return;
+  }
+
+  const scope = currentScope();
+  const date = clientToday(req);
+  const nowMs = Date.now();
+  try {
+    const result = await db.transaction(async (tx) => {
+      await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(nowMs) }).onConflictDoNothing();
+      const [reset] = await tx.select().from(dataResetTable)
+        .where(eq(dataResetTable.scope, scope)).for("update");
+      const [currentRow] = await tx.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, date))).for("update");
+      const data = (currentRow?.data ?? emptySyncData(date)) as Record<string, any>;
+      const canonicalRevision = currentRow?.canonicalRevision ?? 0;
+      if ((reset?.epoch ?? 0) !== suppliedEpoch) {
+        return { status: 409 as const, code: "SYNC_RESET_CHANGED", data, canonicalRevision };
+      }
+
+      const [seen] = await tx.select().from(operationalIntentLedgerTable)
+        .where(and(
+          eq(operationalIntentLedgerTable.scope, scope),
+          eq(operationalIntentLedgerTable.date, date),
+          eq(operationalIntentLedgerTable.intentId, id),
+        )).for("update");
+      if (seen) {
+        const action = seen.actionData && typeof seen.actionData === "object" && !Array.isArray(seen.actionData)
+          ? seen.actionData as Record<string, unknown>
+          : {};
+        if (seen.commandType !== "station-activity-confirmation"
+          || action.runId !== runId || action.station !== station) {
+          return { status: 409 as const, code: "IDEMPOTENCY_KEY_REUSED", data, canonicalRevision };
+        }
+        return {
+          status: 200 as const,
+          duplicate: true,
+          data,
+          canonicalRevision,
+          eventAtServerMs: seen.serverReceivedAt.getTime(),
+        };
+      }
+
+      const dayState = data.dayState as { currentIndex?: number; runs?: Array<Record<string, unknown>> } | undefined;
+      const currentIndex = Number.isInteger(dayState?.currentIndex) ? dayState!.currentIndex! : 0;
+      const selectedRun = dayState?.runs?.[currentIndex];
+      const startedAt = Number(selectedRun?.startedAt);
+      if (
+        selectedRun?.id !== runId
+        || !Number.isFinite(startedAt) || startedAt <= 0
+        || selectedRun?.pausedAt != null || selectedRun?.endedAt != null
+      ) {
+        return { status: 409 as const, code: "RUN_NOT_ACTIVE", data, canonicalRevision };
+      }
+
+      const eventAtServerMs = Date.now();
+      await tx.insert(operationalIntentLedgerTable).values({
+        scope,
+        date,
+        intentId: id,
+        outcome: "accepted",
+        snapshot: null,
+        commandType: "station-activity-confirmation",
+        actorId: req.userId ?? "unknown",
+        deviceId: senderId || "unknown",
+        baseRevision: canonicalRevision,
+        canonicalRevision,
+        actionData: { runId, station },
+        serverReceivedAt: new Date(eventAtServerMs),
+      });
+      await appendSyncOutboxEvent(tx, {
+        kind: "station-activity",
+        scope,
+        date,
+        senderId,
+      });
+      return { status: 200 as const, duplicate: false, data, canonicalRevision, eventAtServerMs };
+    });
+
+    if (result.status !== 200) {
+      res.status(409).json({
+        error: result.code === "SYNC_RESET_CHANGED"
+          ? "The production day changed. Refresh the Line Map and try again."
+          : result.code === "RUN_NOT_ACTIVE"
+            ? "The selected run is no longer active. Refresh the Line Map and try again."
+            : "This confirmation could not be applied. Refresh the Line Map and try again.",
+        code: result.code,
+      });
+      return;
+    }
+
+    stationActivityRowsCache.clear();
+    await broadcast(result.data, senderId, scope, date, {
+      canonicalRevision: result.canonicalRevision,
+      serverTime: result.eventAtServerMs,
+      force: true,
+    });
+    const liveState = await computeServerLiveStateWithStationActivity(
+      result.data,
+      result.eventAtServerMs,
+      result.canonicalRevision,
+      scope,
+      date,
+    );
+    res.json({
+      ok: true,
+      duplicate: result.duplicate,
+      runId,
+      station,
+      eventAtServerMs: result.eventAtServerMs,
+      canonicalRevision: result.canonicalRevision,
+      serverTime: result.eventAtServerMs,
+      snapshotId: syncSnapshotId(result.data),
+      operationalProjection: liveState.operationalProjection,
+    });
+  } catch (error) {
+    req.log.error({ err: error, event: "station_activity_confirmation" },
+      "Station activity confirmation failed");
+    res.status(500).json({ error: "Station activity could not be confirmed. Please retry." });
+  }
 });
 
 // Offline operational commands are not snapshots. Their stable ID is retained
@@ -2148,7 +2409,7 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     }
     if (!result) throw new Error("Operational intent did not complete");
     if (!result.duplicate) {
-      broadcast(
+      await broadcast(
         result.data,
         command.deviceId,
         scope,
@@ -2239,12 +2500,14 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
       return;
     }
     if (result.outcome === "accepted") {
-      broadcast(result.data, senderId, scope, date, result);
+      await broadcast(result.data, senderId, scope, date, result);
     }
-    const liveState = computeServerLiveState(
+    const liveState = await computeServerLiveStateWithStationActivity(
       result.data,
       result.serverTime,
       result.canonicalRevision,
+      scope,
+      date,
     );
     req.log.info({
       event: "auto_track_claim",
@@ -2319,7 +2582,9 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const snapshotId = syncSnapshotId(data);
   const requested = requestedSnapshot(req);
   const initialServerTime = Date.now();
-  const liveState = computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0);
+  const liveState = await computeServerLiveStateWithStationActivity(
+    data, initialServerTime, row?.canonicalRevision ?? 0, scope, watchDate,
+  );
   const initialFrame = `data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
@@ -2386,7 +2651,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       registeredSnapshotId !== registeredClient.lastSnapshotId
       || registeredRevision !== registeredClient.lastCanonicalRevision
     ) {
-      broadcast(registeredData, "", scope, watchDate, {
+      await broadcast(registeredData, "", scope, watchDate, {
         canonicalRevision: registeredRevision,
         force: true,
         canonicalReconcile: true,
@@ -2419,7 +2684,9 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
         }
         const heartbeatServerTime = Date.now();
         const live = fresh?.data
-          ? computeServerLiveState(fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0)
+          ? await computeServerLiveStateWithStationActivity(
+              fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0, scope, watchDate,
+            )
           : null;
         if (live?.autoTrackSchedule) {
           res.write(`data: ${JSON.stringify({
@@ -2446,29 +2713,39 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // (setup-form calcs).  The active-run tick takes priority; if it fires, the
   // setup tick is skipped for that interval to avoid duplicate frames.
   calcTick = setInterval(() => {
-    if (!client || client.lastData == null) return;
-    const nowMs = Date.now();
-    const activeTick = buildLiveCalcTickFrame(
-      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
-    );
-    if (activeTick) {
-      client.lastCalcEmitMs = activeTick.lastCalcEmitMs;
-      const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
+    void (async () => {
+      const tickClient = client;
+      if (!tickClient || tickClient.lastData == null) return;
+      const data = tickClient.lastData;
+      const nowMs = Date.now();
+      const activeTick = buildLiveCalcTickFrame(
+        data, nowMs, tickClient.lastCalcEmitMs, tickClient.lastCanonicalRevision, liveCalcTickMs,
+      );
+      if (activeTick) {
+        tickClient.lastCalcEmitMs = activeTick.lastCalcEmitMs;
+        const live = await computeServerLiveStateWithStationActivity(
+          data, nowMs, tickClient.lastCanonicalRevision, scope, watchDate,
+        );
+        if (client !== tickClient || tickClient.lastData !== data) return;
+        try {
+          tickClient.res.write(`data: ${JSON.stringify({ ...activeTick.frame, ...live })}\n\n`);
+        } catch {}
+        return;
+      }
+      // Fallback: setup-form tick for pending (or any) selected run with runValues
+      const setupTick = buildSetupCalcTickFrame(
+        data, nowMs, tickClient.lastCalcEmitMs, tickClient.lastCanonicalRevision, liveCalcTickMs,
+      );
+      if (!setupTick) return;
+      tickClient.lastCalcEmitMs = setupTick.lastCalcEmitMs;
+      const live = await computeServerLiveStateWithStationActivity(
+        data, nowMs, tickClient.lastCanonicalRevision, scope, watchDate,
+      );
+      if (client !== tickClient || tickClient.lastData !== data) return;
       try {
-        client.res.write(`data: ${JSON.stringify({ ...activeTick.frame, ...live })}\n\n`);
+        tickClient.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
       } catch {}
-      return;
-    }
-    // Fallback: setup-form tick for pending (or any) selected run with runValues
-    const setupTick = buildSetupCalcTickFrame(
-      client.lastData, nowMs, client.lastCalcEmitMs, client.lastCanonicalRevision, liveCalcTickMs,
-    );
-    if (!setupTick) return;
-    client.lastCalcEmitMs = setupTick.lastCalcEmitMs;
-    const live = computeServerLiveState(client.lastData, nowMs, client.lastCanonicalRevision);
-    try {
-      client.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
-    } catch {}
+    })().catch(() => {});
   }, liveCalcTickMs);
 });
 
@@ -2530,7 +2807,9 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
   ));
   const serverTime = Date.now();
   const authoritative = row
-    ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
+    ? await computeServerLiveStateWithStationActivity(
+        row.data, nowMs, row.canonicalRevision ?? 0, scope, date, serverTime,
+      )
     : null;
   const operationalProjection = authoritative?.operationalProjection
     ? {
@@ -2540,7 +2819,7 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       }
     : null;
   if (row) {
-    broadcast(row.data, "server:e2e-clock", scope, date, {
+    await broadcast(row.data, "server:e2e-clock", scope, date, {
       canonicalRevision: row.canonicalRevision ?? 0,
       serverTime,
       operationalProjection,
@@ -2722,7 +3001,7 @@ router.put(
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (result.wrote && date === clientToday(req)) {
-    broadcast(merged, senderId, scope, date, result);
+    await broadcast(merged, senderId, scope, date, result);
   }
   if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
@@ -3158,7 +3437,7 @@ export async function runAutoTrackServerTicks(opts: {
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
       if (result.accepted) {
-        broadcast(result.data, "server:tick", scope, row.date, result);
+        await broadcast(result.data, "server:tick", scope, row.date, result);
       }
     } catch (err) {
       backoff.recordFailure(nowMs);

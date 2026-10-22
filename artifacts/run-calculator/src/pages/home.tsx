@@ -637,7 +637,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
@@ -6952,6 +6952,36 @@ export default function Home() {
     serverCalcReceiptRef.current = receipt;
     setServerCalcReceipt(receipt);
   }
+  const confirmStationActivity = useCallback(async (station: "freezeTunnel" | "warehouse") => {
+    if (!isOnline || !currentRunId) {
+      throw new Error("Connect to the production network and select the active run to confirm activity.");
+    }
+    const response = await fetch(
+      `/api/sync/station-activity?today=${encodeURIComponent(todayStr())}&epoch=${getStoredResetEpoch()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: `line-map:${crypto.randomUUID()}`,
+          runId: currentRunId,
+          station,
+          senderId: getOperationalDeviceId(),
+        }),
+      },
+    );
+    const body = await response.json().catch(() => null) as {
+      ok?: boolean;
+      error?: string;
+      snapshotId?: string;
+      operationalProjection?: OperationalProjection | null;
+    } | null;
+    if (!response.ok || body?.ok !== true || !body.snapshotId) {
+      throw new Error(body?.error ?? "Activity could not be confirmed. Refresh and try again.");
+    }
+    if (body.operationalProjection) {
+      adoptOperationalProjection(body.operationalProjection, body.snapshotId);
+    }
+  }, [currentRunId, isOnline]);
   function adoptServerCalcReceipt(
     serverCalc: { runId: string; calc: Calc } | null | undefined,
     snapshotId: string | undefined,
@@ -15487,7 +15517,7 @@ export default function Home() {
   const homeCtxValue = useMemo(() => ({
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, addBrand,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
-    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus,
+    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus, confirmStationActivity,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,

@@ -153,3 +153,4 @@
 - [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.
 - [Release guide authority claims](release-guide-authority-claims.md) — check provider/action/live-target claims, preserving explicit negatives, examples, and historical context.
 - [Vitest hook returns](vitest-hook-cleanup.md) — implicitly returning a mock from a setup hook registers it as cleanup and can create post-assertion failures.
+- [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.

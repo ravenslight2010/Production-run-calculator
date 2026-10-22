@@ -1287,6 +1287,99 @@ function sandboxAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(SANDBOX)}` };
 }
 
+describe("POST /sync/station-activity — server-confirmed station evidence", () => {
+  const DATE = "2030-03-10";
+  const RUN = "station-activity-run";
+
+  beforeEach(async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          currentIndex: 0,
+          runs: [{ id: RUN, startedAt: 1_000, metaUpdatedAt: 1 }],
+        },
+        runValues: { [RUN]: {} },
+      },
+      canonicalRevision: 7,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  });
+
+  const confirm = (body: Record<string, unknown>) => fetch(
+    `${baseUrl}/api/sync/station-activity?today=${DATE}&epoch=0`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+
+  it("records an idempotent run-bound event without changing snapshot data or counters", async () => {
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const payload = {
+      id: "station-confirm-1",
+      runId: RUN,
+      station: "freezeTunnel",
+      senderId: "device-station-1",
+    };
+
+    const firstResponse = await confirm(payload);
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json() as {
+      ok: boolean;
+      duplicate: boolean;
+      eventAtServerMs: number;
+      canonicalRevision: number;
+    };
+    expect(first).toMatchObject({ ok: true, duplicate: false, canonicalRevision: 7 });
+
+    const secondResponse = await confirm(payload);
+    expect(secondResponse.status).toBe(200);
+    const second = await secondResponse.json() as typeof first;
+    expect(second).toMatchObject({
+      ok: true,
+      duplicate: true,
+      eventAtServerMs: first.eventAtServerMs,
+      canonicalRevision: 7,
+    });
+
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect(after.data).toEqual(before.data);
+    expect(after.canonicalRevision).toBe(before.canonicalRevision);
+    const events = await db.select().from(operationalIntentLedgerTable)
+      .where(and(
+        eq(operationalIntentLedgerTable.scope, "live"),
+        eq(operationalIntentLedgerTable.date, DATE),
+        eq(operationalIntentLedgerTable.intentId, payload.id),
+      ));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      outcome: "accepted",
+      commandType: "station-activity-confirmation",
+      actionData: { runId: RUN, station: "freezeTunnel" },
+    });
+  });
+
+  it("rejects confirmations for a non-selected run", async () => {
+    const response = await confirm({
+      id: "station-confirm-wrong-run",
+      runId: "another-run",
+      station: "warehouse",
+      senderId: "device-station-1",
+    });
+    expect(response.status).toBe(409);
+    const receipts = await db.select().from(operationalIntentLedgerTable)
+      .where(and(
+        eq(operationalIntentLedgerTable.scope, "live"),
+        eq(operationalIntentLedgerTable.date, DATE),
+        eq(operationalIntentLedgerTable.intentId, "station-confirm-wrong-run"),
+      ));
+    expect(receipts).toHaveLength(0);
+  });
+});
+
 describe("factory purge retains QC history", () => {
   it.each(["live", "sandbox"] as const)("preserves both QC scopes while purging only %s master data", async (scope) => {
     await db.delete(qualityChecksTable);

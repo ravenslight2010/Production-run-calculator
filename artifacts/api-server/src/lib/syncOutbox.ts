@@ -42,6 +42,12 @@ export type SyncOutboxEvent =
       ownerId: string;
     }
   | {
+      kind: "station-activity";
+      scope: Scope;
+      date: string;
+      senderId: string;
+    }
+  | {
       kind: "configuration";
       scope: Scope;
       senderId: string;
@@ -152,7 +158,7 @@ export function isLocalSyncOutboxEvent(event: StoredSyncOutboxEvent): boolean {
 
 function assertBoundedEvent(event: SyncOutboxEvent): void {
   if (!event.scope || event.scope.length > 160) throw new Error("Invalid sync outbox scope");
-  if (event.kind === "day-state" || event.kind === "rollover") {
+  if (event.kind === "day-state" || event.kind === "rollover" || event.kind === "station-activity") {
     if (!/^\d{4}-\d{2}-\d{2}$/u.test(event.date)) throw new Error("Invalid sync outbox date");
   }
   if ("senderId" in event && event.senderId.length > 160) {
@@ -268,6 +274,14 @@ function parseEvent(row: {
       runId: payload.runId,
       section: payload.section,
       ownerId: payload.ownerId,
+    };
+  }
+  if (row.kind === "station-activity" && row.date) {
+    return {
+      ...common,
+      kind: "station-activity",
+      date: row.date,
+      senderId: row.sender_id,
     };
   }
   const configurationFamilies = [

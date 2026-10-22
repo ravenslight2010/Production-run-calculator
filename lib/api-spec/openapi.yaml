@@ -5698,6 +5698,32 @@ paths:
         "500":
           description: Safe automatic tracking failure
 
+  /sync/station-activity:
+    post:
+      operationId: confirmStationActivity
+      tags: [sync]
+      summary: Confirm activity at the Freeze Tunnel or Warehouse for the active run
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: epoch
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StationActivityConfirmationRequest" }
+      responses:
+        "200":
+          description: Accepted server-timestamped confirmation or idempotent retry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StationActivityConfirmationResponse" }
+        "400": { description: Invalid confirmation request }
+        "409": { description: Production day or active run changed before confirmation }
+        "500": { description: Confirmation could not be recorded }
+
   /sync/manual-section:
     post:
       operationId: submitManualSectionEdit
@@ -7102,6 +7128,7 @@ components:
         - capturedAtServerMs
         - calculationRevision
         - effectiveElapsedSec
+        - stationActivity
         - timers
         - counters
         - facts
@@ -7115,6 +7142,10 @@ components:
         capturedAtServerMs: { type: number }
         calculationRevision: { type: integer, minimum: 0 }
         effectiveElapsedSec: { type: number }
+        stationActivity:
+          oneOf:
+            - $ref: "#/components/schemas/StationActivityMap"
+            - { type: "null" }
         timers:
           type: object
           required: [nextBatchInSec, pressRemainingSec, freezerElapsedSec, freezerRemainingSec]
@@ -7165,6 +7196,54 @@ components:
         calc: { type: object, additionalProperties: true }
         due:
           $ref: "#/components/schemas/OperationalProjectionSchedule"
+
+    StationActivityMap:
+      type: object
+      description: Latest server-accepted station events for the projection's run; absent keys have no evidence.
+      additionalProperties: false
+      properties:
+        dough: { $ref: "#/components/schemas/StationActivityEvidence" }
+        sauce: { $ref: "#/components/schemas/StationActivityEvidence" }
+        press: { $ref: "#/components/schemas/StationActivityEvidence" }
+        frontline: { $ref: "#/components/schemas/StationActivityEvidence" }
+        freezeTunnel: { $ref: "#/components/schemas/StationActivityEvidence" }
+        packaging: { $ref: "#/components/schemas/StationActivityEvidence" }
+        warehouse: { $ref: "#/components/schemas/StationActivityEvidence" }
+
+    StationActivityEvidence:
+      type: object
+      required: [runId, eventAtServerMs, source]
+      properties:
+        runId: { type: string }
+        eventAtServerMs: { type: number, minimum: 1 }
+        source: { type: string, enum: [automatic, manual, confirmed] }
+
+    StationActivityConfirmationRequest:
+      type: object
+      required: [id, runId, station, senderId]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 8, maxLength: 160, pattern: "^[A-Za-z0-9:_-]+$" }
+        runId: { type: string, minLength: 1, maxLength: 160 }
+        station: { type: string, enum: [freezeTunnel, warehouse] }
+        senderId: { type: string, maxLength: 160 }
+
+    StationActivityConfirmationResponse:
+      type: object
+      required: [ok, duplicate, runId, station, eventAtServerMs, canonicalRevision, serverTime, snapshotId, operationalProjection]
+      properties:
+        ok: { type: boolean, const: true }
+        duplicate: { type: boolean }
+        runId: { type: string }
+        station: { type: string, enum: [freezeTunnel, warehouse] }
+        eventAtServerMs: { type: integer, minimum: 1 }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 1 }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        operationalProjection:
+          oneOf:
+            - $ref: "#/components/schemas/OperationalProjection"
+            - { type: "null" }
 
     OperationalProjectionSchedule:
       type: object
