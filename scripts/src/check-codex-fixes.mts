@@ -39,6 +39,10 @@ const wrappedCityPostalLine =
   /^\s*(?:[-*]\s+)?[a-z][a-z.'’-]*(?:\s+[a-z][a-z.'’-]*){0,4},\s*[a-z]{2}\s+\d{5}(?:-\d{4})?\s*[.,]?\s*$/i;
 const wrappedStreetUnitLine =
   /^\s*(?:[-*]\s+)?(?:suite|ste\.?|unit|apt\.?|apartment)\s+(?:#\s*)?(?:\d[a-z0-9-]{0,9}|[a-z])\s*[.,]?\s*$/i;
+const wrappedCityStateLine =
+  /^\s*(?:[-*]\s+)?[a-z][a-z.'’-]*(?:\s+[a-z][a-z.'’-]*){0,4},\s*[a-z]{2}\s*[.,]?\s*$/i;
+const wrappedPostalCodeLine =
+  /^\s*(?:[-*]\s+)?\d{5}(?:-\d{4})?\s*[.,]?\s*$/;
 const privateKeyMarker = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/i;
 const urlUserInfo = /\bhttps?:\/\/([^/@\s]+)@/gi;
 const credentialAssignment =
@@ -192,6 +196,16 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
       wrappedStreetAddressLine.test(lines[index]) &&
       wrappedStreetUnitLine.test(lines[index + 1]) &&
       wrappedCityPostalLine.test(lines[index + 2])
+    ) {
+      wrappedMailingAddressLines.add(index);
+      wrappedMailingAddressLines.add(index + 1);
+      wrappedMailingAddressLines.add(index + 2);
+    }
+
+    if (
+      wrappedStreetAddressLine.test(lines[index]) &&
+      wrappedCityStateLine.test(lines[index + 1]) &&
+      wrappedPostalCodeLine.test(lines[index + 2])
     ) {
       wrappedMailingAddressLines.add(index);
       wrappedMailingAddressLines.add(index + 1);

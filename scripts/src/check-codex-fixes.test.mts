@@ -156,6 +156,25 @@ test("flags synthetic street, suite or unit, and city lines without echoing thei
   }
 });
 
+test("flags mailing addresses with city and ZIP on separate adjacent lines", () => {
+  const street = "91 Maple Street";
+  const cityState = "Sampletown, IL";
+  const postalCode = "60614";
+  const content = `${street}\n${cityState}\n${postalCode}`;
+
+  const findings = findFixHistoryDetails(content);
+  assert.deepEqual(findings, [
+    { line: 1, category: "mailing address" },
+    { line: 2, category: "mailing address" },
+    { line: 3, category: "mailing address" },
+  ]);
+
+  const diagnostic = findings.map(formatFixHistoryFinding).join("\n");
+  for (const matchedValue of [street, "Sampletown", postalCode]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
 test("allows benign adjacent technical lines, paths, release numbers, and dates", () => {
   const content = [
     "The helper uses",
@@ -173,6 +192,11 @@ test("allows benign adjacent technical lines, paths, release numbers, and dates"
     "91 Maple Street",
     "Unit tests",
     "Sampletown, IL 60614",
+    "A parser groups the city label:",
+    "Sampletown, IL",
+    "with no street component; this is just technical text.",
+    "A separate numeric build identifier follows:",
+    "60614",
   ].join("\n");
 
   assert.deepEqual(findFixHistoryDetails(content), [
