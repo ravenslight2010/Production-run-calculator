@@ -80,3 +80,11 @@ Do not assume a task's automatic code checkpoint includes its operational eviden
 **Why:** The completion checkpoint omitted eligible audit artifacts while Git still considered them changes. Ignoring the whole metadata directory would have overridden the repository's deliberate evidence-retention rules.
 
 **How to apply:** Inspect the exact remaining paths and ignore exceptions. Managed commit hooks may exclude local metadata even when explicitly staged; retain a sanitized, bounded handoff in a normal shared evidence directory and ignore local originals without deleting them. Never sweep all agent metadata into Git, erase artifacts, or bypass managed rebase continuation.
+
+## Revision-bound build evidence during task merges
+
+For performance evidence tied to a Git revision, build only after the production inputs are committed, and compare the build's verified revision with the workspace HEAD before treating the capture as current. If a task merge moves HEAD during preparation, or the build reports an unavailable binding, rebuild on a stable committed tree rather than inferring the revision from its source fingerprint.
+
+**Why:** A task merge advanced HEAD while a local production build was being prepared. The bundle built, but its Git binding was unavailable until the required boundary-check inventory fix was committed and the build repeated.
+
+**How to apply:** Record the verified build ID, source fingerprint, and Git revision together. After the browser run, compare HEAD and the production source fingerprint again; rerun only if production inputs changed, not merely because an unrelated metadata commit advanced HEAD.

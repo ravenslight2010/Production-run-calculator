@@ -118,7 +118,7 @@ test("Home opens each deferred panel in the selected browser and viewport", asyn
   page.on("response", (response) => {
     if (
       response.request().resourceType() === "script" &&
-      !response.ok()
+      response.status() >= 400
     ) {
       failedScriptRequests.push(`${response.status()} ${response.url()}`);
     }

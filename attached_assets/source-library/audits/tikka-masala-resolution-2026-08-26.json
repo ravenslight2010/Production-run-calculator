@@ -1,0 +1,56 @@
+{
+  "format": "source-audit-resolution",
+  "formatVersion": 1,
+  "resolvedOn": "2026-08-26",
+  "finding": {
+    "comparison": "attached_assets/source-library/audits/source-comparison-2026-08-26.json",
+    "sourceFile": "sauce/Tikka_Masala_Process_1784339520201.xlsx",
+    "recipeId": "sauce:maria-son-s-tikka-masala",
+    "recipeName": "Tika Masala Sauce"
+  },
+  "authorityDecision": {
+    "authoritativeSource": "retained sauce workbook",
+    "reason": "The retained workbook is the only detailed formula source in the retained source library. The July 18 operating audit independently records the same Garlic Puree and Chili Powder naming corruption, while the August 26 production snapshot records the corrupted live state rather than an independent formula revision.",
+    "currentOperatingSource": "No separate current operating workbook or signed formula revision was retained."
+  },
+  "approval": {
+    "status": "approved",
+    "approvedBeforeWrite": true,
+    "writePath": "POST /api/sauce-recipes",
+    "authorization": "existing production manager session"
+  },
+  "before": {
+    "snapshot": "attached_assets/source-library/audits/production-snapshot-2026-08-26.json",
+    "snapshotSha256": "4bff312e8176dc5333a2a5982798ea9f9bb951bb50409bb9affbd89c3407e9b6",
+    "formulaSha256": "5c87427ffddf48b19149b18f35e7715eec3eb51003faae16b14bae4c623930de",
+    "componentCount": 20,
+    "relevantComponents": [
+      { "ingredient": "Garlic Powder", "lbs": 3.65 },
+      { "ingredient": "Garlic Powder", "lbs": 1 }
+    ]
+  },
+  "approvedCorrection": {
+    "replace": [
+      { "from": { "ingredient": "Garlic Powder", "lbs": 3.65 }, "to": { "ingredient": "Garlic Puree", "lbs": 3.65 } },
+      { "from": { "ingredient": "Garlic Powder", "lbs": 1 }, "to": { "ingredient": "Chili Powder", "lbs": 1 } }
+    ],
+    "add": { "ingredient": "Black Pepper Powder", "lbs": 0.24 }
+  },
+  "sourceVerification": {
+    "workbookSha256": "89618c9d7737ff2a38d460013e33dc36059e3ba73689cfadc179d8ef0b7685b9",
+    "formulaSha256": "16385e2047c1a6379c0c1377e61a6c5abd66be24b0526ac17f089bfaba9428c7",
+    "componentCount": 21
+  },
+  "after": {
+    "verifiedBy": "authenticated GET /api/sauce-recipes",
+    "formulaSha256": "16385e2047c1a6379c0c1377e61a6c5abd66be24b0526ac17f089bfaba9428c7",
+    "componentCount": 21,
+    "relevantComponents": [
+      { "ingredient": "Garlic Puree", "lbs": 3.65 },
+      { "ingredient": "Chili Powder", "lbs": 1 },
+      { "ingredient": "Black Pepper Powder", "lbs": 0.24 }
+    ],
+    "matchesRetainedWorkbook": true
+  },
+  "auditScriptDatabaseWrites": false
+}
