@@ -173,39 +173,76 @@ function resolveSourceFile(basePath, specifier, readSource) {
   );
 }
 
-function discoverWorkspacePackageDirectories(workspaceRoot) {
-  const result = spawnSync(
-    "pnpm",
-    ["--dir", workspaceRoot, "--recursive", "list", "--json", "--depth", "-1"],
-    { encoding: "utf8" },
+const MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH = 400;
+
+function workspaceDiscoveryContext(workspaceRoot) {
+  const root = path.resolve(workspaceRoot);
+  return {
+    root,
+    command: `pnpm --dir ${JSON.stringify(root)} --recursive list --json --depth -1`,
+  };
+}
+
+function safeWorkspaceDiscoveryDetail(value) {
+  const detail = String(value ?? "No additional details were provided.")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1[redacted]@")
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+/gi, "$1[redacted]")
+    .replace(/(token|password|secret|_auth)\s*([=:]\s*)[^\s,;]+/gi, "$1$2[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (detail.length <= MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH) return detail;
+  return `${detail.slice(0, MAX_WORKSPACE_DISCOVERY_DETAIL_LENGTH - 1)}…`;
+}
+
+function workspaceDiscoveryError(workspaceRoot, detail) {
+  const { root, command } = workspaceDiscoveryContext(workspaceRoot);
+  return new Error(
+    `Workspace package discovery failed.\n` +
+      `Command: ${command}\n` +
+      `Workspace root: ${root}\n` +
+      `Action: Run the command above from the workspace root and check pnpm-workspace.yaml.\n` +
+      `Details: ${safeWorkspaceDiscoveryDetail(detail)}`,
   );
+}
+
+function discoverWorkspacePackageDirectories(
+  workspaceRoot,
+  runWorkspaceList = (root) =>
+    spawnSync(
+      "pnpm",
+      ["--dir", root, "--recursive", "list", "--json", "--depth", "-1"],
+      { encoding: "utf8" },
+    ),
+) {
+  const result = runWorkspaceList(workspaceRoot);
   if (result.error || result.status !== 0) {
     const detail =
       result.error?.message || result.stderr?.trim() || `exit status ${result.status}`;
-    throw new Error(
-      `Unable to discover local workspace packages from pnpm-workspace.yaml: ${detail}`,
-    );
+    throw workspaceDiscoveryError(workspaceRoot, detail);
   }
 
   let packages;
   try {
     packages = JSON.parse(result.stdout);
+    if (!Array.isArray(packages)) {
+      throw new Error("pnpm workspace package listing must be a JSON array.");
+    }
+    if (packages.some((workspacePackage) => typeof workspacePackage?.path !== "string")) {
+      throw new Error("pnpm workspace package listing contains an entry without a path.");
+    }
   } catch (error) {
-    throw new Error(
-      `Unable to parse pnpm workspace package listing: ${
+    throw workspaceDiscoveryError(
+      workspaceRoot,
+      `Invalid pnpm workspace package listing: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
-  if (!Array.isArray(packages)) {
-    throw new Error("pnpm workspace package listing must be a JSON array.");
-  }
 
   const root = path.resolve(workspaceRoot);
   return packages.map((workspacePackage) => {
-    if (typeof workspacePackage?.path !== "string") {
-      throw new Error("pnpm workspace package listing contains an entry without a path.");
-    }
     const packageDirectory = path.resolve(workspacePackage.path);
     const relativePath = path.relative(root, packageDirectory);
     if (
@@ -213,8 +250,9 @@ function discoverWorkspacePackageDirectories(workspaceRoot) {
       relativePath.startsWith(`..${path.sep}`) ||
       path.isAbsolute(relativePath)
     ) {
-      throw new Error(
-        `pnpm reported a workspace package outside the workspace root: "${packageDirectory}".`,
+      throw workspaceDiscoveryError(
+        workspaceRoot,
+        `pnpm reported a workspace package outside the root: "${packageDirectory}".`,
       );
     }
     return packageDirectory;
@@ -382,10 +420,14 @@ export function checkHomeDeferredSourceBoundary({
   sourceRoot = SOURCE_ROOT,
   workspaceRoot = WORKSPACE_ROOT,
   readSource = (filePath) => fs.readFileSync(filePath, "utf8"),
+  runWorkspaceList,
 }) {
   let workspacePackageDirectories;
   const getWorkspacePackageDirectories = () => {
-    workspacePackageDirectories ??= discoverWorkspacePackageDirectories(workspaceRoot);
+    workspacePackageDirectories ??= discoverWorkspacePackageDirectories(
+      workspaceRoot,
+      runWorkspaceList,
+    );
     return workspacePackageDirectories;
   };
   const roots = [

@@ -59,6 +59,7 @@ function createSourceFixture({
   packageLocations = packageSource === undefined ? [] : ["lib/home-bridge"],
   packageExports,
   browserPackageSource,
+  runWorkspaceList,
 }) {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "home-deferred-boundary-"));
   const sourceRoot = path.join(fixtureRoot, "src");
@@ -112,6 +113,7 @@ function createSourceFixture({
     liveRunSource: "",
     sourceRoot,
     workspaceRoot: fixtureRoot,
+    runWorkspaceList,
     cleanup: () => fs.rmSync(fixtureRoot, { recursive: true, force: true }),
   };
 }
@@ -428,6 +430,133 @@ test("source boundary clearly rejects ambiguous local workspace package names", 
     assert.throws(
       () => checkHomeDeferredSourceBoundary(fixture),
       /Workspace package "@workspace\/home-bridge" has multiple local manifests: modules\/one\/packages\/home-bridge, modules\/two\/packages\/home-bridge/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing process failures include command context and bounded details", () => {
+  let invokedWithRoot;
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: (workspaceRoot) => {
+      invokedWithRoot = workspaceRoot;
+      return {
+        status: 1,
+        stderr:
+          "\u001b[31mhttps://user:password@example.test/error\u001b[0m " +
+          "x".repeat(5000),
+      };
+    },
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        const details = error.message.match(/Details: (.*)$/)?.[1];
+        assert.ok(details);
+        assert.equal(details.length, 400);
+        assert.match(details, /^https:\/\/\[redacted\]@example\.test\/error x+/);
+        assert.ok(!details.includes("user:password"));
+        return true;
+      },
+    );
+    assert.equal(invokedWithRoot, fixture.workspaceRoot);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing launch failures include the actionable command context", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: () => ({
+      error: Object.assign(new Error("spawn pnpm ENOENT"), { code: "ENOENT" }),
+      status: null,
+      stderr: "",
+    }),
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /Workspace root:/);
+        assert.match(
+          error.message,
+          /Action: Run the command above from the workspace root and check pnpm-workspace\.yaml\./,
+        );
+        assert.match(error.message, /Details: spawn pnpm ENOENT/);
+        return true;
+      },
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("malformed workspace listing output includes command context and root", () => {
+  let invokedWithRoot;
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: (workspaceRoot) => {
+      invokedWithRoot = workspaceRoot;
+      return { status: 0, stdout: "not-json" };
+    },
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        assert.match(error.message, /Details: Invalid pnpm workspace package listing:/);
+        return true;
+      },
+    );
+    assert.equal(invokedWithRoot, fixture.workspaceRoot);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing rejects valid JSON with an invalid package-list shape", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: () => ({ status: 0, stdout: JSON.stringify([{ name: "missing-path" }]) }),
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        assert.match(
+          error.message,
+          /Details: Invalid pnpm workspace package listing: pnpm workspace package listing contains an entry without a path\./,
+        );
+        return true;
+      },
     );
   } finally {
     fixture.cleanup();
