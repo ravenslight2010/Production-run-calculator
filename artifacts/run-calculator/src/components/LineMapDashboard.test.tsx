@@ -36,6 +36,7 @@ function renderLineMap(
     sauceNeedsWithoutBatches?: boolean;
     sauceBarrelsMade?: number;
     sauceBatches?: number;
+    sauceNeedsWithBatches?: boolean;
     stationActivity?: Record<string, StationActivityEvidence> | null;
     stationActivityNowMs?: number;
     confirmStationActivity?: ReturnType<typeof vi.fn>;
@@ -47,13 +48,15 @@ function renderLineMap(
   const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
   const mixedFrontline = options.mixedFrontline ?? false;
   const sauceNeedsWithoutBatches = options.sauceNeedsWithoutBatches ?? false;
+  const sauceNeedsWithBatches = options.sauceNeedsWithBatches ?? false;
   const confirmStationActivity = options.confirmStationActivity ?? vi.fn().mockResolvedValue(undefined);
   const context = {
     v: {
       traysOnLine: active ? 1 : 0,
       batchesReady: 0,
       sauceBarrelsMade: options.sauceBarrelsMade ?? 0,
-      sauceOzPerPizza: mixedFrontline || sauceNeedsWithoutBatches ? 2 : 0,
+      sauceOzPerPizza:
+        mixedFrontline || sauceNeedsWithoutBatches || sauceNeedsWithBatches ? 2 : 0,
       app1OzPerPizza: mixedFrontline ? 2 : 0,
       app2OzPerPizza: mixedFrontline ? 2 : 0,
       app1Type: mixedFrontline ? "Mozzarella" : "",
@@ -91,9 +94,10 @@ function renderLineMap(
   mocks.useLiveRun.mockReturnValue({
     calc: {
       doughDepletionSec: 0,
-      sauceBatches: options.sauceBatches ?? (active ? 1 : 0),
+      sauceBatches: options.sauceBatches ?? (sauceNeedsWithBatches ? 3 : active ? 1 : 0),
       sauceDepletionSec: 0,
-      sauceEffBarrel: mixedFrontline || sauceNeedsWithoutBatches ? 50 : 0,
+      sauceEffBarrel:
+        mixedFrontline || sauceNeedsWithoutBatches || sauceNeedsWithBatches ? 50 : 0,
       app1Lbs: mixedFrontline ? 20 : 0,
       app1Batches: mixedFrontline ? 1 : 0,
       app2Lbs: mixedFrontline ? 30 : 0,
@@ -229,7 +233,16 @@ describe("LineMapDashboard current product identity", () => {
 });
 
 describe("LineMapDashboard station lifecycle statuses", () => {
-  it("shows Sauce need for multiple barrels when no batches are needed", () => {
+  it("shows Sauce needs in batches when both Sauce pounds and batches are available", () => {
+    renderLineMap("running", { sauceNeedsWithBatches: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    const sauceNeed = within(frontline).getByText("Sauce").parentElement?.textContent;
+    expect(sauceNeed).toContain("3.00 batches");
+    expect(sauceNeed).not.toContain("lbs");
+  });
+
+  it("shows Sauce pounds across multiple barrels when no batches are needed", () => {
     renderLineMap("running", {
       sauceNeedsWithoutBatches: true,
       sauceBarrelsMade: 3,
@@ -246,15 +259,11 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     (slot) => {
       renderLineMap("running", { configuredApplicator: slot });
 
-    const frontline = screen.getByRole("button", { name: /Frontline/ });
-    expect(within(frontline).getByText("App 1 — Mozzarella").parentElement?.textContent)
-      .toContain("1.00 batches");
-    expect(within(frontline).getByText("App 2 — Cheddar").parentElement?.textContent)
-      .toContain("2.00 batches");
-    expect(within(frontline).getByTestId("frontline-components-1").textContent)
-      .toContain("Mozzarella15.00 lbsParmesan5.00 lbs");
-    expect(within(frontline).getByTestId("frontline-components-2").textContent)
-      .toContain("Cheddar7.50 lbsSeasoning22.50 lbs");
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`).parentElement?.textContent)
+        .toContain("2.00 batches");
+      expect(within(frontline).queryByText("App 1 — Mozzarella")).toBeNull();
+      expect(within(frontline).queryByText("App 2 — Cheddar")).toBeNull();
   });
 
   it("keeps the aggregate applicator need when recipe components are not usable", () => {
@@ -269,58 +278,26 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     });
 
     const frontline = screen.getByRole("button", { name: /Frontline/ });
-    expect(within(frontline).getByText("App 1 — Mozzarella").parentElement?.textContent)
-      .toContain("1.00 batches");
-    expect(within(frontline).getByText("App 2 — Cheddar").parentElement?.textContent)
+    expect(within(frontline).getByText("App 3 — Cheese").parentElement?.textContent)
       .toContain("2.00 batches");
-    expect(within(frontline).getByTestId("frontline-components-1").textContent)
-      .toContain("Mozzarella15.00 lbsParmesan5.00 lbs");
-    expect(within(frontline).getByTestId("frontline-components-2").textContent)
-      .toContain("Cheddar7.50 lbsSeasoning22.50 lbs");
+    expect(within(frontline).queryByTestId("frontline-components-3")).toBeNull();
   });
 
-  it("keeps the aggregate applicator need when recipe components are not usable", () => {
-    renderLineMap("running", {
-      configuredApplicator: 3,
-      applicatorRecipes: {
-        3: [
-          { ingredient: "", lbs: 20 },
-          { ingredient: "Zero-weight ingredient", lbs: 0 },
-        ],
-      },
-    });
+  it("shows all configured Frontline needs together", () => {
+    renderLineMap("running", { mixedFrontline: true });
 
     const frontline = screen.getByRole("button", { name: /Frontline/ });
-    expect(within(frontline).getByText("App 1 — Mozzarella").parentElement?.textContent)
-      .toContain("1.00 batches");
-    expect(within(frontline).getByText("App 2 — Cheddar").parentElement?.textContent)
-      .toContain("2.00 batches");
-    expect(within(frontline).getByTestId("frontline-components-1").textContent)
-      .toContain("Mozzarella15.00 lbsParmesan5.00 lbs");
-    expect(within(frontline).getByTestId("frontline-components-2").textContent)
-      .toContain("Cheddar7.50 lbsSeasoning22.50 lbs");
-  });
-
-  it("keeps the aggregate applicator need when recipe components are not usable", () => {
-    renderLineMap("running", {
-      configuredApplicator: 3,
-      applicatorRecipes: {
-        3: [
-          { ingredient: "", lbs: 20 },
-          { ingredient: "Zero-weight ingredient", lbs: 0 },
-        ],
-      },
-    });
-
-    const frontline = screen.getByRole("button", { name: /Frontline/ });
-    expect(within(frontline).getByText("App 1 — Mozzarella").parentElement?.textContent)
-      .toContain("1.00 batches");
-    expect(within(frontline).getByText("App 2 — Cheddar").parentElement?.textContent)
-      .toContain("2.00 batches");
-    expect(within(frontline).getByTestId("frontline-components-1").textContent)
-      .toContain("Mozzarella15.00 lbsParmesan5.00 lbs");
-    expect(within(frontline).getByTestId("frontline-components-2").textContent)
-      .toContain("Cheddar7.50 lbsSeasoning22.50 lbs");
+    for (const label of [
+      "Sauce",
+      "App 1 — Mozzarella",
+      "App 2 — Cheddar",
+      "Pep 1 — Pepperoni",
+      "Pep 1 — Sausage",
+      "App 3 — Cheese",
+      "App 4 — Cheese",
+    ]) {
+      expect(within(frontline).getByText(label)).toBeTruthy();
+    }
   });
 
   it("confirms activity at the warehouse station", async () => {
