@@ -58,13 +58,21 @@ describe("MixesTabContent reserved ingredient names", () => {
       app2Type: "constructor",
       app2OzPerPizza: 2,
       app3Type: "Mozzarella",
-      app3OzPerPizza: 1,
+      app3OzPerPizza: 2,
+      app3CheeseRecipe: [
+        { ingredient: "Mozzarella", lbs: 1 },
+        { ingredient: "valueOf", lbs: 1 },
+      ],
       app4Type: "Mozzarella",
       app4OzPerPizza: 2,
       pep1Type: "__proto__",
       pep1OzPerPizza: 0.75,
       pep2Type: "prototype",
       pep2OzPerPizza: 3,
+      pep1TypeB: "toString",
+      pep1OzPerPizzaB: 0.5,
+      pep2TypeB: "hasOwnProperty",
+      pep2OzPerPizzaB: 1,
     };
     const mixes = [
       makeMix("recipe-proto", "__proto__"),
@@ -80,6 +88,9 @@ describe("MixesTabContent reserved ingredient names", () => {
             { ingredient: "constructor", perPizza: 0 },
             { ingredient: "Mozzarella", perPizza: 0 },
             { ingredient: "prototype", perPizza: 0 },
+            { ingredient: "toString", perPizza: 0 },
+            { ingredient: "hasOwnProperty", perPizza: 0 },
+            { ingredient: "valueOf", perPizza: 0 },
           ],
         },
       ),
@@ -120,6 +131,9 @@ describe("MixesTabContent reserved ingredient names", () => {
       "constructor",
       "Mozzarella",
       "prototype",
+      "toString",
+      "hasOwnProperty",
+      "valueOf",
     ]);
 
     expect(prepRows.map((row) => row.lastElementChild?.textContent?.trim())).toEqual([
@@ -127,7 +141,10 @@ describe("MixesTabContent reserved ingredient names", () => {
       "1.25 lbs",
       "1.88 lbs",
       "1.88 lbs",
+      "0.31 lbs",
+      "0.63 lbs",
+      "0.63 lbs",
     ]);
-    expect(within(plan).getByText(/Total 27\.19 lbs/)).toBeTruthy();
+    expect(within(plan).getByText(/Total 28\.98 lbs/)).toBeTruthy();
   });
 });
