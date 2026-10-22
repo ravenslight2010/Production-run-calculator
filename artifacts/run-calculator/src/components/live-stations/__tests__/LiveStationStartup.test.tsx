@@ -906,6 +906,57 @@ describe("live station startup", () => {
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );
+
+  it.each([
+    { slot: "pep1", registers: ["pep1", "pep1b"], otherRegisters: ["pep2", "pep2b"] },
+    { slot: "pep2", registers: ["pep2", "pep2b"], otherRegisters: ["pep1", "pep1b"] },
+  ] as const)(
+    "keeps all pepperoni stock rows usable after switching away from a peer-locked $slot run",
+    ({ slot, registers, otherRegisters }) => {
+      const values: FormValues = {
+        ...STATION_VALUES,
+        pep1Type: "Pepperoni",
+        pep1TypeB: "Cup Pepperoni",
+        pep2Type: "Turkey Pepperoni",
+        pep2TypeB: "Mini Cup Pepperoni",
+        pep1Combined: false,
+      };
+      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
+      const station = (runId: string) => (
+        <StationProviders status="running" runId={runId} values={values}>
+          <LiveFrontlineTabContent />
+        </StationProviders>
+      );
+      const { rerender } = render(station(RUN_ID));
+
+      for (const register of registers) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(true);
+        }
+      }
+      for (const register of otherRegisters) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(false);
+        }
+      }
+
+      rerender(station(SWITCHED_RUN_ID));
+
+      for (const register of [...registers, ...otherRegisters]) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(false);
+        }
+      }
+
+      // The switch must not release the peer's lock on the original run.
+      rerender(station(RUN_ID));
+      for (const register of registers) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(true);
+        }
+      }
+    },
+  );
 });
 /**
  * These are intentionally component-level regressions rather than more
