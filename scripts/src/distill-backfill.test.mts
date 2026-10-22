@@ -9,6 +9,7 @@ import {
   appendMetadataMaintenanceEntry,
   appendMetadataMaintenanceEntryFile,
   assertMetadataMaintenancePlatformSupported,
+  appendMetadataMaintenanceEntryFileWithRecoveryGate,
   loadProductionContract,
   runMetadataMaintenanceCommand,
   runBackfill,
@@ -465,6 +466,62 @@ try {
   );
   assert.equal(fs.readFileSync(`${malformedRecoveryLockPath}.recovery`, "utf8"), "not-a-pid\n");
   assert.equal(fs.existsSync(malformedRecoveryLockPath), false);
+
+  const unverifiedIdentityCases = [
+    {
+      name: "unreadable-owner-process-record",
+      readIdentityFile(filePath: string) {
+        if (filePath === `/proc/${process.pid}/stat`) {
+          throw new Error("synthetic procfs permission failure");
+        }
+        return fs.readFileSync(filePath, "utf8");
+      },
+    },
+    {
+      name: "invalid-owner-boot-identity",
+      readIdentityFile(filePath: string) {
+        if (filePath === "/proc/sys/kernel/random/boot_id") {
+          return "not-a-valid-boot-identity\n";
+        }
+        return fs.readFileSync(filePath, "utf8");
+      },
+    },
+  ];
+  for (const testCase of unverifiedIdentityCases) {
+    const unverifiedDecisionPath = path.join(
+      repoRoot,
+      "docs",
+      "evidence",
+      `${testCase.name}.json`,
+    );
+    const originalDecisionContents = `${JSON.stringify(makeDecision("no-go"))}\n`;
+    fs.writeFileSync(unverifiedDecisionPath, originalDecisionContents);
+    const unverifiedLockPath = `${unverifiedDecisionPath}.metadata-maintenance.lock`;
+    const originalLockContents = `${JSON.stringify({
+      pid: process.pid,
+      identity: readTestLinuxProcessIdentity(process.pid),
+    })}\n`;
+    fs.writeFileSync(unverifiedLockPath, originalLockContents, { mode: 0o600 });
+
+    assert.throws(
+      () => appendMetadataMaintenanceEntryFileWithRecoveryGate(
+        unverifiedDecisionPath,
+        syntheticLockEntry,
+        testCase.readIdentityFile,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /cannot establish whether metadata lock owner .* leave the lock untouched/u);
+        assert.ok(error.message.includes(
+          `Inspect ${unverifiedLockPath}; remove it only after confirming no metadata update or recovery is active.`,
+        ));
+        return true;
+      },
+    );
+    assert.equal(fs.readFileSync(unverifiedLockPath, "utf8"), originalLockContents);
+    assert.equal(fs.readFileSync(unverifiedDecisionPath, "utf8"), originalDecisionContents);
+    assert.equal(fs.existsSync(`${unverifiedLockPath}.recovery`), false);
+  }
 
   const activeLockDecisionPath = path.join(repoRoot, "docs", "evidence", "active-lock.json");
   fs.writeFileSync(activeLockDecisionPath, JSON.stringify(makeDecision("no-go")));

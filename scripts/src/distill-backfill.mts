@@ -261,6 +261,8 @@ type LinuxProcessIdentity = {
   startTimeTicks: string;
 };
 
+type LinuxIdentityFileReader = (filePath: string) => string;
+
 type MetadataLockOwner = {
   pid: number;
   identity?: LinuxProcessIdentity;
@@ -276,7 +278,10 @@ export function assertMetadataMaintenancePlatformSupported(
   }
 }
 
-function readLinuxProcessIdentity(pid: number): LinuxProcessIdentity {
+function readLinuxProcessIdentity(
+  pid: number,
+  readIdentityFile: LinuxIdentityFileReader = (filePath) => fs.readFileSync(filePath, "utf8"),
+): LinuxProcessIdentity {
   if (process.platform !== "linux") {
     assertMetadataMaintenancePlatformSupported();
   }
@@ -284,8 +289,8 @@ function readLinuxProcessIdentity(pid: number): LinuxProcessIdentity {
   let statContents: string;
   let bootId: string;
   try {
-    statContents = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    bootId = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    statContents = readIdentityFile(`/proc/${pid}/stat`);
+    bootId = readIdentityFile("/proc/sys/kernel/random/boot_id").trim();
   } catch {
     throw new Error(`cannot establish the Linux process identity for metadata lock owner ${pid}`);
   }
@@ -356,7 +361,11 @@ function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"
   };
 }
 
-function isMetadataLockOwnerActive(owner: MetadataLockOwner, lockPath: string): boolean {
+function isMetadataLockOwnerActive(
+  owner: MetadataLockOwner,
+  lockPath: string,
+  readIdentityFile?: LinuxIdentityFileReader,
+): boolean {
   const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
   try {
     process.kill(owner.pid, 0);
@@ -377,7 +386,7 @@ function isMetadataLockOwnerActive(owner: MetadataLockOwner, lockPath: string): 
 
   let currentIdentity: LinuxProcessIdentity;
   try {
-    currentIdentity = readLinuxProcessIdentity(owner.pid);
+    currentIdentity = readLinuxProcessIdentity(owner.pid, readIdentityFile);
   } catch {
     throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
   }
@@ -385,7 +394,10 @@ function isMetadataLockOwnerActive(owner: MetadataLockOwner, lockPath: string): 
     && currentIdentity.startTimeTicks === owner.identity.startTimeTicks;
 }
 
-function acquireMetadataMaintenanceLock(lockPath: string): number {
+function acquireMetadataMaintenanceLock(
+  lockPath: string,
+  readIdentityFile?: LinuxIdentityFileReader,
+): number {
   const lockContents = serializeMetadataLockOwner();
   let initialFd: number | undefined;
   try {
@@ -420,7 +432,7 @@ function acquireMetadataMaintenanceLock(lockPath: string): number {
     fs.writeFileSync(recoveryFd, lockContents, "utf8");
 
     const owner = readMetadataLockOwner(lockPath, "update");
-    if (isMetadataLockOwnerActive(owner, lockPath)) {
+    if (isMetadataLockOwnerActive(owner, lockPath, readIdentityFile)) {
       throw new Error(`another metadata update is active (lock owner PID ${owner.pid}); retry after it finishes`);
     }
 
@@ -472,6 +484,7 @@ function clearAbandonedMetadataRecoveryGuard(lockPath: string): void {
 export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   decisionPath: string,
   entry: unknown,
+  readIdentityFile?: LinuxIdentityFileReader,
 ): DecisionFile {
   assertMetadataMaintenancePlatformSupported();
   const resolvedPath = fs.realpathSync(decisionPath);
@@ -483,7 +496,7 @@ export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   let temporaryDirectory: string | undefined;
   try {
     clearAbandonedMetadataRecoveryGuard(lockPath);
-    lockFd = acquireMetadataMaintenanceLock(lockPath);
+    lockFd = acquireMetadataMaintenanceLock(lockPath, readIdentityFile);
 
     const decision = appendMetadataMaintenanceEntry(
       readJson(resolvedPath, "decision file"),
