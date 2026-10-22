@@ -3160,6 +3160,9 @@ export const QcEventEventType = {
   weight: 'weight',
   'brix-check': 'brix-check',
   'component-check': 'component-check',
+  'label-check': 'label-check',
+  'label-reference': 'label-reference',
+  'label-reference-review': 'label-reference-review',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
   'cleaning-verification': 'cleaning-verification',
@@ -3563,6 +3566,158 @@ export interface QcComponentCheckResponse {
   duplicate: boolean;
 }
 
+export type QcLabelField = typeof QcLabelField[keyof typeof QcLabelField];
+
+
+export const QcLabelField = {
+  productName: 'productName',
+  lotText: 'lotText',
+  dateText: 'dateText',
+} as const;
+
+export type QcLabelCheckInputContext = typeof QcLabelCheckInputContext[keyof typeof QcLabelCheckInputContext];
+
+
+export const QcLabelCheckInputContext = {
+  'shipper-case': 'shipper-case',
+  'carton-label': 'carton-label',
+} as const;
+
+export type QcLabelCheckInputObserved = {
+  /** @maxLength 200 */
+  productName: string;
+  /** @maxLength 200 */
+  lotText: string;
+  /** @maxLength 100 */
+  dateText: string;
+};
+
+export interface QcLabelCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  context: QcLabelCheckInputContext;
+  referenceId?: string;
+  observed: QcLabelCheckInputObserved;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcLabelReferenceInputContext = typeof QcLabelReferenceInputContext[keyof typeof QcLabelReferenceInputContext];
+
+
+export const QcLabelReferenceInputContext = {
+  'shipper-case': 'shipper-case',
+  'carton-label': 'carton-label',
+} as const;
+
+export type QcLabelReferenceInputExpected = {
+  /** @maxLength 200 */
+  productName?: string;
+  /** @maxLength 200 */
+  lotText?: string;
+  /** @maxLength 100 */
+  dateText?: string;
+};
+
+export interface QcLabelReferenceInput {
+  operationId: string;
+  /** Existing reference ID when creating a new pending version */
+  referenceId?: string;
+  context: QcLabelReferenceInputContext;
+  /**
+     * Exact canonical brand__flavor profile identity. Applicability is verified against the server-resolved run; this is not an arbitrary display name.
+     * @minLength 1
+     * @maxLength 120
+     */
+  productKey: string;
+  expected: QcLabelReferenceInputExpected;
+  /**
+     * @minItems 1
+     * @maxItems 3
+     */
+  requiredFields: QcLabelField[];
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  sourceIdentity: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  sourceDescription: string;
+}
+
+export type QcLabelReferenceReviewInputDecision = typeof QcLabelReferenceReviewInputDecision[keyof typeof QcLabelReferenceReviewInputDecision];
+
+
+export const QcLabelReferenceReviewInputDecision = {
+  approved: 'approved',
+  withdrawn: 'withdrawn',
+} as const;
+
+export interface QcLabelReferenceReviewInput {
+  operationId: string;
+  decision: QcLabelReferenceReviewInputDecision;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+}
+
+export type QcLabelReferenceContext = typeof QcLabelReferenceContext[keyof typeof QcLabelReferenceContext];
+
+
+export const QcLabelReferenceContext = {
+  'shipper-case': 'shipper-case',
+  'carton-label': 'carton-label',
+} as const;
+
+export type QcLabelReferenceExpected = {
+  productName?: string;
+  lotText?: string;
+  dateText?: string;
+};
+
+export type QcLabelReferenceState = typeof QcLabelReferenceState[keyof typeof QcLabelReferenceState];
+
+
+export const QcLabelReferenceState = {
+  draft: 'draft',
+  approved: 'approved',
+  withdrawn: 'withdrawn',
+} as const;
+
+export interface QcLabelReference {
+  referenceId: string;
+  /** @minimum 1 */
+  version: number;
+  context: QcLabelReferenceContext;
+  productKey: string;
+  expected: QcLabelReferenceExpected;
+  requiredFields: QcLabelField[];
+  sourceIdentity: string;
+  sourceDescription: string;
+  configurationEventId: number;
+  state: QcLabelReferenceState;
+  /** @nullable */
+  reviewedBy: string | null;
+  /** @nullable */
+  reviewedAt: string | null;
+  /** @nullable */
+  reviewReason?: string | null;
+}
+
+export interface QcLabelReferencesResponse {
+  /** @maxItems 200 */
+  items: QcLabelReference[];
+}
+
 export type QcAllergenReviewInputFootprintStatus = typeof QcAllergenReviewInputFootprintStatus[keyof typeof QcAllergenReviewInputFootprintStatus];
 
 
@@ -3937,6 +4092,20 @@ export const QcRedactionInputFieldsItem = {
   payloadinstrument: 'payload.instrument',
   payloadlotNumber: 'payload.lotNumber',
   payloadexpectedComponents: 'payload.expectedComponents',
+  payloadobservedproductName: 'payload.observed.productName',
+  payloadobservedlotText: 'payload.observed.lotText',
+  payloadobserveddateText: 'payload.observed.dateText',
+  payloadfieldResultsproductNameobserved: 'payload.fieldResults.productName.observed',
+  payloadfieldResultsproductNameexpected: 'payload.fieldResults.productName.expected',
+  payloadfieldResultslotTextobserved: 'payload.fieldResults.lotText.observed',
+  payloadfieldResultslotTextexpected: 'payload.fieldResults.lotText.expected',
+  payloadfieldResultsdateTextobserved: 'payload.fieldResults.dateText.observed',
+  payloadfieldResultsdateTextexpected: 'payload.fieldResults.dateText.expected',
+  payloadreferenceSnapshotexpectedproductName: 'payload.referenceSnapshot.expected.productName',
+  payloadreferenceSnapshotexpectedlotText: 'payload.referenceSnapshot.expected.lotText',
+  payloadreferenceSnapshotexpecteddateText: 'payload.referenceSnapshot.expected.dateText',
+  payloadreferenceSnapshotsourceIdentity: 'payload.referenceSnapshot.sourceIdentity',
+  payloadreferenceSnapshotsourceDescription: 'payload.referenceSnapshot.sourceDescription',
 } as const;
 
 export interface QcRedactionInput {
@@ -3948,7 +4117,7 @@ export interface QcRedactionInput {
   reason: string;
   /**
      * @minItems 1
-     * @maxItems 6
+     * @maxItems 24
      */
   fields: QcRedactionInputFieldsItem[];
 }

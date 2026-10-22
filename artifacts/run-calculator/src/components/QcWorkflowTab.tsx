@@ -72,6 +72,7 @@ import {
   QC_WEIGHT_CHECK_OVERDUE_GRACE_MS,
 } from "../qcWeightCheckSchedule";
 import QcAllergenActivityReport from "./QcAllergenActivityReport";
+import QcLabelVerification, { QcLabelComparison } from "./QcLabelVerification";
 import QualityHistoryTab from "./QualityHistoryTab";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
 
@@ -356,9 +357,11 @@ export default function QcWorkflowTab({
   const [expandedEventId, setExpandedEventId] = useState<number | null>(null);
   const [correctionReason, setCorrectionReason] = useState("");
   const [replacementJson, setReplacementJson] = useState("");
+  const [correctionOperationKey, setCorrectionOperationKey] = useState(() => operationId());
   const [correctionInputError, setCorrectionInputError] = useState("");
   const [redactionReason, setRedactionReason] = useState("");
   const [redactionFields, setRedactionFields] = useState<string[]>([]);
+  const [redactionOperationKey, setRedactionOperationKey] = useState(() => operationId());
   const [exportError, setExportError] = useState("");
   const [exportPending, setExportPending] = useState(false);
   const ingredientsQuery = useMasterDataSlice("ingredients");
@@ -447,8 +450,22 @@ export default function QcWorkflowTab({
   const cleaningMutation = useRecordQcCleaning({ mutation: { onSuccess: refreshAfterWrite } });
   const verificationMutation = useVerifyQcCleaning({ mutation: { onSuccess: refreshAfterWrite } });
   const signoffMutation = useSignoffQcRun({ mutation: { onSuccess: refreshAfterWrite } });
-  const correctionMutation = useCorrectQcEvent({ mutation: { onSuccess: refreshAfterWrite } });
-  const redactionMutation = useRedactQcEvent({ mutation: { onSuccess: refreshAfterWrite } });
+  const correctionMutation = useCorrectQcEvent({
+    mutation: {
+      onSuccess: async () => {
+        setCorrectionOperationKey(operationId());
+        await refreshAfterWrite();
+      },
+    },
+  });
+  const redactionMutation = useRedactQcEvent({
+    mutation: {
+      onSuccess: async () => {
+        setRedactionOperationKey(operationId());
+        await refreshAfterWrite();
+      },
+    },
+  });
 
   useEffect(() => {
     setComponentObservations({});
@@ -768,6 +785,7 @@ export default function QcWorkflowTab({
     setExpandedEventId(next);
     if (next !== null) {
       setCorrectionReason("");
+      setCorrectionOperationKey(operationId());
       const componentReplacement = {
         observations: Array.isArray(event.payload.results)
           ? event.payload.results.flatMap((candidate) => {
@@ -781,14 +799,31 @@ export default function QcWorkflowTab({
           : [],
         note: typeof event.payload.note === "string" ? event.payload.note : "",
       };
+      const labelReplacement = {
+        observed: event.payload.observed && typeof event.payload.observed === "object"
+          ? Object.fromEntries(Object.entries(event.payload.observed as Record<string, unknown>)
+            .filter(([field, value]) => ["productName", "lotText", "dateText"].includes(field)
+              && typeof value === "string"
+              && !event.redactedFields?.includes(`payload.observed.${field}`)))
+          : {},
+        ...(!event.redactedFields?.includes("payload.note")
+          && typeof event.payload.note === "string"
+          ? { note: event.payload.note }
+          : {}),
+      };
       setReplacementJson(JSON.stringify(
-        event.eventType === "component-check" ? componentReplacement : event.payload,
+        event.eventType === "component-check"
+          ? componentReplacement
+          : event.eventType === "label-check"
+            ? labelReplacement
+            : event.payload,
         null,
         2,
       ));
       setCorrectionInputError("");
       setRedactionReason("");
       setRedactionFields([]);
+      setRedactionOperationKey(operationId());
     }
   };
 
@@ -808,7 +843,7 @@ export default function QcWorkflowTab({
     setCorrectionInputError("");
     correctionMutation.mutate({
       eventId: event.id,
-      data: { operationId: operationId(), reason: correctionReason.trim(), replacement },
+      data: { operationId: correctionOperationKey, reason: correctionReason.trim(), replacement },
     });
   };
 
@@ -817,7 +852,7 @@ export default function QcWorkflowTab({
     redactionMutation.mutate({
       eventId: event.id,
       data: {
-        operationId: operationId(),
+        operationId: redactionOperationKey,
         reason: redactionReason.trim(),
         fields: redactionFields as QcRedactionInput["fields"],
       },
@@ -880,6 +915,12 @@ export default function QcWorkflowTab({
         </div>
       ) : (
         <>
+          <QcLabelVerification
+            runId={runId}
+            profileKey={profileKey}
+            canRecordQc={canRecordQc}
+            canManageQc={canManageQc}
+          />
           {runIsActive && runStartedAt !== null && (
             <section
               className={`${panelClass} p-4 sm:p-5`}
@@ -1581,6 +1622,9 @@ export default function QcWorkflowTab({
                             )}
                           </div>
                         )}
+                        {event.eventType === "label-check" && (
+                          <QcLabelComparison event={event} />
+                        )}
                         {event.eventType === "component-check" && (
                           <div className="rounded-lg border border-border/70 bg-background p-3" data-testid={`qc-component-history-${event.id}`}>
                             <div className="flex flex-wrap items-center gap-2">
@@ -1624,10 +1668,14 @@ export default function QcWorkflowTab({
                           <div className="grid gap-4 border-t border-border/70 pt-3 lg:grid-cols-2">
                             <div className="space-y-2">
                               <p className="text-xs font-bold">Append correction</p>
-                              <Textarea label="Correction reason" value={correctionReason} onChange={setCorrectionReason} placeholder="What was inaccurate?" rows={2} />
+                              <Textarea label="Correction reason" value={correctionReason} onChange={(value) => {
+                                setCorrectionReason(value);
+                                setCorrectionOperationKey(operationId());
+                              }} placeholder="What was inaccurate?" rows={2} />
                               <Textarea label="Replacement payload JSON" value={replacementJson} onChange={(value) => {
                                 setReplacementJson(value);
                                 setCorrectionInputError("");
+                                setCorrectionOperationKey(operationId());
                               }} rows={5} />
                               {correctionInputError && <p className="text-xs text-rose-700 dark:text-rose-300" role="alert">{correctionInputError} Correct the JSON before appending.</p>}
                               <MutationAlert error={correctionMutation.error} onRetry={() => submitCorrection(event)} />
@@ -1637,18 +1685,41 @@ export default function QcWorkflowTab({
                             </div>
                             <div className="space-y-2">
                               <p className="text-xs font-bold">Append privacy redaction</p>
-                              <Textarea label="Redaction reason" value={redactionReason} onChange={setRedactionReason} placeholder="Why does this field need redaction?" rows={2} />
+                              <Textarea label="Redaction reason" value={redactionReason} onChange={(value) => {
+                                setRedactionReason(value);
+                                setRedactionOperationKey(operationId());
+                              }} placeholder="Why does this field need redaction?" rows={2} />
                               <div className="space-y-1.5">
-                                {[
+                                {(event.eventType === "label-check" ? [
+                                  ["actorId", "Actor identifier"],
+                                  ["payload.note", "Observation note"],
+                                  ["payload.observed.productName", "Observed product name"],
+                                  ["payload.observed.lotText", "Observed lot text"],
+                                  ["payload.observed.dateText", "Observed date text"],
+                                  ["payload.fieldResults.productName.observed", "Product name result text"],
+                                  ["payload.fieldResults.productName.expected", "Product name expected text"],
+                                  ["payload.fieldResults.lotText.observed", "Lot result text"],
+                                  ["payload.fieldResults.lotText.expected", "Lot expected text"],
+                                  ["payload.fieldResults.dateText.observed", "Date result text"],
+                                  ["payload.fieldResults.dateText.expected", "Date expected text"],
+                                  ["payload.referenceSnapshot.expected.productName", "Reference product name"],
+                                  ["payload.referenceSnapshot.expected.lotText", "Reference lot text"],
+                                  ["payload.referenceSnapshot.expected.dateText", "Reference date text"],
+                                  ["payload.referenceSnapshot.sourceIdentity", "Reference source identity"],
+                                  ["payload.referenceSnapshot.sourceDescription", "Reference source description"],
+                                ] : [
                                   ["actorId", "Actor identifier"],
                                   ["ingredientName", "Ingredient name"],
                                   ["payload.note", "Payload note"],
                                   ["payload.instrument", "Instrument"],
                                   ["payload.lotNumber", "Lot number"],
                                   ["payload.expectedComponents", "Expected component identities"],
-                                ].map(([field, text]) => (
+                                ]).map(([field, text]) => (
                                   <label key={field} className="flex items-center gap-2 text-xs">
-                                    <input type="checkbox" className="h-4 w-4 accent-[#548f80]" checked={redactionFields.includes(field)} onChange={(event) => setRedactionFields((current) => event.target.checked ? [...current, field] : current.filter((item) => item !== field))} />
+                                    <input type="checkbox" className="h-4 w-4 accent-[#548f80]" checked={redactionFields.includes(field)} onChange={(event) => {
+                                      setRedactionFields((current) => event.target.checked ? [...current, field] : current.filter((item) => item !== field));
+                                      setRedactionOperationKey(operationId());
+                                    }} />
                                     {text}
                                   </label>
                                 ))}

@@ -1242,6 +1242,121 @@ paths:
         "404": { description: Run not found in canonical production records }
         "409": { description: Operation ID conflicts with a prior event }
 
+  /qc/label-references:
+    get:
+      operationId: getQcLabelReferences
+      tags: [inventory]
+      summary: Read current approved label references, or all versions for QC managers
+      description: >-
+        Uses the authenticated facility scope. QC recorders see approved current
+        versions only. QC managers also see drafts and withdrawn references.
+        Expected label text is entered from a source identity and requires a
+        separate manager approval event. The list is bounded; an over-limit
+        history fails explicitly rather than silently omitting references.
+      responses:
+        "200":
+          description: Current facility-scoped label reference versions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcLabelReferencesResponse" }
+        "403": { description: QC recording capability required }
+        "503": { description: Label reference history exceeds its configured bound }
+    post:
+      operationId: saveQcLabelReference
+      tags: [inventory]
+      summary: Create a pending label reference version
+      description: >-
+        Manager-only. Saving a new version never approves it; an explicit
+        manager review is required before QC observations can compare against it.
+        No recipe, shipping-guide, or AI data is used to populate expected text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcLabelReferenceInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the pending version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Pending, append-only label reference version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid label reference fields }
+        "403": { description: QC manager capability required }
+        "404": { description: Reference version to update was not found in this scope }
+        "409": { description: Duplicate product/context or operation identity conflict }
+        "503": { description: Label reference history exceeds its configured bound }
+
+  /qc/label-references/{eventId}/review:
+    post:
+      operationId: reviewQcLabelReference
+      tags: [inventory]
+      summary: Explicitly approve or withdraw one label reference version
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcLabelReferenceReviewInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the recorded manager review
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Append-only manager approval or withdrawal event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid review or missing required expected text }
+        "403": { description: QC manager capability required }
+        "404": { description: Reference version was not found in this scope }
+        "409": { description: "Stale version, duplicate reference, or invalid review transition" }
+        "503": { description: Label reference history exceeds its configured bound }
+
+  /qc/label-checks:
+    post:
+      operationId: recordQcLabelCheck
+      tags: [inventory]
+      summary: Record observed shipper-label text for a run
+      description: >-
+        Advisory and text-only. The server resolves only an explicitly approved,
+        facility-scoped reference version for the selected packaging context.
+        Missing or unapproved references save as not-evaluated. The event
+        snapshots the exact approved version and server-computed field outcomes;
+        callers cannot submit expected text or outcomes. Printed dates are
+        compared as text, not decoded. This does not imply a packaging hold,
+        shipping clearance, product claim, or regulatory approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcLabelCheckInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the original label check
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Server-evaluated append-only label-check event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid observed label text }
+        "403": { description: QC recording capability required }
+        "404": { description: Run was not found in this facility scope }
+        "409": { description: Canonical run records or operation identity conflict }
+
   /qc/runs/{runId}:
     get:
       operationId: getQcRun
@@ -8449,7 +8564,7 @@ components:
         recordId: { type: string, format: uuid }
         eventType:
           type: string
-          enum: [lot, weight, brix-check, component-check, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+          enum: [lot, weight, brix-check, component-check, label-check, label-reference, label-reference-review, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
         runId: { type: string, nullable: true }
         profileKey: { type: string, nullable: true }
         ingredientId: { type: string, nullable: true }
@@ -8640,6 +8755,98 @@ components:
       properties:
         event: { $ref: "#/components/schemas/QcEvent" }
         duplicate: { type: boolean }
+
+    QcLabelField:
+      type: string
+      enum: [productName, lotText, dateText]
+
+    QcLabelCheckInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, runId, context, observed]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        context: { type: string, enum: [shipper-case, carton-label] }
+        referenceId: { type: string, format: uuid }
+        observed:
+          type: object
+          additionalProperties: false
+          required: [productName, lotText, dateText]
+          properties:
+            productName: { type: string, maxLength: 200 }
+            lotText: { type: string, maxLength: 200 }
+            dateText: { type: string, maxLength: 100 }
+        note: { type: string, maxLength: 1000 }
+
+    QcLabelReferenceInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, context, productKey, expected, requiredFields, sourceIdentity, sourceDescription]
+      properties:
+        operationId: { type: string, format: uuid }
+        referenceId: { type: string, format: uuid, description: Existing reference ID when creating a new pending version }
+        context: { type: string, enum: [shipper-case, carton-label] }
+        productKey: { type: string, minLength: 1, maxLength: 120, description: 'Exact canonical brand__flavor profile identity. Applicability is verified against the server-resolved run; this is not an arbitrary display name.' }
+        expected:
+          type: object
+          additionalProperties: false
+          properties:
+            productName: { type: string, maxLength: 200 }
+            lotText: { type: string, maxLength: 200 }
+            dateText: { type: string, maxLength: 100 }
+        requiredFields:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/QcLabelField" }
+        sourceIdentity: { type: string, minLength: 1, maxLength: 200 }
+        sourceDescription: { type: string, minLength: 1, maxLength: 500 }
+
+    QcLabelReferenceReviewInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, decision, reason]
+      properties:
+        operationId: { type: string, format: uuid }
+        decision: { type: string, enum: [approved, withdrawn] }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    QcLabelReference:
+      type: object
+      required: [referenceId, version, context, productKey, expected, requiredFields, sourceIdentity, sourceDescription, configurationEventId, state, reviewedBy, reviewedAt]
+      properties:
+        referenceId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        context: { type: string, enum: [shipper-case, carton-label] }
+        productKey: { type: string }
+        expected:
+          type: object
+          additionalProperties: false
+          properties:
+            productName: { type: string }
+            lotText: { type: string }
+            dateText: { type: string }
+        requiredFields:
+          type: array
+          items: { $ref: "#/components/schemas/QcLabelField" }
+        sourceIdentity: { type: string }
+        sourceDescription: { type: string }
+        configurationEventId: { type: integer }
+        state: { type: string, enum: [draft, approved, withdrawn] }
+        reviewedBy: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewReason: { type: string, nullable: true }
+
+    QcLabelReferencesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items: { $ref: "#/components/schemas/QcLabelReference" }
 
     QcAllergenReviewInput:
       type: object
@@ -8873,9 +9080,31 @@ components:
         fields:
           type: array
           minItems: 1
-          maxItems: 6
+          maxItems: 24
           uniqueItems: true
-          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.instrument, payload.lotNumber, payload.expectedComponents] }
+          items:
+            type: string
+            enum:
+              - actorId
+              - ingredientName
+              - payload.note
+              - payload.instrument
+              - payload.lotNumber
+              - payload.expectedComponents
+              - payload.observed.productName
+              - payload.observed.lotText
+              - payload.observed.dateText
+              - payload.fieldResults.productName.observed
+              - payload.fieldResults.productName.expected
+              - payload.fieldResults.lotText.observed
+              - payload.fieldResults.lotText.expected
+              - payload.fieldResults.dateText.observed
+              - payload.fieldResults.dateText.expected
+              - payload.referenceSnapshot.expected.productName
+              - payload.referenceSnapshot.expected.lotText
+              - payload.referenceSnapshot.expected.dateText
+              - payload.referenceSnapshot.sourceIdentity
+              - payload.referenceSnapshot.sourceDescription
 
     Capability:
       type: string

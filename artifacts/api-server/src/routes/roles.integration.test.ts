@@ -3038,7 +3038,444 @@ async function seedQcWorkflowFixtures(): Promise<void> {
   ]);
 }
 
+async function seedQcLabelRun(runIds: string | string[], missingIdentity: string[] = []): Promise<void> {
+  const date = facilityDate();
+  const ids = Array.isArray(runIds) ? runIds : [runIds];
+  await db.insert(dailySyncTable).values({
+    scope: "live",
+    date,
+    canonicalRevision: 1,
+    data: {
+      dayState: { date, runs: ids.map((id) => missingIdentity.includes(id) ? { id, flavor: id } : { id, brand: "Synthetic QC", flavor: id }) },
+      runValues: Object.fromEntries(ids.map((id) => [id, {}])),
+    },
+  });
+}
+
 describe("QC workflows", () => {
+  it("never evaluates an approved label reference for another product or an unknown canonical product", async () => {
+    const matchingRun = "label-product-a";
+    const otherRun = "label-product-b";
+    const unknownRun = "label-product-unknown";
+    await seedQcLabelRun([matchingRun, otherRun, unknownRun], [unknownRun]);
+    const observed = { productName: "SYNTHETIC PRODUCT A", lotText: "LOT-A", dateText: "printed date" };
+    const reference = await req(QC_MANAGER, "POST", "/api/qc/label-references", {
+      operationId: randomUUID(), context: "shipper-case",
+      productKey: `synthetic qc__${matchingRun}`,
+      expected: observed, requiredFields: ["productName", "lotText", "dateText"],
+      sourceIdentity: "SYNTHETIC-PRODUCT-BINDING", sourceDescription: "Fixture source for product A only.",
+    });
+    expect(reference.status).toBe(201);
+    const referenceEvent = (await reference.json() as { event: { id: number; payload: { referenceId: string } } }).event;
+    expect((await req(QC_MANAGER, "POST", `/api/qc/label-references/${referenceEvent.id}/review`, {
+      operationId: randomUUID(), decision: "approved", reason: "Synthetic applicability fixture.",
+    })).status).toBe(201);
+    const unknownReference = await req(QC_MANAGER, "POST", "/api/qc/label-references", {
+      operationId: randomUUID(), context: "shipper-case", productKey: `__${unknownRun}`,
+      expected: observed, requiredFields: ["productName", "lotText", "dateText"],
+      sourceIdentity: "SYNTHETIC-INCOMPLETE-IDENTITY", sourceDescription: "Even an exact partial-key match cannot establish applicability.",
+    });
+    expect(unknownReference.status).toBe(201);
+    const unknownReferenceEvent = (await unknownReference.json() as { event: { id: number; payload: { referenceId: string } } }).event;
+    expect((await req(QC_MANAGER, "POST", `/api/qc/label-references/${unknownReferenceEvent.id}/review`, {
+      operationId: randomUUID(), decision: "approved", reason: "Synthetic incomplete identity fixture.",
+    })).status).toBe(201);
+    for (const runId of [matchingRun, otherRun, unknownRun]) {
+      const response = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+        operationId: randomUUID(), runId, context: "shipper-case",
+        referenceId: runId === unknownRun ? unknownReferenceEvent.payload.referenceId : referenceEvent.payload.referenceId, observed,
+      });
+      expect(response.status).toBe(201);
+      const payload = (await response.json() as { event: { payload: Record<string, any> } }).event.payload;
+      expect(payload.outcome).toBe(runId === matchingRun ? "pass" : "not-evaluated");
+      expect(payload.runProductKey).toBe(runId === unknownRun ? null : `synthetic qc__${runId}`);
+      if (runId !== matchingRun) {
+        expect(payload.referenceSnapshot.state).toBe("inapplicable");
+        expect(Object.values(payload.fieldResults).every((field: any) => field.state === "not-evaluated" && field.expected === null)).toBe(true);
+        expect(payload.referenceUnavailableReason).toMatch(/different product|identity is incomplete/);
+      }
+    }
+  });
+
+  it("keeps label comparisons server-resolved, approved, versioned, and idempotent", async () => {
+    const runId = "qc-label-authority-run";
+    await seedQcLabelRun(runId);
+    const draftInput = {
+      operationId: randomUUID(),
+      context: "shipper-case",
+      productKey: `synthetic qc__${runId}`,
+      expected: {
+        productName: "Synthetic Cheese",
+        lotText: "LOT-30",
+        dateText: "BEST BY 12/30/30",
+      },
+      requiredFields: ["productName", "lotText", "dateText"],
+      sourceIdentity: "SYNTHETIC-FIXTURE-REF-v1",
+      sourceDescription: "Test-only reference; not an operational label master.",
+    };
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/label-references", draftInput)).status).toBe(403);
+    const draftResponse = await req(QC_MANAGER, "POST", "/api/qc/label-references", draftInput);
+    expect(draftResponse.status).toBe(201);
+    const draftEvent = (await draftResponse.json() as {
+      event: { id: number; actorId: string; payload: Record<string, any> };
+    }).event;
+    const referenceId = draftEvent.payload.referenceId as string;
+    expect(draftEvent.actorId).toBe(QC_MANAGER);
+    expect(draftEvent.payload).toMatchObject({ referenceId, version: 1, sourceIdentity: "SYNTHETIC-FIXTURE-REF-v1" });
+    const retryDraft = await req(QC_MANAGER, "POST", "/api/qc/label-references", draftInput);
+    expect(retryDraft.status).toBe(200);
+    expect((await retryDraft.json() as { duplicate: boolean }).duplicate).toBe(true);
+    expect((await req(QC_OPERATOR, "GET", "/api/qc/label-references").then((response) => response.json()) as {
+      items: unknown[];
+    }).items).toEqual([]);
+
+    const observationOnly = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      operationId: randomUUID(),
+      runId,
+      context: "shipper-case",
+      observed: { productName: "Observed only", lotText: "", dateText: "" },
+    });
+    expect(observationOnly.status).toBe(201);
+    expect((await observationOnly.json() as { event: { payload: Record<string, any> } }).event.payload)
+      .toMatchObject({ outcome: "not-evaluated", referenceSnapshot: null });
+
+    const draftCheckInput = {
+      operationId: randomUUID(),
+      runId,
+      context: "shipper-case",
+      referenceId,
+      observed: { productName: "Synthetic Cheese", lotText: "LOT-30", dateText: "BEST BY 12/30/30" },
+    };
+    const forged = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      ...draftCheckInput,
+      expected: { productName: "Synthetic Cheese" },
+      outcome: "pass",
+    });
+    expect(forged.status).toBe(400);
+    const noObservedText = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      operationId: randomUUID(),
+      runId,
+      context: "shipper-case",
+      observed: { productName: "", lotText: "", dateText: "" },
+    });
+    expect(noObservedText.status).toBe(400);
+
+    const unapprovedCheck = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", draftCheckInput);
+    expect(unapprovedCheck.status).toBe(201);
+    const unapprovedEvent = (await unapprovedCheck.json() as {
+      event: { id: number; payload: Record<string, any> };
+    }).event;
+    expect(unapprovedEvent.payload).toMatchObject({
+      referenceId,
+      referenceSnapshot: { version: 1, state: "draft" },
+      outcome: "not-evaluated",
+    });
+    expect(unapprovedEvent.payload.referenceSnapshot.expected).toBeUndefined();
+    expect(Object.values(unapprovedEvent.payload.fieldResults).map((field: any) => field.state))
+      .toEqual(["not-evaluated", "not-evaluated", "not-evaluated"]);
+
+    const approvalInput = {
+      operationId: randomUUID(),
+      decision: "approved",
+      reason: "Synthetic fixture review for deterministic tests.",
+    };
+    const approval = await req(QC_MANAGER, "POST", `/api/qc/label-references/${draftEvent.id}/review`, approvalInput);
+    expect(approval.status).toBe(201);
+    const approvalEvent = (await approval.json() as {
+      event: { id: number; actorId: string; payload: Record<string, unknown>; createdAt: string };
+    }).event;
+    expect(approvalEvent.actorId).toBe(QC_MANAGER);
+    const approvedList = await req(QC_OPERATOR, "GET", "/api/qc/label-references");
+    expect(approvedList.status).toBe(200);
+    expect((await approvedList.json() as { items: Array<Record<string, unknown>> }).items)
+      .toEqual([expect.objectContaining({
+        referenceId,
+        version: 1,
+        state: "approved",
+        sourceIdentity: "SYNTHETIC-FIXTURE-REF-v1",
+        reviewedBy: QC_MANAGER,
+      })]);
+
+    const mixedInput = {
+      operationId: randomUUID(),
+      runId,
+      context: "shipper-case",
+      referenceId,
+      observed: { productName: "Wrong Cheese", lotText: "LOT-30", dateText: "" },
+      note: "Synthetic mixed-result check",
+    };
+    const mixedResponse = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", mixedInput);
+    expect(mixedResponse.status).toBe(201);
+    const mixedEvent = (await mixedResponse.json() as {
+      event: { id: number; payload: Record<string, any> };
+    }).event;
+    expect(mixedEvent.payload).toMatchObject({
+      outcome: "fail",
+      referenceSnapshot: {
+        version: 1,
+        configurationEventId: draftEvent.id,
+        approvalEventId: approvalEvent.id,
+        sourceIdentity: "SYNTHETIC-FIXTURE-REF-v1",
+        approvedBy: QC_MANAGER,
+      },
+      fieldResults: {
+        productName: { state: "fail" },
+        lotText: { state: "pass" },
+        dateText: { state: "not-evaluated" },
+      },
+    });
+    const retriedMixed = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", mixedInput);
+    expect(retriedMixed.status).toBe(200);
+    expect((await retriedMixed.json() as { event: { id: number; payload: Record<string, any> }; duplicate: boolean }))
+      .toMatchObject({ duplicate: true, event: { id: mixedEvent.id, payload: { referenceSnapshot: { version: 1 } } } });
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      ...mixedInput,
+      observed: { ...mixedInput.observed, productName: "Changed" },
+    })).status).toBe(409);
+
+    const nextVersionInput = {
+      ...draftInput,
+      operationId: randomUUID(),
+      referenceId,
+      expected: { ...draftInput.expected, dateText: "2031-01-01" },
+      sourceIdentity: "SYNTHETIC-FIXTURE-REF-v2",
+    };
+    const nextVersionResponse = await req(QC_MANAGER, "POST", "/api/qc/label-references", nextVersionInput);
+    expect(nextVersionResponse.status).toBe(201);
+    const nextVersionEvent = (await nextVersionResponse.json() as {
+      event: { id: number; payload: Record<string, unknown> };
+    }).event;
+    expect(nextVersionEvent.payload.version).toBe(2);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/label-references/${draftEvent.id}/review`, {
+      operationId: randomUUID(),
+      decision: "approved",
+      reason: "Attempt to approve an older version.",
+    })).status).toBe(409);
+    const staleSelection = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      ...draftCheckInput,
+      operationId: randomUUID(),
+    });
+    expect(staleSelection.status).toBe(201);
+    expect((await staleSelection.json() as { event: { payload: Record<string, any> } }).event.payload)
+      .toMatchObject({
+        outcome: "not-evaluated",
+        referenceSnapshot: { version: 2, state: "draft" },
+      });
+
+    const versionTwoApproval = await req(QC_MANAGER, "POST", `/api/qc/label-references/${nextVersionEvent.id}/review`, {
+      operationId: randomUUID(),
+      decision: "approved",
+      reason: "Approve synthetic fixture version two.",
+    });
+    expect(versionTwoApproval.status).toBe(201);
+    const versionTwoCheck = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      ...draftCheckInput,
+      operationId: randomUUID(),
+      observed: { productName: "Synthetic Cheese", lotText: "LOT-30", dateText: "2031-01-01" },
+    });
+    expect(versionTwoCheck.status).toBe(201);
+    expect((await versionTwoCheck.json() as { event: { payload: Record<string, any> } }).event.payload)
+      .toMatchObject({ outcome: "pass", referenceSnapshot: { version: 2, sourceIdentity: "SYNTHETIC-FIXTURE-REF-v2" } });
+    const versionedRunHistory = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    const historicalMixed = ((await versionedRunHistory.json()) as {
+      items: Array<{ id: number; payload: Record<string, any> }>;
+    }).items.find((item) => item.id === mixedEvent.id);
+    expect(historicalMixed?.payload.referenceSnapshot).toMatchObject({
+      version: 1,
+      sourceIdentity: "SYNTHETIC-FIXTURE-REF-v1",
+    });
+
+    const incompleteDraft = await req(QC_MANAGER, "POST", "/api/qc/label-references", {
+      operationId: randomUUID(),
+      context: "shipper-case",
+      productKey: "Incomplete Synthetic Reference",
+      expected: { productName: "Synthetic Cheese" },
+      requiredFields: ["productName", "dateText"],
+      sourceIdentity: "SYNTHETIC-INCOMPLETE-REF",
+      sourceDescription: "Synthetic incomplete test reference.",
+    });
+    expect(incompleteDraft.status).toBe(201);
+    const incompleteId = (await incompleteDraft.json() as { event: { id: number } }).event.id;
+    const incompleteApproval = await req(QC_MANAGER, "POST", `/api/qc/label-references/${incompleteId}/review`, {
+      operationId: randomUUID(),
+      decision: "approved",
+      reason: "Incomplete references cannot be approved.",
+    });
+    expect(incompleteApproval.status).toBe(400);
+  });
+
+  it("keeps ambiguous or cross-scope references unevaluated and supports audited corrections, redactions, CSV, and sign-off reopening", async () => {
+    const runId = "qc-label-ledger-run";
+    const ledgerRunId = "qc-label-audit-run";
+    await seedQcLabelRun([runId, ledgerRunId]);
+    const referenceInput = {
+      operationId: randomUUID(),
+      context: "carton-label",
+      productKey: `synthetic qc__${runId}`,
+      expected: { productName: "Synthetic Cheese", lotText: "LOT-A", dateText: "2030-12-31" },
+      requiredFields: ["productName", "lotText", "dateText"],
+      sourceIdentity: "SYNTHETIC-LEDGER-REF-v1",
+      sourceDescription: "Synthetic only; no shipping source or label master.",
+    };
+    const savedReference = await req(QC_MANAGER, "POST", "/api/qc/label-references", referenceInput);
+    expect(savedReference.status).toBe(201);
+    const referenceEvent = (await savedReference.json() as { event: { id: number; payload: Record<string, any> } }).event;
+    const approved = await req(QC_MANAGER, "POST", `/api/qc/label-references/${referenceEvent.id}/review`, {
+      operationId: randomUUID(),
+      decision: "approved",
+      reason: "Synthetic test approval.",
+    });
+    expect(approved.status).toBe(201);
+
+    const [duplicateConfig] = await db.insert(qcWorkflowEventsTable).values({
+      scope: "live",
+      operationId: randomUUID(),
+      recordId: randomUUID(),
+      eventType: "label-reference",
+      runId: null,
+      actorId: QC_MANAGER,
+      station: "packaging",
+      payload: {
+        referenceId: randomUUID(),
+        version: 1,
+        context: referenceInput.context,
+        productKey: referenceInput.productKey,
+        expected: referenceInput.expected,
+        requiredFields: referenceInput.requiredFields,
+        sourceIdentity: "SYNTHETIC-AMBIGUOUS-REF",
+        sourceDescription: "Synthetic invalid duplicate for fail-closed ambiguity test.",
+      },
+    }).returning({ id: qcWorkflowEventsTable.id, recordId: qcWorkflowEventsTable.recordId, payload: qcWorkflowEventsTable.payload });
+    const duplicatePayload = duplicateConfig!.payload as Record<string, any>;
+    await db.insert(qcWorkflowEventsTable).values({
+      scope: "live",
+      operationId: randomUUID(),
+      recordId: duplicateConfig!.recordId,
+      eventType: "label-reference-review",
+      runId: null,
+      relatedEventId: String(duplicateConfig!.id),
+      actorId: QC_MANAGER,
+      station: "packaging",
+      payload: {
+        referenceId: duplicatePayload.referenceId,
+        version: 1,
+        configurationEventId: duplicateConfig!.id,
+        decision: "approved",
+        reason: "Synthetic invalid duplicate.",
+      },
+    });
+    const ambiguous = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      operationId: randomUUID(),
+      runId,
+      context: "carton-label",
+      referenceId: referenceEvent.payload.referenceId,
+      observed: { productName: "Synthetic Cheese", lotText: "LOT-A", dateText: "2030-12-31" },
+    });
+    expect(ambiguous.status).toBe(201);
+    expect((await ambiguous.json() as { event: { payload: Record<string, any> } }).event.payload)
+      .toMatchObject({
+        outcome: "not-evaluated",
+        referenceSnapshot: { state: "ambiguous" },
+      });
+
+    await db.update(userRolesTable).set({ role: "qc-manager" }).where(eq(userRolesTable.userId, SANDBOX));
+    const sandboxReferences = await req(SANDBOX, "GET", "/api/qc/label-references");
+    expect(sandboxReferences.status).toBe(200);
+    expect((await sandboxReferences.json() as { items: unknown[] }).items).toEqual([]);
+    expect((await req(SANDBOX, "POST", `/api/qc/label-references/${referenceEvent.id}/review`, {
+      operationId: randomUUID(),
+      decision: "withdrawn",
+      reason: "Cross-scope operation must not see a live reference.",
+    })).status).toBe(404);
+    expect((await req(SANDBOX, "POST", "/api/qc/label-checks", {
+      operationId: randomUUID(),
+      runId,
+      context: "carton-label",
+      referenceId: referenceEvent.payload.referenceId,
+      observed: { productName: "Synthetic Cheese", lotText: "LOT-A", dateText: "2030-12-31" },
+    })).status).toBe(404);
+
+    const auditReference = await req(QC_MANAGER, "POST", "/api/qc/label-references", {
+      ...referenceInput,
+      operationId: randomUUID(),
+      productKey: `synthetic qc__${ledgerRunId}`,
+      sourceIdentity: "SYNTHETIC-AUDIT-REF",
+    });
+    const auditReferenceEvent = (await auditReference.json() as { event: { id: number; payload: Record<string, unknown> } }).event;
+    expect((await req(QC_MANAGER, "POST", `/api/qc/label-references/${auditReferenceEvent.id}/review`, {
+      operationId: randomUUID(),
+      decision: "approved",
+      reason: "Synthetic audit approval.",
+    })).status).toBe(201);
+    const labelCheckResponse = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      operationId: randomUUID(),
+      runId: ledgerRunId,
+      context: "carton-label",
+      referenceId: auditReferenceEvent.payload.referenceId,
+      observed: { productName: "Synthetic Cheese", lotText: "LOT-A", dateText: "2030-12-31" },
+    });
+    expect(labelCheckResponse.status).toBe(201);
+    const labelCheck = (await labelCheckResponse.json() as {
+      event: { id: number; payload: Record<string, any> };
+    }).event;
+    expect(labelCheck.payload.outcome).toBe("pass");
+
+    expect((await req(QC_MANAGER, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(),
+      runId: ledgerRunId,
+    })).status).toBe(201);
+    const correction = await req(QC_MANAGER, "POST", `/api/qc/events/${labelCheck.id}/corrections`, {
+      operationId: randomUUID(),
+      reason: "Correct a synthetic date transcription.",
+      replacement: { observed: { dateText: "2030-12-30" } },
+    });
+    expect(correction.status).toBe(201);
+    const reopened = await req(QC_OPERATOR, "GET", `/api/qc/runs/${ledgerRunId}`);
+    expect((await reopened.json() as { signoff: { signedOff: boolean; reopened: boolean } }).signoff)
+      .toMatchObject({ signedOff: false, reopened: true });
+    const redaction = await req(QC_MANAGER, "POST", `/api/qc/events/${labelCheck.id}/redactions`, {
+      operationId: randomUUID(),
+      reason: "Synthetic privacy redaction.",
+      fields: [
+        "payload.observed.dateText",
+        "payload.fieldResults.dateText.observed",
+        "payload.fieldResults.dateText.expected",
+        "payload.referenceSnapshot.expected.dateText",
+      ],
+    });
+    expect(redaction.status).toBe(201);
+    const history = await req(QC_OPERATOR, "GET", `/api/qc/runs/${ledgerRunId}`);
+    const historyItems = (await history.json() as {
+      items: Array<{ eventType: string; payload: Record<string, any>; redactedFields?: string[] }>;
+    }).items;
+    const projected = historyItems.find((event) => event.eventType === "label-check");
+    expect(projected).toMatchObject({
+      corrected: true,
+      redactedFields: expect.arrayContaining([
+        "payload.observed.dateText",
+        "payload.referenceSnapshot.expected.dateText",
+      ]),
+      payload: {
+        outcome: "fail",
+        observed: { productName: "Synthetic Cheese", dateText: "[redacted]" },
+        fieldResults: { dateText: { observed: "[redacted]", expected: "[redacted]", state: "fail" } },
+        referenceSnapshot: { expected: { dateText: "[redacted]" } },
+      },
+    });
+    const csv = await req(QC_MANAGER, "GET", "/api/qc/history.csv");
+    const csvText = await csv.text();
+    expect(csv.status).toBe(200);
+    expect(csvText).toContain("label-reference");
+    expect(csvText).toContain("label-reference-review");
+    expect(csvText).toContain("label-check");
+    expect(csvText).toContain("SYNTHETIC-AUDIT-REF");
+    const runCsv = await req(QC_MANAGER, "GET", `/api/qc/history.csv?runId=${ledgerRunId}`);
+    const runCsvText = await runCsv.text();
+    expect(runCsvText).toContain("Synthetic privacy redaction.");
+    expect(runCsvText).toContain("[redacted]");
+    expect(runCsvText).not.toContain("2030-12-30");
+  });
+
   it("serves one scoped production day from canonical snapshots and applies audited event overlays", async () => {
     const date = "2030-03-10";
     const runId = "qc-activity-ended-run";

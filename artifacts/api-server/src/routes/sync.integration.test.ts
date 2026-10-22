@@ -1573,6 +1573,40 @@ describe("POST /sync/station-activity — server-confirmed station evidence", ()
 });
 
 describe("factory purge retains QC history", () => {
+  it.each(["live", "sandbox"] as const)("retains immutable label checks and reference versions through %s reset and purge", async (scope) => {
+    const original = await db.insert(qcWorkflowEventsTable).values(
+      (["live", "sandbox"] as const).flatMap((fixtureScope) =>
+        (["label-reference", "label-reference-review", "label-check"] as const).map((eventType) => ({
+          scope: fixtureScope,
+          operationId: `retained-${fixtureScope}-${eventType}`,
+          recordId: `retained-label-${fixtureScope}`,
+          eventType,
+          runId: eventType === "label-check" ? "retained-label-run" : null,
+          actorId: fixtureScope === "live" ? MANAGER : SANDBOX,
+          payload: {
+            version: 1,
+            sourceIdentity: "SYNTHETIC-RETENTION-REF",
+            observed: { productName: "Synthetic Product", lotText: "LOT-TEST", dateText: "printed text" },
+            outcome: "not-evaluated",
+          },
+        })),
+      ),
+    ).returning();
+    for (const action of ["reset", "purge-all"]) {
+      const response = await fetch(`${baseUrl}/api/sync/${action}`, {
+        method: "POST",
+        headers: {
+          ...(scope === "live" ? managerAuthHeaders() : sandboxAuthHeaders()),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const retained = await db.select().from(qcWorkflowEventsTable).orderBy(qcWorkflowEventsTable.id);
+      expect(retained).toEqual([...original].sort((a, b) => a.id - b.id));
+    }
+  });
+
   it.each(["live", "sandbox"] as const)("preserves both QC scopes while purging only %s master data", async (scope) => {
     await db.delete(qualityChecksTable);
     await db.insert(qualityChecksTable).values([

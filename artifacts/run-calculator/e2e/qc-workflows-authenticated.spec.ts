@@ -107,6 +107,8 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   const decoyRunId = uniqueTestId("other-scope-run");
   const decoyOperationId = uniqueTestId("other-scope-operation");
   const decoyLot = uniqueTestId("OTHER-SCOPE-LOT");
+  const labelProductKey = profileKey;
+  const labelSourceIdentity = uniqueTestId("SYNTHETIC-LABEL-SOURCE-v1");
   const browserEvidence: string[] = [];
   let operatorPage: AuthenticatedPage | undefined;
   let managerPage: AuthenticatedPage | undefined;
@@ -116,6 +118,10 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   let operatorSignoffStatus: number | null = null;
   let managerSignoffStatus: number | null = null;
   let componentEventId: number | null = null;
+  let labelCheckEventId: number | null = null;
+  let labelReferenceEventId: number | null = null;
+  let labelObservationOutcome = "not attempted";
+  let labelComparisonOutcome = "not attempted";
   let exportSummary = "not attempted";
   let scopedHistorySummary = "not checked";
   let finalEventSummary: Array<{ event_type: string; scope: string; count: number }> = [];
@@ -257,11 +263,42 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await managerPage.page.getByRole("button", { name: "Save reviewed target", exact: true }).click();
     await expect(managerPage.page.getByText(/1\.3 oz ±0\.2 · QC override/)).toBeVisible();
 
+    const referenceManager = managerPage.page.getByTestId("qc-label-reference-manager");
+    await referenceManager.getByLabel("Manager-defined product key").fill(labelProductKey);
+    await referenceManager.getByLabel("Expected product name").fill("Synthetic Cheese");
+    await referenceManager.getByLabel("Expected lot text").fill("LOT-30");
+    await referenceManager.getByLabel("Expected date text").fill("2030-11-30");
+    await referenceManager.getByLabel("Source identity").fill(labelSourceIdentity);
+    await referenceManager.getByLabel("Source description").fill("Synthetic browser fixture only; not an operational label master.");
+    const referenceSaveResponsePromise = managerPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-references")
+      && response.request().method() === "POST");
+    await referenceManager.getByRole("button", { name: "Save new draft reference", exact: true }).click();
+    const referenceSaveResponse = await referenceSaveResponsePromise;
+    expect(referenceSaveResponse.status()).toBe(201);
+    const referenceSaveBody = await referenceSaveResponse.json() as {
+      event: { id: number; payload: { referenceId: string; version: number } };
+    };
+    labelReferenceEventId = referenceSaveBody.event.id;
+    expect(referenceSaveBody.event.payload.version).toBe(1);
+    const draftReferenceCard = referenceManager.locator("article").filter({ hasText: labelProductKey });
+    await expect(draftReferenceCard).toContainText("draft");
+    await expect(draftReferenceCard.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
+    await referenceManager.getByLabel("Approval or withdrawal reason").fill("Approve this synthetic browser reference only.");
+    const approveReferencePromise = managerPage.page.waitForResponse((response) =>
+      response.url().includes(`/api/qc/label-references/${labelReferenceEventId}/review`)
+      && response.request().method() === "POST");
+    await draftReferenceCard.getByRole("button", { name: "Approve", exact: true }).click();
+    expect((await approveReferencePromise).status()).toBe(201);
+    await expect(draftReferenceCard).toContainText("approved");
+
     await openQc(operatorPage.page);
     await expect(operatorPage.page.getByTestId("text-qc-run-id")).toHaveText(runId);
     const componentChecklist = operatorPage.page.getByTestId("qc-component-checklist");
     await expect(componentChecklist.getByText("Expected list complete", { exact: true })).toBeVisible();
     await expect(componentChecklist.getByText(substitutedIngredientName, { exact: true })).toHaveCount(2);
+    const labelPanel = operatorPage.page.getByTestId("qc-label-verification");
+    await expect(labelPanel.getByText("Observation-only mode", { exact: true })).toBeVisible();
     const responsiveViewports = [
       { name: "desktop", width: 1440, height: 900 },
       { name: "phone", width: 390, height: 844 },
@@ -277,6 +314,11 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       expect(sectionBounds!.x + sectionBounds!.width).toBeLessThanOrEqual(viewport.width + 1);
       const documentWidth = await operatorPage.page.evaluate(() => document.documentElement.scrollWidth);
       expect(documentWidth, `${viewport.name} page has no horizontal overflow`).toBeLessThanOrEqual(viewport.width);
+      const labelBounds = await labelPanel.boundingBox();
+      expect(labelBounds, `${viewport.name} label panel layout`).not.toBeNull();
+      expect(labelBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(labelBounds!.x + labelBounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+      await expect(labelPanel.getByLabel("Observed product name")).toBeVisible();
       await capture(operatorPage.page, testInfo, `operator-component-check-${viewport.name}`);
     }
     await operatorPage.page.setViewportSize(VIEWPORT);
@@ -285,6 +327,162 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await expect(doughObservation).toBeFocused();
     await doughObservation.press("ArrowDown");
     await expect(doughObservation).toHaveValue("present-correct");
+    const observedProductInput = labelPanel.getByLabel("Observed product name");
+    const observedLotInput = labelPanel.getByLabel("Observed lot text");
+    await observedProductInput.focus();
+    await expect(observedProductInput).toBeFocused();
+    await observedProductInput.press("Tab");
+    await expect(observedLotInput).toBeFocused();
+    await operatorPage.page.setViewportSize(VIEWPORT);
+
+    const labelRetryBodies: Array<{ operationId: string }> = [];
+    let failLabelRequestOnce = true;
+    await operatorPage.page.route("**/api/qc/label-checks", async (route) => {
+      if (route.request().method() === "POST") {
+        labelRetryBodies.push(route.request().postDataJSON() as { operationId: string });
+        if (failLabelRequestOnce) {
+          failLabelRequestOnce = false;
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Synthetic retry fixture failure" }),
+          });
+          return;
+        }
+      }
+      await route.continue();
+    });
+    await observedProductInput.fill("Observed synthetic cheese");
+    await observedLotInput.fill("LOT-30");
+    await labelPanel.getByLabel("Observed date text").fill("11/30/30");
+    const failedLabelResponse = operatorPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-checks") && response.request().method() === "POST");
+    await labelPanel.getByRole("button", { name: "Save observation", exact: true }).click();
+    expect((await failedLabelResponse).status()).toBe(503);
+    await expect(labelPanel.getByRole("alert")).toBeVisible();
+    await expect(labelPanel.getByLabel("Observed product name")).toHaveValue("Observed synthetic cheese");
+    const retriedLabelResponse = operatorPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-checks") && response.request().method() === "POST");
+    await labelPanel.getByRole("button", { name: "Retry saved values", exact: true }).click();
+    const savedObservationResponse = await retriedLabelResponse;
+    expect(savedObservationResponse.status()).toBe(201);
+    const savedObservation = await savedObservationResponse.json() as {
+      event: { id: number; payload: Record<string, any> };
+    };
+    expect(savedObservation.event.payload).toMatchObject({
+      outcome: "not-evaluated",
+      referenceSnapshot: null,
+    });
+    labelObservationOutcome = String(savedObservation.event.payload.outcome);
+    expect(labelRetryBodies).toHaveLength(2);
+    expect(labelRetryBodies[0]?.operationId).toBe(labelRetryBodies[1]?.operationId);
+    await operatorPage.page.unroute("**/api/qc/label-checks");
+    await expect(operatorPage.page.getByTestId(`qc-history-event-${savedObservation.event.id}`)).toBeVisible();
+    await capture(operatorPage.page, testInfo, "operator-observation-only-label-saved");
+
+    const approvedReferenceOption = `${labelProductKey} · v1`;
+    await labelPanel.getByLabel("Approved reference").selectOption({ label: approvedReferenceOption });
+    await labelPanel.getByLabel("Observed product name").fill("Synthetic Cheese");
+    await labelPanel.getByLabel("Observed lot text").fill("LOT-30");
+    await labelPanel.getByLabel("Observed date text").fill("11/30/30");
+    const mismatchResponsePromise = operatorPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-checks") && response.request().method() === "POST");
+    await labelPanel.getByRole("button", { name: "Save observation", exact: true }).click();
+    const mismatchResponse = await mismatchResponsePromise;
+    expect(mismatchResponse.status()).toBe(201);
+    const mismatchBody = await mismatchResponse.json() as {
+      event: { id: number; payload: Record<string, any> };
+    };
+    expect(mismatchBody.event.payload).toMatchObject({
+      outcome: "fail",
+      referenceSnapshot: {
+        version: 1,
+        sourceIdentity: labelSourceIdentity,
+        expected: { productName: "Synthetic Cheese", dateText: "2030-11-30" },
+      },
+      fieldResults: {
+        productName: { state: "pass" },
+        lotText: { state: "pass" },
+        dateText: { state: "fail" },
+      },
+    });
+    labelComparisonOutcome = String(mismatchBody.event.payload.outcome);
+
+    await operatorPage.page.reload({ waitUntil: "domcontentloaded" });
+    await operatorPage.page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await openQc(operatorPage.page);
+    const persistedMismatch = operatorPage.page.getByTestId(`qc-history-event-${mismatchBody.event.id}`);
+    await persistedMismatch.locator("button").first().click();
+    await expect(persistedMismatch).toContainText("fail");
+
+    const managerReferenceCard = referenceManager.locator("article").filter({ hasText: labelProductKey });
+    await managerReferenceCard.getByRole("button", { name: "New version", exact: true }).click();
+    await referenceManager.getByLabel("Expected date text").fill("11/30/30");
+    await referenceManager.getByLabel("Source identity").fill(`${labelSourceIdentity}-v2`);
+    await referenceManager.getByLabel("Source description").fill("Synthetic browser fixture version two; not an operational source.");
+    const secondVersionResponsePromise = managerPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-references")
+      && response.request().method() === "POST");
+    await referenceManager.getByRole("button", { name: "Save new draft version", exact: true }).click();
+    const secondVersionResponse = await secondVersionResponsePromise;
+    expect(secondVersionResponse.status()).toBe(201);
+    const secondVersion = await secondVersionResponse.json() as {
+      event: { id: number; payload: { version: number } };
+    };
+    expect(secondVersion.event.payload.version).toBe(2);
+
+    const staleOption = `${labelProductKey} · v1`;
+    await labelPanel.getByLabel("Approved reference").selectOption({ label: staleOption });
+    await labelPanel.getByLabel("Observed product name").fill("Synthetic Cheese");
+    await labelPanel.getByLabel("Observed lot text").fill("LOT-30");
+    await labelPanel.getByLabel("Observed date text").fill("11/30/30");
+    const staleReferenceResponsePromise = operatorPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-checks") && response.request().method() === "POST");
+    await labelPanel.getByRole("button", { name: "Save observation", exact: true }).click();
+    const staleReferenceResponse = await staleReferenceResponsePromise;
+    expect(staleReferenceResponse.status()).toBe(201);
+    const staleReferenceBody = await staleReferenceResponse.json() as {
+      event: { payload: Record<string, any> };
+    };
+    expect(staleReferenceBody.event.payload).toMatchObject({
+      outcome: "not-evaluated",
+      referenceSnapshot: { version: 2, state: "draft" },
+    });
+
+    await referenceManager.getByLabel("Approval or withdrawal reason").fill("Approve synthetic browser reference version two.");
+    const approveSecondVersionPromise = managerPage.page.waitForResponse((response) =>
+      response.url().includes(`/api/qc/label-references/${secondVersion.event.id}/review`)
+      && response.request().method() === "POST");
+    await managerReferenceCard.getByRole("button", { name: "Approve", exact: true }).click();
+    expect((await approveSecondVersionPromise).status()).toBe(201);
+
+    await operatorPage.page.reload({ waitUntil: "domcontentloaded" });
+    await operatorPage.page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await openQc(operatorPage.page);
+    const refreshedLabelPanel = operatorPage.page.getByTestId("qc-label-verification");
+    await refreshedLabelPanel.getByLabel("Approved reference").selectOption({ label: `${labelProductKey} · v2` });
+    await refreshedLabelPanel.getByLabel("Observed product name").fill("Synthetic Cheese");
+    await refreshedLabelPanel.getByLabel("Observed lot text").fill("LOT-30");
+    await refreshedLabelPanel.getByLabel("Observed date text").fill("11/30/30");
+    const passResponsePromise = operatorPage.page.waitForResponse((response) =>
+      response.url().endsWith("/api/qc/label-checks") && response.request().method() === "POST");
+    await refreshedLabelPanel.getByRole("button", { name: "Save observation", exact: true }).click();
+    const passResponse = await passResponsePromise;
+    expect(passResponse.status()).toBe(201);
+    const passBody = await passResponse.json() as {
+      event: { id: number; payload: Record<string, any> };
+    };
+    expect(passBody.event.payload).toMatchObject({
+      outcome: "pass",
+      referenceSnapshot: { version: 2, sourceIdentity: `${labelSourceIdentity}-v2` },
+    });
+    labelCheckEventId = passBody.event.id;
+    const passingLabelEvent = operatorPage.page.getByTestId(`qc-history-event-${labelCheckEventId}`);
+    await passingLabelEvent.locator("button").first().click();
+    await expect(passingLabelEvent).toContainText("pass");
+    await capture(operatorPage.page, testInfo, "operator-approved-reference-label-comparison");
+
+    await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Dough)`).selectOption("present-correct");
     await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Applicator 1)`).selectOption("present-correct");
     const componentResponsePromise = operatorPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/component-checks")
@@ -486,6 +684,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await expect(managerPage.page.getByText("Signed off", { exact: true })).toBeVisible();
     await capture(managerPage.page, testInfo, "manager-signed-off-history");
 
+    await managerPage.page.getByTestId("input-run-id-filter").fill("");
     const downloadPromise = managerPage.page.waitForEvent("download");
     const exportResponsePromise = managerPage.page.waitForResponse((response) =>
       new URL(response.url()).pathname === "/api/qc/history.csv"
@@ -502,9 +701,12 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     expect(csv).toContain(lotNumber);
     expect(csv).toContain(runId);
     expect(csv).toContain("component-check");
+    expect(csv).toContain("label-check");
+    expect(csv).toContain("label-reference");
+    expect(csv).toContain(labelProductKey);
     expect(csv).toContain("run-signoff");
     expect(csv).not.toContain(decoyLot);
-    exportSummary = `downloaded ${csv.split(/\r?\n/).filter(Boolean).length - 1} fixture rows; lot/run/sign-off present`;
+    exportSummary = `downloaded ${csv.split(/\r?\n/).filter(Boolean).length - 1} fixture rows; label reference/check, lot, run, and sign-off present`;
 
     if (componentEventId !== null) {
       const managerComponentEvent = managerPage.page.getByTestId(`qc-history-event-${componentEventId}`);
@@ -518,6 +720,38 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       await managerComponentEvent.getByRole("button", { name: "Append correction", exact: true }).click();
       expect((await postSignoffCorrection).status()).toBe(201);
       await expect(managerPage.page.getByText("Reopened", { exact: true })).toBeVisible();
+    }
+
+    if (labelCheckEventId !== null) {
+      const managerLabelEvent = managerPage.page.getByTestId(`qc-history-event-${labelCheckEventId}`);
+      await expect(managerLabelEvent).toBeVisible();
+      await managerLabelEvent.locator("button").first().click();
+      await managerLabelEvent.getByLabel("Correction reason").fill("Correct synthetic printed-date transcription.");
+      await managerLabelEvent.getByLabel("Replacement payload JSON").fill(JSON.stringify({
+        observed: { dateText: "incorrect date text" },
+      }));
+      const labelCorrectionPromise = managerPage.page.waitForResponse((response) =>
+        response.url().includes(`/api/qc/events/${labelCheckEventId}/corrections`)
+        && response.request().method() === "POST");
+      await managerLabelEvent.getByRole("button", { name: "Append correction", exact: true }).click();
+      expect((await labelCorrectionPromise).status()).toBe(201);
+      await expect(managerLabelEvent.getByText("Corrected", { exact: true })).toBeVisible();
+      await expect(managerLabelEvent).toContainText("fail");
+
+      await managerLabelEvent.getByLabel("Redaction reason").fill("Redact synthetic date text in this fixture.");
+      await managerLabelEvent.getByLabel("Observed date text", { exact: true }).check();
+      const labelRedactionPromise = managerPage.page.waitForResponse((response) =>
+        response.url().includes(`/api/qc/events/${labelCheckEventId}/redactions`)
+        && response.request().method() === "POST");
+      await managerLabelEvent.getByRole("button", { name: "Append redaction", exact: true }).click();
+      expect((await labelRedactionPromise).status()).toBe(201);
+      await expect(managerLabelEvent).toContainText("Redacted");
+      const reopenedLabelRun = await managerPage.page.evaluate(async (id) => {
+        const response = await fetch(`/api/qc/runs/${encodeURIComponent(id)}`);
+        if (!response.ok) throw new Error(`Run history returned ${response.status}`);
+        return response.json() as Promise<{ signoff: { signedOff: boolean; reopened: boolean } }>;
+      }, runId);
+      expect(reopenedLabelRun.signoff).toMatchObject({ signedOff: false, reopened: true });
     }
 
     await managerPage.page.reload({ waitUntil: "domcontentloaded" });
@@ -567,10 +801,12 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     const eventRows = await db.query<{ event_type: string; scope: string; count: number }>(
       `SELECT event_type, scope, count(*)::int AS count
        FROM qc_workflow_events
-       WHERE (run_id = $1 OR profile_key = $2)
+       WHERE (run_id = $1 OR profile_key = $2 OR record_id = (
+         SELECT record_id FROM qc_workflow_events WHERE id = $3 AND scope = 'live'
+       ))
        GROUP BY event_type, scope
        ORDER BY scope, event_type`,
-      [runId, profileKey],
+      [runId, profileKey, labelReferenceEventId],
     );
     finalEventSummary = eventRows.rows;
     const decoyRows = await db.query<{ count: number }>(
@@ -589,6 +825,9 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       "lot",
       "weight",
       "component-check",
+      "label-check",
+      "label-reference",
+      "label-reference-review",
       "allergen-review",
       "cleaning",
       "cleaning-verification",
@@ -600,12 +839,9 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   } finally {
     await operatorPage?.context.close().catch(() => {});
     await managerPage?.context.close().catch(() => {});
-    await db.query(
-      `DELETE FROM qc_workflow_events
-       WHERE scope IN ('live', 'sandbox')
-         AND (run_id = $1 OR profile_key = $2 OR operation_id = $3)`,
-      [runId, profileKey, decoyOperationId],
-    ).catch(() => {});
+    // The QC ledger is protected against DELETE, including fixture rows.
+    // Unique IDs isolate engines; the isolated suite runner drops the entire
+    // disposable database afterward. Never suppress a failed ledger deletion.
     await db.query(
       "DELETE FROM ingredients WHERE scope = 'live' AND id = $1",
       [ingredientId],
@@ -615,6 +851,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     const backendEvidence = {
       environment: "fresh local disposable browser_e2e PostgreSQL",
       data: "generated browser fixtures only; no production records",
+      ledgerCleanup: "Append-only fixture rows remain between engines; the isolated runner destroys the disposable database.",
       facilityScope: "live",
       runId,
       roleCapabilities: {
@@ -625,6 +862,10 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       operatorSignoffStatus,
       managerSignoffStatus,
       componentEventId,
+      labelReferenceEventId,
+      labelCheckEventId,
+      labelObservationOutcome,
+      labelComparisonOutcome,
       exportSummary,
       scopedHistorySummary,
       persistedEvents: finalEventSummary,

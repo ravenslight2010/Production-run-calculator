@@ -127,7 +127,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/inventory/quality-checks",
   ]),
   ...reads(["record-qc"], "all", "scoped", [
-    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity",
+    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity", "/qc/label-references",
   ]),
   ...reads(["manage-qc"], "all", "scoped", ["/qc/history.csv"]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
@@ -236,6 +236,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
     "POST /run-suggestions/follow-up", "POST /sync/operational-intents", "POST /sync/manual-section",
+    "POST /sync/station-activity",
     "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
     "POST /cycle-count-schedules/:id/mark-counted",
     "POST /operations-insights/spec-reconciliation", "POST /ai/spec-reconcile",
@@ -279,11 +280,12 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "record-qc", [
     "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
-    "POST /qc/component-checks",
+    "POST /qc/component-checks", "POST /qc/label-checks", "POST /qc/brix-checks",
     "POST /qc/cleaning-records", "POST /qc/cleaning-records/:eventId/verification",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
-    "POST /qc/targets", "POST /qc/run-signoffs",
+    "POST /qc/targets", "POST /qc/run-signoffs", "POST /qc/brix-targets",
+    "POST /qc/label-references", "POST /qc/label-references/:eventId/review",
     "POST /qc/events/:eventId/corrections", "POST /qc/events/:eventId/redactions",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
@@ -328,6 +330,10 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   {
     method: "POST", path: "/import-history", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/preview", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   {

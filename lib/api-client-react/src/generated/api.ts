@@ -213,6 +213,10 @@ import type {
   QcCorrectionInput,
   QcEventResponse,
   QcHistoryResponse,
+  QcLabelCheckInput,
+  QcLabelReferenceInput,
+  QcLabelReferenceReviewInput,
+  QcLabelReferencesResponse,
   QcLotInput,
   QcNoteInput,
   QcRedactionInput,
@@ -4779,6 +4783,375 @@ export const useRecordQcComponentCheck = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRecordQcComponentCheckMutationOptions(options), queryClient);
+    }
+
+export const getGetQcLabelReferencesUrl = () => {
+
+
+
+
+  return `/api/qc/label-references`
+}
+
+/**
+ * Uses the authenticated facility scope. QC recorders see approved current versions only. QC managers also see drafts and withdrawn references. Expected label text is entered from a source identity and requires a separate manager approval event. The list is bounded; an over-limit history fails explicitly rather than silently omitting references.
+ * @summary Read current approved label references, or all versions for QC managers
+ */
+export const getQcLabelReferences = async ( options?: Parameters<typeof customFetch>[1]): Promise<QcLabelReferencesResponse> => {
+
+  return customFetch<QcLabelReferencesResponse>(getGetQcLabelReferencesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcLabelReferencesQueryKey = () => {
+    return [
+    `/api/qc/label-references`
+    ] as const;
+    }
+
+
+export const getGetQcLabelReferencesQueryOptions = <TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcLabelReferencesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcLabelReferences>>> = ({ signal }) => getQcLabelReferences({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcLabelReferencesQueryResult = NonNullable<Awaited<ReturnType<typeof getQcLabelReferences>>>
+export type GetQcLabelReferencesQueryError = ErrorType<void>
+
+
+export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcLabelReferences>>,
+          TError,
+          Awaited<ReturnType<typeof getQcLabelReferences>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcLabelReferences>>,
+          TError,
+          Awaited<ReturnType<typeof getQcLabelReferences>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read current approved label references, or all versions for QC managers
+ */
+
+export function useGetQcLabelReferences<TData = Awaited<ReturnType<typeof getQcLabelReferences>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcLabelReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcLabelReferencesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveQcLabelReferenceUrl = () => {
+
+
+
+
+  return `/api/qc/label-references`
+}
+
+/**
+ * Manager-only. Saving a new version never approves it; an explicit manager review is required before QC observations can compare against it. No recipe, shipping-guide, or AI data is used to populate expected text.
+ * @summary Create a pending label reference version
+ */
+export const saveQcLabelReference = async (qcLabelReferenceInput: QcLabelReferenceInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSaveQcLabelReferenceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcLabelReferenceInput)
+  }
+);}
+
+
+
+
+
+export const getSaveQcLabelReferenceMutationKey = () => ['saveQcLabelReference'] as const;
+
+export const getSaveQcLabelReferenceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveQcLabelReference>>, TError,SaveQcLabelReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveQcLabelReference>>, TError,SaveQcLabelReferenceMutationVariables, TContext> => {
+
+const mutationKey = getSaveQcLabelReferenceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveQcLabelReference>>, SaveQcLabelReferenceMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveQcLabelReference(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveQcLabelReferenceMutationResult = NonNullable<Awaited<ReturnType<typeof saveQcLabelReference>>>
+    export type SaveQcLabelReferenceMutationBody = BodyType<QcLabelReferenceInput>
+    export type SaveQcLabelReferenceMutationError = ErrorType<void>
+    export type SaveQcLabelReferenceMutationVariables = {data: BodyType<QcLabelReferenceInput>}
+
+    /**
+ * @summary Create a pending label reference version
+ */
+export const useSaveQcLabelReference = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveQcLabelReference>>, TError,SaveQcLabelReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof saveQcLabelReference>>,
+        TError,
+        SaveQcLabelReferenceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveQcLabelReferenceMutationOptions(options), queryClient);
+    }
+
+export const getReviewQcLabelReferenceUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/label-references/${eventId}/review`
+}
+
+/**
+ * @summary Explicitly approve or withdraw one label reference version
+ */
+export const reviewQcLabelReference = async (eventId: number,
+    qcLabelReferenceReviewInput: QcLabelReferenceReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getReviewQcLabelReferenceUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcLabelReferenceReviewInput)
+  }
+);}
+
+
+
+
+
+export const getReviewQcLabelReferenceMutationKey = () => ['reviewQcLabelReference'] as const;
+
+export const getReviewQcLabelReferenceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewQcLabelReference>>, TError,ReviewQcLabelReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reviewQcLabelReference>>, TError,ReviewQcLabelReferenceMutationVariables, TContext> => {
+
+const mutationKey = getReviewQcLabelReferenceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewQcLabelReference>>, ReviewQcLabelReferenceMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  reviewQcLabelReference(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewQcLabelReferenceMutationResult = NonNullable<Awaited<ReturnType<typeof reviewQcLabelReference>>>
+    export type ReviewQcLabelReferenceMutationBody = BodyType<QcLabelReferenceReviewInput>
+    export type ReviewQcLabelReferenceMutationError = ErrorType<void>
+    export type ReviewQcLabelReferenceMutationVariables = {eventId: number;data: BodyType<QcLabelReferenceReviewInput>}
+
+    /**
+ * @summary Explicitly approve or withdraw one label reference version
+ */
+export const useReviewQcLabelReference = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewQcLabelReference>>, TError,ReviewQcLabelReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reviewQcLabelReference>>,
+        TError,
+        ReviewQcLabelReferenceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReviewQcLabelReferenceMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcLabelCheckUrl = () => {
+
+
+
+
+  return `/api/qc/label-checks`
+}
+
+/**
+ * Advisory and text-only. The server resolves only an explicitly approved, facility-scoped reference version for the selected packaging context. Missing or unapproved references save as not-evaluated. The event snapshots the exact approved version and server-computed field outcomes; callers cannot submit expected text or outcomes. Printed dates are compared as text, not decoded. This does not imply a packaging hold, shipping clearance, product claim, or regulatory approval.
+ * @summary Record observed shipper-label text for a run
+ */
+export const recordQcLabelCheck = async (qcLabelCheckInput: QcLabelCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcLabelCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcLabelCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcLabelCheckMutationKey = () => ['recordQcLabelCheck'] as const;
+
+export const getRecordQcLabelCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcLabelCheck>>, TError,RecordQcLabelCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcLabelCheck>>, TError,RecordQcLabelCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcLabelCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcLabelCheck>>, RecordQcLabelCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcLabelCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcLabelCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcLabelCheck>>>
+    export type RecordQcLabelCheckMutationBody = BodyType<QcLabelCheckInput>
+    export type RecordQcLabelCheckMutationError = ErrorType<void>
+    export type RecordQcLabelCheckMutationVariables = {data: BodyType<QcLabelCheckInput>}
+
+    /**
+ * @summary Record observed shipper-label text for a run
+ */
+export const useRecordQcLabelCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcLabelCheck>>, TError,RecordQcLabelCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcLabelCheck>>,
+        TError,
+        RecordQcLabelCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcLabelCheckMutationOptions(options), queryClient);
     }
 
 export const getGetQcRunUrl = (runId: string,) => {

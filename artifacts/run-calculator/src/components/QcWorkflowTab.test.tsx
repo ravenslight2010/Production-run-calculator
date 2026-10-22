@@ -3,11 +3,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { QcAllergenReviewInput } from "@workspace/api-client-react";
+import type { QcAllergenReviewInput, QcEvent } from "@workspace/api-client-react";
 import type { Ingredient } from "@workspace/ingredient-catalog";
 import type { IngredientSubstitution } from "@workspace/inventory-math";
 import { DEFAULT_VALUES, type FormValues } from "../types";
 import QcWorkflowTab from "./QcWorkflowTab";
+import QcLabelVerification from "./QcLabelVerification";
 
 const qcMocks = vi.hoisted(() => ({
   targets: {
@@ -113,6 +114,12 @@ const qcMocks = vi.hoisted(() => ({
     isFetching: false,
     refetch: vi.fn(),
   },
+    labelReferences: {
+      data: { items: [] as Array<Record<string, any>> },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    },
   mutation: {
     mutateAsync: vi.fn(),
     mutate: vi.fn(),
@@ -131,16 +138,36 @@ const qcMocks = vi.hoisted(() => ({
     error: null,
     isPending: false,
   },
+    labelCheckOptions: undefined as undefined | {
+      mutation: { onSuccess: (response: { event: QcEvent }) => Promise<void> };
+    },
+    labelCheckMutation: {
+      mutate: vi.fn(),
+      error: null,
+      isPending: false,
+    },
+    labelReferenceMutation: {
+      mutate: vi.fn(),
+      error: null,
+      isPending: false,
+    },
+    labelReviewMutation: {
+      mutate: vi.fn(),
+      error: null,
+      isPending: false,
+    },
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
   exportQcHistoryCsv: vi.fn(),
   getGetQcHistoryQueryKey: (...args: unknown[]) => ["qc-history", ...args],
+  getGetQcLabelReferencesQueryKey: (...args: unknown[]) => ["qc-label-references", ...args],
   getGetQcAllergenActivityQueryKey: (...args: unknown[]) => ["qc-allergen-activity", ...args],
   getGetQcRunQueryKey: (...args: unknown[]) => ["qc-run", ...args],
   getGetQcTargetsQueryKey: (...args: unknown[]) => ["qc-targets", ...args],
   useCorrectQcEvent: () => qcMocks.mutation,
   useGetQcHistory: () => qcMocks.history,
+  useGetQcLabelReferences: () => qcMocks.labelReferences,
   useGetQcAllergenActivity: () => qcMocks.activity,
   useGetQcRun: (runId: string) => (qcMocks.runs[runId] as typeof qcMocks.run | undefined) ?? qcMocks.run,
   useGetQcTargets: () => qcMocks.targets,
@@ -148,6 +175,12 @@ vi.mock("@workspace/api-client-react", () => ({
   useRecordQcComponentCheck: () => qcMocks.mutation,
   useRecordQcCleaning: () => qcMocks.mutation,
   useRecordQcBrixCheck: () => qcMocks.brixMutation,
+  useRecordQcLabelCheck: (options: typeof qcMocks.labelCheckOptions) => {
+    qcMocks.labelCheckOptions = options;
+    return qcMocks.labelCheckMutation;
+  },
+  useSaveQcLabelReference: () => qcMocks.labelReferenceMutation,
+  useReviewQcLabelReference: () => qcMocks.labelReviewMutation,
   useRecordQcLot: () => qcMocks.mutation,
   useRecordQcWeightCheck: () => qcMocks.mutation,
   useRedactQcEvent: () => qcMocks.mutation,
@@ -243,12 +276,63 @@ beforeEach(() => {
   qcMocks.brixTargetMutation.mutate.mockClear();
   qcMocks.brixTargetMutation.error = null;
   qcMocks.brixTargetMutation.isPending = false;
+  qcMocks.labelCheckMutation.mutate.mockClear();
+  qcMocks.labelCheckMutation.error = null;
+  qcMocks.labelCheckMutation.isPending = false;
+  qcMocks.labelReferenceMutation.mutate.mockClear();
+  qcMocks.labelReferenceMutation.error = null;
+  qcMocks.labelReferenceMutation.isPending = false;
+  qcMocks.labelReviewMutation.mutate.mockClear();
+  qcMocks.labelReviewMutation.error = null;
+  qcMocks.labelReviewMutation.isPending = false;
 });
 
 const stagedIngredients: QcAllergenReviewInput["stagedIngredients"] = [
   { area: "Dough", name: "Flour", quantity: "5", unit: "lbs", staged: true },
   { area: "Sauce", name: "Tomato sauce", quantity: "2", unit: "lbs", staged: false },
 ];
+
+it("keeps a late label-save acknowledgement attached to its originating run", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, "invalidateQueries").mockResolvedValue(undefined);
+  const view = (runId: string) => (
+    <QueryClientProvider client={client}>
+      <QcLabelVerification runId={runId} profileKey="brand__flavor" canRecordQc canManageQc={false} />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(view("origin-run"));
+  expect(screen.getByLabelText("Packaging context").className).toContain("appearance-none");
+  const acknowledgeOrigin = qcMocks.labelCheckOptions!.mutation.onSuccess;
+  rerender(view("next-run"));
+  fireEvent.change(screen.getByLabelText("Observed product name"), { target: { value: "Next run text" } });
+  await act(async () => acknowledgeOrigin({ event: { runId: "origin-run" } as QcEvent }));
+  expect((screen.getByLabelText("Observed product name") as HTMLInputElement).value).toBe("Next run text");
+  expect(screen.queryByText(/Label observation saved\./)).toBeNull();
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["qc-run", "origin-run"] });
+});
+
+it("offers only approved references bound to the current product and packaging context", () => {
+  qcMocks.labelReferences.data.items = [
+    { referenceId: "matching", state: "approved", context: "shipper-case", productKey: "brand__flavor", version: 1 },
+    { referenceId: "other-product", state: "approved", context: "shipper-case", productKey: "other__product", version: 1 },
+    { referenceId: "other-context", state: "approved", context: "carton-label", productKey: "brand__flavor", version: 1 },
+    { referenceId: "missing-brand", state: "approved", context: "shipper-case", productKey: "__flavor", version: 1 },
+    { referenceId: "ambiguous-key", state: "approved", context: "shipper-case", productKey: "brand__ambiguous__flavor", version: 1 },
+  ];
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = (profileKey: string) => (
+    <QueryClientProvider client={client}>
+      <QcLabelVerification runId="test-run" profileKey={profileKey} canRecordQc canManageQc={false} />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(view("brand__flavor"));
+  const values = () => Array.from((screen.getByLabelText("Approved reference") as HTMLSelectElement).options).map((option) => option.value);
+  expect(values()).toEqual(["", "matching"]);
+  rerender(view("__flavor"));
+  expect(values()).toEqual([""]);
+  rerender(view("brand__ambiguous__flavor"));
+  expect(values()).toEqual([""]);
+});
 
 type RenderOptions = {
   runId?: string;
@@ -292,6 +376,35 @@ function renderTab(options: RenderOptions = {}) {
   };
 }
 describe("QC workflow UI", () => {
+  it("lets QC staff save observed label text without an approved reference or client-supplied expected values", () => {
+    renderTab();
+    expect(screen.getByText("Observation-only mode").textContent).toBe("Observation-only mode");
+    fireEvent.change(screen.getByLabelText("Observed product name"), {
+      target: { value: "Observed synthetic cheese" },
+    });
+    fireEvent.change(screen.getByLabelText("Observed lot text"), {
+      target: { value: "LOT-TEST" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save observation" }));
+
+    expect(qcMocks.labelCheckMutation.mutate).toHaveBeenCalledTimes(1);
+    const request = qcMocks.labelCheckMutation.mutate.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(request.data).toMatchObject({
+      runId: "run-1",
+      context: "shipper-case",
+      observed: {
+        productName: "Observed synthetic cheese",
+        lotText: "LOT-TEST",
+        dateText: "",
+      },
+    });
+    expect(request.data).not.toHaveProperty("expected");
+    expect(request.data).not.toHaveProperty("outcome");
+    expect(screen.queryByTestId("qc-label-reference-manager")).toBeNull();
+  });
+
   it("shows the selected run's mapped, unknown, and substituted footprint without stale run details", () => {
     qcMocks.ingredients = [
       {

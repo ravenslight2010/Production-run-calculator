@@ -19,6 +19,13 @@ import {
   type QcComponentObservation,
 } from "../lib/qcComponentChecks";
 import { evaluateQcBrixCheck } from "../lib/qcBrixChecks";
+import {
+  evaluateQcLabelCheck,
+  normalizeQcLabelObserved,
+  QC_LABEL_FIELDS,
+  type QcLabelField,
+  type QcLabelExpectedFields,
+} from "../lib/qcLabelChecks";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
@@ -48,6 +55,8 @@ const UNIT = z.enum(["oz", "g", "lb", "kg"]);
 const STATION = z.enum(["dough", "sauce", "frontline", "warehouse", "packaging", "other"]);
 const CHECK_TYPE = z.enum(["pre-run", "30-minute"]);
 const BRIX_CHECK_TYPE = z.enum(["pre-run", "interval"]);
+const LABEL_CONTEXT = z.enum(["shipper-case", "carton-label"]);
+const LABEL_FIELD = z.enum(QC_LABEL_FIELDS);
 const CLEANING_METHOD = z.enum(["standard", "deep", "chemical", "other"]);
 const CLEANING_STATUS = z.enum(["verified", "unverified", "unknown", "not-applicable"]);
 const STAGED_STATUS = z.enum(["reviewed", "not-reviewed", "unknown"]);
@@ -204,6 +213,51 @@ const componentCheckBodySchema = z.object({
   }
 });
 
+const labelObservedSchema = z.object({
+  productName: z.string().max(200),
+  lotText: z.string().max(200),
+  dateText: z.string().max(100),
+}).strict();
+
+const labelCheckBodySchema = z.object({
+  operationId: operationIdSchema,
+  runId: runIdSchema,
+  context: LABEL_CONTEXT,
+  referenceId: z.string().uuid().optional(),
+  observed: labelObservedSchema,
+  note: noteSchema,
+}).strict().superRefine((body, ctx) => {
+  if (!QC_LABEL_FIELDS.some((field) => body.observed[field].trim())) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["observed"],
+      message: "Enter at least one observed label field",
+    });
+  }
+});
+
+const labelReferenceBodySchema = z.object({
+  operationId: operationIdSchema,
+  referenceId: z.string().uuid().optional(),
+  context: LABEL_CONTEXT,
+  productKey: z.string().trim().min(1).max(120),
+  expected: z.object({
+    productName: z.string().trim().max(200).optional(),
+    lotText: z.string().trim().max(200).optional(),
+    dateText: z.string().trim().max(100).optional(),
+  }).strict(),
+  requiredFields: z.array(LABEL_FIELD).min(1).max(3)
+    .refine((fields) => new Set(fields).size === fields.length, "Required fields must be unique"),
+  sourceIdentity: z.string().trim().min(1).max(200),
+  sourceDescription: z.string().trim().min(1).max(500),
+}).strict();
+
+const labelReferenceReviewBodySchema = z.object({
+  operationId: operationIdSchema,
+  decision: z.enum(["approved", "withdrawn"]),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
 const correctionBodySchema = z.object({
   operationId: operationIdSchema,
   reason: z.string().trim().min(1).max(500),
@@ -223,9 +277,23 @@ const redactionBodySchema = z.object({
     "payload.instrument",
     "payload.lotNumber",
     "payload.expectedComponents",
+    "payload.observed.productName",
+    "payload.observed.lotText",
+    "payload.observed.dateText",
+    "payload.fieldResults.productName.observed",
+    "payload.fieldResults.productName.expected",
+    "payload.fieldResults.lotText.observed",
+    "payload.fieldResults.lotText.expected",
+    "payload.fieldResults.dateText.observed",
+    "payload.fieldResults.dateText.expected",
+    "payload.referenceSnapshot.expected.productName",
+    "payload.referenceSnapshot.expected.lotText",
+    "payload.referenceSnapshot.expected.dateText",
+    "payload.referenceSnapshot.sourceIdentity",
+    "payload.referenceSnapshot.sourceDescription",
   ]))
     .min(1)
-    .max(6)
+    .max(24)
     .refine((fields) => new Set(fields).size === fields.length, "Redaction fields must be unique"),
 });
 
@@ -324,6 +392,172 @@ function recordObject(value: unknown): Record<string, unknown> | null {
 }
 
 type QcExecutor = Pick<typeof db, "select">;
+
+const MAX_LABEL_REFERENCES = 200;
+const MAX_LABEL_REFERENCE_EVENTS = 5_000;
+
+const storedLabelReferenceSchema = z.object({
+  referenceId: z.string().uuid(),
+  version: z.number().int().positive(),
+  context: LABEL_CONTEXT,
+  productKey: z.string().min(1).max(120),
+  expected: z.object({
+    productName: z.string().max(200).optional(),
+    lotText: z.string().max(200).optional(),
+    dateText: z.string().max(100).optional(),
+  }).strict(),
+  requiredFields: z.array(LABEL_FIELD).min(1).max(3),
+  sourceIdentity: z.string().min(1).max(200),
+  sourceDescription: z.string().min(1).max(500),
+}).strict();
+
+type StoredLabelReference = z.infer<typeof storedLabelReferenceSchema>;
+
+type LabelReferenceState = {
+  configuration: QcWorkflowEventRow;
+  value: StoredLabelReference;
+  review: QcWorkflowEventRow | null;
+  decision: "approved" | "withdrawn" | null;
+};
+
+async function latestLabelReference(
+  executor: QcExecutor,
+  scope: string,
+  referenceId: string,
+): Promise<QcWorkflowEventRow | null> {
+  const [row] = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "label-reference"),
+    sql`${qcWorkflowEventsTable.payload}->>'referenceId' = ${referenceId}`,
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(1);
+  return row ?? null;
+}
+
+async function labelReferenceState(
+  executor: QcExecutor,
+  scope: string,
+  configuration: QcWorkflowEventRow,
+): Promise<LabelReferenceState | null> {
+  const parsed = storedLabelReferenceSchema.safeParse(configuration.payload);
+  if (!parsed.success) return null;
+  const [review] = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "label-reference-review"),
+    eq(qcWorkflowEventsTable.relatedEventId, String(configuration.id)),
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(1);
+  const decision = review?.payload.decision === "approved" || review?.payload.decision === "withdrawn"
+    ? review.payload.decision
+    : null;
+  return { configuration, value: parsed.data, review: review ?? null, decision };
+}
+
+async function currentLabelReferences(
+  executor: QcExecutor,
+  scope: string,
+): Promise<{ items: LabelReferenceState[]; overflow: boolean }> {
+  const rows = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "label-reference"),
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(MAX_LABEL_REFERENCE_EVENTS + 1);
+  if (rows.length > MAX_LABEL_REFERENCE_EVENTS) return { items: [], overflow: true };
+  const latestById = new Map<string, QcWorkflowEventRow>();
+  for (const row of rows) {
+    const parsed = storedLabelReferenceSchema.safeParse(row.payload);
+    if (parsed.success && !latestById.has(parsed.data.referenceId)) {
+      latestById.set(parsed.data.referenceId, row);
+    }
+  }
+  if (latestById.size > MAX_LABEL_REFERENCES) return { items: [], overflow: true };
+  const states = await Promise.all(
+    [...latestById.values()].map((row) => labelReferenceState(executor, scope, row)),
+  );
+  return {
+    items: states.flatMap((state) => state ? [state] : []),
+    overflow: false,
+  };
+}
+
+function labelReferenceApi(state: LabelReferenceState, includeReviewReason: boolean) {
+  const { configuration, value, review, decision } = state;
+  return {
+    ...value,
+    configurationEventId: configuration.id,
+    state: decision ?? "draft",
+    reviewedBy: review?.actorId ?? null,
+    reviewedAt: review?.createdAt.toISOString() ?? null,
+    ...(includeReviewReason
+      ? { reviewReason: typeof review?.payload.reason === "string" ? review.payload.reason : null }
+      : {}),
+  };
+}
+
+function labelReferenceSnapshot(state: LabelReferenceState) {
+  const reviewPayload = state.review?.payload ?? {};
+  return {
+    referenceId: state.value.referenceId,
+    version: state.value.version,
+    context: state.value.context,
+    productKey: state.value.productKey,
+    expected: state.value.expected,
+    requiredFields: state.value.requiredFields,
+    sourceIdentity: state.value.sourceIdentity,
+    sourceDescription: state.value.sourceDescription,
+    configurationEventId: state.configuration.id,
+    approvalEventId: state.review?.id ?? null,
+    approvedBy: state.review?.actorId ?? null,
+    approvedAt: state.review?.createdAt.toISOString() ?? null,
+    approvalReason: typeof reviewPayload.reason === "string" ? reviewPayload.reason : null,
+  };
+}
+
+function evaluateStoredLabelCheck(payload: Record<string, unknown>) {
+  const observedObject = recordObject(payload.observed);
+  const observed = {
+    productName: typeof observedObject?.productName === "string" ? observedObject.productName : "",
+    lotText: typeof observedObject?.lotText === "string" ? observedObject.lotText : "",
+    dateText: typeof observedObject?.dateText === "string" ? observedObject.dateText : "",
+  };
+  const snapshot = recordObject(payload.referenceSnapshot);
+  const expected = recordObject(snapshot?.expected);
+  const requiredFields = Array.isArray(snapshot?.requiredFields)
+    ? snapshot.requiredFields.filter((field): field is QcLabelField =>
+      QC_LABEL_FIELDS.includes(field as QcLabelField))
+    : [];
+  const hasApprovedSnapshot = typeof snapshot?.approvalEventId === "number"
+    && snapshot.approvalEventId > 0
+    && requiredFields.length > 0;
+  const comparison = evaluateQcLabelCheck({
+    observed,
+    reference: hasApprovedSnapshot
+      ? {
+        expected: Object.fromEntries(QC_LABEL_FIELDS.flatMap((field) =>
+          typeof expected?.[field] === "string" ? [[field, expected[field] as string]] : [],
+        )) as QcLabelExpectedFields,
+        requiredFields,
+      }
+      : null,
+    ...(typeof payload.referenceUnavailableReason === "string"
+      ? { referenceUnavailableReason: payload.referenceUnavailableReason }
+      : {}),
+  });
+  return { ...payload, observed, fieldResults: comparison.fields, outcome: comparison.outcome };
+}
+
+function redactPayloadPath(payload: Record<string, unknown>, fieldPath: string): Record<string, unknown> {
+  const parts = fieldPath.replace(/^payload\./, "").split(".");
+  if (!parts.length || parts.some((part) => !part)) return payload;
+  const result = { ...payload };
+  let current: Record<string, unknown> = result;
+  for (const part of parts.slice(0, -1)) {
+    const nested = recordObject(current[part]);
+    if (!nested) return result;
+    const copy = { ...nested };
+    current[part] = copy;
+    current = copy;
+  }
+  current[parts[parts.length - 1]!] = "[redacted]";
+  return result;
+}
 
 type CanonicalRunSource = {
   kind: "completed-run-snapshot" | "current-day-canonical-settings";
@@ -847,7 +1081,16 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
       if (replacement && typeof replacement === "object" && !Array.isArray(replacement)) {
         const replacementFields = replacement as Record<string, unknown>;
         const prior = corrections.get(target) ?? {};
-        if (rowTypes.get(target) === "component-check" && Array.isArray(replacementFields.observations)) {
+        if (rowTypes.get(target) === "label-check" && recordObject(replacementFields.observed)) {
+          corrections.set(target, {
+            ...prior,
+            ...replacementFields,
+            observed: {
+              ...(recordObject(prior.observed) ?? {}),
+              ...recordObject(replacementFields.observed),
+            },
+          });
+        } else if (rowTypes.get(target) === "component-check" && Array.isArray(replacementFields.observations)) {
           const merged = new Map<string, unknown>();
           if (Array.isArray(prior.observations)) {
             for (const observation of prior.observations) {
@@ -901,7 +1144,16 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     };
     const replacement = corrections.get(String(row.id));
     if (replacement) {
-      output.payload = { ...output.payload, ...replacement };
+      output.payload = row.eventType === "label-check" && recordObject(replacement.observed)
+        ? {
+          ...output.payload,
+          ...replacement,
+          observed: {
+            ...(recordObject(output.payload.observed) ?? {}),
+            ...recordObject(replacement.observed),
+          },
+        }
+        : { ...output.payload, ...replacement };
       const actualValue = numericPositive(output.payload.actualValue);
       const targetValue = numericPositive(output.payload.targetValue);
       const toleranceValue = numericTolerance(output.payload.toleranceValue);
@@ -982,6 +1234,9 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
           outcome: evaluation.outcome,
         };
       }
+      if (row.eventType === "label-check") {
+        output.payload = evaluateStoredLabelCheck(output.payload);
+      }
       output.corrected = true;
     }
     const station = correctedStations.get(String(row.id));
@@ -989,11 +1244,10 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     const fields = redactions.get(String(row.id));
     if (fields?.has("actorId")) output.actorId = null;
     if (fields?.has("ingredientName")) output.ingredientName = null;
-    if (fields?.has("payload.note")) output.payload = { ...output.payload, note: "[redacted]" };
-    if (fields?.has("payload.instrument")) output.payload = { ...output.payload, instrument: "[redacted]" };
-    if (fields?.has("payload.lotNumber")) output.payload = { ...output.payload, lotNumber: "[redacted]" };
-    if (fields?.has("payload.expectedComponents")) {
-      output.payload = { ...output.payload, expectedComponents: "[redacted]" };
+    for (const field of fields ?? []) {
+      if (field.startsWith("payload.")) {
+        output.payload = redactPayloadPath(output.payload, field);
+      }
     }
     if (fields?.size) output.redactedFields = [...fields];
     const details = auditDetails.get(String(row.id));
@@ -1041,6 +1295,18 @@ function validateCorrection(
                 path: ["observations"],
                 message: "Each component may be corrected only once",
               });
+            }
+          })
+        : eventType === "label-check"
+          ? z.object({
+            observed: labelObservedSchema.partial().optional(),
+            note: correctionNote,
+          }).strict().superRefine((replacement, ctx) => {
+            if (
+              (!replacement.observed || Object.keys(replacement.observed).length === 0)
+              && replacement.note === undefined
+            ) {
+              ctx.addIssue({ code: "custom", message: "A correction must change observed text or the note" });
             }
           })
         : eventType === "allergen-review"
@@ -1723,6 +1989,429 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
   }
 });
 
+router.get("/qc/label-references", requireCapability("record-qc"), async (req, res) => {
+  try {
+    const scope = currentScope();
+    const references = await currentLabelReferences(db, scope);
+    if (references.overflow) {
+      safeError(res, 503, "The label reference list is over its review limit. Ask a QC manager to review the configuration.");
+      return;
+    }
+    const canManage = req.capabilities?.includes("manage-qc") === true;
+    res.json({
+      items: references.items
+        .filter((item) => canManage || item.decision === "approved")
+        .map((item) => labelReferenceApi(item, canManage)),
+    });
+  } catch (error) {
+    reportRouteError(req, res, "failed to load label references", error);
+  }
+});
+
+router.post("/qc/label-references", requireCapability("manage-qc"), async (req, res) => {
+  const body = requireValid(labelReferenceBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"qc-label-references:" + scope}, 0))`);
+      const prior = await findOperation(body.operationId, tx);
+      const matchesPrior = (event: QcWorkflowEventRow) => {
+        const value = storedLabelReferenceSchema.safeParse(event.payload);
+        return event.eventType === "label-reference"
+          && value.success
+          && (!body.referenceId || value.data.referenceId === body.referenceId)
+          && value.data.context === body.context
+          && value.data.productKey === body.productKey
+          && JSON.stringify(value.data.expected) === JSON.stringify(body.expected)
+          && JSON.stringify(value.data.requiredFields) === JSON.stringify(body.requiredFields)
+          && value.data.sourceIdentity === body.sourceIdentity
+          && value.data.sourceDescription === body.sourceDescription;
+      };
+      if (prior) return matchesPrior(prior)
+        ? { kind: "duplicate" as const, event: prior }
+        : { kind: "conflict" as const };
+
+      const referenceId = body.referenceId ?? randomUUID();
+      const previous = await latestLabelReference(tx, scope, referenceId);
+      if (body.referenceId && !previous) return { kind: "not-found" as const };
+      const current = await currentLabelReferences(tx, scope);
+      if (current.overflow) return { kind: "overflow" as const };
+      const conflict = current.items.some((item) =>
+        item.value.referenceId !== referenceId
+        && item.value.context === body.context
+        && item.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") === body.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US"),
+      );
+      if (conflict) return { kind: "duplicate-key" as const };
+
+      const previousValue = previous
+        ? storedLabelReferenceSchema.safeParse(previous.payload)
+        : null;
+      if (previous && !previousValue?.success) return { kind: "invalid-prior" as const };
+      const value: StoredLabelReference = {
+        referenceId,
+        version: (previousValue?.success ? previousValue.data.version : 0) + 1,
+        context: body.context,
+        productKey: body.productKey,
+        expected: body.expected,
+        requiredFields: body.requiredFields,
+        sourceIdentity: body.sourceIdentity,
+        sourceDescription: body.sourceDescription,
+      };
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: referenceId,
+        eventType: "label-reference",
+        runId: null,
+        profileKey: null,
+        ingredientId: null,
+        ingredientName: null,
+        station: "packaging",
+        relatedEventId: previous ? String(previous.id) : null,
+        payload: value,
+      });
+      return { kind: "created" as const, event };
+    });
+    if (result.kind === "not-found") {
+      safeError(res, 404, "Label reference was not found in this facility scope");
+      return;
+    }
+    if (result.kind === "duplicate-key") {
+      safeError(res, 409, "A label reference already exists for this product and packaging context");
+      return;
+    }
+    if (result.kind === "invalid-prior") {
+      safeError(res, 409, "The current label reference cannot be versioned safely");
+      return;
+    }
+    if (result.kind === "overflow") {
+      safeError(res, 503, "The label reference list is over its review limit. Ask a QC manager to review the configuration.");
+      return;
+    }
+    if (result.kind === "conflict") {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    res.status(result.kind === "duplicate" ? 200 : 201).json({
+      event: publicEvent(result.event),
+      duplicate: result.kind === "duplicate",
+    });
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      const value = storedLabelReferenceSchema.safeParse(existing.payload);
+      const matches = existing.eventType === "label-reference"
+        && value.success
+        && (!body.referenceId || value.data.referenceId === body.referenceId)
+        && value.data.context === body.context
+        && value.data.productKey === body.productKey
+        && JSON.stringify(value.data.expected) === JSON.stringify(body.expected)
+        && JSON.stringify(value.data.requiredFields) === JSON.stringify(body.requiredFields)
+        && value.data.sourceIdentity === body.sourceIdentity
+        && value.data.sourceDescription === body.sourceDescription;
+      if (matches) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used for another request");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to save label reference", error);
+  }
+});
+
+router.post("/qc/label-references/:eventId/review", requireCapability("manage-qc"), async (req, res) => {
+  const eventId = Number(req.params.eventId);
+  const body = requireValid(labelReferenceReviewBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  if (!Number.isSafeInteger(eventId) || eventId < 1) {
+    safeError(res, 400, "A valid label reference version ID is required");
+    return;
+  }
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"qc-label-references:" + scope}, 0))`);
+      const prior = await findOperation(body.operationId, tx);
+      if (prior) {
+        const matches = prior.eventType === "label-reference-review"
+          && prior.relatedEventId === String(eventId)
+          && prior.payload.decision === body.decision
+          && prior.payload.reason === body.reason;
+        return matches
+          ? { kind: "duplicate" as const, event: prior }
+          : { kind: "operation-conflict" as const };
+      }
+      const [configuration] = await tx.select().from(qcWorkflowEventsTable).where(and(
+        eq(qcWorkflowEventsTable.scope, scope),
+        eq(qcWorkflowEventsTable.id, eventId),
+        eq(qcWorkflowEventsTable.eventType, "label-reference"),
+      )).limit(1);
+      if (!configuration) return { kind: "not-found" as const };
+      const parsed = storedLabelReferenceSchema.safeParse(configuration.payload);
+      if (!parsed.success) return { kind: "invalid-reference" as const };
+      const latest = await latestLabelReference(tx, scope, parsed.data.referenceId);
+      if (!latest || latest.id !== configuration.id) return { kind: "stale-version" as const };
+      const state = await labelReferenceState(tx, scope, configuration);
+      if (!state) return { kind: "invalid-reference" as const };
+
+      if (body.decision === "approved") {
+        if (state.decision === "approved") return { kind: "already-approved" as const };
+        const missingRequired = parsed.data.requiredFields.some((field) =>
+          typeof parsed.data.expected[field] !== "string" || !parsed.data.expected[field]?.trim(),
+        );
+        if (missingRequired) return { kind: "incomplete-reference" as const };
+        const current = await currentLabelReferences(tx, scope);
+        if (current.overflow) return { kind: "overflow" as const };
+        const ambiguous = current.items.some((item) =>
+          item.value.referenceId !== parsed.data.referenceId
+          && item.value.context === parsed.data.context
+          && item.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") === parsed.data.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US")
+          && item.decision === "approved",
+        );
+        if (ambiguous) return { kind: "duplicate-key" as const };
+      } else if (state.decision !== "approved") {
+        return { kind: "not-approved" as const };
+      }
+
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: configuration.recordId,
+        eventType: "label-reference-review",
+        runId: null,
+        profileKey: null,
+        ingredientId: null,
+        ingredientName: null,
+        station: "packaging",
+        relatedEventId: String(configuration.id),
+        payload: {
+          referenceId: parsed.data.referenceId,
+          version: parsed.data.version,
+          configurationEventId: configuration.id,
+          decision: body.decision,
+          reason: body.reason,
+        },
+      });
+      return { kind: "created" as const, event };
+    });
+    const conflicts: Record<string, { status: number; message: string }> = {
+      "not-found": { status: 404, message: "Label reference version was not found in this facility scope" },
+      "invalid-reference": { status: 409, message: "The label reference version cannot be reviewed safely" },
+      "stale-version": { status: 409, message: "A newer label reference version must be reviewed instead" },
+      "already-approved": { status: 409, message: "This label reference version is already approved" },
+      "incomplete-reference": { status: 400, message: "Every required field needs an expected text value before approval" },
+      "duplicate-key": { status: 409, message: "Another approved reference already uses this product and packaging context" },
+      "not-approved": { status: 409, message: "Only an approved label reference can be withdrawn" },
+      overflow: { status: 503, message: "The label reference list is over its review limit. Ask a QC manager to review the configuration." },
+      "operation-conflict": { status: 409, message: "This operation ID was already used for another request" },
+    };
+    if (result.kind === "created" || result.kind === "duplicate") {
+      res.status(result.kind === "duplicate" ? 200 : 201).json({
+        event: publicEvent(result.event),
+        duplicate: result.kind === "duplicate",
+      });
+      return;
+    }
+    const conflict = conflicts[result.kind];
+    if (conflict) {
+      safeError(res, conflict.status, conflict.message);
+      return;
+    }
+    throw new Error(`Unhandled label reference review result: ${result.kind}`);
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      const matches = existing.eventType === "label-reference-review"
+        && existing.relatedEventId === String(eventId)
+        && existing.payload.decision === body.decision
+        && existing.payload.reason === body.reason;
+      if (matches) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used for another request");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to review label reference", error);
+  }
+});
+
+router.post("/qc/label-checks", requireCapability("record-qc"), async (req, res) => {
+  const body = requireValid(labelCheckBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  const observed = normalizeQcLabelObserved(body.observed);
+  const matchesPriorOperation = (event: QcWorkflowEventRow) => {
+    const payload = event.payload;
+    const priorObserved = labelObservedSchema.safeParse(payload.observed);
+    return event.eventType === "label-check"
+      && event.runId === body.runId
+      && payload.context === body.context
+      && (payload.referenceId ?? null) === (body.referenceId ?? null)
+      && priorObserved.success
+      && QC_LABEL_FIELDS.every((field) => priorObserved.data[field] === observed[field])
+      && payload.note === body.note;
+  };
+  try {
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockRun(scope, body.runId));
+      const prior = await findOperation(body.operationId, tx);
+      if (prior) return matchesPriorOperation(prior)
+        ? { kind: "duplicate" as const, event: prior }
+        : { kind: "operation-conflict" as const };
+
+      const canonical = await resolveCanonicalRunSource(tx, scope, body.runId);
+      if (canonical.state === "not-found") return { kind: "run-not-found" as const };
+      if (canonical.state === "unavailable") return { kind: "run-unavailable" as const };
+
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"qc-label-references:" + scope}, 0))`);
+      const runProductKey = canonical.source.profileKey?.normalize("NFC").trim().toLocaleLowerCase("en-US");
+      const productIdentityKnown = Boolean(runProductKey && runProductKey.split("__").length === 2
+        && !runProductKey.startsWith("__") && !runProductKey.endsWith("__"));
+      let approvedReference: LabelReferenceState | null = null;
+      let referenceSnapshot: Record<string, unknown> | null = null;
+      let referenceUnavailableReason: string | undefined;
+      if (!body.referenceId) {
+        referenceUnavailableReason = "No approved reference was selected.";
+      } else {
+        const configuration = await latestLabelReference(tx, scope, body.referenceId);
+        const state = configuration
+          ? await labelReferenceState(tx, scope, configuration)
+          : null;
+        if (!state) {
+          referenceUnavailableReason = "No approved applicable reference is available.";
+        } else if (!productIdentityKnown
+          || state.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") !== runProductKey) {
+          referenceSnapshot = {
+            referenceId: state.value.referenceId,
+            version: state.value.version,
+            productKey: state.value.productKey,
+            context: state.value.context,
+            configurationEventId: state.configuration.id,
+            state: "inapplicable",
+          };
+          referenceUnavailableReason = productIdentityKnown
+            ? "The selected reference is for a different product than the canonical run."
+            : "The canonical run product identity is incomplete or ambiguous; reference applicability cannot be established.";
+        } else if (state.value.context !== body.context) {
+          referenceSnapshot = {
+            referenceId: state.value.referenceId,
+            version: state.value.version,
+            context: state.value.context,
+            configurationEventId: state.configuration.id,
+            state: state.decision ?? "draft",
+          };
+          referenceUnavailableReason = "The selected reference is for a different packaging context.";
+        } else if (state.decision !== "approved" || !state.review) {
+          referenceSnapshot = {
+            referenceId: state.value.referenceId,
+            version: state.value.version,
+            context: state.value.context,
+            configurationEventId: state.configuration.id,
+            state: state.decision ?? "draft",
+          };
+          referenceUnavailableReason = "The selected reference version has not been approved.";
+        } else {
+          const current = await currentLabelReferences(tx, scope);
+          const matches = current.items.filter((item) =>
+            item.decision === "approved"
+            && item.value.context === state.value.context
+            && item.value.productKey.normalize("NFC").trim().toLocaleLowerCase("en-US") === runProductKey,
+          );
+          if (current.overflow || matches.length !== 1 || matches[0]?.value.referenceId !== state.value.referenceId) {
+            referenceUnavailableReason = current.overflow
+              ? "Approved reference availability could not be verified."
+              : "More than one approved reference matches this product and packaging context.";
+            referenceSnapshot = {
+              referenceId: state.value.referenceId,
+              version: state.value.version,
+              context: state.value.context,
+              configurationEventId: state.configuration.id,
+              state: "ambiguous",
+            };
+          } else {
+            approvedReference = state;
+            referenceSnapshot = {
+              state: "approved",
+              ...labelReferenceSnapshot(state),
+            };
+          }
+        }
+      }
+
+      const comparison = evaluateQcLabelCheck({
+        observed,
+        reference: approvedReference
+          ? { expected: approvedReference.value.expected, requiredFields: approvedReference.value.requiredFields }
+          : null,
+        ...(referenceUnavailableReason ? { referenceUnavailableReason } : {}),
+      });
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "label-check",
+        runId: body.runId,
+        profileKey: canonical.source.profileKey ?? null,
+        ingredientId: null,
+        ingredientName: null,
+        station: "packaging",
+        relatedEventId: null,
+        payload: {
+          context: body.context,
+          runProductKey: productIdentityKnown ? runProductKey : null,
+          referenceId: body.referenceId ?? null,
+          referenceSnapshot,
+          ...(referenceUnavailableReason ? { referenceUnavailableReason } : {}),
+          observed,
+          fieldResults: comparison.fields,
+          outcome: comparison.outcome,
+          note: body.note,
+        },
+      });
+      return { kind: "created" as const, event };
+    });
+    if (result.kind === "run-not-found") {
+      safeError(res, 404, "Run was not found in this facility scope");
+      return;
+    }
+    if (result.kind === "run-unavailable") {
+      safeError(res, 409, "Canonical run records are unavailable; the label check was not saved");
+      return;
+    }
+    if (result.kind === "operation-conflict") {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    res.status(result.kind === "duplicate" ? 200 : 201).json({
+      event: publicEvent(result.event),
+      duplicate: result.kind === "duplicate",
+    });
+  } catch (error) {
+    const existing = await findOperation(body.operationId);
+    if (existing) {
+      if (matchesPriorOperation(existing)) {
+        res.status(200).json({ event: publicEvent(existing), duplicate: true });
+      } else {
+        safeError(res, 409, "This operation ID was already used for another request");
+      }
+      return;
+    }
+    reportRouteError(req, res, "failed to record label check", error);
+  }
+});
+
 router.post("/qc/component-checks", requireCapability("record-qc"), async (req, res) => {
   const body = requireValid(componentCheckBodySchema, req.body, res);
   const actorId = currentActor(req);
@@ -2142,7 +2831,7 @@ router.post("/qc/events/:eventId/corrections", requireCapability("manage-qc"), a
       eq(qcWorkflowEventsTable.scope, currentScope()),
       eq(qcWorkflowEventsTable.id, eventId),
     )).limit(1);
-    if (!target || !["lot", "weight", "brix-check", "component-check", "allergen-review", "cleaning"].includes(target.eventType)) {
+    if (!target || !["lot", "weight", "brix-check", "component-check", "label-check", "allergen-review", "cleaning"].includes(target.eventType)) {
       safeError(res, 404, "Correctable QC record not found");
       return;
     }
