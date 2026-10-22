@@ -140,6 +140,7 @@
 - [Signal cleanup](shell-signal-cleanup-output.md) + [skill refresh](skill-session-registry-refresh.md) — show cleanup warnings, close locks, and refresh loaded skills.
 - [Pool fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 bytes; waive drift only with fresh owner-reviewed pins.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) — record-first, non-blocking workflow with explicit target, role, sign-off, and retention rules.
+- [Advisory Brix targets](qc-brix-targets.md) — Brix settings are separately manager-reviewed; never inherit weight limits or infer a default.
 - [Run to Time policy](run-to-time-operator-policy.md) — elapsed targets mean reached today; reset restores the standard evening target rather than copying now.
 - [Crust batch UI](crust-run-no-dough-batches.md) + [run-need cap](autotrack-over-provisioning.md) — hide dough batches in crust mode and clamp live auto-track to actual demand.
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.

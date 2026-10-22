@@ -3158,6 +3158,7 @@ export type QcEventEventType = typeof QcEventEventType[keyof typeof QcEventEvent
 export const QcEventEventType = {
   lot: 'lot',
   weight: 'weight',
+  'brix-check': 'brix-check',
   'component-check': 'component-check',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
@@ -3231,9 +3232,48 @@ export interface QcTarget {
   overrideEventId?: number;
 }
 
+export type QcBrixTargetSource = typeof QcBrixTargetSource[keyof typeof QcBrixTargetSource];
+
+
+export const QcBrixTargetSource = {
+  'qc-override': 'qc-override',
+  'not-configured': 'not-configured',
+} as const;
+
+export type QcBrixTargetState = typeof QcBrixTargetState[keyof typeof QcBrixTargetState];
+
+
+export const QcBrixTargetState = {
+  configured: 'configured',
+  'not-evaluated': 'not-evaluated',
+} as const;
+
+export interface QcBrixTarget {
+  ingredientId: string;
+  ingredientName: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  targetBrix: number | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  toleranceBrix: number | null;
+  source: QcBrixTargetSource;
+  state: QcBrixTargetState;
+  reason?: string;
+  overrideEventId?: number;
+  targetRecordedAt?: string;
+}
+
 export interface QcTargetsResponse {
   profileKey: string;
   targets: QcTarget[];
+  brixTargets?: QcBrixTarget[];
 }
 
 /**
@@ -3278,6 +3318,87 @@ export interface QcTargetInput {
      * @maxLength 500
      */
   reason: string;
+}
+
+export interface QcBrixTargetInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  targetBrix: number | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  toleranceBrix: number | null;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+}
+
+export type QcBrixCheckInputStation = typeof QcBrixCheckInputStation[keyof typeof QcBrixCheckInputStation];
+
+
+export const QcBrixCheckInputStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export type QcBrixCheckInputCheckType = typeof QcBrixCheckInputCheckType[keyof typeof QcBrixCheckInputCheckType];
+
+
+export const QcBrixCheckInputCheckType = {
+  'pre-run': 'pre-run',
+  interval: 'interval',
+} as const;
+
+export interface QcBrixCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  station: QcBrixCheckInputStation;
+  checkType: QcBrixCheckInputCheckType;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  actualBrix: number;
+  /** @maxLength 120 */
+  instrument?: string;
+  /** @maxLength 1000 */
+  note?: string;
 }
 
 export type QcLotInputStation = typeof QcLotInputStation[keyof typeof QcLotInputStation];
@@ -3813,6 +3934,7 @@ export const QcRedactionInputFieldsItem = {
   actorId: 'actorId',
   ingredientName: 'ingredientName',
   payloadnote: 'payload.note',
+  payloadinstrument: 'payload.instrument',
   payloadlotNumber: 'payload.lotNumber',
   payloadexpectedComponents: 'payload.expectedComponents',
 } as const;
@@ -3826,7 +3948,7 @@ export interface QcRedactionInput {
   reason: string;
   /**
      * @minItems 1
-     * @maxItems 5
+     * @maxItems 6
      */
   fields: QcRedactionInputFieldsItem[];
 }

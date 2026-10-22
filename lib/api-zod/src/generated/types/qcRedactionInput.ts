@@ -16,7 +16,7 @@ export interface QcRedactionInput {
   reason: string;
   /**
      * @minItems 1
-     * @maxItems 5
+     * @maxItems 6
      */
   fields: QcRedactionInputFieldsItem[];
 }

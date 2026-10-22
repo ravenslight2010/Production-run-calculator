@@ -290,6 +290,16 @@ describe("POST /sync/reset", () => {
         scope: "sandbox", operationId: "reset-component-sandbox", recordId: "sandbox-component-record",
         eventType: "component-check", runId: "reset-run", actorId: MANAGER, payload: { outcome: "not-evaluated" },
       },
+      {
+        scope: "live", operationId: "reset-brix-live", recordId: "live-brix-record",
+        eventType: "brix-check", runId: "reset-run", actorId: MANAGER,
+        payload: { measurementKind: "brix", actualBrix: 12.5, outcome: "not-evaluated" },
+      },
+      {
+        scope: "sandbox", operationId: "reset-brix-sandbox", recordId: "sandbox-brix-record",
+        eventType: "brix-check", runId: "reset-run", actorId: MANAGER,
+        payload: { measurementKind: "brix", actualBrix: 8, outcome: "not-evaluated" },
+      },
     ]);
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
@@ -309,6 +319,8 @@ describe("POST /sync/reset", () => {
     expect(qcEvents.filter((event) => event.eventType === "allergen-review").map((event) => event.scope).sort())
       .toEqual(["live", "sandbox"]);
     expect(qcEvents.filter((event) => event.eventType === "component-check").map((event) => event.scope).sort())
+      .toEqual(["live", "sandbox"]);
+    expect(qcEvents.filter((event) => event.eventType === "brix-check").map((event) => event.scope).sort())
       .toEqual(["live", "sandbox"]);
   });
 

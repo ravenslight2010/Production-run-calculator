@@ -204,6 +204,8 @@ import type {
   PutSyncTodayParams,
   QcAllergenActivityResponse,
   QcAllergenReviewInput,
+  QcBrixCheckInput,
+  QcBrixTargetInput,
   QcCleaningInput,
   QcComponentCheckInput,
   QcComponentCheckResponse,
@@ -4151,8 +4153,8 @@ export const getGetQcTargetsUrl = (params: GetQcTargetsParams,) => {
 }
 
 /**
- * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
- * @summary Resolve explicit imported and reviewed QC weight targets
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
  */
 export const getQcTargets = async (params: GetQcTargetsParams, options?: Parameters<typeof customFetch>[1]): Promise<QcTargetsResponse> => {
 
@@ -4223,7 +4225,7 @@ export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Resolve explicit imported and reviewed QC weight targets
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
  */
 
 export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
@@ -4331,6 +4333,95 @@ export const useSetQcTarget = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSetQcTargetMutationOptions(options), queryClient);
+    }
+
+export const getSetQcBrixTargetUrl = () => {
+
+
+
+
+  return `/api/qc/brix-targets`
+}
+
+/**
+ * Manager-only, append-only configuration for the canonical Brix unit. Target and tolerance are both required to configure a target, and both must be null to clear it. No weight target or default tolerance is used.
+ * @summary Add or clear an explicitly reviewed Brix target and tolerance
+ */
+export const setQcBrixTarget = async (qcBrixTargetInput: QcBrixTargetInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSetQcBrixTargetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcBrixTargetInput)
+  }
+);}
+
+
+
+
+
+export const getSetQcBrixTargetMutationKey = () => ['setQcBrixTarget'] as const;
+
+export const getSetQcBrixTargetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcBrixTarget>>, TError,SetQcBrixTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setQcBrixTarget>>, TError,SetQcBrixTargetMutationVariables, TContext> => {
+
+const mutationKey = getSetQcBrixTargetMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setQcBrixTarget>>, SetQcBrixTargetMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setQcBrixTarget(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetQcBrixTargetMutationResult = NonNullable<Awaited<ReturnType<typeof setQcBrixTarget>>>
+    export type SetQcBrixTargetMutationBody = BodyType<QcBrixTargetInput>
+    export type SetQcBrixTargetMutationError = ErrorType<void>
+    export type SetQcBrixTargetMutationVariables = {data: BodyType<QcBrixTargetInput>}
+
+    /**
+ * @summary Add or clear an explicitly reviewed Brix target and tolerance
+ */
+export const useSetQcBrixTarget = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcBrixTarget>>, TError,SetQcBrixTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setQcBrixTarget>>,
+        TError,
+        SetQcBrixTargetMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetQcBrixTargetMutationOptions(options), queryClient);
     }
 
 export const getRecordQcLotUrl = () => {
@@ -4509,6 +4600,95 @@ export const useRecordQcWeightCheck = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRecordQcWeightCheckMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcBrixCheckUrl = () => {
+
+
+
+
+  return `/api/qc/brix-checks`
+}
+
+/**
+ * The server binds the reading to the canonical run profile, snapshots the latest manager-reviewed Brix target and tolerance, and evaluates only in the canonical Brix unit. Missing configuration is not-evaluated. Target values and outcomes are not accepted from callers. A repeated operation ID with the same reading returns the original event.
+ * @summary Record an advisory pre-run or interval Brix reading
+ */
+export const recordQcBrixCheck = async (qcBrixCheckInput: QcBrixCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcBrixCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcBrixCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcBrixCheckMutationKey = () => ['recordQcBrixCheck'] as const;
+
+export const getRecordQcBrixCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcBrixCheck>>, TError,RecordQcBrixCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcBrixCheck>>, TError,RecordQcBrixCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcBrixCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcBrixCheck>>, RecordQcBrixCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcBrixCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcBrixCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcBrixCheck>>>
+    export type RecordQcBrixCheckMutationBody = BodyType<QcBrixCheckInput>
+    export type RecordQcBrixCheckMutationError = ErrorType<void>
+    export type RecordQcBrixCheckMutationVariables = {data: BodyType<QcBrixCheckInput>}
+
+    /**
+ * @summary Record an advisory pre-run or interval Brix reading
+ */
+export const useRecordQcBrixCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcBrixCheck>>, TError,RecordQcBrixCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcBrixCheck>>,
+        TError,
+        RecordQcBrixCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcBrixCheckMutationOptions(options), queryClient);
     }
 
 export const getRecordQcComponentCheckUrl = () => {

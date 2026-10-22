@@ -1051,11 +1051,13 @@ paths:
     get:
       operationId: getQcTargets
       tags: [inventory]
-      summary: Resolve explicit imported and reviewed QC weight targets
+      summary: Resolve explicit imported weight targets and separate reviewed Brix targets
       description: >-
         Uses the authenticated facility scope. An ingredient without one
         unambiguous explicit target is returned as not-evaluated; crust targets
         are included only if the import contract provides an explicit value.
+        Brix targets are returned separately and are manager-configured only;
+        a missing target or tolerance is not-evaluated and never inherits weight settings.
       parameters:
         - name: profileKey
           in: query
@@ -1089,6 +1091,35 @@ paths:
               schema: { $ref: "#/components/schemas/QcEventResponse" }
         "400": { description: Invalid target or tolerance }
         "403": { description: QC manager capability required }
+
+  /qc/brix-targets:
+    post:
+      operationId: setQcBrixTarget
+      tags: [inventory]
+      summary: Add or clear an explicitly reviewed Brix target and tolerance
+      description: >-
+        Manager-only, append-only configuration for the canonical Brix unit.
+        Target and tolerance are both required to configure a target, and both
+        must be null to clear it. No weight target or default tolerance is used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcBrixTargetInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the original target event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Audited Brix target-setting event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid Brix target or tolerance }
+        "403": { description: QC manager capability required }
+        "409": { description: Operation identity conflicts with a different request }
 
   /qc/lots:
     post:
@@ -1132,6 +1163,38 @@ paths:
               schema: { $ref: "#/components/schemas/QcEventResponse" }
         "400": { description: Invalid weight or missing out-of-tolerance note }
         "403": { description: QC recording capability required }
+
+  /qc/brix-checks:
+    post:
+      operationId: recordQcBrixCheck
+      tags: [inventory]
+      summary: Record an advisory pre-run or interval Brix reading
+      description: >-
+        The server binds the reading to the canonical run profile, snapshots
+        the latest manager-reviewed Brix target and tolerance, and evaluates
+        only in the canonical Brix unit. Missing configuration is
+        not-evaluated. Target values and outcomes are not accepted from callers.
+        A repeated operation ID with the same reading returns the original event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcBrixCheckInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the original Brix event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Server-evaluated append-only Brix event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid Brix reading }
+        "403": { description: QC recording capability required }
+        "404": { description: Run or ingredient is unavailable in this facility scope }
+        "409": { description: Run profile or operation identity conflicts }
 
   /qc/component-checks:
     post:
@@ -8372,7 +8435,7 @@ components:
         recordId: { type: string, format: uuid }
         eventType:
           type: string
-          enum: [lot, weight, component-check, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+          enum: [lot, weight, brix-check, component-check, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
         runId: { type: string, nullable: true }
         profileKey: { type: string, nullable: true }
         ingredientId: { type: string, nullable: true }
@@ -8417,6 +8480,23 @@ components:
         targets:
           type: array
           items: { $ref: "#/components/schemas/QcTarget" }
+        brixTargets:
+          type: array
+          items: { $ref: "#/components/schemas/QcBrixTarget" }
+
+    QcBrixTarget:
+      type: object
+      required: [ingredientId, ingredientName, targetBrix, toleranceBrix, source, state]
+      properties:
+        ingredientId: { type: string }
+        ingredientName: { type: string }
+        targetBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        toleranceBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        source: { type: string, enum: [qc-override, not-configured] }
+        state: { type: string, enum: [configured, not-evaluated] }
+        reason: { type: string }
+        overrideEventId: { type: integer }
+        targetRecordedAt: { type: string, format: date-time }
 
     QcTargetInput:
       type: object
@@ -8429,6 +8509,33 @@ components:
         unit: { type: string, nullable: true, enum: [oz, g, lb, kg] }
         toleranceValue: { type: number, nullable: true, minimum: 0 }
         reason: { type: string, minLength: 1, maxLength: 500 }
+
+    QcBrixTargetInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, profileKey, ingredientId, targetBrix, toleranceBrix, reason]
+      properties:
+        operationId: { type: string, format: uuid }
+        profileKey: { type: string, minLength: 1, maxLength: 400 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        targetBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        toleranceBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    QcBrixCheckInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, runId, profileKey, ingredientId, station, checkType, actualBrix]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        profileKey: { type: string, minLength: 1, maxLength: 400 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        station: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] }
+        checkType: { type: string, enum: [pre-run, interval] }
+        actualBrix: { type: number, minimum: 0, maximum: 100 }
+        instrument: { type: string, maxLength: 120 }
+        note: { type: string, maxLength: 1000 }
 
     QcLotInput:
       type: object
@@ -8752,9 +8859,9 @@ components:
         fields:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 6
           uniqueItems: true
-          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.lotNumber, payload.expectedComponents] }
+          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.instrument, payload.lotNumber, payload.expectedComponents] }
 
     Capability:
       type: string

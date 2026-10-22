@@ -123,3 +123,23 @@ descriptor matches, and include its ID, digest, and classification counts in
 summary evidence. Release validation and evidence import must require the same
 digest. Missing rows, renames, unlisted IDs, and newly differing fields remain
 unresolved and must fail the release gate.
+
+Historical production audit artifacts can be removed from a checkout while the
+development build still requires their exact bytes as source-fingerprint inputs.
+Do not weaken source identity or re-add those payloads to tracked source merely
+to make a local server start. A local-only test workaround must use exact
+hash-verified inputs, keep them ignored and out of task evidence, and report the
+app build's Git binding as unavailable.
+
+**Why:** A rebase exposed a mismatch between source-fingerprint requirements
+and retained audit artifacts that had been removed from the current tree. The
+development build could not start, but changing the identity policy would have
+altered a release-security boundary and restoring the production report to
+tracked source would have reversed an intentional data cleanup.
+
+**How to apply:** For local development verification, use only exact historical
+inputs in an ignored temporary location and remove them afterward. Never
+fabricate or publish source evidence, and do not claim a verified app-build
+revision when the fingerprint inputs are not in the committed tree. Reconcile
+the source policy or evidence location only with explicit owner approval before
+release use.

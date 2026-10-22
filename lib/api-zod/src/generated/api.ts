@@ -43,11 +43,22 @@ export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 export const parseSpecImagesBodyImagesMax = 10;
 export const getQcTargetsQueryProfileKeyMax = 400;
+export const getQcTargetsResponseBrixTargetsItemTargetBrixMin = 0;
+export const getQcTargetsResponseBrixTargetsItemTargetBrixMax = 100;
+export const getQcTargetsResponseBrixTargetsItemToleranceBrixMin = 0;
+export const getQcTargetsResponseBrixTargetsItemToleranceBrixMax = 100;
 export const setQcTargetBodyProfileKeyMax = 400;
 export const setQcTargetBodyIngredientIdMax = 200;
 export const setQcTargetBodyTargetValueExclusiveMin = 0;
 export const setQcTargetBodyToleranceValueMin = 0;
 export const setQcTargetBodyReasonMax = 500;
+export const setQcBrixTargetBodyProfileKeyMax = 400;
+export const setQcBrixTargetBodyIngredientIdMax = 200;
+export const setQcBrixTargetBodyTargetBrixMin = 0;
+export const setQcBrixTargetBodyTargetBrixMax = 100;
+export const setQcBrixTargetBodyToleranceBrixMin = 0;
+export const setQcBrixTargetBodyToleranceBrixMax = 100;
+export const setQcBrixTargetBodyReasonMax = 500;
 export const recordQcLotBodyRunIdMax = 200;
 export const recordQcLotBodyIngredientIdMax = 200;
 export const recordQcLotBodyLotNumberMax = 200;
@@ -58,6 +69,13 @@ export const recordQcWeightCheckBodyIngredientIdMax = 200;
 export const recordQcWeightCheckBodyActualValueExclusiveMin = 0;
 export const recordQcWeightCheckBodyActualValueMax = 1000000;
 export const recordQcWeightCheckBodyNoteMax = 1000;
+export const recordQcBrixCheckBodyRunIdMax = 200;
+export const recordQcBrixCheckBodyProfileKeyMax = 400;
+export const recordQcBrixCheckBodyIngredientIdMax = 200;
+export const recordQcBrixCheckBodyActualBrixMin = 0;
+export const recordQcBrixCheckBodyActualBrixMax = 100;
+export const recordQcBrixCheckBodyInstrumentMax = 120;
+export const recordQcBrixCheckBodyNoteMax = 1000;
 export const recordQcComponentCheckBodyRunIdMax = 200;
 export const recordQcComponentCheckBodyObservationsItemComponentIdMax = 80;
 export const recordQcComponentCheckBodyObservationsMax = 200;
@@ -90,7 +108,7 @@ export const exportQcHistoryCsvQueryRunIdMax = 200;
 export const exportQcHistoryCsvQueryIngredientIdMax = 200;
 export const correctQcEventBodyReasonMax = 500;
 export const redactQcEventBodyReasonMax = 500;
-export const redactQcEventBodyFieldsMax = 5;
+export const redactQcEventBodyFieldsMax = 6;
 export const wasteInsightBodyPlannedItemsItemKeyMax = 200;
 export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
@@ -1818,8 +1836,8 @@ export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem
 
 
 /**
- * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
- * @summary Resolve explicit imported and reviewed QC weight targets
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
  */
 
 
@@ -1827,6 +1845,10 @@ export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem
 export const GetQcTargetsQueryParams = zod.object({
   "profileKey": zod.coerce.string().min(1).max(getQcTargetsQueryProfileKeyMax)
 })
+
+
+
+
 
 export const GetQcTargetsResponse = zod.object({
   "profileKey": zod.string(),
@@ -1840,7 +1862,18 @@ export const GetQcTargetsResponse = zod.object({
   "state": zod.enum(['configured', 'not-evaluated']),
   "reason": zod.string().optional(),
   "overrideEventId": zod.int().optional()
-}))
+})),
+  "brixTargets": zod.array(zod.object({
+  "ingredientId": zod.string(),
+  "ingredientName": zod.string(),
+  "targetBrix": zod.number().min(getQcTargetsResponseBrixTargetsItemTargetBrixMin).max(getQcTargetsResponseBrixTargetsItemTargetBrixMax).nullable(),
+  "toleranceBrix": zod.number().min(getQcTargetsResponseBrixTargetsItemToleranceBrixMin).max(getQcTargetsResponseBrixTargetsItemToleranceBrixMax).nullable(),
+  "source": zod.enum(['qc-override', 'not-configured']),
+  "state": zod.enum(['configured', 'not-evaluated']),
+  "reason": zod.string().optional(),
+  "overrideEventId": zod.int().optional(),
+  "targetRecordedAt": zod.coerce.date().optional()
+})).optional()
 })
 
 
@@ -1870,7 +1903,48 @@ export const SetQcTargetResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * Manager-only, append-only configuration for the canonical Brix unit. Target and tolerance are both required to configure a target, and both must be null to clear it. No weight target or default tolerance is used.
+ * @summary Add or clear an explicitly reviewed Brix target and tolerance
+ */
+
+
+
+
+
+
+
+export const SetQcBrixTargetBody = zod.object({
+  "operationId": zod.uuid(),
+  "profileKey": zod.string().min(1).max(setQcBrixTargetBodyProfileKeyMax),
+  "ingredientId": zod.string().min(1).max(setQcBrixTargetBodyIngredientIdMax),
+  "targetBrix": zod.number().min(setQcBrixTargetBodyTargetBrixMin).max(setQcBrixTargetBodyTargetBrixMax).nullable(),
+  "toleranceBrix": zod.number().min(setQcBrixTargetBodyToleranceBrixMin).max(setQcBrixTargetBodyToleranceBrixMax).nullable(),
+  "reason": zod.string().min(1).max(setQcBrixTargetBodyReasonMax)
+})
+
+export const SetQcBrixTargetResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -1910,7 +1984,7 @@ export const RecordQcLotResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -1953,7 +2027,52 @@ export const RecordQcWeightCheckResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * The server binds the reading to the canonical run profile, snapshots the latest manager-reviewed Brix target and tolerance, and evaluates only in the canonical Brix unit. Missing configuration is not-evaluated. Target values and outcomes are not accepted from callers. A repeated operation ID with the same reading returns the original event.
+ * @summary Record an advisory pre-run or interval Brix reading
+ */
+
+
+
+
+
+
+
+
+export const RecordQcBrixCheckBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcBrixCheckBodyRunIdMax),
+  "profileKey": zod.string().min(1).max(recordQcBrixCheckBodyProfileKeyMax),
+  "ingredientId": zod.string().min(1).max(recordQcBrixCheckBodyIngredientIdMax),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']),
+  "checkType": zod.enum(['pre-run', 'interval']),
+  "actualBrix": zod.number().min(recordQcBrixCheckBodyActualBrixMin).max(recordQcBrixCheckBodyActualBrixMax),
+  "instrument": zod.string().max(recordQcBrixCheckBodyInstrumentMax).optional(),
+  "note": zod.string().max(recordQcBrixCheckBodyNoteMax).optional()
+})
+
+export const RecordQcBrixCheckResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -1994,7 +2113,7 @@ export const RecordQcComponentCheckResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2033,7 +2152,7 @@ export const GetQcRunResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2212,7 +2331,7 @@ export const RecordQcAllergenReviewResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2250,7 +2369,7 @@ export const RecordQcCleaningResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2289,7 +2408,7 @@ export const VerifyQcCleaningResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2324,7 +2443,7 @@ export const SignoffQcRunResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2365,7 +2484,7 @@ export const GetQcHistoryResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2426,7 +2545,7 @@ export const CorrectQcEventResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2459,7 +2578,7 @@ export const RedactQcEventParams = zod.object({
 export const RedactQcEventBody = zod.object({
   "operationId": zod.uuid(),
   "reason": zod.string().min(1).max(redactQcEventBodyReasonMax),
-  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.lotNumber', 'payload.expectedComponents'])).min(1).max(redactQcEventBodyFieldsMax)
+  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.instrument', 'payload.lotNumber', 'payload.expectedComponents'])).min(1).max(redactQcEventBodyFieldsMax)
 })
 
 export const RedactQcEventResponse = zod.object({
@@ -2467,7 +2586,7 @@ export const RedactQcEventResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),

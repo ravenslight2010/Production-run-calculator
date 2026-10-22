@@ -12,6 +12,7 @@ import {
 export type QcWorkflowEventType =
   | "lot"
   | "weight"
+  | "brix-check"
   | "component-check"
   | "allergen-review"
   | "cleaning"

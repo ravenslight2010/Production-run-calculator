@@ -18,6 +18,7 @@ import {
   resolveQcExpectedComponents,
   type QcComponentObservation,
 } from "../lib/qcComponentChecks";
+import { evaluateQcBrixCheck } from "../lib/qcBrixChecks";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
@@ -46,6 +47,7 @@ type QcAuditDetail = {
 const UNIT = z.enum(["oz", "g", "lb", "kg"]);
 const STATION = z.enum(["dough", "sauce", "frontline", "warehouse", "packaging", "other"]);
 const CHECK_TYPE = z.enum(["pre-run", "30-minute"]);
+const BRIX_CHECK_TYPE = z.enum(["pre-run", "interval"]);
 const CLEANING_METHOD = z.enum(["standard", "deep", "chemical", "other"]);
 const CLEANING_STATUS = z.enum(["verified", "unverified", "unknown", "not-applicable"]);
 const STAGED_STATUS = z.enum(["reviewed", "not-reviewed", "unknown"]);
@@ -104,6 +106,35 @@ const targetBodySchema = z.object({
   toleranceValue: z.number().finite().min(0).max(100_000).nullable(),
   reason: z.string().trim().min(1).max(500),
 });
+
+const brixTargetBodySchema = z.object({
+  operationId: operationIdSchema,
+  profileKey: profileKeySchema,
+  ingredientId: ingredientIdSchema,
+  targetBrix: z.number().finite().min(0).max(100).nullable(),
+  toleranceBrix: z.number().finite().min(0).max(100).nullable(),
+  reason: z.string().trim().min(1).max(500),
+}).strict().superRefine((body, ctx) => {
+  if ((body.targetBrix === null) !== (body.toleranceBrix === null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["toleranceBrix"],
+      message: "A reviewed Brix target and tolerance must be set or cleared together",
+    });
+  }
+});
+
+const brixCheckBodySchema = z.object({
+  operationId: operationIdSchema,
+  runId: runIdSchema,
+  profileKey: profileKeySchema,
+  ingredientId: ingredientIdSchema,
+  station: STATION,
+  checkType: BRIX_CHECK_TYPE,
+  actualBrix: z.number().finite().min(0).max(100),
+  instrument: z.string().trim().max(120).optional().default(""),
+  note: noteSchema,
+}).strict();
 
 const footprintSchema = z.object({
   status: FOOTPRINT_STATUS,
@@ -189,11 +220,12 @@ const redactionBodySchema = z.object({
     "actorId",
     "ingredientName",
     "payload.note",
+    "payload.instrument",
     "payload.lotNumber",
     "payload.expectedComponents",
   ]))
     .min(1)
-    .max(5)
+    .max(6)
     .refine((fields) => new Set(fields).size === fields.length, "Redaction fields must be unique"),
 });
 
@@ -218,6 +250,18 @@ type QcTarget = {
   state: "configured" | "not-evaluated";
   reason?: string;
   overrideEventId?: number;
+};
+
+type QcBrixTarget = {
+  ingredientId: string;
+  ingredientName: string;
+  targetBrix: number | null;
+  toleranceBrix: number | null;
+  source: "qc-override" | "not-configured";
+  state: "configured" | "not-evaluated";
+  reason?: string;
+  overrideEventId?: number;
+  targetRecordedAt?: string;
 };
 
 function safeError(res: Response, status: number, message: string): void {
@@ -504,7 +548,11 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
   }
   const latestOverrides = new Map<string, QcWorkflowEventRow>();
   for (const row of overrideRows) {
-    if (row.ingredientId && !latestOverrides.has(row.ingredientId)) {
+    if (
+      row.payload.measurementKind !== "brix"
+      && row.ingredientId
+      && !latestOverrides.has(row.ingredientId)
+    ) {
       latestOverrides.set(row.ingredientId, row);
     }
   }
@@ -583,6 +631,118 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
     }
   }
   return targets;
+}
+
+async function resolveBrixTargets(profileKey: string): Promise<QcBrixTarget[]> {
+  const scope = currentScope();
+  const [ingredientRows, brixTargetRows] = await Promise.all([
+    db.select({
+      id: ingredientsTable.id,
+      name: ingredientsTable.name,
+      enabled: ingredientsTable.enabled,
+      mergedInto: ingredientsTable.mergedInto,
+    }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope)),
+    db.select().from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, scope),
+      eq(qcWorkflowEventsTable.eventType, "target-setting"),
+      eq(qcWorkflowEventsTable.profileKey, profileKey),
+      sql`${qcWorkflowEventsTable.payload}->>'measurementKind' = 'brix'`,
+    )).orderBy(desc(qcWorkflowEventsTable.id)),
+  ]);
+  const latestByIngredient = new Map<string, QcWorkflowEventRow>();
+  for (const row of brixTargetRows) {
+    if (row.ingredientId && !latestByIngredient.has(row.ingredientId)) {
+      latestByIngredient.set(row.ingredientId, row);
+    }
+  }
+  return ingredientRows
+    .filter((ingredient) => ingredient.enabled && !ingredient.mergedInto)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((ingredient): QcBrixTarget => {
+      const override = latestByIngredient.get(ingredient.id);
+      const targetBrix = override?.payload.active === true
+        ? numericBrix(override.payload.targetBrix)
+        : null;
+      const toleranceBrix = override?.payload.active === true
+        ? numericBrix(override.payload.toleranceBrix)
+        : null;
+      const configured = targetBrix !== null && toleranceBrix !== null;
+      return {
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        targetBrix,
+        toleranceBrix,
+        source: configured ? "qc-override" : "not-configured",
+        state: configured ? "configured" : "not-evaluated",
+        ...(!configured
+          ? {
+            reason: override?.payload.active === true
+              ? "The reviewed Brix target or tolerance is invalid."
+              : override
+                ? "No reviewed Brix target is configured."
+                : "No manager-reviewed Brix target is configured.",
+          }
+          : {}),
+        ...(override ? { overrideEventId: override.id } : {}),
+        ...(override ? { targetRecordedAt: override.createdAt.toISOString() } : {}),
+      };
+    });
+}
+
+async function resolveBrixTarget(
+  executor: QcExecutor,
+  scope: string,
+  profileKey: string,
+  ingredientId: string,
+): Promise<QcBrixTarget | null> {
+  const [ingredient] = await executor.select({
+    id: ingredientsTable.id,
+    name: ingredientsTable.name,
+  }).from(ingredientsTable).where(and(
+    eq(ingredientsTable.scope, scope),
+    eq(ingredientsTable.id, ingredientId),
+    eq(ingredientsTable.enabled, true),
+  )).limit(1);
+  if (!ingredient) return null;
+  const [override] = await executor.select().from(qcWorkflowEventsTable).where(and(
+    eq(qcWorkflowEventsTable.scope, scope),
+    eq(qcWorkflowEventsTable.eventType, "target-setting"),
+    eq(qcWorkflowEventsTable.profileKey, profileKey),
+    eq(qcWorkflowEventsTable.ingredientId, ingredientId),
+    sql`${qcWorkflowEventsTable.payload}->>'measurementKind' = 'brix'`,
+  )).orderBy(desc(qcWorkflowEventsTable.id)).limit(1);
+  const targetBrix = override?.payload.active === true
+    ? numericBrix(override.payload.targetBrix)
+    : null;
+  const toleranceBrix = override?.payload.active === true
+    ? numericBrix(override.payload.toleranceBrix)
+    : null;
+  const configured = targetBrix !== null && toleranceBrix !== null;
+  return {
+    ingredientId: ingredient.id,
+    ingredientName: ingredient.name,
+    targetBrix,
+    toleranceBrix,
+    source: configured ? "qc-override" : "not-configured",
+    state: configured ? "configured" : "not-evaluated",
+    ...(!configured
+      ? {
+        reason: override?.payload.active === true
+          ? "The reviewed Brix target or tolerance is invalid."
+          : override
+            ? "No reviewed Brix target is configured."
+            : "No manager-reviewed Brix target is configured.",
+      }
+      : {}),
+    ...(override ? { overrideEventId: override.id } : {}),
+    ...(override ? { targetRecordedAt: override.createdAt.toISOString() } : {}),
+  };
+}
+
+function numericBrix(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : null;
 }
 
 function parseDateParam(value: unknown, endOfDay = false): Date | null | undefined {
@@ -758,6 +918,15 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
                 : "out-of-tolerance",
           }
           : {}),
+        ...(row.eventType === "brix-check"
+          ? {
+            outcome: evaluateQcBrixCheck({
+              actualBrix: Number(output.payload.actualBrix),
+              targetBrix: numericBrix(output.payload.targetBrix),
+              toleranceBrix: numericBrix(output.payload.toleranceBrix),
+            }),
+          }
+          : {}),
       };
       if (row.eventType === "component-check" && Array.isArray(replacement.observations)) {
         const expectedComponents = Array.isArray(output.payload.expectedComponents)
@@ -821,6 +990,7 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     if (fields?.has("actorId")) output.actorId = null;
     if (fields?.has("ingredientName")) output.ingredientName = null;
     if (fields?.has("payload.note")) output.payload = { ...output.payload, note: "[redacted]" };
+    if (fields?.has("payload.instrument")) output.payload = { ...output.payload, instrument: "[redacted]" };
     if (fields?.has("payload.lotNumber")) output.payload = { ...output.payload, lotNumber: "[redacted]" };
     if (fields?.has("payload.expectedComponents")) {
       output.payload = { ...output.payload, expectedComponents: "[redacted]" };
@@ -850,6 +1020,14 @@ function validateCorrection(
         checkType: CHECK_TYPE.optional(),
         note: correctionNote,
       }).strict()
+      : eventType === "brix-check"
+        ? z.object({
+          actualBrix: z.number().finite().min(0).max(100).optional(),
+          checkType: BRIX_CHECK_TYPE.optional(),
+          instrument: z.string().trim().max(120).optional(),
+          note: correctionNote,
+          station: STATION.optional(),
+        }).strict()
         : eventType === "component-check"
           ? z.object({
             observations: z.array(componentObservationSchema).max(200).optional(),
@@ -934,9 +1112,70 @@ router.get("/qc/targets", requireCapability("record-qc"), async (req, res) => {
     return;
   }
   try {
-    res.json({ profileKey, targets: await resolveTargets(profileKey) });
+    const [targets, brixTargets] = await Promise.all([
+      resolveTargets(profileKey),
+      resolveBrixTargets(profileKey),
+    ]);
+    res.json({ profileKey, targets, brixTargets });
   } catch (error) {
     reportRouteError(req, res, "failed to resolve QC weight targets", error);
+  }
+});
+
+router.post("/qc/brix-targets", requireCapability("manage-qc"), async (req, res) => {
+  const body = requireValid(brixTargetBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  try {
+    const ingredient = await findActiveIngredient(body.ingredientId);
+    if (!ingredient) {
+      safeError(res, 404, "Ingredient identity is unavailable");
+      return;
+    }
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockTarget(scope, body.profileKey, ingredient.id));
+      const existing = await findOperation(body.operationId, tx);
+      if (existing) {
+        const sameRequest = existing.eventType === "target-setting"
+          && existing.profileKey === body.profileKey
+          && existing.ingredientId === ingredient.id
+          && existing.payload.measurementKind === "brix"
+          && existing.payload.active === (body.targetBrix !== null)
+          && existing.payload.targetBrix === body.targetBrix
+          && existing.payload.toleranceBrix === body.toleranceBrix
+          && existing.payload.reason === body.reason;
+        return sameRequest ? { event: existing, replayed: true } : { conflict: true as const };
+      }
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "target-setting",
+        profileKey: body.profileKey,
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        payload: {
+          measurementKind: "brix",
+          active: body.targetBrix !== null,
+          targetBrix: body.targetBrix,
+          toleranceBrix: body.toleranceBrix,
+          unit: "brix",
+          source: "qc-override",
+          reason: body.reason,
+        },
+      });
+      return { event, replayed: false };
+    });
+    if ("conflict" in result) {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    res.status(result.replayed ? 200 : 201).json({ event: publicEvent(result.event) });
+  } catch (error) {
+    reportRouteError(req, res, "failed to save QC Brix target override", error);
   }
 });
 
@@ -1090,6 +1329,103 @@ router.post("/qc/weight-checks", requireCapability("record-qc"), async (req, res
       return;
     }
     reportRouteError(req, res, "failed to record QC weight check", error);
+  }
+});
+
+router.post("/qc/brix-checks", requireCapability("record-qc"), async (req, res) => {
+  const body = requireValid(brixCheckBodySchema, req.body, res);
+  const actorId = currentActor(req);
+  if (!body || !actorId) {
+    if (!actorId) safeError(res, 401, "Unauthorized");
+    return;
+  }
+  try {
+    const ingredient = await findActiveIngredient(body.ingredientId);
+    if (!ingredient) {
+      safeError(res, 404, "Ingredient identity is unavailable");
+      return;
+    }
+    const result = await db.transaction(async (tx) => {
+      const scope = currentScope();
+      await tx.execute(lockRun(scope, body.runId));
+      await tx.execute(lockTarget(scope, body.profileKey, ingredient.id));
+      const existing = await findOperation(body.operationId, tx);
+      if (existing) {
+        const sameRequest = existing.eventType === "brix-check"
+          && existing.runId === body.runId
+          && existing.profileKey === body.profileKey
+          && existing.ingredientId === ingredient.id
+          && existing.station === body.station
+          && existing.payload.checkType === body.checkType
+          && existing.payload.actualBrix === body.actualBrix
+          && existing.payload.instrument === body.instrument
+          && existing.payload.note === body.note;
+        return sameRequest ? { event: existing, replayed: true } : { conflict: true as const };
+      }
+      const sourceLookup = await resolveCanonicalRunSource(tx, scope, body.runId);
+      if (sourceLookup.state !== "found") return { source: sourceLookup } as const;
+      if (sourceLookup.source.profileKey !== body.profileKey) {
+        return { profileMismatch: true as const };
+      }
+      const target = await resolveBrixTarget(tx, scope, body.profileKey, ingredient.id);
+      const configured = target?.state === "configured"
+        && target.targetBrix !== null
+        && target.toleranceBrix !== null;
+      const targetBrix = configured ? target!.targetBrix : null;
+      const toleranceBrix = configured ? target!.toleranceBrix : null;
+      const outcome = evaluateQcBrixCheck({
+        actualBrix: body.actualBrix,
+        targetBrix,
+        toleranceBrix,
+      });
+      const event = await appendRunEvent(tx, scope, actorId, {
+        operationId: body.operationId,
+        recordId: randomUUID(),
+        eventType: "brix-check",
+        runId: body.runId,
+        profileKey: body.profileKey,
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        station: body.station,
+        payload: {
+          measurementKind: "brix",
+          unit: "brix",
+          checkType: body.checkType,
+          actualBrix: body.actualBrix,
+          targetBrix,
+          toleranceBrix,
+          targetSource: configured ? "qc-override" : "not-configured",
+          targetVersion: configured ? target!.overrideEventId ?? null : null,
+          targetRecordedAt: configured ? target!.targetRecordedAt ?? null : null,
+          runSourceKind: sourceLookup.source.kind,
+          runSourceDate: sourceLookup.source.date,
+          runSourceRevision: sourceLookup.source.revision,
+          outcome,
+          instrument: body.instrument,
+          note: body.note,
+        },
+      });
+      return { event, replayed: false };
+    });
+    if ("conflict" in result) {
+      safeError(res, 409, "This operation ID was already used for another request");
+      return;
+    }
+    if ("profileMismatch" in result) {
+      safeError(res, 409, "The selected profile does not match this run");
+      return;
+    }
+    if (result.source !== undefined) {
+      if (result.source.state === "not-found") {
+        safeError(res, 404, "Run is not available in this facility scope");
+      } else {
+        safeError(res, 409, "Canonical run settings are unavailable");
+      }
+      return;
+    }
+    res.status(result.replayed ? 200 : 201).json({ event: publicEvent(result.event) });
+  } catch (error) {
+    reportRouteError(req, res, "failed to record QC Brix check", error);
   }
 });
 
@@ -1806,7 +2142,7 @@ router.post("/qc/events/:eventId/corrections", requireCapability("manage-qc"), a
       eq(qcWorkflowEventsTable.scope, currentScope()),
       eq(qcWorkflowEventsTable.id, eventId),
     )).limit(1);
-    if (!target || !["lot", "weight", "component-check", "allergen-review", "cleaning"].includes(target.eventType)) {
+    if (!target || !["lot", "weight", "brix-check", "component-check", "allergen-review", "cleaning"].includes(target.eventType)) {
       safeError(res, 404, "Correctable QC record not found");
       return;
     }

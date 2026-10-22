@@ -1,10 +1,22 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Approved Phase 1 implemented; later gates and additional QC programs remain deferred
-**Updated:** 2026-10-09
+**Status:** Approved Phase 1 implemented; advisory Brix master-program Slice 0 implemented; later gates remain deferred
+**Updated:** 2026-10-22
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 QC is a durable follow-on product track, not a sync-protocol prerequisite. New QC actions require explicit capabilities, server-generated audit identity, reset/purge survival, and stable ingredient identity for lot and allergen rollups.
+
+## Approved Master-Program Slice 0 — Advisory Brix
+
+**Status:** Implemented and verified with synthetic fixtures; the authenticated Brix matrix passed 8/8. The broader E2E syntax gate remains blocked by unrelated malformed specs (see the retained evidence map). This is an advisory QC workflow, not a production or regulatory approval.
+
+- Brix readings are recorded from the Brix view alongside Lots and Weights, linked to the selected run, station, and active ingredient, with pre-run or interval timing and optional instrument/note.
+- Managers configure Brix targets and tolerances separately from weight targets. Both values require an explicit reviewed setting; there is no inherited weight tolerance or default ±0.5 °Bx. Missing configuration stays not evaluated.
+- The server validates readings in the canonical `brix` unit (0–100 °Bx), resolves the saved configuration, snapshots its version and applicable target/tolerance, and computes the outcome. Clients cannot submit authoritative targets or outcomes.
+- Brix events appear in scoped history and manager CSV. Corrections and redactions append evidence; later run-linked events reopen sign-off. The shared QC event ledger preserves Brix evidence through daily reset and factory purge.
+- The focused server, UI, database-retention, and authenticated browser checks use synthetic readings only. No real facility target values were supplied or inferred; reviewed operational configuration is still required before staff use.
+
+This slice does not change weight behavior or add workbook target extraction, cadence alerts, device integrations, holds, run/shipping gates, or regulatory claims. Slice 8 enforcement remains deferred pending explicit owner policy; it is neither shipped nor formally declined. Slice 9 allergen expansion is not adopted by this request. See the retained [Slice 0 coverage map and failure ledger](../.local/tasks/evidence/qc-slice-0-brix/coverage-check-map.md).
 
 ## QC Phase 1 — Approved and Implemented
 
