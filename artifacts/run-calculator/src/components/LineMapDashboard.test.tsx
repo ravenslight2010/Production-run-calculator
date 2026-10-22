@@ -34,6 +34,8 @@ function renderLineMap(
     mixedFrontline?: boolean;
     applicatorRecipes?: Partial<Record<1 | 2 | 3 | 4, RecipeRow[]>>;
     sauceNeedsWithoutBatches?: boolean;
+    sauceBarrelsMade?: number;
+    sauceBatches?: number;
     stationActivity?: Record<string, StationActivityEvidence> | null;
     stationActivityNowMs?: number;
     confirmStationActivity?: ReturnType<typeof vi.fn>;
@@ -50,7 +52,7 @@ function renderLineMap(
     v: {
       traysOnLine: active ? 1 : 0,
       batchesReady: 0,
-      sauceBarrelsMade: 0,
+      sauceBarrelsMade: options.sauceBarrelsMade ?? 0,
       sauceOzPerPizza: mixedFrontline || sauceNeedsWithoutBatches ? 2 : 0,
       app1OzPerPizza: mixedFrontline ? 2 : 0,
       app2OzPerPizza: mixedFrontline ? 2 : 0,
@@ -89,7 +91,7 @@ function renderLineMap(
   mocks.useLiveRun.mockReturnValue({
     calc: {
       doughDepletionSec: 0,
-      sauceBatches: active ? 1 : 0,
+      sauceBatches: options.sauceBatches ?? (active ? 1 : 0),
       sauceDepletionSec: 0,
       sauceEffBarrel: mixedFrontline || sauceNeedsWithoutBatches ? 50 : 0,
       app1Lbs: mixedFrontline ? 20 : 0,
@@ -227,6 +229,18 @@ describe("LineMapDashboard current product identity", () => {
 });
 
 describe("LineMapDashboard station lifecycle statuses", () => {
+  it("shows Sauce need for multiple barrels when no batches are needed", () => {
+    renderLineMap("running", {
+      sauceNeedsWithoutBatches: true,
+      sauceBarrelsMade: 3,
+      sauceBatches: 0,
+    });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    expect(within(frontline).getByText("Sauce").parentElement?.textContent)
+      .toContain("150.00 lbs");
+  });
+
   it.each([3, 4] as const)(
     "shows the need for applicator %i when it is the only configured Frontline item",
     (slot) => {
@@ -309,36 +323,16 @@ describe("LineMapDashboard station lifecycle statuses", () => {
       .toContain("Cheddar7.50 lbsSeasoning22.50 lbs");
   });
 
-  it("keeps the aggregate applicator need when recipe components are not usable", () => {
-    renderLineMap("running", {
-      configuredApplicator: 3,
-      applicatorRecipes: {
-        3: [
-          { ingredient: "", lbs: 20 },
-          { ingredient: "Zero-weight ingredient", lbs: 0 },
-        ],
-      },
-    });
-
-    const frontline = screen.getByRole("button", { name: /Frontline/ });
-    for (const label of [
-      "Sauce",
-      "App 1 — Mozzarella",
-      "App 2 — Cheddar",
-      "Pep 1 — Pepperoni",
-      "Pep 1 — Sausage",
-      "App 3 — Cheese",
-      "App 4 — Cheese",
-    ]) {
-      expect(within(frontline).getByText(label)).toBeTruthy();
-    }
-    const app3Label = within(frontline).getByText("App 3 — Cheese");
-    const app4Label = within(frontline).getByText("App 4 — Cheese");
+  it("confirms activity at the warehouse station", async () => {
     const confirmStationActivity = vi.fn().mockResolvedValue(undefined);
     renderLineMap("running", { confirmStationActivity });
 
-    fireEvent.click(screen.getByRole("button", { name: accessibleName }));
-    await waitFor(() => expect(confirmStationActivity).toHaveBeenCalledWith(station));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm activity at Warehouse" }),
+    );
+    await waitFor(() =>
+      expect(confirmStationActivity).toHaveBeenCalledWith("warehouse"),
+    );
   });
 
   it("does not show an activity age for active stations or non-running lifecycle states", () => {
