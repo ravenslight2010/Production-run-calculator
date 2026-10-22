@@ -72,3 +72,17 @@ then caught fixture values that had to stay distinct.
 **How to apply:** Use the exact conflict text from the file and compare both
 staged versions. Resolve one boundary at a time, then scan the entire file for
 markers and trailing fragments and rerun the owning tests before continuing.
+
+For additive test changes, compare the resolved file against the refreshed base,
+not only against the task's earlier file. Existing unrelated test bodies should
+remain intact, and independently merged regressions must remain present.
+
+**Why:** Replaying a stock-draft regression alongside new lock and run-switch
+tests left valid-looking but misplaced statements, replaced unrelated fixtures,
+and removed the new navigation suite without conflict markers. Earlier passing
+test results did not apply to that resolved tree.
+
+**How to apply:** Preserve both baseline tips, restore only the damaged test
+boundaries, and verify the final diff consists of the intended additions plus
+explicitly justified fixture changes. Run the focused file and package typecheck
+again on the resolved tree before resubmitting completion.

@@ -29,6 +29,8 @@ import { LivePackagingTabContent } from "../LivePackagingTabContent";
 import { LiveSauceTabContent } from "../LiveSauceTabContent";
 import { HomeStationTabs } from "../../../components/HomeStationTabs";
 import { TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
+import { APPLICATOR_STOCK_REGISTERS, applicatorStockFields } from "@workspace/live-calc";
+import type { HomeTab } from "../../../hooks/useHomeNavigation";
 
 vi.mock("../../../useRole", () => ({
   useMe: () => ({ hasCapability: () => false }),
@@ -101,6 +103,7 @@ function StationProviders({
   switchToRun = vi.fn(() => true),
   packagingManager: packagingManagerOverride,
   sauceAutoTrackFailure = null,
+  queueManualCorrection,
   children,
 }: {
   status: "pending" | "running" | "paused" | "ended";
@@ -110,6 +113,7 @@ function StationProviders({
   switchToRun?: (newIndex: number, expectedCurrentRunId?: string) => boolean;
   packagingManager?: PackagingManager;
   sauceAutoTrackFailure?: { barrelId: string; dismissed: boolean; kind: "transient" | "permanent" } | null;
+  queueManualCorrection?: (...args: unknown[]) => void;
   children: ReactNode;
 }) {
   const form = useForm<FormValues>({ defaultValues: values });
@@ -158,7 +162,7 @@ function StationProviders({
     lastLocalEditRef,
     packagingManager: stationPackagingManager,
     persistManualPackagingProgress: noop,
-    queueManualCorrection: noop,
+    queueManualCorrection: queueManualCorrection ?? noop,
     refreshFreezerSurplus: vi.fn().mockResolvedValue(undefined),
     runStatus: status,
     runToTime: "12:00",
@@ -227,6 +231,7 @@ function SauceWarningTabFixture() {
 }
 
 describe("Sauce auto-track warning surface", () => {
+  afterEach(() => { cleanup(); });
   it("shows the failure only on the selected Sauce station", async () => {
     render(<SauceWarningTabFixture />);
     expect(screen.getByText("Run screen").hidden).toBe(false);
@@ -366,6 +371,129 @@ function PepperoniSetupEditor() {
     </>
   );
 }
+
+const STOCK_DRAFT_VALUES: FormValues = {
+  ...FRONTLINE_APPLICATOR_VALUES,
+  pep1Type: "Pepperoni",
+  pep1TypeB: "Cup Pepperoni",
+  pep2Type: "Turkey Pepperoni",
+  pep2TypeB: "Mini Pepperoni",
+  pep1Combined: false,
+};
+
+function StockValuesObserver() {
+  const values = useWatch<FormValues>();
+  return <output data-testid="stock-form-values">{JSON.stringify(values)}</output>;
+}
+
+function FrontlineNavigationFixture({
+  runId = RUN_ID,
+  queueManualCorrection,
+}: {
+  runId?: string;
+  queueManualCorrection: (...args: unknown[]) => void;
+}) {
+  const [activeTab, setActiveTab] = useState("frontline");
+  return (
+    <StationProviders status="running" runId={runId} values={STOCK_DRAFT_VALUES} queueManualCorrection={queueManualCorrection}>
+      <HomeStationTabs activeTab={activeTab as HomeTab} onTabChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="frontline">Frontline</TabsTrigger>
+          <TabsTrigger value="dough">Dough</TabsTrigger>
+        </TabsList>
+        <TabsContent value="frontline"><LiveFrontlineTabContent /></TabsContent>
+        <TabsContent value="dough"><div>Dough station</div></TabsContent>
+      </HomeStationTabs>
+      <StockValuesObserver />
+      <PepperoniSetupEditor />
+    </StationProviders>
+  );
+}
+
+describe("Frontline stock drafts across station navigation", () => {
+  beforeEach(() => { clearManualSectionLocks(); });
+  afterEach(() => { cleanup(); clearManualSectionLocks(); });
+
+  function navigateAwayAndBack() {
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
+    expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
+  }
+
+  it.each(APPLICATOR_STOCK_REGISTERS)("retains %s without changing stock or queuing persistence before Save", (register) => {
+    const queueManualCorrection = vi.fn();
+    render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
+    const beforeForm = screen.getByTestId("stock-form-values").textContent;
+    const beforePersisted = loadRunValues(RUN_ID);
+    const fields = applicatorStockFields(register);
+    fireEvent.change(screen.getByTestId(`stock-${register}-lbs`), { target: { value: "12.25" } });
+    navigateAwayAndBack();
+    const input = screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
+    expect(input.value).toBe("12.25");
+    expect(screen.getByTestId("stock-form-values").textContent).toBe(beforeForm);
+    expect(loadRunValues(RUN_ID)).toEqual(beforePersisted);
+    expect(queueManualCorrection).not.toHaveBeenCalled();
+    const other = register === "app1" ? "app2" : "app1";
+    expect((screen.getByTestId(`stock-${other}-lbs`) as HTMLInputElement).value).not.toBe("12.25");
+
+    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Save" }));
+    expect(queueManualCorrection).toHaveBeenCalledTimes(1);
+    expect(queueManualCorrection.mock.calls[0][0]).toBe(RUN_ID);
+    expect(queueManualCorrection.mock.calls[0][1]).toMatchObject({ [fields.stock]: 12.25 });
+    navigateAwayAndBack();
+    const saved = screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
+    expect(saved.value).toBe("12.25");
+    expect((within(saved.parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each(["", "0", "9999"])("retains the raw draft %j without validating or saving during navigation", (draft) => {
+    const queueManualCorrection = vi.fn();
+    render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
+    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: "5" } });
+    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: draft } });
+    navigateAwayAndBack();
+    const input = screen.getByTestId("stock-app1-lbs") as HTMLInputElement;
+    expect(input.value).toBe(draft);
+    expect((within(input.parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(queueManualCorrection).not.toHaveBeenCalled();
+  });
+
+  it("retains simultaneous drafts separately and clears only the saved or filled slot", () => {
+    render(<FrontlineNavigationFixture queueManualCorrection={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: "12.25" } });
+    fireEvent.change(screen.getByTestId("stock-pep2b-lbs"), { target: { value: "34.5" } });
+    navigateAwayAndBack();
+    const input = screen.getByTestId("stock-app1-lbs") as HTMLInputElement;
+    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
+    navigateAwayAndBack();
+    const filled = screen.getByTestId("stock-app1-lbs") as HTMLInputElement;
+    expect(filled.value).toBe(filled.max);
+    expect((within(filled.parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("stock-pep2b-lbs") as HTMLInputElement).value).toBe("34.5");
+  });
+
+  it("does not carry a draft to another ingredient in the same slot", () => {
+    render(<FrontlineNavigationFixture queueManualCorrection={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("stock-pep1-lbs"), { target: { value: "12.25" } });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByTestId("change-pep1-type"));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
+    expect((screen.getByTestId("stock-pep1-lbs") as HTMLInputElement).value).not.toBe("12.25");
+  });
+
+  it("clears the bounded run cache even when the run changes while Frontline is unmounted", () => {
+    const queueManualCorrection = vi.fn();
+    const view = render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
+    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: "12.25" } });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
+    view.rerender(<FrontlineNavigationFixture runId={SWITCHED_RUN_ID} queueManualCorrection={queueManualCorrection} />);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
+    expect((screen.getByTestId("stock-app1-lbs") as HTMLInputElement).value).not.toBe("12.25");
+    view.rerender(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
+    expect((screen.getByTestId("stock-app1-lbs") as HTMLInputElement).value).not.toBe("12.25");
+    expect(queueManualCorrection).not.toHaveBeenCalled();
+  });
+});
 
 function expectSelector(
   selector:
