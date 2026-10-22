@@ -774,6 +774,8 @@ import {
 import { useAuth } from "@/useAuth";
 import type { ImportParseResult } from "@/utils/runExcel";
 import { loadWorkbookWorkflow } from "@/workbookWorkflow";
+import { useMixedImportQueue } from "../hooks/useMixedImportQueue";
+import type { WorkbookFileSelection } from "../mixedImportQueue";
 import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
 import {
   PENDING_DUPLICATE_REVIEW_SCAN,
@@ -883,6 +885,7 @@ const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
+const loadMixedImportReviewQueue = () => import("../components/MixedImportReviewQueue");
 const loadImportHistoryPanel = () => import("../components/ImportHistoryPanel");
 const loadMixReconcilePanel = () => import("../components/MixReconcilePanel");
 const loadGlanceOverlay = () => import("../components/GlanceOverlay");
@@ -6382,6 +6385,8 @@ export default function Home() {
     if (showEditReasonsDialog)  { setShowEditReasonsDialog(false);  return; }
     if (showManageDialog)       { setShowManageDialog(false);       return; }
     if (showScheduleDialog)     { setShowScheduleDialog(false); setScheduleView("list"); return; }
+    if ((showImportDialog || showSpecImport || showPremixImport || showShippingImport ||
+      showSauceGuideImport || showDoughGuideImport || showCheeseImport) && !canCloseWorkbookReview()) return;
     if (closeTopmostImportDialog([
       { open: showImportDialog, close: () => setShowImportDialog(false) },
       { open: showSpecImport, close: () => setShowSpecImport(false) },
@@ -12786,7 +12791,7 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -12803,6 +12808,7 @@ export default function Home() {
       setShowImportDialog(true);
     } catch (err) {
       recordImportPreparationFailure("schedule", file.name, err);
+      mixedImportQueue.outcome("schedule", "failed", "Workbook preparation failed. No schedule requests were sent.");
       toast({
         variant: "destructive",
         title: "Couldn't read that file",
@@ -12827,6 +12833,35 @@ export default function Home() {
   const shippingImportFileNameRef = useRef<string>("");
   const sauceGuideImportGenRef = useRef(0);
   const doughGuideImportGenRef = useRef(0);
+
+  const mixedImportQueue = useMixedImportQueue({
+    identity: `${me?.userId ?? ""}:${me?.sandbox ?? false}:${[...enabledImporterTypes].sort().join(",")}`,
+    enabled: enabledImporterTypes,
+    states: {
+      spec: { open: showSpecImport, loading: specImportLoading, applying: specImportApplying, error: specImportError, progress: specImportProgress },
+      premix: { open: showPremixImport, loading: premixImportLoading, applying: premixImportApplying, error: premixImportError, progress: premixImportProgress },
+      cheese: { open: showCheeseImport, loading: cheeseImportLoading, applying: cheeseImportApplying, error: cheeseImportError, progress: cheeseImportProgress },
+      shipping: { open: showShippingImport, loading: shippingImportLoading, applying: shippingImportApplying, error: shippingImportError },
+      sauce: { open: showSauceGuideImport, loading: sauceGuideImportLoading, applying: sauceGuideImportApplying, error: sauceGuideImportError },
+      dough: { open: showDoughGuideImport, loading: doughGuideImportLoading, applying: doughGuideImportApplying, error: doughGuideImportError },
+      schedule: { open: showImportDialog, applying: !!importProgress, progress: importProgress },
+    },
+    start: {
+      spec: handleSpecImportFile, premix: handlePremixImportFile, cheese: handleCheeseImportFile,
+      shipping: handleShippingImportFile, sauce: handleSauceGuideImportFile, dough: handleDoughGuideImportFile,
+      schedule: handleImportFile,
+    },
+  });
+
+  function canCloseWorkbookReview() {
+    if (mixedImportQueue.canCloseReview()) return true;
+    toast({
+      title: "Import save is not confirmed",
+      description: "Keep this review open and use its original Apply or retry action. Do not prepare a replacement import.",
+      variant: "destructive",
+    });
+    return false;
+  }
 
   /**
    * History never auto-replays an import: snapshots open their existing
@@ -12989,7 +13024,7 @@ export default function Home() {
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
-  async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSpecImportFile(e: WorkbookFileSelection) {
     const selectedFiles = Array.from(e.target.files ?? []);
     e.target.value = "";
     noteBreadcrumb(selectedFiles.length > 0 ? `spec import: ${selectedFiles.length} file(s) selected` : "spec import: picker canceled");
@@ -13292,6 +13327,8 @@ export default function Home() {
           operationId,
           captureGoldCase ? { input: makeImportGoldInput({ profiles: editedParsed.profiles, recipes: editedParsed.recipes }) } : undefined,
         );
+      mixedImportQueue.outcome("spec", aliasSaveFailed || toCommit.note?.includes("could not be read") ? "partial" : "applied",
+        "Server confirmed this import. Any Undo remains scoped to this operation in Import history.");
       finishSpecImportOutcome("success");
       setSpecImportReviewNotice(null);
       setSpecImportRetryPending(false);
@@ -13795,6 +13832,7 @@ export default function Home() {
       await retryPendingImportOperation(operationId);
       clearPendingImportOperation(operationId);
       specImportOperationRef.current = null;
+      mixedImportQueue.outcome("spec", "applied", "Server confirmed the exact earlier operation. Current data is being refreshed.");
       await cycleCountQc.invalidateQueries();
       finishSpecImportOutcome("success");
       setShowSpecImport(false);
@@ -13838,7 +13876,7 @@ export default function Home() {
   // Mix deterministically (the AI only disambiguates product names), ground the
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms; re-importing updates existing mixes by id.
-  async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePremixImportFile(e: WorkbookFileSelection) {
     const { premixImport } = await loadWorkbookWorkflow();
     const files = Array.from(e.target.files ?? []).slice(0, premixImport.MAX_PREMIX_IMPORT_FILES);
     e.target.value = "";
@@ -14002,6 +14040,8 @@ export default function Home() {
       // Refresh the Mix Monitoring saved-sheet lists so the just-saved premix
       // sheet snapshot shows up immediately.
       setSheetListSignal((c) => c + 1);
+      mixedImportQueue.outcome("premix", result.warning || premixImportPrepared.note ? "partial" : "applied",
+        result.warning || "Server confirmed this import. Guarded Undo remains in Import history.");
       setShowPremixImport(false);
       setPremixImportPrepared(null);
       const parts = [
@@ -14048,7 +14088,7 @@ export default function Home() {
   // parse the per-brand table, map each row onto the packaging fields the app
   // already has, and show a review screen. Nothing is written until the user
   // confirms; unmappable values are kept as-is (never guessed).
-  async function handleShippingImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleShippingImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     noteBreadcrumb(file ? "shipping import: file selected" : "shipping import: picker canceled");
@@ -14161,6 +14201,8 @@ export default function Home() {
       ).catch(() => {
         /* snapshot is advisory; import already applied */
       });
+      mixedImportQueue.outcome("shipping", shippingSkipped > 0 ? "partial" : "applied",
+        `${result.rowsApplied} rows verified locally. Not a server transaction or delivery receipt; unselected rows were not applied.`);
       setShowShippingImport(false);
       setShippingImportPrepared(null);
       toast({
@@ -14177,7 +14219,7 @@ export default function Home() {
   }
 
   // ── Sauce Guide importer (Joe's Sauce Guide .docx) ──────────────────────────
-  async function handleSauceGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSauceGuideImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -14244,6 +14286,8 @@ export default function Home() {
         },
       }).catch(() => {});
       reloadMasterData();
+      mixedImportQueue.outcome("sauce", result.rowsSkippedBothUnmatched > 0 ? "partial" : "applied",
+        `${result.rowsApplied} rows verified locally; ${result.rowsSkippedBothUnmatched} skipped. Not a server delivery receipt.`);
       setShowSauceGuideImport(false);
       setSauceGuideImportPrepared(null);
       const skippedNote = result.rowsSkippedBothUnmatched > 0
@@ -14261,7 +14305,7 @@ export default function Home() {
   }
 
   // ── Dough Guide importer (Pizza to Dough Recipes .xlsx) ──────────────────────
-  async function handleDoughGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleDoughGuideImportFile(e: WorkbookFileSelection) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -14330,6 +14374,8 @@ export default function Home() {
         },
       }).catch(() => {});
       reloadMasterData();
+      mixedImportQueue.outcome("dough", result.rowsSkippedBothUnmatched > 0 ? "partial" : "applied",
+        `${result.rowsApplied} rows verified locally; ${result.rowsSkippedBothUnmatched} skipped. Not a server delivery receipt.`);
       setShowDoughGuideImport(false);
       setDoughGuideImportPrepared(null);
       const skippedNote = result.rowsSkippedBothUnmatched > 0
@@ -14351,7 +14397,7 @@ export default function Home() {
   // assignment lines, per-batch pounds), and show a single review screen.
   // Nothing is written until the user confirms; re-importing updates existing
   // cheese recipes by id.
-  async function handleCheeseImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleCheeseImportFile(e: WorkbookFileSelection) {
     const { cheeseImport } = await loadWorkbookWorkflow();
     const files = Array.from(e.target.files ?? []).slice(0, cheeseImport.MAX_CHEESE_IMPORT_FILES);
     e.target.value = "";
@@ -14534,6 +14580,8 @@ export default function Home() {
       // immediately in the manager list and the run "Cheese" pickers.
       void invalidateMasterDataSlice(cycleCountQc, "cheeseRecipes");
       setSheetListSignal((c) => c + 1);
+      mixedImportQueue.outcome("cheese", result.warning || cheeseImportPrepared.note?.includes("could not be read") ? "partial" : "applied",
+        result.warning || "Server confirmed this import. Guarded Undo remains in Import history.");
       setShowCheeseImport(false);
       setCheeseImportPrepared(null);
       toast({
@@ -14611,6 +14659,7 @@ export default function Home() {
       }
     } catch {}
     if (!existingSnapshotId) {
+      mixedImportQueue.outcome("schedule", "failed", "Current schedule could not be loaded. No schedule write was sent.");
       setShowImportDialog(false);
       setImportResult(null);
       toast({
@@ -14696,6 +14745,7 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     if (ok) {
+      mixedImportQueue.outcome("schedule", "applied", `Schedule day ${date} acknowledged separately by the server.`);
       payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
@@ -14716,6 +14766,7 @@ export default function Home() {
         description: `${payload.runs.length} run${payload.runs.length === 1 ? "" : "s"} imported to ${date}.`,
       });
     } else {
+      mixedImportQueue.outcome("schedule", "partial", "Schedule request was not confirmed. Check the current day before reviewing again; no rollback or automatic retry.");
       toast({
         variant: "destructive",
         title: "Import failed",
@@ -14874,6 +14925,8 @@ export default function Home() {
       )) {
         setImportProgress(null);
         if (done > 0) {
+          mixedImportQueue.outcome("schedule", "partial",
+            `${confirmedDays} days confirmed saved; ${failed} requests unconfirmed. Cancelled and remaining days were not sent. Earlier saves were not undone.`);
           // Days are independently acknowledged. Cancelling a later proposal
           // cannot roll back earlier writes or claim the whole file was cancelled.
           void recordImportHistory({
@@ -14979,6 +15032,8 @@ export default function Home() {
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
     if (failed === 0) {
+      mixedImportQueue.outcome("schedule", skippedToday > 0 ? "partial" : "applied",
+        `${byDate.length} day requests acknowledged separately; ${skippedToday} already-started rows skipped.`);
       payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
@@ -15002,6 +15057,8 @@ export default function Home() {
         description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.${skippedNote}`,
       });
     } else {
+      mixedImportQueue.outcome("schedule", "partial",
+        `${byDate.length - failed} day requests acknowledged; ${failed} unconfirmed. Earlier saves were not undone. Check current days before another review.`);
       void recordImportHistory({
         importType: "schedule",
         sourceLabel: "Schedule workbook",
@@ -17124,6 +17181,11 @@ export default function Home() {
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
                     <ImportTemplateDownloads enabled={enabledImporterTypes} />
+                    <DeferredSurface
+                      label="related workbook reviews"
+                      load={loadMixedImportReviewQueue}
+                      componentProps={{ queue: mixedImportQueue, enabledImporters: enabledImporterTypes }}
+                    />
                     {canManageInventory && pendingDuplicateReviewCount !== 0 && (
                       <div
                         className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between"
@@ -18660,7 +18722,7 @@ export default function Home() {
             presentation="dialog"
             componentProps={{
               open: true,
-              onClose: () => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); },
+              onClose: () => { if (!canCloseWorkbookReview()) return; setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); },
               result: importResult,
               brands,
               brandFlavors,
@@ -18669,7 +18731,7 @@ export default function Home() {
               onConfirm: (payload) => {
                 const work = payload.multiDay ? commitMultiDayImport(payload)
                   : importIntoEditor ? importExcelIntoEditor(payload) : commitExcelImport(payload);
-                void work.catch((error: unknown) => {
+                void mixedImportQueue.confirm("schedule", () => work).catch((error: unknown) => {
                   setImportProgress(null);
                   toast({ title: "Schedule import needs review", description: error instanceof Error ? error.message : "The schedule could not be verified. No automatic retry was made.", variant: "destructive" });
                 });
@@ -18688,6 +18750,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             if (specImportRetryPending) {
               toast({
                 title: "Import status not confirmed",
@@ -18733,7 +18796,7 @@ export default function Home() {
               retryPending: specImportRetryPending,
               retryBlocked: specImportRetryBlocked,
               retryingPending: specImportRetryingPending,
-              onRetryPending: () => void handleRetryPendingSpecImport(),
+              onRetryPending: () => void mixedImportQueue.confirm("spec", handleRetryPendingSpecImport),
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
               aiRetryAvailable: specImportAiRetryCount === 0 &&
@@ -18748,7 +18811,7 @@ export default function Home() {
                   }
                 : null,
               goldCaptureEnabled,
-              onConfirm: handleSpecImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("spec", () => handleSpecImportConfirm(...args)),
             }}
           />
         )}
@@ -18762,6 +18825,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             premixImportGenRef.current++;
             premixImportAbortRef.current?.abort();
             premixImportAbortRef.current = null;
@@ -18783,7 +18847,7 @@ export default function Home() {
               prepared: premixImportPrepared,
               applying: premixImportApplying,
               goldCaptureEnabled,
-              onConfirm: handlePremixImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("premix", () => handlePremixImportConfirm(...args)),
             }}
           />
         )}
@@ -18797,6 +18861,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             shippingImportGenRef.current++;
             if (shippingImportLoading) {
               toast({
@@ -18813,7 +18878,7 @@ export default function Home() {
               error: shippingImportError,
               prepared: shippingImportPrepared,
               applying: shippingImportApplying,
-              onConfirm: handleShippingImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("shipping", () => handleShippingImportConfirm(...args)),
             }}
           />
         )}
@@ -18827,6 +18892,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             sauceGuideImportGenRef.current++;
             setShowSauceGuideImport(false);
             setSauceGuideImportPrepared(null);
@@ -18837,7 +18903,7 @@ export default function Home() {
               error: sauceGuideImportError,
               prepared: sauceGuideImportPrepared,
               applying: sauceGuideImportApplying,
-              onConfirm: handleSauceGuideImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("sauce", () => handleSauceGuideImportConfirm(...args)),
             }}
           />
         )}
@@ -18851,6 +18917,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             doughGuideImportGenRef.current++;
             setShowDoughGuideImport(false);
             setDoughGuideImportPrepared(null);
@@ -18861,7 +18928,7 @@ export default function Home() {
               error: doughGuideImportError,
               prepared: doughGuideImportPrepared,
               applying: doughGuideImportApplying,
-              onConfirm: handleDoughGuideImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("dough", () => handleDoughGuideImportConfirm(...args)),
             }}
           />
         )}
@@ -18875,6 +18942,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            if (!canCloseWorkbookReview()) return;
             cheeseImportGenRef.current++;
             cheeseImportAbortRef.current?.abort();
             cheeseImportAbortRef.current = null;
@@ -18896,7 +18964,7 @@ export default function Home() {
               prepared: cheeseImportPrepared,
               applying: cheeseImportApplying,
               goldCaptureEnabled,
-              onConfirm: handleCheeseImportConfirm,
+              onConfirm: (...args) => mixedImportQueue.confirm("cheese", () => handleCheeseImportConfirm(...args)),
             }}
           />
         )}

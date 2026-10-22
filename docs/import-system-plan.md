@@ -37,7 +37,7 @@ Spec, premix, and cheese now apply server-owned master-data changes through one 
 1. **QC approval gate — gated** — owned by the QC department; do not build before QC Phase 1 prerequisites are resolved.
 2. **Atomic undo — complete for spec/premix/cheese only** — local-only guide and schedule projections retain separate recovery boundaries.
 3. **Structured preview diff — implemented with bounded authority** — all seven paths share the final review. Atomic, local profile and per-day sync guarantees remain distinct.
-4. **Batch import — partial** — spec multi-file parsing exists; mixed/all-importer batch application remains.
+4. **Batch import — reviewed queue** — mixed workbook navigation now opens each file's existing importer with separate human Apply; there is no group transaction or Apply all.
 5. **Template download — open** — no maintained template-download workflow for every importer.
 6. **Shared validation pre-check — implemented for bounded supported inputs** — recognized-table rules validate canonical headers/types; unfamiliar layouts retain format-specific parsing/review/fallback.
 7. **Import scheduling — deferred** — revisit only if a recurring source and approved workflow exist.
@@ -105,16 +105,18 @@ LINK    Sauce recipe "Deluxe" → "Shared Sauce" (was unlinked)
 **Boundary**: This is human import review, not implementation or approval of the separately owned QC queue.
 
 ### 4. Batch Import (new)
-**Status (2026-10-08): Partial.** Spec multi-file parsing exists; a mixed/all-importer batch review and apply workflow does not.
-**What**: Extend current multi-file support to consistent batch review and apply across importer types.
+**Status (2026-10-22): Implemented as a bounded, session-only mixed-workbook review queue.**
+**What**: Group related supported workbooks in the manager Import workspace while retaining each importer's existing review, confirmation, persistence and recovery boundaries.
 
 **Flow**:
-- Multi-file picker → each file goes through its own parse → review queue
-- User reviews each file's matches/preview in sequence
-- "Apply all" or per-file apply
-- Each file gets its own import-history record (audit per file)
+- Add up to 20 workbook files and explicitly choose their types; filenames never determine the importer.
+- Open one file at a time in its original preview. Preparation happens when the user opens that file, against current state, rather than precomputing potentially stale batch proposals.
+- Each file retains its own human Apply confirmation, source comparison, current-state checks and existing history path. No Apply all or automatic repair.
+- Display preparation/review/Apply progress and applied, partial, failed, cancelled or unconfirmed outcomes independently.
+- Cancellation does not roll back earlier files or schedule days. An unconfirmed atomic operation retains its original review and exact operation identity for recovery; starting a replacement is blocked.
+- The queue holds File objects only in tab memory. Reload, sign-out, scope or capability changes discard the group; no workbook bytes or group source evidence are persisted.
 
-**Note**: Schedule planner already handles multi-sheet day blocks; extend the pattern to all importers.
+**Boundaries**: Spec, premix and cheese keep their existing server-owned transactions and guarded Undo where supported. Shipping, sauce and dough guides remain locally verified profile updates, not transactional delivery receipts. Schedule writes remain independently reviewed and acknowledged per day. There is no group Undo. See [mixed-workbook-review.md](mixed-workbook-review.md) for the design and bounded verification matrix.
 
 ### 5. Template Download (new)
 **Status:** Implemented as optional client-generated downloads; see

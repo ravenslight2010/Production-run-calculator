@@ -515,7 +515,7 @@ export default function ExcelImportDialog({
     <div
       // No close-on-backdrop-click: the review step holds unsaved date/run
       // edits — a stray tap would silently discard them. Close is explicit only.
-      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
+      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[80] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
     >
       <div
         ref={dialogRef}

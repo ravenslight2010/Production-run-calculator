@@ -18,9 +18,7 @@
 - [Inventory accounting](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) + [stock corrections](completed-run-stock-corrections.md) — serialize drawdowns and reconcile edits against a durable ledger.
 - [Database test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, and isolated writes.
 - [Browser test evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
-- [Slow-network auth timing](slow-network-auth-timing.md) — include session confirmation in authenticated cold-start measurements with a bounded wait suited to the network profile.
-- [Browser isolation](browser-matrix-isolation.md) + [picker evidence](browser-evidence-assertions.md) — isolate failed matrix profiles and scope picker assertions to active dialogs.
-- [Browser storage](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable localStorage and missing query parameters.
+- [Browser compatibility](browser-compatibility-index.md) — auth timing, isolated matrices, active touch pickers, unavailable storage, phone forms and query coercion.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
 - [Spec export integrity](spec-export.md) — fresh server snapshots; keep per-pizza oz and batch lbs separate; blanks are unknown, and conflicts remain visible.
@@ -39,8 +37,7 @@
 - [Sandbox network](codeexecution-network-globals.md) — keep fetch calls inside impure functions.
 - [Warehouse staging](warehouse-staging-checklist.md) — synced per-run staged items mirror substitutions and resets across web/mobile.
 - [Draining-run selection](draining-run-selection.md) — filter eligibility before latest end time; web must not reuse lastEndedRun.
-- [Multi-file imports](multi-file-ai-import.md) + [premix](premix-import.md) — read sequentially, merge safely, parse deterministically, and review before commit.
-- [Import reloads](web-form-button-submit-reload.md) + [cold start](cold-start-import-hang.md) — distinguish reset/HMR blanks; bound fetch waits and offer cancel.
+- [Workbook workflow safety](workbook-workflow-safety-index.md) — sequential multi-file reads, premix review, reload/cold-start diagnosis, shipping mapping and generation guards.
 - [Brand quotes](brand-quote-typo-fold.md) + [spec aliases](spec-alias-hygiene.md) + [redirects](import-redirect-aliases.md) — fold quotes; reject unsafe aliases; preserve one-to-one claims.
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [One-time heals](one-time-data-heals.md) + [purge](one-time-data-purge.md) + [placeholder runs](seeded-placeholder-runs.md) — marker/epoch guards; seeded blanks stay local; never hold zero runs.
@@ -49,9 +46,7 @@
 - [HTTP security policy](http-security-policy.md) — keep CSP narrowly matched to actual app resources, and emit HSTS only at a verified TLS-terminating layer.
 - [Import units](spec-import-batch-vs-perpizza.md) + [sources](import-source-file-semantics.md) + [dedup](import-order-dedup-keys.md) — keep native units/order; dedup by kind.
 - [Stick pepperoni types](stick-pep-types.md) — cheese sticks are pepperoni types, not cheese recipes; recognize them in prompt and classifier.
-- [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time profile reconciliation in @workspace/profile-cleanup; "has real data" gates must exclude dough or dough-only profiles ghost.
-- [Import gen guards](import-gen-guard.md) — slow import prepares need per-kind generation refs (stale parse clobbers next import); post-import merge scan is background + toast, never force-navigates.
 - [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Station order](line-station-order.md) + [batch weights](ingredient-batch-weights.md) + [mix slots](mix-applicator-slots.md) — weights follow ingredients; slots stay recipe-linked.
 - [Dough/sauce relink](spec-import-name-first-relink.md) + [crust backstop](crust-dough-name-backstop.md) — attach names early; hydrate only a unique crust match.
@@ -122,6 +117,7 @@
 - [Container deployment history](container-image-migration.md) + [image provenance](container-image-release-evidence.md) — Render steps are historical; container lessons do not change Replit’s production publishing authority.
 - [Compose env isolation](docker-compose-env-file-overrides.md) — replace base Compose env files with `!override`; assert the resolved database URL stays on disposable Postgres.
 - [Atomic import](atomic-import-operations.md) + [history](completed-history-durability.md) + [undo](data-health-undo-coverage.md) — preserve evidence, enrich history idempotently, retain snapshots.
+- [Mixed workbook review](mixed-workbook-review-boundary.md) — groups are session-only navigation; each importer owns Apply, uncertainty, partial outcomes and supported Undo.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
