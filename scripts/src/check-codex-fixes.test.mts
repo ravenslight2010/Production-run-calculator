@@ -121,6 +121,41 @@ test("flags mailing addresses split across adjacent lines without echoing their 
   }
 });
 
+test("flags synthetic street, suite or unit, and city lines without echoing their contents", () => {
+  const suiteAddress = [
+    "91 Maple Street",
+    "Suite 210",
+    "Sampletown, IL 60614",
+  ];
+  const unitAddress = [
+    "4827 W. Cedarbrook Avenue",
+    "Apt. 4B",
+    "Northfield, CA 90210-1234",
+  ];
+  const content = [...suiteAddress, ...unitAddress].join("\n");
+
+  const findings = findFixHistoryDetails(content);
+  assert.deepEqual(
+    findings,
+    [1, 2, 3, 4, 5, 6].map((line) => ({
+      line,
+      category: "mailing address" as const,
+    })),
+  );
+
+  const diagnostic = findings.map(formatFixHistoryFinding).join("\n");
+  for (const matchedValue of [
+    ...suiteAddress,
+    ...unitAddress,
+    "Sampletown",
+    "60614",
+    "Northfield",
+    "90210-1234",
+  ]) {
+    assert.equal(diagnostic.includes(matchedValue), false);
+  }
+});
+
 test("allows benign adjacent technical lines, paths, release numbers, and dates", () => {
   const content = [
     "The helper uses",
@@ -131,9 +166,18 @@ test("allows benign adjacent technical lines, paths, release numbers, and dates"
     "the local development server uses port 8080.",
     "A street matcher checks",
     "its input one line at a time.",
+    "The parser splits suite",
+    "and unit tests into separate groups.",
+    "A build unit",
+    "is deployed to Sampletown, IL 60614.",
+    "91 Maple Street",
+    "Unit tests",
+    "Sampletown, IL 60614",
   ].join("\n");
 
-  assert.deepEqual(findFixHistoryDetails(content), []);
+  assert.deepEqual(findFixHistoryDetails(content), [
+    { line: 13, category: "mailing address" },
+  ]);
 });
 
 test("flags synthetic credential values, private-key markers, and URL user-info without echoing values", () => {

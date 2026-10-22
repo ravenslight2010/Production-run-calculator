@@ -37,6 +37,8 @@ const wrappedStreetAddressLine =
   /^\s*(?:[-*]\s+)?\d{1,6}\s+(?:(?:N|S|E|W|NE|NW|SE|SW)\.?\s+)?[a-z0-9.'’-]+(?:\s+[a-z0-9.'’-]+){0,4}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?|circle|cir\.?|parkway|pkwy\.?|place|pl\.?|terrace|ter\.?|highway|hwy\.?|way)\s*[.,]?\s*$/i;
 const wrappedCityPostalLine =
   /^\s*(?:[-*]\s+)?[a-z][a-z.'’-]*(?:\s+[a-z][a-z.'’-]*){0,4},\s*[a-z]{2}\s+\d{5}(?:-\d{4})?\s*[.,]?\s*$/i;
+const wrappedStreetUnitLine =
+  /^\s*(?:[-*]\s+)?(?:suite|ste\.?|unit|apt\.?|apartment)\s+(?:#\s*)?(?:\d[a-z0-9-]{0,9}|[a-z])\s*[.,]?\s*$/i;
 const privateKeyMarker = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/i;
 const urlUserInfo = /\bhttps?:\/\/([^/@\s]+)@/gi;
 const credentialAssignment =
@@ -182,6 +184,18 @@ export function findFixHistoryDetails(content: string): FixHistoryFinding[] {
     ) {
       wrappedMailingAddressLines.add(index);
       wrappedMailingAddressLines.add(index + 1);
+    }
+  }
+
+  for (let index = 0; index < lines.length - 2; index += 1) {
+    if (
+      wrappedStreetAddressLine.test(lines[index]) &&
+      wrappedStreetUnitLine.test(lines[index + 1]) &&
+      wrappedCityPostalLine.test(lines[index + 2])
+    ) {
+      wrappedMailingAddressLines.add(index);
+      wrappedMailingAddressLines.add(index + 1);
+      wrappedMailingAddressLines.add(index + 2);
     }
   }
 
