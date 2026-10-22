@@ -27,6 +27,7 @@
     "test:budget:contract": "node --test scripts/check-test-duration-contract.test.mjs",
     "test:performance": "vitest run src/performanceDiagnostics.test.ts src/homePerformance.test.ts src/warehouseGrouping.test.ts",
     "test:e2e": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium || command -v chromium-browser || command -v google-chrome)} playwright test",
+    "test:e2e:ignored-match-filter": "bash ../../scripts/src/run-release-node.sh env npm_config_offline=true bash ../../scripts/src/run-isolated-browser-suite.sh --playwright-config=playwright.ignored-match-filter.config.ts",
     "test:e2e:qc-brix-matrix": "BROWSER_TEST_INSTALL_WEBKIT=1 bash ../../scripts/src/run-release-node.sh env npm_config_offline=true bash ../../scripts/src/run-isolated-browser-suite.sh --playwright-config=playwright.qc-brix-matrix.config.ts",
     "test:e2e:reduced-motion": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(if [ -n \"${CI:-}\" ]; then :; else command -v chromium || command -v chromium-browser || command -v google-chrome; fi)} playwright test --config playwright.reduced-motion.config.ts",
     "test:e2e:reduced-motion:built": "REDUCED_MOTION_BUILT_OUTPUT=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(if [ -n \"${CI:-}\" ]; then :; else command -v chromium || command -v chromium-browser || command -v google-chrome; fi)} playwright test --config playwright.reduced-motion.config.ts",

@@ -5,7 +5,7 @@
 - [npm lifecycle](npm-registry-script-metadata.md) + [tarball transport](npm-tarball-transport.md) — test script metadata and HTTPS-only redirects, not just strict TLS.
 - [pnpm lockfile](post-merge-setup.md) + [provenance](pnpm12-lockfile-provenance.md) + [outdated scope](pnpm-outdated-scope-limits.md) — repair peers; verify direct importers and preserve provenance.
 - [Security override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to the affected parent when a global major replacement could disrupt other consumers.
-- [Safe observability](observability-safe-events.md) + [event-loop histogram](event-loop-delay-monitor-warmup.md) + [diagnostic persistence](diagnostic-persistence-scope.md) — bound event data and distinguish diagnostic writes from other transactions.
+- [Observability](observability-safe-events.md) + [histograms](event-loop-delay-monitor-warmup.md) + [diagnostics](diagnostic-persistence-scope.md) — bound events and separate diagnostic writes.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
 - [Dough families](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) + [weights](dough-weight-server-pool.md) — specific flavors first; fill only unset weights.
@@ -15,23 +15,28 @@
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only](web-mobile-parity.md) + [screens](cast-screens.md) + [live sync](live-sync-web-mobile.md) — station displays stay web-only; sync uses non-clobber merges and a 10 MB JSON limit.
 - [edits](autosave-edit-attribution.md) + [forms](open-form-profile-clobber.md) + [pending](scheduled-run-profile-snapshot.md) — attribute edits; refresh forms and pending runs after profile writes.
-- [Auth & sessions](daily-reset-auth-boundary.md) + [revocation](password-change-session-invalidation.md) + [daily reset](daily-reset-trigger.md) + [identity](auth-identity-cache.md) + [account lifecycle](account-lifecycle-sessions.md) — server owns rollover; keep roles, tokens, and sessions fenced.
-- [Inventory merge](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) + [stock corrections](completed-run-stock-corrections.md) — serialize drawdowns and reconcile edits against a durable ledger.
-- [DB fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, workflow roles, and writable sockets.
-- [Browser](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
-- [Isolated browser matrices](browser-matrix-isolation.md) — when a multi-project suite times out after its first profile, rerun the failed profile alone before treating it as a browser defect.
-- [Browser picker assertions](browser-evidence-assertions.md) — scope queries to the active touch dialog; hidden closed-dialog inputs may match global selectors.
-- [Browser storage](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable localStorage and missing query parameters.
+- [Auth](daily-reset-auth-boundary.md) + [revocation](password-change-session-invalidation.md) + [reset trigger](daily-reset-trigger.md) — server owns rollover; fence roles and sessions.
+- [Identity](auth-identity-cache.md) + [account lifecycle](account-lifecycle-sessions.md) — fence cached identities and revoked sessions.
+- [Merge](ingredient-merge.md), [locks](inventory-settings-concurrency.md), [idempotency](inventory-consume-idempotency.md), [corrections](completed-run-stock-corrections.md) — serialize stock.
+- [Prep inventory accounting](prep-inventory-accounting.md) — charge raw ingredients when prep is made; later runs use prepared stock.
+- [DB fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) — keep migration-aware setup and role boundaries.
+- [Pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve writable sockets and local/CI parity.
+- [Browser tests](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [a11y](a11y-coverage-gate.md) — isolate state; stabilize browser checks.
+- [Fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) + [visuals](visual-regression-baselines.md) + [ack](onboarding-ack-latch.md) — seed; stabilize UI proof.
+- [Browser checks](browser-check-boundaries.md) + [auth timing](slow-network-auth-timing.md) + [isolated suites](browser-matrix-isolation.md) — bound waits; rerun timed-out profiles alone.
+- [Browser selectors](browser-evidence-assertions.md) + [storage](browser-localstorage-availability.md) — scope queries and guard unavailable browser storage.
+- [Phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — account for form overrides and missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
 - [Spec export integrity](spec-export.md) — fresh server snapshots; keep per-pizza oz and batch lbs separate; blanks are unknown, and conflicts remain visible.
-- [Memory](learned-memory-pattern.md) + [aliases](learned-import-aliases.md) + [AI](shared-ai-memory.md) + [alerts](proactive-alerts.md) — shared corrections; deduped nudges; separate staff Q&A.
+- [Shared memory](learned-memory-pattern.md) + [aliases](learned-import-aliases.md) — corrections and learned aliases are shared.
 - [Reviewer coverage](ai-corrections-full-coverage.md) + [memory health](ai-memory-health-audits.md) — fail-safe review treats historic aliases as evidence.
 - [Run progress](press-done-model.md) + [occupancy](cases-line-occupancy.md) + [auto-track](autotrack-remainder-carry.md) — separate WIP; carry fractions, cap demand, hide dough batches in crust mode.
-- [Schedule import](multi-sheet-schedule-import.md) + [checks](scheduled-recipe-check.md) + [moves](schedule-move-canonical-writes.md) — preserve imported days, canonical moves, and non-pizza markers.
-- [Schedule dates](scheduled-day-client-date.md) + [today edits](today-schedule-edit-live-path.md) + [401s](schedule-import-401.md) — use client dates, stop 401s, and preserve edits on Start Run.
+- [Schedule import](multi-sheet-schedule-import.md) + [checks](scheduled-recipe-check.md) + [dates](scheduled-day-client-date.md) — preserve days and non-pizza markers; use client dates.
+- [Moves](schedule-move-canonical-writes.md) + [today edits](today-schedule-edit-live-path.md) + [401s](schedule-import-401.md) — use canonical moves and retain edits on Start Run.
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Merge denials and tombstones](merge-deny-and-change-history.md) + [tombstones](merge-tombstones.md) — denials, undo, and un-delete stamps protect cross-device merges.
+- [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — keyed nudges dedupe; staff Q&A stays separate from manager-only optimization.
 - [AI forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — forecasts seed editable schedules; scoring is pure and truncation-tolerant.
 - [Stale workspace links](isolated-env-stale-workspace-links.md) — isolated installs may miss workspace links; run pnpm install and typecheck:libs before changing code.
 - [Temp substitutions](temp-substitutions.md) — day-state swap/add/remove overlays must affect both totals and consumption keys through shared inventory math.
@@ -45,7 +50,8 @@
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [One-time heals](one-time-data-heals.md) + [purge](one-time-data-purge.md) + [placeholder runs](seeded-placeholder-runs.md) — marker/epoch guards; seeded blanks stay local; never hold zero runs.
 - [Master-data merge](merge-server-master-data-repoint.md) + [brand aliases](brand-rename-aliases.md) — repoint pools and learn aliases so old names do not return.
-- [API boundaries](api-json-error-handler.md) + [route mounting](api-route-composition.md) + [compatibility](operations-api-compatibility-window.md) + [HTTP policy](http-security-policy.md) + [route uniqueness](express-route-uniqueness.md) — keep errors, mounts, aliases, and security rules explicit; verify effective routes.
+- [API errors](api-json-error-handler.md) + [route mounting](api-route-composition.md) + [compatibility](operations-api-compatibility-window.md) — keep JSON errors, mounts, and aliases explicit.
+- [HTTP security policy](http-security-policy.md) — keep CSP narrowly matched to actual app resources, and emit HSTS only at a verified TLS-terminating layer.
 - [Import units](spec-import-batch-vs-perpizza.md) + [sources](import-source-file-semantics.md) + [dedup](import-order-dedup-keys.md) — keep native units/order; dedup by kind.
 - [Stick pepperoni types](stick-pep-types.md) — cheese sticks are pepperoni types, not cheese recipes; recognize them in prompt and classifier.
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
@@ -57,40 +63,37 @@
 - [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.
 - [Spec-import chunk union](spec-import-chunk-union.md) — union chunk applicators; replace on file merge; same type at two weights means two stations.
 - [Profile autofill](profile-autofill-from-saved-sheets.md) — mirror applySpecImport, including the dough/sauce recipe tie loop; form-only until Save Setup.
-- [Profile Apply](profile-force-apply.md) + [save ack](explicit-profile-ack.md) + [setup edits](unified-setup-editing.md) — verify explicit writes and propagate changes to open forms.
-- [Profile write gating](profile-write-gating.md) — capability-gate saves; defer boot heals and treat queued 403s as terminal.
+- [Profile Apply](profile-force-apply.md) + [ack](explicit-profile-ack.md) — verify writes and refresh open forms.
+- [Setup edits](unified-setup-editing.md) + [write gates](profile-write-gating.md) — defer boot heals and stop queued 403s.
 - [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Batch upsert atomicity](batch-upsert-transaction.md) — transact batch writes; persist rename maps before client heals to avoid stranded references.
-- [Spec brand backfill](spec-import-brand-backfill.md) + [brand-scoped links](brand-scoped-import-names.md) — heal unbranded rows; keep cheese/mix links in-brand.
-- [Spec overwrite](spec-wins-recipe-overwrite.md) + [re-import links](spec-import-name-link-authority.md) — preserve spec authority; pruning never gates name links or applicators.
+- [Spec brand links](spec-import-brand-backfill.md) + [scoped names](brand-scoped-import-names.md) — heal unbranded rows and preserve in-brand links.
+- [Overwrite](spec-wins-recipe-overwrite.md) + [re-import](spec-import-name-link-authority.md) — keep spec authority during overwrite and re-import.
 - [Cheese share oz basis](cheese-share-oz-basis.md) — Share % may use oz only with FULL oz coverage of lbs>0 rows; partial imported oz must be stripped (heal + editor clear) or shares go wild.
 - [Spec-import stub pollution](spec-import-stub-pollution.md) — spec imports mint all-zero stub recipes in every pool; unlinked stubs persist in prod; audit method + corpus pointer inside.
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
 - [DB recovery](dev-db-connection-exhaustion.md) + [deadlines](pool-acquisition-deadlines.md) + [capacity](database-capacity-evidence.md) — bound waits; backend slots are not Autoscale counts.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Applicator tolerances](applicator-tolerance-columns.md) — first post-name number is oz/pizza; trailing 0.2/0.1 cells are tolerances; verify TARGET WEIGHT sum.
-- [Bare-qualifier pep names](natural-pep-name-poison.md) — use the full product name; guard synced-name poison at write time.
-- [Re-import rename memory](spec-reimport-rename-memory.md) — learn aliases on every rename; never fuzz between distinct parenthetical variants.
-- [Name-only attachment](recipe-name-only-attachment.md) + [fan narrowing](brand-fan-linked-name-narrowing.md) — attach by name/slot; brand/flavor fan-out is retired.
-- [Correcting-import cleanup](correcting-import-alias-cleanup.md) — corrections remove bad aliases when safe and learn the reverse.
+- [Pepperoni names](natural-pep-name-poison.md) + [rename memory](spec-reimport-rename-memory.md) — use full names; learn aliases on rename and never fuzz distinct variants.
+- [Attach](recipe-name-only-attachment.md) + [fan](brand-fan-linked-name-narrowing.md) + [correction](correcting-import-alias-cleanup.md) — link by name/slot; correct bad aliases safely.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
-- [Sync safety](sync-snapshot-identity.md) + [write fences](complete-sync-snapshot-fencing.md) + [offline intents](offline-operational-intents.md) — stable hashes/fences; non-OK is never ack.
-- [Sync and auto-tracking priority](sync-autotracking-priority.md) — prioritize sync reliability; align recovery/lifecycle across trackers without flattening station-specific production math.
-- [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
-- [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve units and fail closed on unsupported layouts.
-- [Apply-source retention](apply-source-evidence-retention.md) — formula and cached-result text stays review-only; do not send formula-cell results with Apply evidence.
-- [Release/source evidence](release-evidence-index.md) + [source boundary](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to its DB, report, revision, provenance, and deployment readiness.
+- [Sync safety](sync-snapshot-identity.md) + [write fences](complete-sync-snapshot-fencing.md) + [offline intents](offline-operational-intents.md) — stable identity/fences; non-OK is never ack.
+- [Sync recovery](sync-autotracking-priority.md) + [cross-channel claims](cross-channel-auto-track-claims.md) — distinguish peer auto-accepts from manual edits; preserve station math.
+- [Formula safety](formula-import-safety.md) + [layouts](source-workbook-layouts.md) + [Apply retention](apply-source-evidence-retention.md) — preserve units; formula/cached values stay review-only.
+- [Release evidence and readiness](release-evidence-index.md) — revision binding, bounded gates, browser proof, retry/cancel outcomes and deployment-bound readiness.
+- [Source evidence](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to DB, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
-- [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — offline gates; ties fail; use ignored caches for local weights.
-- [Local model memory headroom](local-model-memory-headroom.md) — verify available RAM at the required context on the actual evaluator; a 16-GiB cap did not guarantee Qwen3 8B fit.
+- [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — offline ties fail; verify target-context memory.
+- [Local headroom](local-model-memory-headroom.md) — verify actual context memory; keep weights in ignored caches.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
-- [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
-- [Finished-case adjustment audit](finished-case-adjustment-audit.md) — keep actor/reason history behind manager authorization without narrowing general stock reads.
+- [Warehouse/Inventory](warehouse-inventory-boundary.md) + [case adjustment audit](finished-case-adjustment-audit.md) — keep destinations distinct and gate actor/reason history.
 - [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
 - [AI cache](retained-ai-cache-boundary.md) + [retired data](retired-ai-data-retention.md) — recompute deterministic matches; stop writers before allowlisted cleanup and redact sensitive payloads.
 - [Operational read-model integrity](operational-read-model-integrity.md) — canonical reports fail closed on rejected snapshot facts; offline exports must preserve non-authoritative provenance.
 - [Import lifecycle row identity](import-lifecycle-row-identity.md) — compare repeated ingredient rows by totals, but preserve structure; ambiguous manager fields stay review-only.
+- [Import Gold authorization](import-gold-owner-authorization.md) + [review layering](import-review-dialog-layering.md) — record source approval for real cases; keep review controls above overlays.
 - [Scoped offline master-data queues](scoped-offline-master-data-queues.md) — partition caches/outboxes by auth scope; verify cross-account delivery and application, not only visible queue state.
 - [Historical repair compatibility](historical-repair-compatibility.md) — preserve released marker-first transactions; validate stored nested results with bounded recursive telemetry.
 - [Bundle boundaries](bundle-boundary-manifests.md) + [build isolation](build-integration-isolation.md) — use Rollup module membership; keep bundler caches out of reused dependencies.
@@ -98,8 +101,7 @@
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — REPLIT_ENVIRONMENT=production can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) + [MPL web-push approval](mpl-web-push-approval.md) — keep one atomic alert claim; package approval is limited to web-push@3.6.7.
-- [Scheduled queue warning channel](scheduled-queue-warning-channel.md) — stalled/duplicate queue warnings use readiness and transition logs, not generic staff push.
-- [Scheduled evaluation identity](scheduled-evaluation-idempotency.md) — one scope/time slot is independent of scheduler identity; legacy queue cleanup requires a separate audited process.
+- [Queue warnings](scheduled-queue-warning-channel.md) + [evaluation identity](scheduled-evaluation-idempotency.md) — log stalls and dedupe by scope/time, not scheduler identity.
 - [Dated sync authorization](dated-sync-authorization.md) — staff use `/sync/today`; dated writes must not trust client-claimed scheduling dates.
 - [Bounded archive reads](bounded-archive-range-reads.md) + [cursors](queue-history-cursor-precision.md) — cap spans/results and preserve timestamp precision to prevent row skips.
 - [Finalized report authenticity](finalized-report-authenticity.md) — sign canonical payload/audit envelopes; verify persisted rows and classify unsigned legacy records.
@@ -107,50 +109,51 @@
 - [Profile import precedence](profile-import-precedence.md) — explicit product-level metadata must fence every later shared-recipe and pool hydration path, including force mode.
 - [Recipe row unit provenance](recipe-row-unit-provenance.md) — unit labels describe raw values only and must follow the selected row set through merges.
 - [Shared recipe refresh](shared-master-data-refresh.md) + [Mix Plan snapshots](mix-plan-snapshot-refresh.md) — invalidate canonical views after shared edits and run-value changes.
-- [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely; keep overlays and app-shell panels clear of fixed tabs on short screens.
+- [Operational dialogs](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals and keep overlays clear of fixed tabs on short screens.
 - [Case-based input validity](case-based-production-input-validity.md) — without positive pizzas-per-case, suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
-- [Source repair/propagation](source-heal-stale-client-fence.md) + [acknowledged master-data writes](acknowledged-master-data-propagation.md) — fence sleeping-client replays and refresh pending runs after recipe saves.
+- [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
+- [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — recipe saves must refresh pending runs; cache effects alone can look like bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
-- [PWA cache/update](pwa-offline-eventsource-fixtures.md) + [deferred cache](pwa-deferred-cache-policy.md) + [update prompts](pwa-update-prompts.md) — close owned SSE on outages; lazy loading alone does not warrant excluding precache, and recovery requires safe-state proof.
+- [PWA cache](pwa-offline-eventsource-fixtures.md) + [deferred cache](pwa-deferred-cache-policy.md) + [updates](pwa-update-prompts.md) — close SSE on outages; gate updates on safe-state proof.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
-- [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
-- [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
-- [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
-- [Disposable DB startup](disposable-database-test-startup.md) — wait for test schemas and keep local PostgreSQL rehearsals alive across shell calls.
+- [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64](local-arm64-toolchain.md) + [disposable DB](disposable-database-test-startup.md) — use private sockets; wait for test schemas.
+- [Section-scoped edits](section-scoped-online-edits.md) + [automatic staged supply](automatic-staged-supply.md) — use durable row fencing; derive stages from cumulative progress.
 - [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — Publish owns managed schema changes; direct SQL rehearsals do not prove Publish compatibility.
-- [Container history/provenance](container-image-migration.md) + [image evidence](container-image-release-evidence.md) + [Compose isolation](docker-compose-env-file-overrides.md) — preserve Replit publish authority and ensure test Compose resolves to disposable Postgres.
+- [Container history](container-image-migration.md) + [provenance](container-image-release-evidence.md) — Render is historical; Replit controls production publishing.
+- [Compose env isolation](docker-compose-env-file-overrides.md) — replace base Compose env files with `!override`; assert the resolved database URL stays on disposable Postgres.
 - [Atomic import](atomic-import-operations.md) + [history](completed-history-durability.md) + [undo](data-health-undo-coverage.md) — preserve evidence, enrich history idempotently, retain snapshots.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
 - [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
-- [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — shared handoffs must retain exact CI/task-run reports with full run and revision identity, not summaries alone.
-- [GitHub CI trigger access](github-ci-trigger-access.md) — an authorized source-control connection may not authenticate `gh`; verify run access before claiming CI evidence.
+- [GitHub CI evidence](github-actions-evidence-extraction.md) + [trigger access](github-ci-trigger-access.md) — retain run/revision records; verify source-control access before claiming a run.
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
-- [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
-- [Local validation runtime](local-validation-runtime-index.md) — runner locks, pinned Node, Docker healthcheck `setns` limits, loopback probes, and offline browser fixtures.
+- [Task validation](task-platform-evidence-limits.md) + [runtime](local-validation-runtime-index.md) — use real dependencies; account for locks, pinned toolchains, and offline browsers.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [SSE topology](sse-topology-choice.md) + [publish](production-publish-workflow.md) — derive DB peaks from samples; provider metrics stay manual; peer SSE unsupported.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
 - [Signal cleanup](shell-signal-cleanup-output.md) + [skill refresh](skill-session-registry-refresh.md) — show cleanup warnings, close locks, and refresh loaded skills.
 - [Pool fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 bytes; waive drift only with fresh owner-reviewed pins.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) — record-first, non-blocking workflow with explicit target, role, sign-off, and retention rules.
+- [Advisory Brix targets](qc-brix-targets.md) — Brix settings are separately manager-reviewed; never inherit weight limits or infer a default.
 - [Run to Time policy](run-to-time-operator-policy.md) — elapsed targets mean reached today; reset restores the standard evening target rather than copying now.
 - [Crust batch UI](crust-run-no-dough-batches.md) + [run-need cap](autotrack-over-provisioning.md) — hide dough batches in crust mode and clamp live auto-track to actual demand.
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.
 - [SSE reader timeouts](sse-test-reader-timeouts.md) + [listener stop](sync-listener-stop-diagnostics.md) — retain pending reads across timeouts; fence in-flight metrics after shutdown.
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [WebKit GIO TLS](webkit-gio-tls-runtime.md) + [IPv6 loopback](ipv6-loopback-test-environment.md) — keep trust enabled; load Nix TLS modules and block unsupported AF_INET6 identity checks.
-- [Local production graph builds](local-production-graph-build.md) — use development identity mode for local bundle analysis; keep publish-source identity changes in release workflows.
-- [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
+- [WebKit push tests](local-browser-suite-routing.md) — WPE can hang on push APIs; use active registrations and clearly scoped empty-subscription fixtures.
+- [Bundle evidence](local-production-graph-build.md) + [TS bundle hash](typescript-source-bundle-hashing.md) — use development identity locally; verify source before upload.
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
 - [Prep-mix identities](prep-mix-identities.md) — Hot Giardiniera Mix, Pineapples, and Spinach are prep mixes; audit their fields under prep semantics.
-- [Prep inventory accounting](prep-inventory-accounting.md) — raw ingredients charge when prep is made; later runs use prepared stock, including previously made carry.
+- [Runtime/CLI](runtime-library-cli-boundaries.md) + [Docker smoke](docker-browser-smoke-runtime.md) — isolate CLI effects; keep DNS fixes test-only; verify app/API startup.
 - [Release guide authority claims](release-guide-authority-claims.md) — check provider/action/live-target claims, preserving explicit negatives, examples, and historical context.
 - [Vitest hook returns](vitest-hook-cleanup.md) — implicitly returning a mock from a setup hook registers it as cleanup and can create post-assertion failures.
+- [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.
+- [Playwright 304 responses](playwright-304-responses.md) — valid HTTP 304 cache hits are not errors; classify 4xx/5xx separately and keep request failures fatal.

@@ -4564,6 +4564,10 @@ export default function Home() {
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
   const [ignoredMergePanelOpen, setIgnoredMergePanelOpen] = useState(false);
+  const [ignoredMergeFilter, setIgnoredMergeFilter] = useState<{
+    scopeKey: string;
+    query: string;
+  } | null>(null);
   const [ignoredMergeState, setIgnoredMergeState] = useState<{
     scopeKey: string;
     pairs: DeniedMerge[];
@@ -5132,6 +5136,17 @@ export default function Home() {
   ]);
   const scopedIgnoredMerges =
     ignoredMergeState?.scopeKey === ignoredMergeScopeKey ? ignoredMergeState.pairs : [];
+  // A query is only visible in the scope where it was entered, so scope changes
+  // never show old rows under a stale category or flavor brand.
+  const ignoredMergeFilterQuery =
+    ignoredMergeFilter?.scopeKey === ignoredMergeScopeKey ? ignoredMergeFilter.query : "";
+  const visibleIgnoredMerges = useMemo(() => {
+    const query = ignoredMergeFilterQuery.trim().toLowerCase();
+    if (!query) return scopedIgnoredMerges;
+    return scopedIgnoredMerges.filter((pair) =>
+      pair.nameA.toLowerCase().includes(query) || pair.nameB.toLowerCase().includes(query),
+    );
+  }, [ignoredMergeFilterQuery, scopedIgnoredMerges]);
 
   useEffect(() => {
     if (!ignoredMergePanelOpen || !canManageProfiles) return;
@@ -15566,7 +15581,7 @@ export default function Home() {
     mergeSources, mergeStaleCi, mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected, mergeSuggestions, mergeTarget,
     ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError, ignoredMergeScopeKey,
-    scopedIgnoredMerges, restoringIgnoredMergeKey,
+    ignoredMergeFilterQuery, visibleIgnoredMerges, scopedIgnoredMerges, restoringIgnoredMergeKey,
     mergeTargetOptions, mergeUniverse, mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput,
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
@@ -15606,7 +15621,7 @@ export default function Home() {
     setMergeBfMode, setMergeBusy, setMergeCategory, setMergeConfirming, setMergeError,
     setMergeFromImport, setMergeSources, setMergeSuggestBusy, setMergeSuggestError, setMergeSuggestNote, setMergeSuggestRan,
     setMergeSuggestSelected, setMergeSuggestions, setMergeTarget, setMergedAwayTomb, setMgIngInput, setMgNamesInput,
-    setIgnoredMergePanelOpen, setIgnoredMergeState,
+    setIgnoredMergePanelOpen, setIgnoredMergeState, setIgnoredMergeFilter,
     setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
     setNewPin, setNewPinConfirm, setNewReasonInput, setPep1ShowB, setPep2ShowB, setPepTypes,
     setPinChangeMsg, setPinError, setPinInput, setPremixImportApplying, setPremixImportError, setPremixImportLoading,
@@ -15675,7 +15690,8 @@ export default function Home() {
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected,
     mergeSuggestions, mergeTarget, mergeTargetOptions, mergeUniverse,
     ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError,
-    ignoredMergeScopeKey, scopedIgnoredMerges, restoringIgnoredMergeKey,
+    ignoredMergeScopeKey, ignoredMergeFilterQuery, visibleIgnoredMerges, scopedIgnoredMerges,
+    restoringIgnoredMergeKey,
     mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
     mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
@@ -16553,33 +16569,74 @@ export default function Home() {
                             {ignoredMergeBusy ? (
                               <p className="text-[11px] text-muted-foreground">Loading ignored matches…</p>
                             ) : scopedIgnoredMerges.length > 0 ? (
-                              <ul className="space-y-1.5">
-                                {scopedIgnoredMerges.map((pair) => {
-                                  const pairKey = [pair.nameA, pair.nameB].sort().join("::");
-                                  return (
-                                    <li
-                                      key={pairKey}
-                                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/60 px-2.5 py-2"
+                              <>
+                                <label
+                                  htmlFor="ignored-merge-filter"
+                                  className="block text-[11px] font-medium text-muted-foreground"
+                                >
+                                  Filter ignored matches by recipe name
+                                </label>
+                                <div className="flex gap-2">
+                                  <input
+                                    id="ignored-merge-filter"
+                                    type="search"
+                                    value={ignoredMergeFilterQuery}
+                                    onChange={(event) => setIgnoredMergeFilter({
+                                      scopeKey: ignoredMergeScopeKey,
+                                      query: event.currentTarget.value,
+                                    })}
+                                    placeholder="Search either recipe name"
+                                    autoComplete="off"
+                                    className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                  />
+                                  {ignoredMergeFilterQuery && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIgnoredMergeFilter({
+                                        scopeKey: ignoredMergeScopeKey,
+                                        query: "",
+                                      })}
+                                      className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted"
                                     >
-                                      <span className="min-w-0 break-words text-xs">
-                                        {pair.nameA} ↔ {pair.nameB}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        aria-label={`Restore ignored match ${pair.nameA} and ${pair.nameB}`}
-                                        disabled={Boolean(restoringIgnoredMergeKey)}
-                                        onClick={() => void restoreIgnoredMerge(pair)}
-                                        className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50"
-                                      >
-                                        {restoringIgnoredMergeKey === pairKey ? "Restoring…" : "Restore"}
-                                      </button>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
+                                      Clear filter
+                                    </button>
+                                  )}
+                                </div>
+                                {visibleIgnoredMerges.length > 0 ? (
+                                  <ul className="space-y-1.5">
+                                    {visibleIgnoredMerges.map((pair) => {
+                                      const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+                                      return (
+                                        <li
+                                          key={pairKey}
+                                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/60 px-2.5 py-2"
+                                        >
+                                          <span className="min-w-0 break-words text-xs">
+                                            {pair.nameA} ↔ {pair.nameB}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            aria-label={`Restore ignored match ${pair.nameA} and ${pair.nameB}`}
+                                            disabled={Boolean(restoringIgnoredMergeKey)}
+                                            onClick={() => void restoreIgnoredMerge(pair)}
+                                            className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50"
+                                          >
+                                            {restoringIgnoredMergeKey === pairKey ? "Restoring…" : "Restore"}
+                                          </button>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    No ignored matches contain “{ignoredMergeFilterQuery.trim()}”.
+                                    Clear the filter to see all ignored matches.
+                                  </p>
+                                )}
+                              </>
                             ) : !ignoredMergeError ? (
                               <p className="text-[11px] text-muted-foreground">
-                                No ignored matches in this category.
+                                No ignored matches in this selection.
                               </p>
                             ) : null}
                           </div>
