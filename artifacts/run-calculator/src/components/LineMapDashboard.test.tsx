@@ -30,6 +30,7 @@ function renderLineMap(
     scheduledDays?: ScheduledDay[];
     configuredApplicator?: 3 | 4;
     configuredPepperoni?: boolean;
+    pepperoniBatchQuantity?: number;
     applicatorBatchesAvailable?: boolean;
     mixedFrontline?: boolean;
     applicatorRecipes?: Partial<Record<1 | 2 | 3 | 4, RecipeRow[]>>;
@@ -112,7 +113,7 @@ function renderLineMap(
         ? applicatorBatchesAvailable ? 3 : 0
         : configuredApplicator === 4 && applicatorBatchesAvailable ? 2 : 0,
       pep1Lbs: mixedFrontline || configuredPepperoni ? 12 : 0,
-      pep1Batches: mixedFrontline ? 1 : 0,
+      pep1Batches: options.pepperoniBatchQuantity ?? (mixedFrontline ? 1 : 0),
       pep1LbsB: mixedFrontline ? 8 : 0,
       pep1BatchesB: 0,
       pep2Lbs: 0,
@@ -260,24 +261,105 @@ describe("LineMapDashboard station lifecycle statuses", () => {
       renderLineMap("running", { configuredApplicator: slot });
 
       const frontline = screen.getByRole("button", { name: /Frontline/ });
-      expect(within(frontline).getByText(`App ${slot} — Cheese`).parentElement?.textContent)
+      const appRow = within(frontline).getByText(`App ${slot} — Cheese`).parentElement;
+      expect(appRow?.textContent)
         .toContain("2.00 batches");
       expect(within(frontline).queryByText("App 1 — Mozzarella")).toBeNull();
       expect(within(frontline).queryByText("App 2 — Cheddar")).toBeNull();
+    },
+  );
+
+  it.each([3, 4] as const)(
+    "shows the need for applicator %i in pounds when batch quantity is unavailable",
+    (slot) => {
+      renderLineMap("running", {
+        configuredApplicator: slot,
+        applicatorBatchesAvailable: false,
+      });
+
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
+      expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
+    },
+  );
+
+  it("shows a Pepperoni need in pounds when no batch quantity is available", () => {
+    renderLineMap("running", { configuredPepperoni: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
+    expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
+    expect(within(frontline).queryByText(/batches/)).toBeNull();
   });
 
-  it("keeps the aggregate applicator need when recipe components are not usable", () => {
+  it("shows a configured Pepperoni need in batches when batch details are available", () => {
     renderLineMap("running", {
-      configuredApplicator: 3,
+      configuredPepperoni: true,
+      pepperoniBatchQuantity: 2.5,
+    });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    const pepperoniRow = within(frontline).getByText("Pep 1 — Pepperoni").parentElement;
+    expect(pepperoniRow?.textContent).toContain("2.50 batches");
+    expect(pepperoniRow?.textContent).not.toContain("12.00 lbs");
+  });
+
+  it("shows Sauce need in pounds when batch quantity is unavailable", () => {
+    renderLineMap("running", { sauceNeedsWithoutBatches: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    expect(within(frontline).getByText("Sauce")).toBeTruthy();
+    expect(within(frontline).getByText("50.00 lbs")).toBeTruthy();
+    expect(within(frontline).queryByText(/batches/)).toBeNull();
+  });
+
+  it("shows later applicator needs after Sauce, earlier applicators, and Pepperoni rows", () => {
+    renderLineMap("running", { mixedFrontline: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    for (const label of [
+      "Sauce",
+      "App 1 — Mozzarella",
+      "App 2 — Cheddar",
+      "Pep 1 — Pepperoni",
+      "Pep 1 — Sausage",
+      "App 3 — Cheese",
+      "App 4 — Cheese",
+    ]) {
+      expect(within(frontline).getByText(label)).toBeTruthy();
+    }
+    const app3Label = within(frontline).getByText("App 3 — Cheese");
+    const app4Label = within(frontline).getByText("App 4 — Cheese");
+    expect(app3Label.classList.contains("whitespace-normal")).toBe(true);
+    expect(app3Label.classList.contains("break-words")).toBe(true);
+    expect(app3Label.parentElement?.textContent).toContain("2.00 batches");
+    expect(app4Label.parentElement?.textContent).toContain("3.00 batches");
+  });
+
+  it("shows ingredient details alongside aggregate applicator needs", () => {
+    renderLineMap("running", {
+      mixedFrontline: true,
       applicatorRecipes: {
-        3: [
-          { ingredient: "", lbs: 20 },
-          { ingredient: "Zero-weight ingredient", lbs: 0 },
+        1: [
+          { ingredient: "Mozzarella", lbs: 15 },
+          { ingredient: "Parmesan", lbs: 5 },
+        ],
+        2: [
+          { ingredient: "Cheddar", lbs: 7.5 },
+          { ingredient: "Seasoning", lbs: 22.5 },
         ],
       },
     });
 
     const frontline = screen.getByRole("button", { name: /Frontline/ });
+    expect(within(frontline).getByText("App 1 — Mozzarella").parentElement?.textContent)
+      .toContain("1.00 batches");
+    expect(within(frontline).getByTestId("frontline-components-1").textContent)
+      .toContain("Mozzarella15.00 lbsParmesan5.00 lbs");
+    expect(within(frontline).getByText("App 2 — Cheddar").parentElement?.textContent)
+      .toContain("2.00 batches");
+    expect(within(frontline).getByTestId("frontline-components-2").textContent)
+      .toContain("Cheddar7.50 lbsSeasoning22.50 lbs");
     expect(within(frontline).getByText("App 3 — Cheese").parentElement?.textContent)
       .toContain("2.00 batches");
     expect(within(frontline).queryByTestId("frontline-components-3")).toBeNull();
@@ -298,6 +380,9 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     ]) {
       expect(within(frontline).getByText(label)).toBeTruthy();
     }
+    const app3Row = within(frontline).getByText("App 3 — Cheese").parentElement;
+    expect(app3Row?.textContent).toContain("2.00 batches");
+    expect(within(frontline).queryByTestId("frontline-components-3")).toBeNull();
   });
 
   it("confirms activity at the warehouse station", async () => {
@@ -310,6 +395,72 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     await waitFor(() =>
       expect(confirmStationActivity).toHaveBeenCalledWith("warehouse"),
     );
+  });
+
+  it("shows waiting for stations on a pending run", () => {
+    renderLineMap("pending");
+
+    expect(screen.getByText("LINE WAITING")).toBeTruthy();
+    expectZoneStatus(/Press \/ Oven/, "Waiting");
+    expectZoneStatus(/Freeze Tunnel/, "Waiting");
+    expectZoneStatus(/Packaging/, "Waiting");
+    expectZoneReason(/Press \/ Oven/, "Run is waiting to start");
+    expectZoneReason(/Freeze Tunnel/, "Run is waiting to start");
+    expectZoneReason(/Packaging/, "Run is waiting to start");
+    expect(
+      screen.getByRole("button", {
+        name: /Press \/ Oven.*Run is waiting to start/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("shows active only for running stations with current activity", () => {
+    renderLineMap("running", { active: true });
+
+    expect(screen.getByText("LINE RUNNING")).toBeTruthy();
+    expectZoneStatus(/Dough/, "Running");
+    expectZoneStatus(/Sauce/, "Running");
+    expectZoneStatus(/Press \/ Oven/, "Running");
+    expectZoneStatus(/Frontline/, "Running");
+    expectZoneStatus(/Freeze Tunnel/, "Running");
+    expectZoneStatus(/Packaging/, "Running");
+    expectZoneReason(/Warehouse/, "No current station activity");
+    expect(
+      within(screen.getByRole("button", { name: /Dough/ })).queryByText(
+        "No current station activity",
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps inactive stations idle while a run is running", () => {
+    renderLineMap("running");
+
+    expectZoneStatus(/Press \/ Oven/, "Idle");
+    expectZoneStatus(/Freeze Tunnel/, "Idle");
+    expectZoneStatus(/Packaging/, "Idle");
+    expectZoneReason(/Press \/ Oven/, "No current station activity");
+    expectZoneReason(/Freeze Tunnel/, "No current station activity");
+    expectZoneReason(/Packaging/, "No current station activity");
+  });
+
+  it("labels the age unknown when a running idle station has no authoritative activity timestamp", () => {
+    renderLineMap("running");
+
+    for (const zoneId of [
+      "dough",
+      "sauce",
+      "press",
+      "frontline",
+      "freezeTunnel",
+      "packaging",
+      "warehouse",
+    ]) {
+      expect(
+        screen.getByTestId(`station-activity-age-${zoneId}`).textContent,
+      ).toBe("Time since last confirmed activity: unknown");
+    }
+    expectZoneStatus(/Press \/ Oven/, "Idle");
+    expectZoneReason(/Press \/ Oven/, "No current station activity");
   });
 
   it("does not show an activity age for active stations or non-running lifecycle states", () => {
