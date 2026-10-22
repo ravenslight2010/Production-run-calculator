@@ -384,6 +384,7 @@ describe("live station startup", () => {
   afterEach(() => {
     cleanup();
     clearManualSectionLocks();
+    vi.useRealTimers();
   });
 
   for (const station of STATIONS) {
@@ -516,6 +517,50 @@ describe("live station startup", () => {
 
       expect(lockedControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
       expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
+    },
+  );
+
+  it.each([
+    { section: "pep1", registers: ["pep1", "pep1b"], otherRegisters: ["pep2", "pep2b"] },
+    { section: "pep2", registers: ["pep2", "pep2b"], otherRegisters: ["pep1", "pep1b"] },
+  ] as const)(
+    "restores $section primary and additional stock rows when its peer lease expires without remounting",
+    ({ section, registers, otherRegisters }) => {
+      vi.useFakeTimers();
+      // Expire before the running station's 1-second clock tick: only the lock
+      // notification, not a live-clock rerender, should restore these controls.
+      const leaseMs = 250;
+      expect(claimManualSectionLock(RUN_ID, section, "peer-device", leaseMs, true)).toBe(true);
+      render(
+        <StationProviders status="running" values={{
+          ...STATION_VALUES,
+          pep1Type: "Pepperoni",
+          pep1TypeB: "Cup Pepperoni",
+          pep2Type: "Turkey Pepperoni",
+          pep2TypeB: "Mini Cup Pepperoni",
+          pep1Combined: false,
+        }}>
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const lockedControls = registers.flatMap(applicatorStockControls);
+      const otherControls = otherRegisters.flatMap(applicatorStockControls);
+      for (const control of lockedControls) expect(control.disabled).toBe(true);
+      for (const control of otherControls) expect(control.disabled).toBe(false);
+
+      act(() => { vi.advanceTimersByTime(leaseMs - 1); });
+      for (const control of lockedControls) expect(control.disabled).toBe(true);
+      for (const control of otherControls) expect(control.disabled).toBe(false);
+
+      // The expiry notification runs one millisecond after the lease boundary.
+      act(() => { vi.advanceTimersByTime(2); });
+      for (const control of [...lockedControls, ...otherControls]) {
+        expect(control.isConnected).toBe(true);
+        expect(control.disabled).toBe(false);
+      }
+      expect(registers.flatMap(applicatorStockControls)).toEqual(lockedControls);
+      expect(otherRegisters.flatMap(applicatorStockControls)).toEqual(otherControls);
     },
   );
 
