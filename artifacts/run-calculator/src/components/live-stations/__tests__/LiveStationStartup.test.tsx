@@ -293,10 +293,10 @@ const FRONTLINE_APPLICATOR_LOCK_CASES = [
   { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
 
-function applicatorStockControls(slot: (typeof FRONTLINE_APPLICATOR_LOCK_CASES)[number]["slot"]) {
+function applicatorStockControls(slot: string) {
   const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
-  const buttons = within(input.parentElement!).getAllByRole("button") as HTMLButtonElement[];
-  return [input, ...buttons];
+  const fillToCap = within(input.parentElement!).getByRole("button", { name: "Fill to cap" }) as HTMLButtonElement;
+  return [input, fillToCap];
 }
 
 type CheeseApplicatorSlot = "app1" | "app2" | "app3" | "app4";
@@ -471,6 +471,51 @@ describe("live station startup", () => {
       });
 
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      slot: "pep1",
+      section: "pep1",
+      registers: ["pep1", "pep1b"],
+      otherRegisters: ["pep2", "pep2b"],
+    },
+    {
+      slot: "pep2",
+      section: "pep2",
+      registers: ["pep2", "pep2b"],
+      otherRegisters: ["pep1", "pep1b"],
+    },
+  ] as const)(
+    "keeps $slot primary and additional stock rows scoped to their peer lock",
+    ({ slot, section, registers, otherRegisters }) => {
+      const values: FormValues = {
+        ...STATION_VALUES,
+        pep1Type: "Pepperoni",
+        pep1TypeB: "Cup Pepperoni",
+        pep2Type: "Turkey Pepperoni",
+        pep2TypeB: "Mini Cup Pepperoni",
+        pep1Combined: false,
+      };
+      claimManualSectionLock(RUN_ID, section, `peer-${slot}`, 30_000, true);
+      render(
+        <StationProviders status="running" values={values}>
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const lockedControls = registers.flatMap(applicatorStockControls);
+      const otherControls = otherRegisters.flatMap(applicatorStockControls);
+      expect(lockedControls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+      expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
+
+      act(() => {
+        releaseManualSectionLock(RUN_ID, section, `peer-${slot}`);
+      });
+
+      expect(lockedControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
+      expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
     },
   );
 
