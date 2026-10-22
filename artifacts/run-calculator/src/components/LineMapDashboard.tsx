@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
 import { fmtCountdownParts, fmtNum, todayStr } from "../utils";
-import { deriveFrontlineNeedRows } from "../frontlineRows";
+import {
+  deriveFrontlineIngredientNeeds,
+  deriveFrontlineNeedRows,
+} from "../frontlineRows";
 import type { HomeTab } from "../hooks/useHomeNavigation";
 import type { ScheduledDay, ScheduledRun } from "../scheduledDays";
 import type { StationActivityEvidence } from "@workspace/live-calc";
@@ -81,7 +84,11 @@ interface ZoneStatus {
   navTab: HomeTab;
   status: "active" | "idle" | "stopped" | "upstream";
   reason?: string;
-  metrics: { label: string; value: string }[];
+  metrics: {
+    label: string;
+    value: string;
+    details?: { label: string; value: string }[];
+  }[];
   sub?: string;
   activityAge?: string;
   confirmActivity?: boolean;
@@ -234,9 +241,14 @@ export default function LineMapDashboard() {
           pep2LbsB: calc.pep2LbsB, pep2BatchesB: calc.pep2BatchesB,
         })
       : [];
-    const frontlineMetrics = frontlineRows.map(r => ({
-      label: r.label,
-      value: `${fmtNum(r.amount)} ${r.unit}`,
+    const frontlineIngredientNeeds = deriveFrontlineIngredientNeeds(v, frontlineRows);
+    const frontlineMetrics = frontlineRows.map((row) => ({
+      label: row.label,
+      value: `${fmtNum(row.amount)} ${row.unit}`,
+      details: frontlineIngredientNeeds[row.key]?.map((ingredient) => ({
+        label: ingredient.ingredient,
+        value: `${fmtNum(ingredient.amountLbs)} lbs`,
+      })),
     }));
 
     // Freeze Tunnel (derived from calc — cases in freezer)
@@ -470,24 +482,45 @@ function ZoneCard({
         {zone.metrics.length > 0 && (
           <div className={zone.id === "frontline" ? "space-y-1" : "space-y-0.5"}>
             {zone.metrics.map((m) => (
-              <div
-                key={m.label}
-                className={`flex justify-between text-xs ${zone.id === "frontline" ? "items-start gap-x-2" : ""}`}
-              >
-                <span className={
-                  zone.id === "frontline"
-                    ? "min-w-0 whitespace-normal break-words text-muted-foreground"
-                    : "text-muted-foreground truncate"
-                }>
-                  {m.label}
-                </span>
-                <span className={
-                  zone.id === "frontline"
-                    ? "shrink-0 text-right font-medium tabular-nums"
-                    : "font-medium tabular-nums ml-1"
-                }>
-                  {m.value}
-                </span>
+              <div key={m.label}>
+                <div
+                  className={`flex justify-between text-xs ${zone.id === "frontline" ? "items-start gap-x-2" : ""}`}
+                >
+                  <span className={
+                    zone.id === "frontline"
+                      ? "min-w-0 whitespace-normal break-words text-muted-foreground"
+                      : "text-muted-foreground truncate"
+                  }>
+                    {m.label}
+                  </span>
+                  <span className={
+                    zone.id === "frontline"
+                      ? "shrink-0 text-right font-medium tabular-nums"
+                      : "font-medium tabular-nums ml-1"
+                  }>
+                    {m.value}
+                  </span>
+                </div>
+                {zone.id === "frontline" && m.details?.length ? (
+                  <ul
+                    className="ml-2 mt-0.5 space-y-0.5 border-l border-current/20 pl-2 text-[11px]"
+                    data-testid={`frontline-components-${m.label.match(/^App ([1-4])/)?.[1] ?? "unknown"}`}
+                  >
+                    {m.details.map((detail, index) => (
+                      <li
+                        key={`${detail.label}-${index}`}
+                        className="flex justify-between gap-x-2"
+                      >
+                        <span className="min-w-0 whitespace-normal break-words text-muted-foreground">
+                          {detail.label}
+                        </span>
+                        <span className="shrink-0 font-medium tabular-nums">
+                          {detail.value}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             ))}
           </div>
