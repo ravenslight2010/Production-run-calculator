@@ -116,6 +116,37 @@ test("measures a build whose generated identity matches the prepared source iden
   );
 });
 
+test("measures stylesheet links with query strings and fragments", (t) => {
+  const { repoRoot, assets } = createFixture(t);
+  fs.writeFileSync(
+    path.join(repoRoot, "artifacts/run-calculator/dist/public/index.html"),
+    [
+      '<link href="./assets/styles.css?v=123">',
+      '<link href="./assets/styles.css#theme">',
+      '<link href="./assets/styles.css?v=123#theme">',
+    ].join("\n"),
+  );
+
+  const result = measureHomeOpeningGraph(repoRoot);
+
+  assert.equal(result.openingCss.assetCount, 1);
+  assert.equal(result.openingCss.rawBytes, Buffer.byteLength(assets["assets/styles.css"]));
+  assert.equal(result.openingCss.gzipBytes, gzipSync(assets["assets/styles.css"]).length);
+});
+
+test("rejects stylesheet links that cannot resolve to an emitted asset", (t) => {
+  const { repoRoot } = createFixture(t);
+  fs.writeFileSync(
+    path.join(repoRoot, "artifacts/run-calculator/dist/public/index.html"),
+    '<link href="../outside.css?v=123">',
+  );
+
+  assert.throws(
+    () => measureHomeOpeningGraph(repoRoot),
+    /Stylesheet link cannot be measured from the build output/,
+  );
+});
+
 test("rejects a missing generated web build identity before measuring assets", (t) => {
   const { repoRoot } = createFixture(t, { includeBuildIdentity: false });
   fs.rmSync(

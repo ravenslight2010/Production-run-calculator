@@ -116,9 +116,14 @@ export function measureHomeOpeningGraph(repoRoot = defaultRepoRoot) {
 
   const cssFiles = new Set();
   const html = fs.readFileSync(path.join(outputDir, "index.html"), "utf8");
-  for (const [, href] of html.matchAll(/href=["']([^"']+\.css)["']/g)) {
-    const file = href.replace(/^\.?\//, "");
-    if (!file.startsWith("../") && !path.isAbsolute(file)) cssFiles.add(file);
+  for (const [, href] of html.matchAll(/href=["']([^"']+\.css(?:[?#][^"']*)?)["']/g)) {
+    const assetPath = href.split(/[?#]/, 1)[0];
+    const file = assetPath.replace(/^\.?\//, "");
+    if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(assetPath) ||
+        file.startsWith("../") || path.isAbsolute(file)) {
+      throw new Error(`Stylesheet link cannot be measured from the build output: ${href}.`);
+    }
+    cssFiles.add(file);
   }
   const css = [...cssFiles].map(measure);
   const cssTotal = css.reduce(
