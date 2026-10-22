@@ -7,8 +7,10 @@ import { promisify } from "node:util";
 import { test } from "node:test";
 import {
   formatHistoricalAgentMemoryFinding,
+  formatLocalRefHistoricalAgentMemoryFinding,
   main,
   scanHistoricalAgentMemoryInfrastructure,
+  scanLocalRefsOutsideAgentMemorySnapshot,
 } from "./check-agent-memory-infrastructure-history.mts";
 
 const execFileAsync = promisify(execFile);
@@ -195,4 +197,204 @@ test("history scan rejects unsafe or unbounded revision limits", async () => {
     ),
     /revisionLimit must be an integer/u,
   );
+});
+
+test("local-ref scan finds and redacts a synthetic branch-only match", async () => {
+  const repositoryRoot = await mkdtemp(
+    join(tmpdir(), "agent-memory-history-refs-"),
+  );
+  const privateHost = "branch-only.synthetic.internal";
+
+  try {
+    await git(repositoryRoot, ["init", "-q"]);
+    await git(repositoryRoot, ["config", "user.name", "Synthetic Audit"]);
+    await git(repositoryRoot, ["config", "user.email", "audit@example.invalid"]);
+    const snapshot = await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      "No infrastructure reference.\n",
+      "Create pinned snapshot",
+    );
+    await git(repositoryRoot, ["switch", "-c", "audit-only"]);
+    const branchOnlyCommit = await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      `Endpoint: ${privateHost}\n`,
+      "Add branch-only synthetic host",
+    );
+
+    const audit = await scanLocalRefsOutsideAgentMemorySnapshot(
+      repositoryRoot,
+      snapshot,
+    );
+    const repeatedAudit = await scanLocalRefsOutsideAgentMemorySnapshot(
+      repositoryRoot,
+      snapshot,
+    );
+    const formatted = audit.findings
+      .map(formatLocalRefHistoricalAgentMemoryFinding)
+      .join("\n");
+
+    assert.equal(audit.snapshot, snapshot);
+    assert.equal(audit.refsInventoried, 2);
+    assert.equal(
+      audit.refInventorySha256,
+      repeatedAudit.refInventorySha256,
+    );
+    assert.equal(audit.localBranchRefs, 2);
+    assert.equal(audit.tagRefs, 0);
+    assert.equal(audit.remoteTrackingRefs, 0);
+    assert.match(audit.refInventorySha256, /^[0-9a-f]{64}$/u);
+    assert.equal(audit.revisionsScanned, 1);
+    assert.equal(audit.olderRevisionsOmitted, false);
+    assert.deepEqual(
+      audit.findings.map(({ ref, commit, file, line, category }) => ({
+        ref,
+        commit,
+        file,
+        line,
+        category,
+      })),
+      [
+        {
+          ref: "refs/heads/audit-only",
+          commit: branchOnlyCommit,
+          file: ".agents/memory/example.md",
+          line: 1,
+          category: "infrastructure host",
+        },
+      ],
+    );
+    assert.equal(formatted.includes(privateHost), false);
+    assert.equal(JSON.stringify(audit).includes(privateHost), false);
+    assert.equal(formatted.includes("refs/heads/audit-only"), true);
+    assert.equal(formatted.includes(branchOnlyCommit), true);
+
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...values: unknown[]) => {
+      output.push(values.join(" "));
+    };
+    try {
+      await main(
+        ["--", "--refs-outside-snapshot", snapshot],
+        repositoryRoot,
+      );
+    } finally {
+      console.log = originalLog;
+    }
+    const cliOutput = output.join("\n");
+    assert.equal(cliOutput.includes(privateHost), false);
+    assert.equal(cliOutput.includes("refs/heads/audit-only"), true);
+    assert.equal(cliOutput.includes(branchOnlyCommit), true);
+    assert.equal(cliOutput.includes("Git history was not changed."), true);
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test("local-ref scan inventories tags and remote refs and respects its cap", async () => {
+  const repositoryRoot = await mkdtemp(
+    join(tmpdir(), "agent-memory-history-ref-cap-"),
+  );
+  const firstPrivateHost = "first-branch-only.synthetic.internal";
+  const secondPrivateHost = "second-branch-only.synthetic.internal";
+
+  try {
+    await git(repositoryRoot, ["init", "-q"]);
+    await git(repositoryRoot, ["config", "user.name", "Synthetic Audit"]);
+    await git(repositoryRoot, ["config", "user.email", "audit@example.invalid"]);
+    const snapshot = await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      "No infrastructure reference.\n",
+      "Create pinned snapshot",
+    );
+    await git(repositoryRoot, ["switch", "-c", "audit-only"]);
+    await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      `Endpoint: ${firstPrivateHost}\n`,
+      "Add first branch-only host",
+    );
+    const latestCommit = await commitFile(
+      repositoryRoot,
+      ".agents/memory/example.md",
+      `Endpoint: ${secondPrivateHost}\n`,
+      "Add second branch-only host",
+    );
+    await git(repositoryRoot, ["tag", "--annotate", "audit-tag", "-m", "test"]);
+    await git(repositoryRoot, [
+      "update-ref",
+      "refs/remotes/origin/audit-only",
+      latestCommit,
+    ]);
+    await git(repositoryRoot, [
+      "update-ref",
+      "refs/custom/audit-only",
+      latestCommit,
+    ]);
+
+    const audit = await scanLocalRefsOutsideAgentMemorySnapshot(
+      repositoryRoot,
+      snapshot,
+      1,
+    );
+
+    assert.equal(audit.refsInventoried, 5);
+    assert.equal(audit.localBranchRefs, 2);
+    assert.equal(audit.tagRefs, 1);
+    assert.equal(audit.remoteTrackingRefs, 1);
+    assert.equal(audit.otherRefs, 1);
+    assert.equal(audit.revisionsScanned, 1);
+    assert.equal(audit.olderRevisionsOmitted, true);
+    assert.deepEqual(
+      audit.findings.map(({ ref, commit, file, line, category }) => ({
+        ref,
+        commit,
+        file,
+        line,
+        category,
+      })),
+      [
+        {
+          ref: "refs/custom/audit-only",
+          commit: latestCommit,
+          file: ".agents/memory/example.md",
+          line: 1,
+          category: "infrastructure host",
+        },
+        {
+          ref: "refs/heads/audit-only",
+          commit: latestCommit,
+          file: ".agents/memory/example.md",
+          line: 1,
+          category: "infrastructure host",
+        },
+        {
+          ref: "refs/remotes/origin/audit-only",
+          commit: latestCommit,
+          file: ".agents/memory/example.md",
+          line: 1,
+          category: "infrastructure host",
+        },
+        {
+          ref: "refs/tags/audit-tag",
+          commit: latestCommit,
+          file: ".agents/memory/example.md",
+          line: 1,
+          category: "infrastructure host",
+        },
+      ],
+    );
+    const formatted = audit.findings
+      .map(formatLocalRefHistoricalAgentMemoryFinding)
+      .join("\n");
+    assert.equal(formatted.includes(firstPrivateHost), false);
+    assert.equal(formatted.includes(secondPrivateHost), false);
+    assert.equal(JSON.stringify(audit).includes(firstPrivateHost), false);
+    assert.equal(JSON.stringify(audit).includes(secondPrivateHost), false);
+  } finally {
+    await rm(repositoryRoot, { recursive: true, force: true });
+  }
 });
