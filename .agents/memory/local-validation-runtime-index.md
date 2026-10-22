@@ -3,6 +3,19 @@ name: Local validation runtime index
 description: Pointers for the release runner, pinned Node, local browser transport and test certificates.
 ---
 
+In Replit, `playwright install --with-deps` fails when it tries to use apt; install
+browser binaries without `--with-deps` and provision any missing host libraries through
+Nix. Keep `--with-deps` for Ubuntu-hosted GitHub Actions runners.
+
+**Why:** Replit routes system dependencies through Nix, while GitHub's Ubuntu runner supports
+Playwright's apt-based dependency setup. Chromium's login-shell auto-discovery also stalled
+during a local Docker/Caddy preflight, while an explicit executable path worked.
+
+**How to apply:** Use the browser-only installer for a local Replit smoke check and the
+`--with-deps` installer in hosted Linux CI. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`
+explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwright's
+`chromium.executablePath()` after browser installation in hosted CI.
+
 - [Runner locks](release-runner-lock-history.md) — local lock history is private, not platform task history.
 - [Pinned Node](pinned-node-nix-runner.md) — use the exact installed Node when provisioning fails.
 - [Docker healthcheck exec](docker-healthcheck-setns.md) — if healthchecks and `docker exec` both fail with `setns`, preserve CI health semantics and validate on a supported runner.
