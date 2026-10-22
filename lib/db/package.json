@@ -5,6 +5,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./identity-sequence-health": {
+      "types": "./migrations/identity-sequence-health.d.mts",
+      "import": "./migrations/identity-sequence-health.mjs"
+    },
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
