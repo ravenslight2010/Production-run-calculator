@@ -19,8 +19,7 @@
 - [Database test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, and isolated writes.
 - [Browser test evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
 - [Slow-network auth timing](slow-network-auth-timing.md) — include session confirmation in authenticated cold-start measurements with a bounded wait suited to the network profile.
-- [Isolated browser matrices](browser-matrix-isolation.md) — when a multi-project suite times out after its first profile, rerun the failed profile alone before treating it as a browser defect.
-- [Browser picker assertions](browser-evidence-assertions.md) — scope queries to the active touch dialog; hidden closed-dialog inputs may match global selectors.
+- [Browser isolation](browser-matrix-isolation.md) + [picker evidence](browser-evidence-assertions.md) — isolate failed matrix profiles and scope picker assertions to active dialogs.
 - [Browser storage](browser-localstorage-availability.md) + [phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — guard unavailable localStorage and missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
@@ -147,13 +146,12 @@
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [WebKit GIO TLS](webkit-gio-tls-runtime.md) + [IPv6 loopback](ipv6-loopback-test-environment.md) — keep trust enabled; load Nix TLS modules and block unsupported AF_INET6 identity checks.
 - [WebKit push tests](local-browser-suite-routing.md) — WPE can hang on push APIs; use active registrations and clearly scoped empty-subscription fixtures.
-- [Local production graph builds](local-production-graph-build.md) — use development identity mode for local bundle analysis; keep publish-source identity changes in release workflows.
-- [TS bundle hash](typescript-source-bundle-hashing.md) — verify source identity before uploading compact evidence.
+- [Local builds](local-production-graph-build.md) + [source hashes](typescript-source-bundle-hashing.md) — use development identity for graph analysis; verify hashes before uploading evidence.
 - [Field-check evidence](field-check-evidence-boundary.md) — `local` is an unknown build, not an environment; legacy missing causes stay unknown and recurrence differs from replay.
 - [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
 - [Prep mixes](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) — Hot Giardiniera Mix, Pineapples, Spinach are prep mixes; charge raw ingredients at prep, then use prepared stock and carry later.
 - [Docker browser smoke runtime](docker-browser-smoke-runtime.md) — keep Replit Docker DNS and healthcheck workarounds test-only; verify the app and API before browser checks.
 - [Release guide authority claims](release-guide-authority-claims.md) — check provider/action/live-target claims, preserving explicit negatives, examples, and historical context.
-- [Vitest hook returns](vitest-hook-cleanup.md) — implicitly returning a mock from a setup hook registers it as cleanup and can create post-assertion failures.
+- [Vitest hooks](vitest-hook-cleanup.md) + [Playwright 304s](playwright-304-responses.md) — avoid implicit cleanup returns; HTTP 304 cache hits are valid, but request failures remain fatal.
 - [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.
-- [Playwright 304 responses](playwright-304-responses.md) — valid HTTP 304 cache hits are not errors; classify 4xx/5xx separately and keep request failures fatal.
+- [Deployment log fallback](deployment-log-fallback.md) — if revision-scoped runtime logs are unavailable, verify the live build first and use only a time-bounded current-serving log query.

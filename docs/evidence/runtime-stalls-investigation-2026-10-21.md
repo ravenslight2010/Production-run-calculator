@@ -88,3 +88,45 @@ All three control and all three repaired runs passed their data-integrity assert
 This change has no database schema or persisted-data effect. If it causes a regression, revert the health-route coalescing/timing change, the additive capacity-sample fields, and their tests in the task merge, or restore the prior checkpoint; no database rollback or data heal is required.
 
 The fix is local to this task branch and has not been published. After merge, the owner-controlled Replit Publish is required before production verification. A later read-only check should confirm the published build identity, core/audit readiness, and presence of the bounded `health_check` duration fields. Do not run production load tests.
+
+## Post-publish verification attempt — 2026-10-22
+
+**Capture window:** 2026-10-22 20:19:49–20:23:06 UTC
+**Environment:** production, public Replit autoscale deployment
+**Evidence handling:** only bounded status, identity, counts, and numeric ranges are retained; raw deployment logs and response bodies were not saved.
+
+- **PASS — deployment metadata:** At 20:20:43 UTC, official deployment metadata reported an active deployment and successful build. The public app build identity was `app-build:54d9849b-b8b4-4a1d-a6cd-a311bdec75a4`.
+- **BLOCKED — source identity:** The public build-info response at 20:20:09 UTC reported that build completed at 16:37:05 UTC with source policy `production-source-v3` and fingerprint `4703becbfd4a0340293b4a947b65573927306fd38ff684326d0f1f32e3ce0dac`. The independent expected record, prepared at 20:16:40 UTC, had the same policy but fingerprint `58b298028979cbc73dc3ad11e1c6e5c82c0f06af726d7acff5560678d318023f`. `pnpm run check:published-build -- --url <official-url>` reported “Published source does not match the expected build.” The runtime did not provide a Git revision binding. This does not establish that the live build contains the merged task source.
+- **PASS — public readiness sample:** At 20:19:49 UTC, `/api/readyz` returned HTTP 200 and `status: ok`; process, startup, database, and audit-protection checks were all `ok`. The optional background-workers check was `warning` in this sample.
+- **PASS with source-binding caveat — bounded health logs:** The scoped revision reader returned no usable records. The documented reader for the currently serving build returned 95 `health_check` records in the 16:37:05–20:23:06 UTC window. All 95 contained a `stageDurationsMs` object; 90 included database-check durations (28–270 ms) and optional-diagnostics durations (73–328 ms). Total `durationMs` values ranged from 0–512 ms. Ninety records reported success and five reported degraded; among the 90 with required-check status fields, database and audit protection were `ok`. Background-worker status was `warning` in 42 and `ok` in 48 records. No local-model-probe duration field appeared in this window.
+- **PASS with source-binding caveat — capacity fields:** The current-serving-build log reader returned 44 `database_capacity_sample` records. Thirty observed samples contained both `activeWaitingBackends` and `lockWaitingBackends`; each field ranged from 0–2. Fourteen samples were unavailable and did not supply wait counts. Missing counts remain unknown; they are not treated as zero.
+- **BLOCKED — attribution to the merged source:** The health and capacity fields are present in current-serving-build logs, but the source fingerprint mismatch prevents binding those observations to the exact merged source. The revision-scoped log reader also did not provide records; the fallback reader is pinned to the current serving build. No conclusion is made that this change caused any earlier incident.
+- **NOT RUN:** No production writes, Publish, or production load tests were performed.
+
+**Next action:** The deployment owner must Publish the source represented by the independent expected record. After that owner-controlled Publish, rerun the official source comparison, readiness probe, and bounded log inspection against the newly serving build. Until then, task completion remains blocked.
+
+## Retry — verified published signals, 2026-10-22 21:19 UTC
+
+This retry supersedes the preceding next action. A newer owner-controlled Publish exists; do not ask the owner to publish the older task-copy source merely to match this isolated checkout.
+
+### Identity and authority
+
+- Official deployment metadata again reported a successful, public autoscale deployment.
+- Official build `c799e2cf-ec67-4637-9336-151d468b24e0` was created at 20:33:35.741 UTC and recorded successful at 20:41:41.809 UTC. The owning stall-repair task was already merged before that Publish.
+- Its official build logs contain two prepared-source records and one sealed-build record. All three report application build `app-build:bee65f3c-70bd-4de3-901c-c348214828be` and source fingerprint `bd319653b852c242f755bd44fd6116d35088052d13930627830e847363875442`. The public `/api/build-info` response captured at 21:19:04.332 UTC independently reports that same application build and fingerprint, completed at 20:35:36.890 UTC.
+- **PASS — published-artifact identity and targeted implementation presence:** the official prepared and sealed identities match the running artifact, and its runtime samples contain both sets of targeted telemetry fields described below. This binds the availability finding to the newer published artifact rather than the older task checkout.
+- **FAIL — comparison to the isolated task-copy expectation:** `pnpm run check:published-build -- --url <official-url>` still reports a fingerprint mismatch against this checkout's independently prepared `58b298028979cbc73dc3ad11e1c6e5c82c0f06af726d7acff5560678d318023f` expectation. That failed comparison is not relabeled as a source match. The expected record was not regenerated, replaced, or constructed from the runtime response. An authorized source-backup fetch also did not provide this newer Publish's expected record. Official Publish logs supply the separate artifact-identity evidence above.
+- **Limitations:** Git binding remains unavailable. This proves the published artifact and the presence of the requested instrumentation, not exact equality with the current checkout, an immutable Git revision, or release GO. No source-match receipt or release approval was created.
+
+### Readiness and bounded runtime evidence
+
+- **PASS — required readiness:** `/api/readyz` at 21:19:04.571 UTC returned HTTP 200, `status: ok`, with process, startup, database, and audit protection all `ok`. Optional background workers reported `warning`; this is not described as all workers being healthy.
+- **PASS — health stage fields:** the documented current-serving-build log reader returned 17 `health_check` records for 20:35:36.890–21:19:23.440 UTC. Total duration ranged from 0–353 ms. Sixteen records included database-check durations (29–130 ms) and optional-diagnostics durations (74–321 ms); the remaining record supplied no values for those stages, which remain unknown.
+- **PASS — wait-event fields:** eight `database_capacity_sample` records all carried the matching application build identity. Six observed samples contained both `activeWaitingBackends` and `lockWaitingBackends`, each zero in these samples. Two samples were unavailable and did not supply wait counts; those counts remain unknown, not zero. No claim about continuous absence of waits between samples is made.
+- **Historical boundary:** absent fields in older samples remain unknown. Neither these readings nor the earlier nonzero readings establish a cause for historical incidents or prove the repair prevented stalls.
+- **NOT APPLICABLE — browser compatibility:** desktop, phone, tablet portrait/landscape, Chromium/Chrome, WebKit/Safari, and physical Android/iOS/PWA checks; this is read-only backend telemetry verification with no UI change.
+- **NOT RUN — broad tests and release gates:** no application code changed; public probes, official metadata/build-log comparison, sanitized runtime summaries, and a whitespace check are the focused verification. No new Publish, production writes, production load tests, pool changes, or schema changes were performed.
+
+### Failure ledger disposition
+
+The initial old-build mismatch and unavailable revision-scoped log reader remain historical observations. The current-serving reader supplied the requested runtime evidence. The retry's task-copy source mismatch remains a failed checkout comparison, while official prepared/sealed build records and matching runtime telemetry resolve the narrower published-signal verification objective. Full checkout-source matching and release approval have not been asserted.
