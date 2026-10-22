@@ -23,6 +23,7 @@
     "test:budget": "node scripts/check-test-duration.mjs",
     "test:budget:lower": "CALCULATOR_TEST_WORKERS=4 node scripts/check-test-duration.mjs",
     "test:budget:unit": "node --test scripts/check-test-duration.test.mjs",
+    "test:budget:contract": "node --test scripts/check-test-duration-contract.test.mjs",
     "test:performance": "vitest run src/performanceDiagnostics.test.ts src/homePerformance.test.ts src/warehouseGrouping.test.ts",
     "test:e2e": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium || command -v chromium-browser || command -v google-chrome)} playwright test",
     "test:e2e:reduced-motion": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(if [ -n \"${CI:-}\" ]; then :; else command -v chromium || command -v chromium-browser || command -v google-chrome; fi)} playwright test --config playwright.reduced-motion.config.ts",
