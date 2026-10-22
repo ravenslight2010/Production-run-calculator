@@ -330,6 +330,28 @@ test("source boundary follows the browser-selected workspace package export", ()
   }
 });
 
+test("source boundary rejects a workspace package export that resolves outside its package", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    packageExports: { ".": "./../outside.ts" },
+  });
+  fs.writeFileSync(
+    path.join(fixture.workspaceRoot, "lib/outside.ts"),
+    "export const bridge = true;",
+  );
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Workspace package "@workspace\/home-bridge" export "\." escapes its package directory\./,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("source boundary rejects exports with mode-dependent source entries when NODE_ENV is unset", () => {
   const fixture = createSourceFixture({
     homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
