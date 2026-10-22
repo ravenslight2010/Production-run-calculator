@@ -298,6 +298,49 @@ describe("POST /api/mixes — perPizza DB round-trip", () => {
     expect(m.components[1]).toEqual({ ingredient: "Green Peppers", perPizza: 0.5 });
   });
 
+  it("preserves reserved-looking recipe and component names across POST and GET", async () => {
+    const reservedMixes: Partial<Mix>[] = [
+      specDerivedMix({ id: "reserved-recipe-proto", name: "__proto__" }),
+      specDerivedMix({ id: "reserved-recipe-constructor", name: "constructor" }),
+      specDerivedMix({ id: "reserved-recipe-prototype", name: "prototype" }),
+      {
+        id: "reserved-component-names",
+        name: "Reserved topping prep",
+        brand: "",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        amountAlreadyMade: 0,
+        components: [
+          { ingredient: "__proto__", perPizza: 1.25 },
+          { ingredient: "constructor", perPizza: 2 },
+          { ingredient: "prototype", perPizza: 3.5 },
+        ],
+        enabled: true,
+        isPrep: true,
+      },
+    ];
+
+    const posted = await postMixes(reservedMixes);
+    expect(posted.status).toBe(200);
+
+    const reloaded = await getMixes();
+    expect(reloaded.status).toBe(200);
+    expect(reloaded.items).toHaveLength(reservedMixes.length);
+
+    const byId = new Map(reloaded.items.map((mix) => [mix.id, mix]));
+    expect([
+      byId.get("reserved-recipe-proto")?.name,
+      byId.get("reserved-recipe-constructor")?.name,
+      byId.get("reserved-recipe-prototype")?.name,
+    ]).toEqual(["__proto__", "constructor", "prototype"]);
+    expect(byId.get("reserved-component-names")?.components).toEqual([
+      { ingredient: "__proto__", perPizza: 1.25 },
+      { ingredient: "constructor", perPizza: 2 },
+      { ingredient: "prototype", perPizza: 3.5 },
+    ]);
+  });
+
   it("persists per-batch pounds separately from per-pizza ounces across POST and GET", async () => {
     const mix = specDerivedMix({
       id: "mix-per-batch-round-trip",
