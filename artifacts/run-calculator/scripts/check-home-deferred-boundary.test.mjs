@@ -351,7 +351,7 @@ test("source boundary rejects exports with mode-dependent source entries when NO
   }
 });
 
-test("source boundary ignores third-party imports in a local workspace package", () => {
+test("source boundary does not scan dynamic imports inside workspace package exports", () => {
   const fixture = createSourceFixture({
     homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
     helperSource: "",
@@ -359,6 +359,7 @@ test("source boundary ignores third-party imports in a local workspace package",
       'import "third-party-package";',
       'export type { SetupContentProps } from "../../../../../../src/components/SetupContent";',
       'export const loadSetupContent = () => import("../../../../../../src/components/SetupContent");',
+      "export const loadPanel = (panel) => import(panel);",
       "export const bridge = true;",
     ].join("\n"),
     workspacePatterns: ["modules/**/packages/*"],
@@ -433,10 +434,13 @@ test("source boundary clearly rejects ambiguous local workspace package names", 
   }
 });
 
-test("source boundary ignores type-only and dynamic imports in intermediate modules", () => {
+test("source boundary inventories helper dynamic imports and ignores import-type syntax", () => {
   const fixture = createSourceFixture({
     homeSource: (sourceRoot) =>
-      `import { loadSetupContent } from "../components/homeBridge";\n${sourceHome(sourceRoot)}`,
+      `import { loadSetupContent } from "../components/homeBridge";\n${sourceHome(sourceRoot).replace(
+        'const loadSetupContent = () => import("../components/SetupContent.tsx");',
+        "",
+      )}`,
     helperSource: [
       'import type { SetupContentProps } from "./SetupContent";',
       'export { type SetupContentProps } from "./SetupContent";',
@@ -447,6 +451,23 @@ test("source boundary ignores type-only and dynamic imports in intermediate modu
   try {
     const result = checkHomeDeferredSourceBoundary(fixture);
     assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary rejects a computed runtime dynamic import in a local helper", () => {
+  const fixture = createSourceFixture({
+    homeSource: (sourceRoot) =>
+      `import { loadPanel } from "../components/homeBridge";\n${sourceHome(sourceRoot)}`,
+    helperSource: "export const loadPanel = (panel) => import(panel);",
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home helper components\/homeBridge\.ts has runtime dynamic import\(s\) with a non-literal specifier[\s\S]*line 1, column \d+[\s\S]*Use a string literal or no-substitution template literal[\s\S]*Import chain: Home -> components\/homeBridge\.ts/,
+    );
   } finally {
     fixture.cleanup();
   }

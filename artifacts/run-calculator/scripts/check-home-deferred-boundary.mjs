@@ -389,16 +389,41 @@ export function checkHomeDeferredSourceBoundary({
     ]),
   );
   const dynamicImportPaths = new Set();
-  for (const [sourceName, filePath, source] of roots) {
+  const rootPaths = new Set(
+    roots.map(([, filePath]) => normalize(path.resolve(filePath))),
+  );
+  const sourceRootPath = path.resolve(sourceRoot);
+  const isLocalSourcePath = (filePath) => {
+    const relativePath = path.relative(sourceRootPath, filePath);
+    return (
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath)
+    );
+  };
+  const collectDynamicImports = (
+    sourceName,
+    filePath,
+    source,
+    importChain,
+    isHelper,
+  ) => {
     const { specifiers, nonLiteralLocations } = analyzeDynamicImports(
       source,
       filePath,
     );
     if (nonLiteralLocations.length > 0) {
+      const sourceLabel = isHelper
+        ? `${sourceName} helper ${normalize(path.relative(sourceRootPath, filePath))}`
+        : sourceName;
+      const chain =
+        importChain.length > 0
+          ? `\nImport chain: ${[sourceName, ...importChain].join(" -> ")}`
+          : "";
       throw new Error(
-        `${sourceName} has runtime dynamic import(s) with a non-literal specifier that the Home startup guard cannot inspect:\n` +
+        `${sourceLabel} has runtime dynamic import(s) with a non-literal specifier that the Home startup guard cannot inspect:\n` +
           `${nonLiteralLocations.map((location) => `- ${location}`).join("\n")}\n` +
-          `Use a string literal or no-substitution template literal for each dynamic import specifier.`,
+          `Use a string literal or no-substitution template literal for each dynamic import specifier.${chain}`,
       );
     }
     for (const specifier of specifiers) {
@@ -415,6 +440,10 @@ export function checkHomeDeferredSourceBoundary({
         dynamicImportPaths.add(normalize(path.resolve(importedPath)));
       }
     }
+  };
+
+  for (const [sourceName, filePath, source] of roots) {
+    collectDynamicImports(sourceName, filePath, source, [], false);
   }
 
   const unregisteredDynamicImports = [...dynamicImportPaths].filter(
@@ -433,6 +462,16 @@ export function checkHomeDeferredSourceBoundary({
     const normalizedPath = normalize(path.resolve(filePath));
     if (visited.has(normalizedPath)) return;
     visited.add(normalizedPath);
+
+    if (isLocalSourcePath(normalizedPath) && !rootPaths.has(normalizedPath)) {
+      collectDynamicImports(
+        sourceName,
+        normalizedPath,
+        source,
+        importChain,
+        true,
+      );
+    }
 
     for (const specifier of staticImportSpecifiers(source, normalizedPath)) {
       const importedPath = resolveLocalSource(
