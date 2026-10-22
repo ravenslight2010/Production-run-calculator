@@ -64,10 +64,8 @@ staged versions before editing. Conflict markers can split related test bodies
 and leave duplicate fragments outside the test suite; broad hunks may fail to
 match the conflict's exact text.
 
-**Why:** A Line Map test conflict combined independent incoming and task-owned
-fixtures, while leaving a trailing test assertion outside the suite. Exact,
-small edits exposed and preserved both behaviors; the post-resolution test run
-then caught fixture values that had to stay distinct.
+**Why:** Combining independently added tests can leave valid-looking fragments
+outside their suites or accidentally couple fixtures that must stay independent.
 
 **How to apply:** Use the exact conflict text from the file and compare both
 staged versions. Resolve one boundary at a time, then scan the entire file for
@@ -77,10 +75,9 @@ For additive test changes, compare the resolved file against the refreshed base,
 not only against the task's earlier file. Existing unrelated test bodies should
 remain intact, and independently merged regressions must remain present.
 
-**Why:** Replaying a stock-draft regression alongside new lock and run-switch
-tests left valid-looking but misplaced statements, replaced unrelated fixtures,
-and removed the new navigation suite without conflict markers. Earlier passing
-test results did not apply to that resolved tree.
+**Why:** A marker-free resolution can still drop unrelated test coverage or
+replace independent fixtures. Earlier passing results do not validate that
+resolved tree.
 
 **How to apply:** Preserve both baseline tips, restore only the damaged test
 boundaries, and verify the final diff consists of the intended additions plus

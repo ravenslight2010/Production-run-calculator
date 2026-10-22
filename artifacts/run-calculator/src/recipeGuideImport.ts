@@ -3,6 +3,7 @@
 // Sauce Guide pipeline:
 //   Read .docx ArrayBuffer → unzip word/document.xml → extract <w:t> text →
 //   parse sauce rows → match brands + recipe names → candidates for review.
+//   Optional .xlsx templates flatten cells to the same mapping sentences.
 //
 // Dough Guide pipeline:
 //   Read .xlsx ArrayBuffer → SheetGrid[] → parse dough rows →
@@ -160,7 +161,7 @@ function decodeXmlEntities(s: string): string {
 // ─── Prepare ─────────────────────────────────────────────────────────────────
 
 /**
- * Read a sauce guide .docx buffer → parse → match brands and recipe names.
+ * Read a sauce guide .docx or named .xlsx buffer → parse → match brands and recipe names.
  * Throws with a plain-language message when the file is unreadable or empty.
  *
  * @param extraSauceNames  Additional sauce recipe names from the server pool
@@ -170,14 +171,20 @@ function decodeXmlEntities(s: string): string {
 export async function prepareSauceGuideImport(
   buffer: ArrayBuffer,
   extraSauceNames: string[] = [],
+  sourceName?: string,
 ): Promise<SauceGuideImportPrepared> {
   assertImportFileBytes(buffer.byteLength, "Sauce guide");
-  const text = await readDocxText(buffer);
+  // Workbook templates use the same mapping sentences as the original DOCX.
+  // Select by extension: a corrupt DOCX must not silently become spreadsheet input.
+  const text = sourceName && /\.xlsx$/i.test(sourceName)
+    ? (await readWorkbookGrids(buffer, sourceName)).map((grid) =>
+        grid.rows.map((row) => row.join(" ")).join("\n")).join("\n")
+    : await readDocxText(buffer);
   const rows = parseSauceGuide(text);
   if (rows.length === 0) {
     throw new Error(
       "No sauce guide entries were found. " +
-      "Make sure this is Joe's Sauce Guide document (.docx).",
+      "Use a Sauce Guide document (.docx) or workbook (.xlsx) with product-to-sauce mapping sentences.",
     );
   }
   const known = loadSpecImportKnown();

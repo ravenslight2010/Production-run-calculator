@@ -117,13 +117,17 @@ LINK    Sauce recipe "Deluxe" → "Shared Sauce" (was unlinked)
 **Note**: Schedule planner already handles multi-sheet day blocks; extend the pattern to all importers.
 
 ### 5. Template Download (new)
-**Status:** Open.
+**Status:** Implemented as optional client-generated downloads; see
+[`import-template-downloads.md`](import-template-downloads.md) for the seven
+formats, native units, compatibility boundaries and deterministic fixtures.
 **What**: Download a blank, correctly-formatted Excel template for each importer.
 
 **How**:
 - Each importer defines its expected columns/sheets (from the shared lib parse shapes)
 - A template generator writes headers + one example row
-- Templates live server-side (`GET /api/import/templates/{type}`) so they never drift from the parser
+- Templates reuse shared export builders and preflight locally; no additional API
+  or source retention. The sauce mapping guide additionally accepts `.xlsx`
+  sentences through its existing deterministic parser; Word guides remain supported.
 
 ### 6. Validation Rules Pre-Check (new)
 **Status:** Implemented with conservative format recognition and shared bounds, plus existing importer-specific rules. Unknown layouts do not inherit assumed canonical columns; blank amounts remain review-required unknowns, not inferred zero.
@@ -253,5 +257,6 @@ The remaining endpoints below are historical proposals, not implemented contract
 - `POST /api/qc/import-reviews/:id/reject` — reject + rollback offer
 - Generic rollback is **not** an open feature for spec/premix/cheese; their guarded undo is implemented. Local-only guides and schedules retain separate recovery boundaries.
 - Structured preview uses the existing operation boundary above rather than a separate generic diff endpoint.
-- `GET /api/import/templates/{type}` — download blank template
+- `GET /api/import/templates/{type}` — historical proposal, replaced by local
+  downloads using existing workbook utilities
 - Shared file preflight runs locally before expensive parser/provider work; no unnecessary validation-upload endpoint was added.

@@ -515,6 +515,7 @@ import {
 import FillMissingPanel from "../components/FillMissingPanel";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ManagerActionQueue from "../components/ManagerActionQueue";
+import ImportTemplateDownloads from "../components/ImportTemplateDownloads";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ManagerAttentionDialog, {
   buildManagerAttentionItems,
@@ -14192,7 +14193,7 @@ export default function Home() {
         fetchNamedRecipes("sauce").catch(() => [] as NamedRecipe[]),
       ]);
       const extraSauceNames = serverSauceRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareSauceGuideImport(buffer, extraSauceNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareSauceGuideImport(buffer, extraSauceNames, file.name);
       if (gen !== sauceGuideImportGenRef.current) return;
       setSauceGuideImportPrepared(prepared);
     } catch (err) {
@@ -17122,6 +17123,7 @@ export default function Home() {
                 {manageCategory === "import" && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
+                    <ImportTemplateDownloads enabled={enabledImporterTypes} />
                     {canManageInventory && pendingDuplicateReviewCount !== 0 && (
                       <div
                         className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between"
@@ -18615,7 +18617,7 @@ export default function Home() {
           <input
             ref={sauceGuideImportInputRef}
             type="file"
-            accept=".docx,.doc,.txt"
+            accept=".docx,.doc,.txt,.xlsx"
             className="hidden"
             onChange={handleSauceGuideImportFile}
           />

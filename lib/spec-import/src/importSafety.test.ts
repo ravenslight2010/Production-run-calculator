@@ -39,6 +39,43 @@ describe("reviewed import changes", () => {
 });
 
 describe("bounded format-aware preflight", () => {
+  it("resumes formula validation under later headers, including reordered columns beyond row 30", () => {
+    const rows: unknown[][] = [
+      ["Ingredient", "Per Pizza (oz)", "Per Batch (lbs)"],
+      ["Green Pepper", 1.5, 40],
+      ["Total", "", 40],
+      ["Product Brand", "Example Customer"],
+      ["Product Flavor", "Second Pizza"],
+      ["Example Onion Mix"],
+      ...Array.from({ length: 30 }, () => []),
+      ["Per Batch (lbs)", "Ingredient", "Per Pizza (oz)"],
+      [50, "Onion", 2.25],
+      ["", "Total", 50],
+    ];
+    const grids = [{ name: "Two recipes", rows }];
+    expect(preflightImportGrids(grids, "premix")).toEqual([]);
+    rows[37][2] = -2.25;
+    expect(preflightImportGrids(grids, "premix")).toContainEqual(expect.objectContaining({
+      severity: "error", row: 38, column: "Per Pizza (oz)",
+    }));
+    rows[37][2] = "";
+    expect(preflightImportGrids(grids, "premix")).toEqual([expect.objectContaining({
+      severity: "review", row: 38, column: "Per Pizza (oz)",
+    })]);
+  });
+  it("validates each schedule section using that section's column positions", () => {
+    const rows = [
+      ["2026-01-15", "Brand", "Flavor", "Cases Planned"],
+      ["", "Example Customer", "First", "100"],
+      [],
+      ["Cases Planned", "Flavor", "Brand", "2026-01-16"],
+      ["250", "Second", "Example Customer", ""],
+    ];
+    const grids = [{ name: "Two days", rows }];
+    expect(preflightImportGrids(grids, "schedule")).toEqual([]);
+    rows[4][0] = "not a count";
+    expect(() => assertImportPreflight(grids, "schedule")).toThrow(/row 5.*Cases Planned/);
+  });
   it("rejects empty and oversized input before decoding/provider work", () => {
     expect(() => assertImportFileBytes(0, "empty.xlsx")).toThrow(/empty/i);
     expect(() => assertImportFileBytes(26 * 1024 * 1024, "large.xlsx")).toThrow(/large.xlsx/);

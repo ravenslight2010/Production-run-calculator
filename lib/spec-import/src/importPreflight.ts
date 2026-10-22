@@ -33,9 +33,18 @@ export function preflightImportGrids(grids: readonly PreflightGrid[], format?: I
     }
     cells += sheet.rows.reduce((sum, row) => sum + row.length, 0);
     let recognized = false;
+    let active: {
+      headers: string[];
+      row: number;
+      isFormula: boolean;
+      numericColumns: { header: string; index: number }[];
+    } | null = null;
     // Only exact exported table signatures are canonical. Loose procedure,
     // planner and customer-specific layouts must not inherit these requirements.
-    for (let r = 0; r < Math.min(30, sheet.rows.length); r++) {
+    // After recognizing the first section, inspect later section headers too:
+    // recipe blocks and dated schedules can repeat or reorder their columns.
+    for (let r = 0; r < sheet.rows.length; r++) {
+      if (!recognized && r >= 30) break;
       const headers = sheet.rows[r].map(key);
       const isSpec = (!format || format === "spec") &&
         headers.includes("dietype") && (headers.includes("saucerecipe") || headers.includes("doughrecipe"));
@@ -48,40 +57,45 @@ export function preflightImportGrids(grids: readonly PreflightGrid[], format?: I
       const isSauceGuide = (!format || format === "sauce") && !isSpec &&
         headers.includes("brand") && headers.includes("saucerecipe") && headers.includes("sauceozperpizza");
       const isFormula = (!format || format === "premix" || format === "cheese") &&
-        headers.includes("ingredient") && headers.includes("perpizza") && headers.includes("perbatchlbs");
-      if (!isSpec && !isSchedule && !isShipping && !isDoughGuide && !isSauceGuide && !isFormula) continue;
-      recognized = true;
-      const required = isSpec ? ["brand", "flavor"] : isSchedule ? ["brand", "flavor", "casesplanned"]
-        : isFormula ? ["ingredient", "perpizza", "perbatchlbs"] : ["brand"];
-      for (const column of required) {
-        if (!headers.includes(column)) diagnostics.push({ ...context, severity: "error", row: r + 1, column, message: `Canonical ${isSpec ? "spec" : "schedule"} table is missing the ${column} column. Restore the header or use the original layout.` });
-      }
-      const numericColumns = headers.map((header, index) => ({ header, index })).filter(({ header }) =>
-        isSchedule ? header === "casesplanned" : /^(?:sauceozpizza|sauceozperpizza|targetdoughballweightoz|doughballspertray|pizzaspercase|casesperskid|perpizza|perbatchlbs)$/.test(header));
-      for (let i = r + 1; i < sheet.rows.length; i++) {
-        const row = sheet.rows[i];
-        if (!row.some((value) => String(value ?? "").trim())) continue;
-        const identity = key(row[headers.indexOf(isFormula ? "ingredient" : "brand")]);
-        // A canonical header does not authorize treating its footnotes,
-        // totals, or the next section as product records.
-        if (!identity || /^(?:total|subtotal|notes?|instructions?|preparedby|date)$/.test(identity)) continue;
-        for (const { header, index } of numericColumns) {
-          const value = String(row[index] ?? "").trim();
-          // Blank/formula-without-cached-result values require review, not zero.
-          if (!value) {
-            if (diagnostics.length < 40) diagnostics.push({ ...context, severity: "review", row: i + 1,
-              column: String(sheet.rows[r][index]), message: "Blank amount is unknown. Review the parsed proposal; no zero has been inferred by preflight." });
-            continue;
-          }
-          const number = Number(value.replace(/,/g, ""));
-          if (!Number.isFinite(number) || number < 0) diagnostics.push({
-            ...context, severity: "error", row: i + 1, column: String(sheet.rows[r][index]),
-            message: `${header} must contain a non-negative number, or be blank for explicit review. Correct this cell before importing.`,
-          });
-          if (diagnostics.length >= 40) return diagnostics;
+        headers.includes("ingredient") && (headers.includes("perpizza") || headers.includes("perpizzaoz")) && headers.includes("perbatchlbs");
+      if (isSpec || isSchedule || isShipping || isDoughGuide || isSauceGuide || isFormula) {
+        recognized = true;
+        const required = isSpec ? ["brand", "flavor"] : isSchedule ? ["brand", "flavor", "casesplanned"]
+          : isFormula ? ["ingredient", headers.includes("perpizzaoz") ? "perpizzaoz" : "perpizza", "perbatchlbs"] : ["brand"];
+        for (const column of required) {
+          if (!headers.includes(column)) diagnostics.push({ ...context, severity: "error", row: r + 1, column, message: `Canonical ${isSpec ? "spec" : "schedule"} table is missing the ${column} column. Restore the header or use the original layout.` });
         }
+        const numericColumns = headers.map((header, index) => ({ header, index })).filter(({ header }) =>
+          isSchedule ? header === "casesplanned" : /^(?:sauceozpizza|sauceozperpizza|targetdoughballweightoz|doughballspertray|pizzaspercase|casesperskid|perpizza|perpizzaoz|perbatchlbs)$/.test(header));
+        active = { headers, row: r, isFormula, numericColumns };
+        continue;
       }
-      break;
+      if (!active) continue;
+      const row = sheet.rows[r];
+      if (!row.some((value) => String(value ?? "").trim())) continue;
+      const identity = key(row[active.headers.indexOf(active.isFormula ? "ingredient" : "brand")]);
+      // Formula totals/metadata end a block; wait for another recognized header.
+      // Never read the next recipe's name or product link as numeric ingredients.
+      if (active.isFormula && /^(?:total|subtotal|notes?|instructions?|preparedby|date|productbrand|productflavor|isprep)$/.test(identity)) {
+        active = null;
+        continue;
+      }
+      if (!identity || /^(?:total|subtotal|notes?|instructions?|preparedby|date)$/.test(identity)) continue;
+      for (const { header, index } of active.numericColumns) {
+        const value = String(row[index] ?? "").trim();
+        // Blank/formula-without-cached-result values require review, not zero.
+        if (!value) {
+          if (diagnostics.length < 40) diagnostics.push({ ...context, severity: "review", row: r + 1,
+            column: String(sheet.rows[active.row][index]), message: "Blank amount is unknown. Review the parsed proposal; no zero has been inferred by preflight." });
+          continue;
+        }
+        const number = Number(value.replace(/,/g, ""));
+        if (!Number.isFinite(number) || number < 0) diagnostics.push({
+          ...context, severity: "error", row: r + 1, column: String(sheet.rows[active.row][index]),
+          message: `${header} must contain a non-negative number, or be blank for explicit review. Correct this cell before importing.`,
+        });
+        if (diagnostics.length >= 40) return diagnostics;
+      }
     }
     if (!recognized) diagnostics.push({ ...context, severity: "review", message: "Layout is not a recognized canonical table. Use the existing format-specific parser and review/fallback; no canonical columns have been assumed." });
   }
