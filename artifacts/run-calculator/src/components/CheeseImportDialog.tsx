@@ -304,7 +304,7 @@ export default function CheeseImportDialog({
     <div
       // No close-on-backdrop-click: the AI parse is slow and the review step
       // holds unsaved edits — a stray tap would silently cancel the import.
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
     >
       <div
         ref={dialogRef}
