@@ -165,8 +165,56 @@ export async function fetchDeniedMerges(
     15_000,
   );
   if (!res.ok) throw new Error(`List denied merges failed (${res.status})`);
-  const data = (await res.json()) as { denied: DeniedMerge[] };
-  return data.denied ?? [];
+  return parseDeniedMergeResponse(await res.json());
+}
+
+function parseDeniedMergeResponse(data: unknown): DeniedMerge[] {
+  const denied =
+    typeof data === "object" && data !== null && "denied" in data
+      ? (data as { denied?: unknown }).denied
+      : undefined;
+  if (
+    !Array.isArray(denied) ||
+    !denied.every((pair) =>
+      typeof pair === "object" &&
+      pair !== null &&
+      "nameA" in pair &&
+      "nameB" in pair &&
+      typeof pair.nameA === "string" &&
+      typeof pair.nameB === "string",
+    )
+  ) {
+    throw new Error("The server returned an invalid ignored-match list.");
+  }
+  return denied as DeniedMerge[];
+}
+
+/**
+ * Remove ignored pairs only from their active category/brand scope and return
+ * the remaining pairs in that same scope.
+ */
+export async function restoreDeniedMerges(
+  pairs: DeniedMerge[],
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<DeniedMerge[]> {
+  if (pairs.length === 0) return fetchDeniedMerges(category, brand);
+  const res = await fetch("/api/denied-merges", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({
+      pairs,
+      ...(category ? { category } : {}),
+      ...(category === "flavor" && brand ? { brand } : {}),
+    }),
+  });
+  if (!res.ok) throw new Error(`Restore ignored matches failed (${res.status})`);
+  const denied = parseDeniedMergeResponse(await res.json());
+  clearMergeSuggestionCache();
+  return denied;
 }
 
 /**

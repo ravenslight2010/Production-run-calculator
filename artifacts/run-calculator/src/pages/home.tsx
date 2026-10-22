@@ -595,9 +595,12 @@ import {
   savePendingDuplicateReviews,
   resolvePendingDuplicateReview,
   duplicateReviewGroupKey,
+  fetchDeniedMerges,
+  restoreDeniedMerges,
   isCurrentMergeSuggestionRequest,
   type ReviewedMergeSuggestion,
   type MergeSuggestCategory,
+  type DeniedMerge,
 } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
@@ -4549,6 +4552,14 @@ export default function Home() {
   const [mergeSuggestError, setMergeSuggestError] = useState("");
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
+  const [ignoredMergePanelOpen, setIgnoredMergePanelOpen] = useState(false);
+  const [ignoredMergeState, setIgnoredMergeState] = useState<{
+    scopeKey: string;
+    pairs: DeniedMerge[];
+  } | null>(null);
+  const [ignoredMergeBusy, setIgnoredMergeBusy] = useState(false);
+  const [ignoredMergeError, setIgnoredMergeError] = useState("");
+  const [restoringIgnoredMergeKey, setRestoringIgnoredMergeKey] = useState("");
   // Checked suggestion groups for batch apply, keyed by target+sources (stable
   // across list re-renders; stale keys from removed suggestions are harmless
   // because counts intersect against the live list).
@@ -5104,6 +5115,51 @@ export default function Home() {
         return { category: "ingredient", universe: mergeFullUniverse };
     }
   }, [mergeCategory, mergeBfMode, mergeBfBrand, mergeUniverse, mergeFullUniverse]);
+  const ignoredMergeScopeKey = JSON.stringify([
+    mergeSuggestScope.category,
+    mergeSuggestScope.category === "flavor" ? mergeSuggestScope.brand?.trim().toLowerCase() ?? "" : "",
+  ]);
+  const scopedIgnoredMerges =
+    ignoredMergeState?.scopeKey === ignoredMergeScopeKey ? ignoredMergeState.pairs : [];
+
+  useEffect(() => {
+    if (!ignoredMergePanelOpen || !canManageProfiles) return;
+    const controller = new AbortController();
+    let active = true;
+    setIgnoredMergeState(null);
+    setIgnoredMergeBusy(true);
+    setIgnoredMergeError("");
+    void fetchDeniedMerges(
+      mergeSuggestScope.category,
+      mergeSuggestScope.brand,
+      controller.signal,
+    )
+      .then((pairs) => {
+        if (active) setIgnoredMergeState({ scopeKey: ignoredMergeScopeKey, pairs });
+      })
+      .catch((error) => {
+        if (active && !controller.signal.aborted) {
+          setIgnoredMergeError(
+            error instanceof Error && error.message.includes("invalid ignored-match list")
+              ? "The ignored-match list couldn't be read. Refresh and try again."
+              : "Couldn't load ignored matches. Refresh and try again.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIgnoredMergeBusy(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    canManageProfiles,
+    ignoredMergePanelOpen,
+    ignoredMergeScopeKey,
+    mergeSuggestScope.brand,
+    mergeSuggestScope.category,
+  ]);
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
@@ -5463,6 +5519,27 @@ export default function Home() {
         duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
         "ignored",
       ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
+    }
+  }
+
+  async function restoreIgnoredMerge(pair: DeniedMerge) {
+    const scope = mergeSuggestScope;
+    const scopeKey = ignoredMergeScopeKey;
+    const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+    setRestoringIgnoredMergeKey(pairKey);
+    setIgnoredMergeError("");
+    try {
+      const remaining = await restoreDeniedMerges([pair], scope.category, scope.brand);
+      setIgnoredMergeState({ scopeKey, pairs: remaining });
+      setMergeSuggestNote("Match restored. Scan again to see it in suggestions.");
+    } catch (error) {
+      setIgnoredMergeError(
+        error instanceof Error && error.message.includes("invalid ignored-match list")
+          ? "The server couldn't confirm the restored match. Refresh and check its status."
+          : "Couldn't restore this match. Please retry; if it continues, refresh and try again.",
+      );
+    } finally {
+      setRestoringIgnoredMergeKey("");
     }
   }
 
@@ -15302,7 +15379,7 @@ export default function Home() {
     applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
-    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
     checklistSatisfied, cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields, cheeseImportApplying,
     cheeseImportError, cheeseImportGenRef, cheeseImportInputRef, cheeseImportLoading, cheeseImportPrepared, cheeseImportProgress,
@@ -15323,7 +15400,7 @@ export default function Home() {
     handleApplyMerge, handleApplyRecipeNameMerge, handleCheeseImportConfirm, handleCheeseImportFile, handleConfirmMerge, handleImportFile,
     handlePremixImportConfirm, handlePremixImportFile, handleRemoveStaleReference, handleScheduleImportFile, handleSetupProfileSaved, handleShippingImportConfirm,
     handleShippingImportFile, handleSpecImportConfirm, handleSpecImportFile, handleStaleSyncWrite, handleSuggestMerges, handleUndoChange,
-    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, importDefaultDate, importExcelIntoEditor,
+    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, restoreIgnoredMerge, importDefaultDate, importExcelIntoEditor,
     importInputRef, importIntoEditor, importProgress, importResult, ingredientCatalog, ingredientTypeOptions,
     ingredientTypes, initialFinishTimestampRef, isFullscreen, isManager, isOnline, isRecipeNameCategory,
     isSupervisor, isSyncApplyingRef, lastEndedRun, lastLocalEditRef, lastRunRecall, lastSyncSigRef,
@@ -15335,6 +15412,8 @@ export default function Home() {
     mergeFormRef, mergeFromImport, mergeFullUniverse, mergeMap, mergePoolLabel, mergePreviewCount,
     mergeSources, mergeStaleCi, mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected, mergeSuggestions, mergeTarget,
+    ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError, ignoredMergeScopeKey,
+    scopedIgnoredMerges, restoringIgnoredMergeKey,
     mergeTargetOptions, mergeUniverse, mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput,
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
@@ -15374,6 +15453,7 @@ export default function Home() {
     setMergeBfMode, setMergeBusy, setMergeCategory, setMergeConfirming, setMergeError,
     setMergeFromImport, setMergeSources, setMergeSuggestBusy, setMergeSuggestError, setMergeSuggestNote, setMergeSuggestRan,
     setMergeSuggestSelected, setMergeSuggestions, setMergeTarget, setMergedAwayTomb, setMgIngInput, setMgNamesInput,
+    setIgnoredMergePanelOpen, setIgnoredMergeState,
     setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
     setNewPin, setNewPinConfirm, setNewReasonInput, setPep1ShowB, setPep2ShowB, setPepTypes,
     setPinChangeMsg, setPinError, setPinInput, setPremixImportApplying, setPremixImportError, setPremixImportLoading,
@@ -15413,7 +15493,7 @@ export default function Home() {
     activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
     batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
-    canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
     checklistAcks, checklistSatisfied,
     cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields,
@@ -15441,6 +15521,8 @@ export default function Home() {
     mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected,
     mergeSuggestions, mergeTarget, mergeTargetOptions, mergeUniverse,
+    ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError,
+    ignoredMergeScopeKey, scopedIgnoredMerges, restoringIgnoredMergeKey,
     mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
     mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
@@ -16286,6 +16368,71 @@ export default function Home() {
                         ? "Combine duplicate recipe names in this category into one. Pick the recipe name(s) to merge away (sources), then the one to keep (target). Their recipe presets are folded and today's runs are re-pointed to the kept recipe. This can't be undone."
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated. Separate inventory products are preserved and follow their production ingredient link. This can't be undone."}
                     </p>
+
+                    {canManageProfiles &&
+                      !(mergeSuggestScope.category === "flavor" && !mergeSuggestScope.brand) && (
+                      <section
+                        data-testid="ignored-merge-matches"
+                        aria-label="Previously ignored matches"
+                        className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-2"
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={ignoredMergePanelOpen}
+                          aria-controls="ignored-merge-pair-list"
+                          onClick={() => setIgnoredMergePanelOpen((open) => !open)}
+                          className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-foreground"
+                        >
+                          <span>Previously ignored matches</span>
+                          {ignoredMergeState?.scopeKey === ignoredMergeScopeKey && (
+                            <span className="text-[11px] font-normal text-muted-foreground">
+                              {scopedIgnoredMerges.length}
+                            </span>
+                          )}
+                        </button>
+                        {ignoredMergePanelOpen && (
+                          <div id="ignored-merge-pair-list" className="space-y-2">
+                            {ignoredMergeError && (
+                              <p role="alert" className="text-[11px] text-amber-600 dark:text-amber-500">
+                                {ignoredMergeError}
+                              </p>
+                            )}
+                            {ignoredMergeBusy ? (
+                              <p className="text-[11px] text-muted-foreground">Loading ignored matches…</p>
+                            ) : scopedIgnoredMerges.length > 0 ? (
+                              <ul className="space-y-1.5">
+                                {scopedIgnoredMerges.map((pair) => {
+                                  const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+                                  return (
+                                    <li
+                                      key={pairKey}
+                                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/60 px-2.5 py-2"
+                                    >
+                                      <span className="min-w-0 break-words text-xs">
+                                        {pair.nameA} ↔ {pair.nameB}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        aria-label={`Restore ignored match ${pair.nameA} and ${pair.nameB}`}
+                                        disabled={Boolean(restoringIgnoredMergeKey)}
+                                        onClick={() => void restoreIgnoredMerge(pair)}
+                                        className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50"
+                                      >
+                                        {restoringIgnoredMergeKey === pairKey ? "Restoring…" : "Restore"}
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : !ignoredMergeError ? (
+                              <p className="text-[11px] text-muted-foreground">
+                                No ignored matches in this category.
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </section>
+                    )}
 
                     {/* Deterministic + optional AI suggestions: each tab scans ONLY its own
                         name pool (mergeSuggestScope.universe) — Ingredients scans
