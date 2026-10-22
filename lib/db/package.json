@@ -11,7 +11,7 @@
     "push": "drizzle-kit push --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
     "apply-audit-log-protection": "node ./migrations/apply-audit-log-protection.mjs",
-    "test:serial-to-identity": "node --test ./migrations/serial-to-identity.integration.test.mjs",
+    "test:serial-to-identity": "node --test ./migrations/serial-to-identity.integration.test.mjs ./migrations/import-identity-write-guard.test.mjs",
     "check:identity-sequences": "node ./migrations/check-identity-sequence-drift.mjs"
   },
   "dependencies": {
