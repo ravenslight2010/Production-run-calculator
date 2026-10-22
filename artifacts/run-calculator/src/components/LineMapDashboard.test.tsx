@@ -27,12 +27,14 @@ function renderLineMap(
     active?: boolean;
     scheduledDays?: ScheduledDay[];
     configuredApplicator?: 3 | 4;
+    configuredPepperoni?: boolean;
     applicatorBatchesAvailable?: boolean;
     mixedFrontline?: boolean;
   } = {},
 ) {
   const active = options.active ?? false;
   const configuredApplicator = options.configuredApplicator;
+  const configuredPepperoni = options.configuredPepperoni ?? false;
   const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
   const mixedFrontline = options.mixedFrontline ?? false;
   mocks.useHomeTabCtx.mockReturnValue({
@@ -49,7 +51,7 @@ function renderLineMap(
       app4OzPerPizza: mixedFrontline || configuredApplicator === 4 ? 2 : 0,
       app3Type: mixedFrontline || configuredApplicator === 3 ? "Cheese" : "",
       app4Type: mixedFrontline || configuredApplicator === 4 ? "Cheese" : "",
-      pep1Type: mixedFrontline ? "Pepperoni" : "",
+      pep1Type: mixedFrontline || configuredPepperoni ? "Pepperoni" : "",
       pep1TypeB: mixedFrontline ? "Sausage" : "",
       pep2Type: "",
       pep2TypeB: "",
@@ -87,7 +89,7 @@ function renderLineMap(
       app4Batches: mixedFrontline
         ? applicatorBatchesAvailable ? 3 : 0
         : configuredApplicator === 4 && applicatorBatchesAvailable ? 2 : 0,
-      pep1Lbs: mixedFrontline ? 12 : 0,
+      pep1Lbs: mixedFrontline || configuredPepperoni ? 12 : 0,
       pep1Batches: mixedFrontline ? 1 : 0,
       pep1LbsB: mixedFrontline ? 8 : 0,
       pep1BatchesB: 0,
@@ -159,6 +161,15 @@ describe("LineMapDashboard station lifecycle statuses", () => {
       expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
     },
   );
+
+  it("shows a Pepperoni need in pounds when no batch quantity is available", () => {
+    renderLineMap("running", { configuredPepperoni: true });
+
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    expect(within(frontline).getByText("Pep 1 — Pepperoni")).toBeTruthy();
+    expect(within(frontline).getByText("12.00 lbs")).toBeTruthy();
+    expect(within(frontline).queryByText(/batches/)).toBeNull();
+  });
 
   it("shows later applicator needs after Sauce, earlier applicators, and Pepperoni rows", () => {
     renderLineMap("running", { mixedFrontline: true });
