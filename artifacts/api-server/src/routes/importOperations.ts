@@ -101,9 +101,16 @@ function objectBody(req: Request): Record<string, unknown> | null {
 }
 
 function importGoldEnabled(): boolean {
+  const rawApprovalRecordRef = process.env.IMPORT_GOLD_APPROVAL_RECORD_REF;
+  const approvalRecordRef = rawApprovalRecordRef?.trim();
+  const privacyReviewStatus = process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS?.trim();
   return process.env.IMPORT_GOLD_ENABLED === "true" &&
     process.env.IMPORT_GOLD_SOURCE_USE_APPROVED === "true" &&
-    process.env.IMPORT_GOLD_RETENTION_APPROVED === "true";
+    process.env.IMPORT_GOLD_RETENTION_APPROVED === "true" &&
+    !!approvalRecordRef &&
+    approvalRecordRef.length <= 500 &&
+    !/[\u0000-\u001f\u007f]/u.test(rawApprovalRecordRef ?? "") &&
+    (privacyReviewStatus === "approved" || privacyReviewStatus === "not_required");
 }
 
 function jsonBytes(value: unknown): number {

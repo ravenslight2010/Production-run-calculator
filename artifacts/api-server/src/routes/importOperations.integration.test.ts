@@ -27,6 +27,8 @@ let observabilityMiddleware: typeof import("../lib/observability")["observabilit
 const originalGoldEnabled = process.env.IMPORT_GOLD_ENABLED;
 const originalGoldSourceApproved = process.env.IMPORT_GOLD_SOURCE_USE_APPROVED;
 const originalGoldRetentionApproved = process.env.IMPORT_GOLD_RETENTION_APPROVED;
+const originalGoldApprovalRecordRef = process.env.IMPORT_GOLD_APPROVAL_RECORD_REF;
+const originalGoldPrivacyReviewStatus = process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS;
 const originalGoldLocalEnabled = process.env.IMPORT_GOLD_LOCAL_ENABLED;
 const originalGoldLocalBaseUrl = process.env.IMPORT_GOLD_LOCAL_BASE_URL;
 const sessionTokens = new Map<string, string>();
@@ -88,6 +90,10 @@ afterAll(async () => {
   else process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = originalGoldSourceApproved;
   if (originalGoldRetentionApproved === undefined) delete process.env.IMPORT_GOLD_RETENTION_APPROVED;
   else process.env.IMPORT_GOLD_RETENTION_APPROVED = originalGoldRetentionApproved;
+  if (originalGoldApprovalRecordRef === undefined) delete process.env.IMPORT_GOLD_APPROVAL_RECORD_REF;
+  else process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = originalGoldApprovalRecordRef;
+  if (originalGoldPrivacyReviewStatus === undefined) delete process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS;
+  else process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = originalGoldPrivacyReviewStatus;
   if (originalGoldLocalEnabled === undefined) delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
   else process.env.IMPORT_GOLD_LOCAL_ENABLED = originalGoldLocalEnabled;
   if (originalGoldLocalBaseUrl === undefined) delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
@@ -98,6 +104,8 @@ beforeEach(async () => {
   process.env.IMPORT_GOLD_ENABLED = "true";
   process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
   process.env.IMPORT_GOLD_RETENTION_APPROVED = "true";
+  process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "test-only://synthetic-import-gold-approval";
+  process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "not_required";
   delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
   delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
   route?.setImportGoldProviderForTest();
@@ -932,6 +940,21 @@ describe("atomic import operations", () => {
     expect(listBody.cases[0]).not.toHaveProperty("evaluatedInput");
     const caseId = listBody.cases[0]!.id;
 
+    process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "pending";
+    const disabledCaseRoutes = await Promise.all([
+      fetch(`${baseUrl}/api/import-gold/cases`, { headers: headers() }),
+      fetch(`${baseUrl}/api/import-gold/export.jsonl`, { headers: headers() }),
+      fetch(`${baseUrl}/api/import-gold/score`, {
+        method: "POST", headers: headers(), body: JSON.stringify({ provider: "local" }),
+      }),
+      fetch(`${baseUrl}/api/import-gold/cases/${caseId}/exclusion`, {
+        method: "PATCH", headers: headers(), body: JSON.stringify({ excluded: true }),
+      }),
+      fetch(`${baseUrl}/api/import-gold/cases/${caseId}`, { method: "DELETE", headers: headers() }),
+    ]);
+    expect(disabledCaseRoutes.map((response) => response.status)).toEqual([404, 404, 404, 404, 404]);
+    process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "not_required";
+
     const invalidLimit = await fetch(`${baseUrl}/api/import-gold/cases?limit=101`, { headers: headers() });
     expect(invalidLimit.status).toBe(400);
     const excluded = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}/exclusion`, {
@@ -974,6 +997,23 @@ describe("atomic import operations", () => {
     expect((await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).status).toBe(200);
     expect((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json() as { enabled: boolean }).enabled).toBe(false);
     process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
+
+    process.env.IMPORT_GOLD_RETENTION_APPROVED = "false";
+    expect(((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json()) as { enabled: boolean }).enabled).toBe(false);
+    process.env.IMPORT_GOLD_RETENTION_APPROVED = "true";
+    const captureWhileApprovalMissing = async (operationId: string) => apply(operationId, {
+      ...change(operationId),
+      goldCapture: { input: { candidates: [{ name: "Synthetic case" }] } },
+    });
+    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "  ";
+    expect(((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json()) as { enabled: boolean }).enabled).toBe(false);
+    expect((await captureWhileApprovalMissing("gold-capture-no-approval-ref-001")).status).toBe(404);
+    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "test-only://synthetic-import-gold-approval";
+    process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "pending";
+    expect(((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json()) as { enabled: boolean }).enabled).toBe(false);
+    expect((await captureWhileApprovalMissing("gold-capture-pending-privacy-001")).status).toBe(404);
+    process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "not_required";
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
 
     const oversized = await apply("gold-capture-oversized-001", {
       ...change("gold-oversized"),
