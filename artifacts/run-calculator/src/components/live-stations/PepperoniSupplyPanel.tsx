@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { applicatorStockFields, computeApplicatorStockCapacityLbs } from "@workspace/live-calc";
 import { useStockDrafts } from "../../contexts/StockDraftContext";
 import { useManualControlLock } from "../../manualSectionLocks";
@@ -7,6 +8,14 @@ import { ApplicatorStockRow } from "./ApplicatorStockRow";
 
 export const PEPPERONI_SUPPLY_REGISTERS = ["pep1", "pep1b", "pep2", "pep2b"] as const;
 export type PepperoniSupplyRegister = (typeof PEPPERONI_SUPPLY_REGISTERS)[number];
+
+function supplyLabel(values: FormValues, register: PepperoniSupplyRegister) {
+  const group = register.startsWith("pep1") ? "pep1" : "pep2";
+  const typeField = register.endsWith("b") ? `${group}TypeB` as const : `${group}Type` as const;
+  const type = String(values[typeField] ?? "").trim();
+  if (!type) return undefined;
+  return `Pep ${group.slice(3)}${register.endsWith("b") ? " additional" : ""} · ${type}`;
+}
 
 /** Pepperoni loads are not batch recipes; preserve their separate pounds controls. */
 export function PepperoniSupplyPanel({
@@ -21,6 +30,17 @@ export function PepperoniSupplyPanel({
   onSave: (register: PepperoniSupplyRegister, stockLbs: number) => void;
 }) {
   const drafts = useStockDrafts(runId);
+  useEffect(() => {
+    for (const register of PEPPERONI_SUPPLY_REGISTERS) {
+      const label = supplyLabel(values, register);
+      const draft = drafts[register];
+      // Blank setup hides a slot temporarily. A different configured product,
+      // even while hidden by combined mode, retires the old product's draft.
+      if (label !== undefined && draft && draft.label !== label) {
+        delete drafts[register];
+      }
+    }
+  }, [values, drafts]);
   const locks = {
     pep1: useManualControlLock(runId, "pepperoni-1-stock"),
     pep2: useManualControlLock(runId, "pepperoni-2-stock"),
@@ -41,9 +61,7 @@ export function PepperoniSupplyPanel({
           const fields = applicatorStockFields(register);
           const group = register.startsWith("pep1") ? "pep1" : "pep2";
           const lock = locks[group];
-          const label = register.endsWith("b")
-            ? `Pep ${register.slice(3, 4)} additional · ${String(source[`${group}TypeB`] ?? "").trim()}`
-            : `Pep ${register.slice(3, 4)} · ${String(source[`${register}Type`] ?? "").trim()}`;
+          const label = supplyLabel(values, register)!;
           const retained = drafts[register];
           return <ApplicatorStockRow
             key={`${register}-${runId}-${label}`}

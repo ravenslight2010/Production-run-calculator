@@ -384,7 +384,17 @@ function PepperoniSetupEditor() {
       <button key={id} type="button" data-testid={id} onClick={() => setValue(field, value, { shouldDirty: true })}>{id}</button>
     ))}
     <button type="button" data-testid="toggle-pep1-combined" onClick={() => setValue("pep1Combined", !getValues("pep1Combined"), { shouldDirty: true })}>Toggle combined pepperoni</button>
+    {PEPPERONI_REGISTERS.map((register) => <StockSlotSetupEditor key={register} register={register} />)}
   </>;
+}
+
+function StockSlotSetupEditor({ register }: { register: (typeof PEPPERONI_REGISTERS)[number] }) {
+  const { control, setValue } = useFormContext<FormValues>();
+  const typeField = (register.endsWith("b")
+    ? `${register.slice(0, -1)}TypeB`
+    : `${register}Type`) as keyof FormValues;
+  const type = useWatch({ control, name: typeField });
+  return <input data-testid={`setup-${register}-type`} value={String(type ?? "")} onChange={(event) => setValue(typeField, event.target.value)} />;
 }
 
 describe("Pepperoni supply controls retained alongside applicator batches", () => {
@@ -393,15 +403,70 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
   const fixture = (queueManualCorrection = vi.fn(), runId = RUN_ID) =>
     <FrontlineNavigationFixture values={PEPPERONI_VALUES} runId={runId} queueManualCorrection={queueManualCorrection} />;
   const input = (register: string) => screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
-  const controls = (register: string) => [
-    input(register),
-    within(input(register).parentElement!).getByRole("button", { name: "Fill to cap" }) as HTMLButtonElement,
-  ];
+      const controls = applicatorSupplyControls(slot);
   function navigateAwayAndBack() {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
     expect(screen.queryByTestId("stock-pep1-lbs")).toBeNull();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
   }
+
+  it.each(PEPPERONI_REGISTERS.flatMap((register) =>
+    ["34.25", "0", ""].map((draft) => ({ register, draft })),
+  ))("restores the raw $register draft '$draft' after setup hides every stock row, saving only on Save", ({ register, draft }) => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    const setup = screen.getByTestId(`setup-${register}-type`) as HTMLInputElement;
+    const originalType = setup.value;
+    for (const other of PEPPERONI_REGISTERS) {
+      if (other !== register) fireEvent.change(screen.getByTestId(`setup-${other}-type`), { target: { value: "" } });
+    }
+    const before = screen.getByTestId("stock-form-values").textContent;
+    const stockField = `${register}StockLbs`;
+    const savedStock = input(register).value;
+    fireEvent.change(input(register), { target: { value: "12.25" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    fireEvent.change(setup, { target: { value: "" } });
+    fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
+    fireEvent.change(setup, { target: { value: originalType } });
+    expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input(register).value).toBe(savedStock);
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    const setup = screen.getByTestId(`setup-${register}-type`) as HTMLInputElement;
+    const originalType = setup.value;
+    const savedStock = input(register).value;
+    fireEvent.change(input(register), { target: { value: "12.25" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    fireEvent.change(setup, { target: { value: "" } });
+    fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
+    fireEvent.change(setup, { target: { value: originalType } });
+    expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input(register).value).toBe(savedStock);
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    const setup = screen.getByTestId(`setup-${register}-type`) as HTMLInputElement;
+    const originalType = setup.value;
+    const savedStock = input(register).value;
+    fireEvent.change(input(register), { target: { value: "12.25" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    fireEvent.change(setup, { target: { value: "" } });
+    fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
+    fireEvent.change(setup, { target: { value: originalType } });
+    expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input(register).value).toBe(savedStock);
+    expect(queue).not.toHaveBeenCalled();
+  });
 
   it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
     const queue = vi.fn();
@@ -431,37 +496,28 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
   it.each(["", "0", "9999"])("retains a raw pepperoni draft %j across navigation without saving", (draft) => {
     const queue = vi.fn();
     render(fixture(queue));
-    fireEvent.change(input("pep1"), { target: { value: "5" } });
-    fireEvent.change(input("pep1"), { target: { value: draft } });
+    fireEvent.change(input("pep2"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
+    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
     navigateAwayAndBack();
-    expect(input("pep1").value).toBe(draft);
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2").value).toBe("12.25");
+    expect(input("pep2b").value).toBe("34.5");
     expect(queue).not.toHaveBeenCalled();
   });
 
-  it("clears only the filled slot while preserving another unfinished draft", () => {
+  it("does not revive a hidden additional-Pep-2 draft after its ingredient changes", () => {
     render(fixture());
-    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
     fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
-    navigateAwayAndBack();
-    fireEvent.click(within(input("pep1").parentElement!).getByRole("button", { name: "Fill to cap" }));
-    navigateAwayAndBack();
-    expect(input("pep1").value).toBe(input("pep1").max);
-    expect(input("pep2b").value).toBe("34.5");
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    fireEvent.click(screen.getByTestId("change-pep2-additional-type"));
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2b").value).not.toBe("34.5");
   });
 
-  it.each([
-    ["pep1", "change-pep1-type"], ["pep1b", "change-pep1-additional-type"],
-    ["pep2", "change-pep2-type"], ["pep2b", "change-pep2-additional-type"],
-  ])("does not transfer an unfinished %s draft to a different ingredient", (register, change) => {
-    render(fixture());
-    fireEvent.change(input(register), { target: { value: "12.25" } });
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByTestId(change));
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
-    expect(input(register).value).not.toBe("12.25");
-  });
-
-  it("preserves hidden Pep 2 drafts across combined mode, without exposing or persisting them", () => {
+  it("discards a run's drafts when switching runs while Frontline is unmounted", () => {
     const queue = vi.fn();
     render(fixture(queue));
     fireEvent.change(input("pep2"), { target: { value: "12.25" } });
@@ -487,7 +543,11 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
 
   it("discards a run's drafts when switching runs while Frontline is unmounted", () => {
     const queue = vi.fn();
-    const view = render(fixture(queue));
+    const view = render(
+      <LiveStationPersistenceHarness>
+        <LiveSauceTabContent />
+      </LiveStationPersistenceHarness>,
+    );
     fireEvent.change(input("pep1"), { target: { value: "12.25" } });
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
     view.rerender(fixture(queue, SWITCHED_RUN_ID));
@@ -514,7 +574,11 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
 
   it.each(["pep1", "pep2"])("does not leak the %s peer lock across runs or release its original owner", (section) => {
     claimManualSectionLock(RUN_ID, section, "peer-device", 30_000, true);
-    const view = render(fixture());
+    const view = render(
+      <LiveStationPersistenceHarness>
+        <LiveSauceTabContent />
+      </LiveStationPersistenceHarness>,
+    );
     expect(input(section).disabled).toBe(true);
     view.rerender(fixture(vi.fn(), SWITCHED_RUN_ID));
     for (const register of PEPPERONI_REGISTERS) expect(input(register).disabled).toBe(false);
@@ -540,6 +604,8 @@ describe("Frontline on-line applicator supply", () => {
 
   it("shows batch-unit supply controls and persists a manual correction for the active run", () => {
     const queueManualCorrection = vi.fn();
+
+    const before = screen.getByTestId("stock-form-values").textContent;
     render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
     expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
     expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("batches");
@@ -719,17 +785,27 @@ describe("live station startup", () => {
   });
 
   it("advances Frontline once when its ended run has cleared Stage 1", () => {
-    const runs = [ENDED_RUN, NEXT_RUN];
-    const selectedRunId = { current: RUN_ID };
-    const switchToRun = vi.fn((newIndex: number, expectedCurrentRunId?: string) => {
-      if (expectedCurrentRunId && selectedRunId.current !== expectedCurrentRunId) return false;
-      selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-      return true;
-    });
+      const runs = [fullyDrained, NEXT_RUN, MANUALLY_SELECTED_RUN];
+      const selectedRunId = { current: MANUALLY_SELECTED_RUN.id };
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     const view = render(
-      <StationProviders status="ended" runs={runs} switchToRun={switchToRun}>
-        <LiveFrontlineTabContent />
-      </StationProviders>,
+      <LiveStationPersistenceHarness>
+        <LiveSauceTabContent />
+      </LiveStationPersistenceHarness>,
     );
     expect(switchToRun).toHaveBeenCalledTimes(1);
     expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
@@ -742,7 +818,21 @@ describe("live station startup", () => {
   });
 
   it("keeps an ended station run selected when there is no queued next run", () => {
-    const switchToRun = vi.fn();
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     render(
       <StationProviders status="ended" runs={[ENDED_RUN]} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
@@ -753,7 +843,21 @@ describe("live station startup", () => {
   });
 
   it("does not advance Packaging during Frontline or Freeze tunnel drain", () => {
-    const switchToRun = vi.fn();
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     const stillDraining = { ...ENDED_RUN, endedAt: Date.now() - 5 * 60_000 };
     render(
       <StationProviders status="ended" runs={[stillDraining, NEXT_RUN]} switchToRun={switchToRun}>
@@ -765,14 +869,24 @@ describe("live station startup", () => {
   });
 
   it("advances Packaging once when the ended run is fully drained, including on mount", () => {
-    const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
-    const runs = [fullyDrained, NEXT_RUN];
-    const selectedRunId = { current: RUN_ID };
-    const switchToRun = vi.fn((newIndex: number, expectedCurrentRunId?: string) => {
-      if (expectedCurrentRunId && selectedRunId.current !== expectedCurrentRunId) return false;
-      selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-      return true;
-    });
+      const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+      const runs = [fullyDrained, NEXT_RUN, MANUALLY_SELECTED_RUN];
+      const selectedRunId = { current: MANUALLY_SELECTED_RUN.id };
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     render(
       <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
         <LivePackagingTabContent />
@@ -1079,3 +1193,5 @@ describe("live station edits and stamped browser persistence", () => {
   });
 
 });
+
+    const persisted = loadRunValues(RUN_ID);
