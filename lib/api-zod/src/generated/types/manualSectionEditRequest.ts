@@ -16,6 +16,7 @@ import type { ManualPep2Edit } from './manualPep2Edit';
 import type { ManualSauceEdit } from './manualSauceEdit';
 import type { ManualSauceStockEdit } from './manualSauceStockEdit';
 import type { ManualSectionEditRequestBaseValues } from './manualSectionEditRequestBaseValues';
+import type { ManualSectionEditRequestOperation } from './manualSectionEditRequestOperation';
 import type { ManualSectionEditRequestSection } from './manualSectionEditRequestSection';
 import type { ManualSectionEditRequestValues } from './manualSectionEditRequestValues';
 
@@ -45,6 +46,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualDoughEdit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -71,6 +79,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualSauceEdit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -97,6 +112,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualSauceStockEdit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -123,6 +145,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualApp1Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -149,6 +178,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualApp2Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -175,6 +211,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualApp3Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -201,6 +244,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualApp4Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -227,6 +277,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualPep1Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -253,6 +310,13 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 }) | (ManualPep2Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
@@ -279,4 +343,11 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+  /** End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. */
+  operation?: ManualSectionEditRequestOperation;
+  /**
+     * Required for resume-packaging; must match the canonical correction generation.
+     * @minimum 1
+     */
+  correctionGeneration?: number;
 });

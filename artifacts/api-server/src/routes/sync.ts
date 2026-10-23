@@ -72,6 +72,7 @@ import {
   reconcileRunConsumptionInTransaction,
 } from "./inventory";
 import { logger } from "../lib/logger";
+import { getBuildInfo } from "../lib/buildInfo";
 import {
   recordSseFrame,
   recordSsePeerFrameSkippedExactSnapshot,
@@ -1956,6 +1957,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
   const observedGeneration = body?.observedGeneration;
   const deviceId = body?.deviceId;
   const requestedDate = body?.date;
+  const resumePackaging = body?.operation === "resume-packaging";
+  const correctionGeneration = body?.correctionGeneration;
+  if ((body?.operation !== undefined && !resumePackaging)
+    || (resumePackaging && (section !== "packaging"
+      || !Number.isSafeInteger(correctionGeneration) || (correctionGeneration as number) < 1))) {
+    reject(400, "invalid_edit"); return;
+  }
   if (typeof id !== "string" || id.length < 1 || id.length > 160
     || !/^[A-Za-z0-9:_-]+$/.test(id)
     || typeof requestedDate !== "string" || requestedDate !== date
@@ -2034,12 +2042,31 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     const [seen] = await tx.select().from(operationalIntentLedgerTable)
       .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, date),
         eq(operationalIntentLedgerTable.intentId, id))).for("update");
-    if (seen) return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
+    if (seen) {
+      if (resumePackaging && (seen.commandType !== "packaging:resume"
+        || (seen.actionData as Record<string, unknown>)?.runId !== runId
+        || (seen.actionData as Record<string, unknown>)?.observedGeneration !== observedGeneration
+        || (seen.actionData as Record<string, unknown>)?.correctionGeneration !== correctionGeneration)) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+      return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
+    }
     const run = (current.dayState?.runs as Array<Record<string, any>> | undefined)?.find((candidate) => candidate.id === runId);
     if (!run || `${runId}:${String(run.metaUpdatedAt ?? run.startedAt ?? 0)}` !== observedGeneration) {
       return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "run_changed" };
     }
     const currentValues = current.runValues?.[runId] ?? {};
+    if (resumePackaging) {
+      const progress = current.packagingProgress?.[runId];
+      // Compare both lifecycle and correction identity under the same row lock.
+      // Resume is not allowed to write counters, including on an old retry.
+      if (progress?.correctionGeneration !== correctionGeneration) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+      if (entries.some(([field, value]) => value !== Number(currentValues[field] ?? 0))) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
+      }
+    }
     const stockRegisters = section === "app1" || section === "app2" || section === "app3" || section === "app4"
       ? [section as "app1" | "app2" | "app3" | "app4"]
       : section === "pep1" ? ["pep1", "pep1b"] as const
@@ -2152,7 +2179,9 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         && previousProgress.correctionGeneration >= 0
           ? previousProgress.correctionGeneration as number
           : 0;
-      const correctionGeneration = Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
+      const correctionGeneration = resumePackaging
+        ? previousGeneration
+        : Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
       const canonicalValues = next.runValues[runId] ?? {};
       const canonicalCounter = (value: unknown) =>
         typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -2163,7 +2192,9 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
           casesOnCurrentSkid: canonicalCounter(canonicalValues.casesOnCurrentSkid),
           correctionGeneration,
           updatedAt: serverTime,
-          manualOverrideUntil: serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
+          manualOverrideUntil: resumePackaging
+            ? Math.min(Number(previousProgress?.manualOverrideUntil) || 0, serverTime)
+            : serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
         },
       };
     }
@@ -2176,9 +2207,10 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     }
     await tx.insert(operationalIntentLedgerTable).values({
       scope, date, intentId: id, outcome: "accepted", snapshot: next,
-      commandType: `manual-section:${section}`, actorId: req.userId ?? "unknown",
+      commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`, actorId: req.userId ?? "unknown",
       deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
-      canonicalRevision: revision, actionData: { runId, section, values, baseValues }, serverReceivedAt: new Date(),
+      canonicalRevision: revision, actionData: { runId, section, values, baseValues,
+        ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration, observedGeneration } : {}) }, serverReceivedAt: new Date(),
     });
     await appendSyncOutboxEvent(tx, {
       kind: "day-state",
@@ -2366,15 +2398,18 @@ router.post("/sync/station-activity", async (req: Request, res: Response): Promi
 // original answer instead of applying a second pause or correction.
 router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
   const now = Date.now();
-  let validationStage = "envelope";
-  const intent = parseOperationalIntent(req.body?.intent, now, (issue) => { validationStage = issue; });
+  // Only parser stages and the fixed boundary stages below are logged; never
+  // retain inventory keys, correction values, identities or rejected payloads.
+  const logValidationRejection = (stage: string) => req.log.warn({
+    event: "operational_intent_rejected",
+    requestId: req.id,
+    correlationId: (req as Request & { correlationId?: string }).correlationId,
+    stage,
+    build: getBuildInfo()?.appBuildId ?? "unknown",
+  }, "Operational intent contract rejected");
+  const intent = parseOperationalIntent(req.body?.intent, now, logValidationRejection);
   if (!intent || intent.date !== clientToday(req)) {
-    // Allowlisted stage only. The request logger supplies correlation; never
-    // retain inventory keys, values, identities or the rejected payload.
-    req.log.warn({
-      event: "operational_intent_rejected",
-      stage: intent ? "production-date" : validationStage,
-    }, "Operational intent contract rejected");
+    if (intent) logValidationRejection("production-date");
     res.status(400).json({ error: "Invalid operational intent or production date" }); return;
   }
   const command = commandContext(req, {
@@ -2391,10 +2426,7 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     inventoryLines: intent.inventoryLines,
   }, intent.baseRevision ?? 0);
   if (!command) {
-    req.log.warn({
-      event: "operational_intent_rejected",
-      stage: "command-context",
-    }, "Operational command rejected before application");
+    logValidationRejection("command-context");
     res.status(400).json({ error: "Invalid or oversized operational command" });
     return;
   }

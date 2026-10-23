@@ -9,8 +9,19 @@ describe("operational intents", () => {
   it("reports only an allowlisted validation stage, never a rejected payload", () => {
     const invalid = vi.fn();
     expect(parseOperationalIntent({ privatePayload: "must-not-be-retained" }, 300, invalid)).toBeNull();
-    expect(invalid).toHaveBeenCalledWith("envelope");
+    expect(invalid).toHaveBeenCalledWith("identity");
     expect(JSON.stringify(invalid.mock.calls)).not.toContain("must-not-be-retained");
+  });
+  it.each([
+    [{ ...pause, effectiveAt: 200_000_000 }, "effective-time"],
+    [{ ...pause, baseRevision: -1 }, "revision"],
+    [{ ...pause, action: "lifecycle", lifecycle: "end", inventoryLines: [
+      { itemKey: "z", qty: 1 }, { itemKey: "a", qty: 1 },
+    ] }, "inventory-order"],
+  ])("preserves bounded diagnostics across merged validation paths", (input, stage) => {
+    const invalid = vi.fn();
+    expect(parseOperationalIntent(input, 300, invalid)).toBeNull();
+    expect(invalid).toHaveBeenCalledExactlyOnceWith(stage);
   });
   it("applies an offline pause once and retains its outcome for restart replay", () => {
     const first = applyOperationalIntent(base(), pause, 300);

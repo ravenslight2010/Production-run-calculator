@@ -18,6 +18,9 @@ import {
   setOperationalIntentIdentity,
   submitManualSection,
   setOperationalIntentCanonicalAdopter,
+  hasPendingManualSection,
+  readPendingManualSection,
+  retireObsoletePackagingResume,
 } from "./operationalIntentOutbox";
 import { subscribeToManualSectionErrors } from "./manualSectionErrors";
 
@@ -25,6 +28,125 @@ describe("manual section locks", () => {
   afterEach(() => clearManualSectionLocks());
 
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); localStorage.clear(); });
+
+  it("sends Resume as a generation-bound control and does not force correction counts on adoption", async () => {
+    setOperationalIntentIdentity({ scope: "live", userId: "resume-fixture" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const adopter = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopter);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      outcome: "accepted", serverTime: 200,
+      data: {
+        runValues: { r: { skidsCompleted: 1, casesOnCurrentSkid: 3 } },
+        packagingProgress: { r: { correctionGeneration: 2, manualOverrideUntil: 200, updatedAt: 200, skidsCompleted: 1, casesOnCurrentSkid: 3 } },
+      },
+    }), { status: 200 }));
+    const result = await submitManualSection({
+      id: "resume-id", runId: "r", section: "packaging",
+      values: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
+      baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
+      observedGeneration: "r:1", operation: "resume-packaging", correctionGeneration: 2,
+    });
+    expect(result).toBe("accepted");
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+      id: "resume-id", operation: "resume-packaging", correctionGeneration: 2, observedGeneration: "r:1",
+    });
+    expect(adopter.mock.calls[0][1].values).toBeUndefined();
+    expect(hasPendingManualSection("r", "packaging")).toBe(false);
+    setOperationalIntentCanonicalAdopter(undefined);
+  });
+
+  it.each([{}, { runValues: { r: { skidsCompleted: 1, casesOnCurrentSkid: 3 } } }])(
+    "does not report Resume accepted for a malformed canonical success", async (data) => {
+      vi.useFakeTimers();
+      setOperationalIntentIdentity({ scope: "live", userId: "resume-malformed" });
+      Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+      const adopter = vi.fn();
+      setOperationalIntentCanonicalAdopter(adopter);
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ outcome: "accepted", data }), { status: 200 }));
+      expect(await submitManualSection({
+        id: "bad-resume", runId: "r", section: "packaging",
+        values: { skidsCompleted: 1, casesOnCurrentSkid: 3 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
+        observedGeneration: "r:1", operation: "resume-packaging", correctionGeneration: 2,
+      })).toBe("offline");
+      expect(adopter).not.toHaveBeenCalled();
+      expect(readPendingManualSection("r", "packaging")?.id).toBe("bad-resume");
+      setOperationalIntentCanonicalAdopter(undefined);
+    },
+  );
+
+  it("retains offline Resume identity and retires only obsolete control requests, never corrections", async () => {
+    setOperationalIntentIdentity({ scope: "live", userId: "resume-offline" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    const input = {
+      id: "offline-resume", runId: "r", section: "packaging",
+      values: { skidsCompleted: 1, casesOnCurrentSkid: 3 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
+      observedGeneration: "r:1", operation: "resume-packaging" as const, correctionGeneration: 2,
+    };
+    expect(await submitManualSection(input)).toBe("offline");
+    expect(hasPendingManualSection("r", "packaging")).toBe(true);
+    retireObsoletePackagingResume("r", "r:1", 2);
+    expect(readPendingManualSection("r", "packaging")?.id).toBe(input.id);
+    retireObsoletePackagingResume("r", "r:1", 3);
+    expect(hasPendingManualSection("r", "packaging")).toBe(false);
+    await submitManualSection({ ...input, id: "offline-correction", operation: undefined, correctionGeneration: undefined });
+    retireObsoletePackagingResume("r", "r:99", 99);
+    expect(readPendingManualSection("r", "packaging")?.id).toBe("offline-correction");
+  });
+
+  it.each([401, 400, 409, "hidden-timeout"] as const)("keeps Resume recoverable after %s without a false acknowledgement", async (failure) => {
+    vi.useFakeTimers();
+    setOperationalIntentIdentity({ scope: "live", userId: "resume-recovery" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(failure === "hidden-timeout");
+    const adopter = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopter);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    if (failure === "hidden-timeout") fetchSpy.mockRejectedValueOnce(new DOMException("fixture suspended request", "AbortError"));
+    else fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ code: "section_changed" }), { status: failure }));
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      outcome: "accepted", serverTime: 300,
+      data: {
+        runValues: { r: { skidsCompleted: 1, casesOnCurrentSkid: 3 } },
+        packagingProgress: { r: {
+          skidsCompleted: 1, casesOnCurrentSkid: 3, correctionGeneration: 2,
+          manualOverrideUntil: 300, updatedAt: 300,
+        } },
+      },
+    }), { status: 200 }));
+    const input = {
+      id: "resume-recovery-id", runId: "r", section: "packaging",
+      values: { skidsCompleted: 1, casesOnCurrentSkid: 3 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 3 },
+      observedGeneration: "r:1", operation: "resume-packaging" as const, correctionGeneration: 2,
+    };
+    expect(await submitManualSection(input)).not.toBe("accepted");
+    expect(adopter).not.toHaveBeenCalled();
+    expect(readPendingManualSection("r", "packaging")).toMatchObject({
+      id: input.id, values: input.values, observedGeneration: input.observedGeneration, correctionGeneration: 2,
+    });
+    if (failure !== "hidden-timeout") {
+      await retryPendingManualSections();
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    }
+    if (failure === 400 || failure === 409) {
+      expect(await retryPendingManualSection(input.id)).toBe(false);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(adopter).not.toHaveBeenCalled();
+      setOperationalIntentCanonicalAdopter(undefined);
+      return;
+    }
+    hidden.mockReturnValue(false);
+    expect(await retryPendingManualSection(input.id)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const sent = fetchSpy.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+    expect(sent[1]).toMatchObject({
+      id: sent[0].id, values: sent[0].values, baseValues: sent[0].baseValues,
+      operation: "resume-packaging", correctionGeneration: 2,
+    });
+    expect(adopter).toHaveBeenCalledOnce();
+    expect(hasPendingManualSection("r", "packaging")).toBe(false);
+    setOperationalIntentCanonicalAdopter(undefined);
+  });
 
   it("shares ownership across duplicate controls but not unrelated sections", () => {
     expect(claimManualSectionLock("run-1", "packaging", "device-a")).toBe(true);

@@ -41,7 +41,18 @@ If `run-release-node.sh` exits before a check starts with Node's conflicting `--
 
 **How to apply:** Preserve the original failure, remove only the conflicting inherited Node option for the retry (for example, `env -u NODE_OPTIONS`), and keep the release runner's own checks and HTTPS protections enabled.
 
+If the system pnpm launcher attempts to bootstrap the workspace's pinned pnpm
+version over the package firewall, use the already-installed pinned Node and
+pnpm-native executable through a temporary PATH shim for that validation only.
+Do not disable the package-manager version check or change the global pnpm.
 
+**Why:** A bootstrap attempt can fail before any project validation starts and
+leave managed workflows unable to launch, even when the exact Node and pnpm
+tools are already cached locally.
+
+**How to apply:** Check the workspace Node selector and cached native pnpm
+version, put those exact executables first on PATH, and keep the normal release
+runner, workspace lock, and validation commands intact.
 ## pnpm bootstrap recursion
 
 Some Replit images expose an older global pnpm than the repository pin. Its

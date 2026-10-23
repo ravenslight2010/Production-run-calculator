@@ -1990,12 +1990,14 @@ export default function Home() {
       skidsCompleted: number,
       casesOnCurrentSkid: number,
       manualOverrideUntil?: number,
+      beforeOverride?: Record<string, number>,
     ) => {
       packagingManager.persistManualProgress(
         runId,
         skidsCompleted,
         casesOnCurrentSkid,
         manualOverrideUntil,
+        beforeOverride,
       );
       invalidateOperationalCalcForPackagingRun(runId);
     },
@@ -7690,10 +7692,7 @@ export default function Home() {
       if (packagingFenceRaised) {
         invalidateOperationalCalcForPackagingRun(packagingRunAtApplyStart!);
         const accepted = packagingMerge.merged[packagingRunAtApplyStart];
-        autoSuppressUntilRef.current = Math.max(
-          autoSuppressUntilRef.current,
-          accepted?.manualOverrideUntil ?? 0,
-        );
+        autoSuppressUntilRef.current = accepted?.manualOverrideUntil ?? 0;
         // A newly accepted packaging register changes the case counter's
         // authoritative baseline even when the run lifecycle is unchanged.
         // Rebase before releasing the sync fence so hidden time cannot be
@@ -8097,10 +8096,7 @@ export default function Home() {
           );
         if (adoptedPackaging || equalPackagingEcho) {
           const progress = packagingMerge.merged[currentId!];
-          autoSuppressUntilRef.current = Math.max(
-            autoSuppressUntilRef.current,
-            progress?.manualOverrideUntil ?? 0,
-          );
+          autoSuppressUntilRef.current = progress?.manualOverrideUntil ?? 0;
         }
         const currentRunValues = currentId
           ? payload.runValues[currentId] as FormValues | undefined
@@ -8596,7 +8592,6 @@ export default function Home() {
             || msg.snapshotId !== syncSnapshotIdRef.current
           ) return false;
         } else if (msg.completeness === "partial") {
-          const partialStartedAt = typeof performance === "undefined" ? 0 : performance.now();
           const reconstructed = await reconstructPartialSyncPayload(
             adoptedCanonicalSnapshotRef.current,
             syncSnapshotIdRef.current,
@@ -8623,19 +8618,20 @@ export default function Home() {
             void foregroundRecoveryRetryRef.current?.();
             return false;
           }
-          syncSnapshotIdRef.current = msg.snapshotId!;
-          adoptedCanonicalSnapshotRef.current = persistedSyncPayload(reconstructed);
+          // Keep the validated full snapshot through the common adoption path
+          // below. Applying here and then again as raw msg.data stores a sparse
+          // delta as the next baseline and can throw on missing dayState.
+          msg.data = reconstructed;
           recordSyncEvent("peer", "Partial peer update reconstructed", "partial");
-          applySyncCallbackRef.current(reconstructed, {
-            peerReceivedAt: partialStartedAt,
-            peerResponseBytes: new Blob([e.data as string]).size,
-          });
         } else if (msg.data) {
           if (
             !isCanonicalRecoverySyncPayload(msg.data, todayStr(), msg.completeness)
             || !isValidSyncSnapshotId(msg.snapshotId)
             || !await syncPayloadMatchesSnapshot(msg.data, msg.snapshotId)
-          ) return false;
+          ) {
+            recordSyncEvent("failure", "Peer snapshot did not match its canonical contract", "peer-snapshot-rejected");
+            return false;
+          }
           if (streamDate !== todayStr()) return false;
           if (foregroundSyncBarrierRef.current) return false;
         } else if (msg.initial) {

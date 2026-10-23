@@ -7612,6 +7612,8 @@ components:
         baseRevision: { type: integer, minimum: 0 }
         resetEpoch: { type: integer, minimum: 0 }
         deviceId: { type: string, minLength: 1, maxLength: 160, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+        operation: { type: string, enum: [resume-packaging], description: End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration. }
+        correctionGeneration: { type: integer, minimum: 1, description: Required for resume-packaging; must match the canonical correction generation. }
       oneOf:
         - $ref: "#/components/schemas/ManualPackagingEdit"
         - $ref: "#/components/schemas/ManualDoughEdit"

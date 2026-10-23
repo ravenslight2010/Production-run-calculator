@@ -33,7 +33,7 @@ export type OperationalIntentOutcome =
   | "review-required";
 
 export type OperationalIntentValidationIssue =
-  | "envelope" | "revision" | "lifecycle" | "inventory-shape"
+  | "envelope" | "identity" | "effective-time" | "revision" | "lifecycle" | "inventory-shape"
   | "inventory-line" | "inventory-order" | "correction";
 
 export function parseOperationalIntent(
@@ -52,9 +52,9 @@ export function parseOperationalIntent(
     || typeof x.runId !== "string" || !ID.test(x.runId)
     || typeof x.observedGeneration !== "string" || !ID.test(x.observedGeneration)
     || !Number.isSafeInteger(x.resetEpoch) || (x.resetEpoch as number) < 0
-    || typeof x.effectiveAt !== "number" || !Number.isFinite(x.effectiveAt)
-    || Math.abs(now - (x.effectiveAt as number)) > 36 * 60 * 60_000
-    || !["pause", "resume", "lifecycle", "correction"].includes(String(x.action))) return reject("envelope");
+    || !["pause", "resume", "lifecycle", "correction"].includes(String(x.action))) return reject("identity");
+  if (typeof x.effectiveAt !== "number" || !Number.isFinite(x.effectiveAt)
+    || Math.abs(now - x.effectiveAt) > 36 * 60 * 60_000) return reject("effective-time");
   if (x.baseRevision !== undefined
     && (!Number.isSafeInteger(x.baseRevision) || (x.baseRevision as number) < 0)) return reject("revision");
   if (x.action === "lifecycle" && x.lifecycle !== "start" && x.lifecycle !== "end") return reject("lifecycle");

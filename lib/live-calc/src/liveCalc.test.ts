@@ -33,12 +33,9 @@ describe("shared live calculation boundary", () => {
 
   it("does not create automatic batch claims without a valid configured weight", () => {
     const base = {
-      type: "cheese",
-      recipe: undefined,
-      ozPerPizza: 1,
-      casesNeeded: 100,
-      pizzasPerCase: 10,
-      ppm: 60,
+      syncVersion: 1 as const, completeness: "complete" as const,
+      dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, substitutions: [{ action: "replace" }], runs: [{ id: "run-1", startedAt: 1_000 }] },
+      runValues: { "run-1": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, tempCycleSpeed: 12 } },
     };
     expect(computeAppSlotInfo({ ...base, batchLbs: 0 })).toMatchObject({
       effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
@@ -54,7 +51,7 @@ describe("shared live calculation boundary", () => {
       dayState: { runs: [{ id: "run-override", startedAt: 1000 }], currentIndex: 0 },
       runValues: {
         "run-override": {
-          pizzasPerCase: 0,
+          pizzasPerCase: 10,
           casesPerSkid: 20,
           casesNeeded: 100,
           crustsPerCycle: 4,
@@ -128,8 +125,7 @@ describe("shared live calculation boundary", () => {
         pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
         app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
       } as never,
-      coordination: { case: { generation: "run-1:2000", nextDueAt: 4000, sequence: 3 } },
-      serverWallOwnership: { case: 3 },
+      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
@@ -210,6 +206,15 @@ describe("shared live calculation boundary", () => {
       snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
       snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
     });
+    expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000 }, 6_000)).observed.status).toBe("running");
+    expect(deriveOperationalRunView(args({
+      id: "run-1", startedAt: 1_000, pausedAt: 2_000,
+      stoppages: [{ type: "pause", startedAt: 2_000, stopTunnel: true }],
+    }, 3_000)).elapsed.phase.stage1.state).toBe("draining");
+    expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000, endedAt: 2_000 }, 3_000))
+      .elapsed.phase.stage1.state).toBe("draining");
+    expect(deriveOperationalRunView(args({ id: "run-1", startedAt: 1_000, endedAt: 2_000 }, 602_000))
+      .elapsed.phase.stage3.state).toBe("empty");
 
     const splitActive = deriveOperationalRunView({
       ...args({ id: "run-1", startedAt: 1_000 }, 6_000),

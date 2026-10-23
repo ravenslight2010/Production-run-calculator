@@ -3,7 +3,7 @@ name: Managed rebase tree recovery
 description: How to detect and repair silent tree corruption after a history-preserving managed rebase.
 ---
 
-Treat a successful rebase as history completion, not proof that the resulting tree matches the validated pre-rebase integration. Replay can leave duplicated declarations, truncated handlers, weakened policy inventories, or stale evidence fingerprints without retaining conflict markers.
+Treat a successful rebase as history completion, not proof that the resulting tree matches the validated pre-rebase integration. Replay can leave duplicated declarations, truncated handlers, weakened policy inventories, or stale evidence fingerprints without retaining conflict markers. Task-only added specs and evidence can also revert to earlier task versions; compare them with the validated tip even when they are not listed as conflicts.
 
 **Why:** A managed rebase completed cleanly while replayed conflict resolutions silently changed the integrated tree. Typechecking, sharded tests, generated-contract checks, and revision-bound evidence checks found regressions that a conflict-marker scan could not detect.
 

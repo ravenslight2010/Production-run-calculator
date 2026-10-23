@@ -60,10 +60,10 @@ describe("server auto-track claim builders", () => {
     const baseline = buildWallClockServerClaims(source, NOW)!;
     source.autoTrackServerState = { wallClockBookkeeping: { [RUN]: baseline.bookkeeping } };
     const nextDue = Math.max(
-      baseline.bookkeeping.caseNextDueMs,
       baseline.bookkeeping.trayConsNextDueMs,
       baseline.bookkeeping.batchConsNextDueMs,
     );
+    expect(nextDue).toBeLessThan(source.packagingProgress[RUN].manualOverrideUntil);
     const wall = buildWallClockServerClaims(source, nextDue)!;
     const dough = wall.claims.find(({ channel }) => channel === "tray-consume" || channel === "batch-consume")!;
     expect(dough).toBeDefined();
@@ -71,9 +71,9 @@ describe("server auto-track claim builders", () => {
     expect(doughAccepted.outcome).toBe("accepted");
     expect(doughAccepted.values.traysOnLine !== source.runValues[RUN].traysOnLine
       || doughAccepted.values.batchesReady !== source.runValues[RUN].batchesReady).toBe(true);
-    const caseClaim = wall.claims.find(({ channel }) => channel === "case")!;
-    expect(caseClaim).toBeDefined();
-    expect(applyAutoTrackClaim(source, caseClaim, nextDue).outcome).toBe("conflict");
+    expect(wall.claims.some(({ channel }) => channel === "case")).toBe(false);
+    expect(wall.bookkeeping.packagingHeld).toBe(true);
+    expect(source.runValues[RUN].casesOnCurrentSkid).toBe(1);
     const acceptedValues = appAccepted.data.runValues as Record<string, Record<string, unknown>>;
     expect(acceptedValues[RUN].traysOnLine).toBe(source.runValues[RUN].traysOnLine);
   });
@@ -539,17 +539,90 @@ describe("server auto-track claim builders", () => {
 
     const dueAt = baseline.bookkeeping.caseNextDueMs;
     const due = buildWallClockServerClaims(source, dueAt)!;
-    expect(due.claims).toHaveLength(1);
-    expect(applyAutoTrackClaim(source as never, due.claims[0]!, dueAt).outcome)
-      .toBe("conflict");
+    expect(due.claims).toHaveLength(0);
+    expect(due.bookkeeping.packagingHeld).toBe(true);
 
-    // Persisted bookkeeping advances despite the rejected claim. A restart at
-    // the same wall time therefore cannot regenerate or double-apply that case.
+    // There is no rejected claim to stall the worker transaction. A restart at
+    // the same wall time cannot regenerate or double-apply that case.
     (source as Record<string, unknown>).autoTrackServerState = {
       wallClockBookkeeping: { [RUN]: due.bookkeeping },
     };
     expect(buildWallClockServerClaims(source, dueAt)!.claims).toEqual([]);
   });
+
+  it.each([3, 30])("keeps a corrected baseline of %s through expiry without catch-up", (corrected) => {
+    const source: any = payload({ freezerTime: 0, casesOnCurrentSkid: corrected });
+    source.dayState.runs[0].startedAt = NOW - 600_000;
+    source.packagingProgress = { [RUN]: {
+      skidsCompleted: 0, casesOnCurrentSkid: corrected,
+      correctionGeneration: 1, manualOverrideUntil: NOW + 60_000,
+    } };
+    const held = buildWallClockServerClaims(source, NOW)!;
+    expect(held.claims.some((claim) => claim.channel === "case")).toBe(false);
+    source.autoTrackServerState = { wallClockBookkeeping: { [RUN]: held.bookkeeping } };
+    const expired = buildWallClockServerClaims(source, NOW + 60_000)!;
+    expect(expired.claims.some((claim) => claim.channel === "case")).toBe(false);
+    expect(expired.bookkeeping.packagingHeld).toBe(false);
+    source.autoTrackServerState.wallClockBookkeeping[RUN] = expired.bookkeeping;
+    const dueAt = expired.bookkeeping.caseNextDueMs;
+    const due = buildWallClockServerClaims(source, dueAt)!;
+    const claim = due.claims.find((entry) => entry.channel === "case")!;
+    expect(claim).toBeDefined();
+    const accepted = applyAutoTrackClaim(source, claim, dueAt);
+    expect(accepted.outcome).toBe("accepted");
+    expect(accepted.values.casesOnCurrentSkid).toBe(corrected + 1);
+    expect(applyAutoTrackClaim(accepted.data, claim, dueAt).outcome).toBe("duplicate");
+  });
+
+  it("rebases only the case arm when Resume shortens the same correction hold", () => {
+    const source: any = payload({ freezerTime: 0, casesOnCurrentSkid: 7 });
+    source.packagingProgress = { [RUN]: { correctionGeneration: 2, manualOverrideUntil: NOW + 60_000 } };
+    const held = buildWallClockServerClaims(source, NOW)!;
+    source.autoTrackServerState = { wallClockBookkeeping: { [RUN]: held.bookkeeping } };
+    source.packagingProgress[RUN].manualOverrideUntil = NOW + 1_000;
+    const resumed = buildWallClockServerClaims(source, NOW + 1_000)!;
+    const unrelated = buildWallClockServerClaims({
+      ...source, packagingProgress: {},
+      autoTrackServerState: { wallClockBookkeeping: { [RUN]: { ...held.bookkeeping, packagingHeld: false } } },
+    }, NOW + 1_000)!;
+    expect(resumed.claims.some((claim) => claim.channel === "case")).toBe(false);
+    // The fixture's effective speed is 400 ppm: twelve pizzas take 1.8s.
+    expect(resumed.bookkeeping.caseNextDueMs).toBe(NOW + 2_800);
+    expect(resumed.bookkeeping.trayConsNextDueMs).toBe(unrelated.bookkeeping.trayConsNextDueMs);
+    expect(resumed.bookkeeping.appliedPackagingCorrectionGeneration).toBe(2);
+  });
+
+  it.each(["paused-stopped", "paused-draining", "ended-draining", "ended-clear"] as const)(
+    "does not change %s lifecycle or replay held cases after Resume", (state) => {
+      const source: any = payload({ freezerTime: 3, preTunnelMin: 0.5, postTunnelMin: 0.5, casesOnCurrentSkid: 5 });
+      source.dayState.runs[0].startedAt = NOW - 240_000;
+      const held = buildWallClockServerClaims({
+        ...source, packagingProgress: { [RUN]: { correctionGeneration: 2, manualOverrideUntil: NOW + 60_000 } },
+      }, NOW)!;
+      source.autoTrackServerState = { wallClockBookkeeping: { [RUN]: held.bookkeeping } };
+      source.packagingProgress = { [RUN]: { correctionGeneration: 2, manualOverrideUntil: NOW } };
+      const run = source.dayState.runs[0];
+      if (state.startsWith("paused")) {
+        run.pausedAt = state === "paused-stopped" ? NOW - 60_000 : NOW;
+        run.stoppages = [{ type: "pause", startedAt: run.pausedAt, stopTunnel: state === "paused-stopped" }];
+      } else {
+        run.endedAt = state === "ended-clear" ? NOW - 240_000 : NOW;
+      }
+      const original = structuredClone(run);
+      const rearmed = buildWallClockServerClaims(source, NOW + 1_000);
+      expect(buildNetSecondServerClaims(source, NOW + 1_000)).toEqual([]);
+      expect(source.dayState.runs[0]).toEqual(original);
+      if (state === "paused-stopped" || state === "ended-clear") {
+        expect(rearmed).toBeNull();
+      } else {
+        expect(rearmed!.claims.some((claim) => claim.channel === "case")).toBe(false);
+        source.autoTrackServerState.wallClockBookkeeping[RUN] = rearmed!.bookkeeping;
+        const due = buildWallClockServerClaims(source, rearmed!.bookkeeping.caseNextDueMs)!;
+        expect(due.claims.filter((claim) => claim.channel === "case")).toHaveLength(1);
+        expect(due.claims.filter((claim) => claim.channel !== "case")).toEqual([]);
+      }
+    },
+  );
 
   it("keeps a safely stopped tunnel out of wall-clock claims after its drain clears", () => {
     const source = payload({ freezerTime: 3, preTunnelMin: 0.5, postTunnelMin: 0.5 });

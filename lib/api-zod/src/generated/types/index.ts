@@ -405,6 +405,7 @@ export * from './manualSectionEditErrorCode';
 export * from './manualSectionEditRequest';
 export * from './manualSectionEditRequestBase';
 export * from './manualSectionEditRequestBaseValues';
+export * from './manualSectionEditRequestOperation';
 export * from './manualSectionEditRequestSection';
 export * from './manualSectionEditRequestValues';
 export * from './manualSectionEditResponse';

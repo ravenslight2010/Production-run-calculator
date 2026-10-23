@@ -9620,7 +9620,9 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyOneoneObservedGenerationMax),
   "baseRevision": zod.int().min(submitManualSectionEditBodyOneoneBaseRevisionMin),
   "resetEpoch": zod.int().min(submitManualSectionEditBodyOneoneResetEpochMin),
-  "deviceId": zod.string().min(1).max(submitManualSectionEditBodyOneoneDeviceIdMax).regex(submitManualSectionEditBodyOneoneDeviceIdRegExp)
+  "deviceId": zod.string().min(1).max(submitManualSectionEditBodyOneoneDeviceIdMax).regex(submitManualSectionEditBodyOneoneDeviceIdRegExp),
+  "operation": zod.enum(['resume-packaging']).optional().describe('End only the identified Packaging hold without changing counts. Packaging section only; requires correctionGeneration.'),
+  "correctionGeneration": zod.int().min(1).optional().describe('Required for resume-packaging; must match the canonical correction generation.')
 }))
 
 
@@ -10023,7 +10025,6 @@ export const UndoImportOperationResponse = zod.object({
 })
 })
 export const getQcTargetsResponseBrixTargetsItemSourceSectionMax = 200;
-
 export const saveDieLineDefaultsBodyEntriesItemPressOvenMinMin = 0;
 export const saveDieLineDefaultsBodyEntriesItemFrontlineMinMin = 0;
 export const saveDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
@@ -10031,5 +10032,4 @@ export const deleteDieLineDefaultsResponseEntriesItemPressOvenMinMin = 0;
 export const deleteDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
 export const saveDieLineDefaultsResponseEntriesItemPressOvenMinMin = 0;
 export const listDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
-
 export const setQcBrixTargetBodySourceSectionMax = 200;

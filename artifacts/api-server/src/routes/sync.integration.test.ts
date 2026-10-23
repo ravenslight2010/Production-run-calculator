@@ -1078,6 +1078,145 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
   });
 
+  it("resumes only the acknowledged Packaging correction, retaining counts and generation", async () => {
+    const correction = await request(edit("resume-baseline"));
+    expect(correction.status).toBe(200);
+    const corrected = await correction.json() as any;
+    const progress = corrected.data.packagingProgress["manual-run"];
+    const body = edit("resume-operation", "packaging", "manual-run", {
+      operation: "resume-packaging", correctionGeneration: progress.correctionGeneration,
+      values: { skidsCompleted: 2, casesOnCurrentSkid: 2 },
+      baseValues: { skidsCompleted: 2, casesOnCurrentSkid: 2 },
+    });
+    const response = await request(body);
+    expect(response.status).toBe(200);
+    const resumed = await response.json() as any;
+    expect(resumed.data.packagingProgress["manual-run"]).toMatchObject({
+      skidsCompleted: 2, casesOnCurrentSkid: 2,
+      correctionGeneration: progress.correctionGeneration,
+    });
+    expect(resumed.data.packagingProgress["manual-run"].manualOverrideUntil)
+      .toBeLessThanOrEqual(resumed.serverTime);
+    expect(resumed.data.runValues["manual-run"]).toEqual(corrected.data.runValues["manual-run"]);
+    expect(resumed.data.dayState).toEqual(corrected.data.dayState);
+    const duplicate = await (await request(body)).json() as any;
+    expect(duplicate.duplicate).toBe(true);
+    expect(duplicate.canonicalRevision).toBe(resumed.canonicalRevision);
+    expect(duplicate.data.packagingProgress).toEqual(resumed.data.packagingProgress);
+    // The next correction supersedes both delayed and already-accepted retries.
+    const newer = await (await request(edit("resume-new-correction", "packaging", "manual-run", {
+      values: { casesOnCurrentSkid: 1 },
+      baseValues: { skidsCompleted: 2, casesOnCurrentSkid: 2 },
+    }))).json() as any;
+    expect((await request({ ...body, id: "resume-stale-generation" })).status).toBe(409);
+    const oldRetry = await (await request(body)).json() as any;
+    expect(oldRetry.duplicate).toBe(true);
+    expect(oldRetry.data.packagingProgress).toEqual(newer.data.packagingProgress);
+    const reboundIdentity = await request({ ...body, observedGeneration: "other-lifecycle:2" });
+    expect(reboundIdentity.status).toBe(409);
+    expect((await reboundIdentity.json() as { code: string }).code).toBe("section_changed");
+  });
+
+  it.each(["expiry", "resume"] as const)("keeps four-station canonical progress live after a correction and %s", async (recovery) => {
+    const now = Date.now();
+    const date = new Date(now).toISOString().slice(0, 10);
+    const runId = "integrated-packaging";
+    const [sauceItem] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:BBQ Sauce:lbs", category: "ingredient", name: "BBQ Sauce", unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({ itemId: sauceItem.id, qtyReceived: 1000, qtyRemaining: 1000 });
+    const stored = {
+      dayState: { date, currentIndex: 0, runs: [
+        { id: runId, brand: "", flavor: "", subTab: "dough", startedAt: now - 500_000, metaUpdatedAt: now - 500_000 },
+        { id: "unrelated-pending", brand: "", flavor: "", metaUpdatedAt: 1 },
+      ] },
+      runValuesUpdatedAt: { [runId]: 1 },
+      runValues: {
+        [runId]: {
+          casesNeeded: 1000, approxLineSpeed: 60, speedAdjustment: 1, crustsPerCycle: 12, cycleSpeed: 5,
+          freezerTime: 0, preTunnelMin: 0.5, postTunnelMin: 0.5,
+          pizzasPerCase: 12, casesPerSkid: 48, casesPerLayer: 12,
+          doughballsPerTray: 36, doughBatchYield: 100, targetDoughballWeight: 8,
+          doughRecipe: [], skidsCompleted: 0, casesOnCurrentSkid: 10,
+          traysOnLine: 2, batchesReady: 1, mixerLowSec: 10, mixerHighSec: 10, hopperSec: 10,
+          sauceBarrelLbs: 50, sauceOzPerPizza: 2, frontlineRecipeName: "BBQ Sauce", frontlineRecipe: [],
+          sauceStockBarrels: 2, sauceStockAnchorNetSec: 0, sauceStockCorrectionGeneration: 0, sauceStockInitialized: true,
+          sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+          app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50, app1CheeseRecipe: [],
+          app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+          app1StockLbs: 0, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+          app1StockConsumedLbs: 0, applicatorStockInitialized: true,
+          app2Type: "", app3Type: "", app4Type: "", pep1Type: "", pep2Type: "",
+        },
+        "unrelated-pending": { skidsCompleted: 9, casesOnCurrentSkid: 7 },
+      },
+    };
+    await db.insert(dailySyncTable).values({ date, scope: "live", data: stored });
+    const read = async () => (await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, date))))[0]!.data as any;
+    const post = (body: Record<string, unknown>) => fetch(`${baseUrl}/api/sync/manual-section?today=${date}`, {
+      method: "POST", headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const correction = {
+      id: `integrated-correction-${recovery}`, date, runId, section: "packaging",
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 3 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 10 },
+      observedGeneration: `${runId}:${now - 500_000}`, baseRevision: 0, resetEpoch: 0, deviceId: "fixture-device",
+    };
+    expect((await post(correction)).status).toBe(200);
+    const corrected = await read();
+    const hold = corrected.packagingProgress[runId].manualOverrideUntil;
+    const heldTick = await runAutoTrackServerTicks({ nowMs: now + 1_000, scope: "live", date });
+    expect(heldTick.accepted, JSON.stringify(heldTick)).toBeGreaterThan(0);
+    const held = await read();
+    expect(held.runValues[runId].casesOnCurrentSkid).toBe(3);
+    expect(held.autoTrackServerState.wallClockBookkeeping[runId].packagingHeld).toBe(true);
+    expect(held.runValues[runId].traysOnLine).not.toBe(2);
+    expect(held.runValues[runId].sauceStockBarrels).toBeLessThan(2);
+    expect(held.runValues[runId].sauceBarrelsMade).toBeGreaterThan(0);
+    expect(held.runValues[runId].app1BatchesMade).toBeGreaterThan(0);
+    expect(held.runValues["unrelated-pending"]).toEqual(stored.runValues["unrelated-pending"]);
+    let recoveryAt = hold;
+    if (recovery === "resume") {
+      const resumedResponse = await post({
+        ...correction, id: "integrated-resume", operation: "resume-packaging", correctionGeneration: 1,
+        baseValues: correction.values,
+      });
+      expect(resumedResponse.status).toBe(200);
+      const resumed = await resumedResponse.json() as any;
+      recoveryAt = Math.max(now + 2_000, resumed.serverTime);
+      expect(resumed.data.packagingProgress[runId].manualOverrideUntil).toBeLessThan(hold);
+    }
+    await runAutoTrackServerTicks({ nowMs: recoveryAt, scope: "live", date });
+    const rearmed = await read();
+    expect(rearmed.runValues[runId].casesOnCurrentSkid).toBe(3);
+    const dueAt = rearmed.autoTrackServerState.wallClockBookkeeping[runId].caseNextDueMs;
+    expect(dueAt).toBe(recoveryAt + 12_000);
+    await runAutoTrackServerTicks({ nowMs: dueAt, scope: "live", date });
+    const advanced = await read();
+    expect(advanced.runValues[runId].casesOnCurrentSkid).toBe(4);
+    expect(advanced.packagingProgress[runId].correctionGeneration).toBe(1);
+    await runAutoTrackServerTicks({ nowMs: dueAt, scope: "live", date });
+    expect((await read()).runValues[runId].casesOnCurrentSkid).toBe(4);
+    // A second client/reload reads the same durable correction and progress.
+    const peer = await fetch(`${baseUrl}/api/sync/today?today=${date}`, { headers: authHeaders() });
+    expect(peer.status).toBe(200);
+    expect((await peer.json() as any).runValues[runId].casesOnCurrentSkid).toBe(4);
+  });
+
+  it.each([
+    { operation: "resume-packaging" },
+    { operation: "resume-packaging", correctionGeneration: 0 },
+    { operation: "resume-packaging", correctionGeneration: 1, section: "dough" },
+    { operation: "other" },
+  ])("rejects an invalid Resume operation without a correction write: %j", async (extra) => {
+    const response = await request(edit(`invalid-resume-${crypto.randomUUID()}`, "packaging", "manual-run", extra));
+    expect(response.status).toBe(400);
+    const [row] = await db.select().from(dailySyncTable).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect(row!.data).toEqual(values());
+  });
+
   it.each([
     ["invalid section", { ...edit("error-invalid-section"), section: "unknown" }, 400, "invalid_edit", undefined],
     ["invalid submitted values", { ...edit("error-invalid-values"), values: { skidsCompleted: 7654321 } }, 400, "invalid_values", "7654321"],

@@ -343,6 +343,9 @@ export type ServerWallClockBookkeeping = WallClockBookkeeping & {
   lifecycleGeneration: string;
   serverSequences: Partial<Record<WallClockChannel, number>>;
   appliedDoughControlUpdatedAt?: number;
+  appliedPackagingCorrectionGeneration?: number;
+  appliedPackagingOverrideUntil?: number;
+  packagingHeld?: boolean;
 };
 export function buildWallClockServerClaims(
   raw: unknown,
@@ -478,9 +481,29 @@ export function buildWallClockServerClaims(
   } else if (matchingControl && number(control?.pausedAt) === 0 && bookkeeping.doughPausedAtMs > 0) {
     bookkeeping = rearmWallClockTimers(bookkeeping, nowMs, timing);
   }
+  const progress = payload.packagingProgress?.[plan.runId];
+  const correctionGeneration = number(progress?.correctionGeneration);
+  const overrideUntil = number(progress?.manualOverrideUntil);
+  const caseSuppressed = overrideUntil > nowMs;
+  const correctionChanged = correctionGeneration > 0 && (
+    old.appliedPackagingCorrectionGeneration !== correctionGeneration
+    || old.appliedPackagingOverrideUntil !== overrideUntil
+  );
+  // A correction is the new physical baseline, not a gap to fill from expected
+  // lifetime output. Keep observing output during the hold without issuing
+  // rejected claims (which also prevented the other wall arms being persisted).
+  // On expiry or explicit Resume wait one full case period; never replay held
+  // time, even when the worker slept through the entire hold.
+  if (caseSuppressed || correctionChanged || old.packagingHeld === true) {
+    bookkeeping.lastExpectedCases = expectedCasesRaw;
+    bookkeeping.drainFreezer = Math.max(0, Math.floor(calc.casesInFreezer));
+    bookkeeping.caseNextDueMs = Math.max(nowMs, overrideUntil) + timing.caseMs;
+    bookkeeping.caseClaimRetry = false;
+    bookkeeping.formResetSkipped = true;
+  }
   const tick = tickWallClock({
     bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive,
-    packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
+    packagingAutoTrackActive: true, caseSuppressed, doughSuppressed: false,
     calc: { ppm: calc.ppm, perTray: calc.perTray, perBatch: calc.perBatch, pressDone: calc.pressDone, casesInFreezer: calc.casesInFreezer, traysNeeded: calc.traysNeeded, batchesNeeded: calc.batchesNeeded },
     v: { pizzasPerCase: number(values.pizzasPerCase), casesPerSkid: number(values.casesPerSkid), casesNeeded: number(values.casesNeeded), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
     form: { skidsCompleted: number(values.skidsCompleted), casesOnCurrentSkid: number(values.casesOnCurrentSkid), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
@@ -524,6 +547,9 @@ export function buildWallClockServerClaims(
       ...tick.next, lifecycleGeneration: plan.generation, serverSequences,
       appliedDoughControlUpdatedAt: timedResume
         ? number(control?.updatedAt) : number(old.appliedDoughControlUpdatedAt),
+      appliedPackagingCorrectionGeneration: correctionGeneration,
+      appliedPackagingOverrideUntil: overrideUntil,
+      packagingHeld: caseSuppressed,
     },
     claims,
   };

@@ -71,6 +71,8 @@ export type PendingManualSection = {
   observedGeneration: string; baseRevision?: number; owner?: string;
   deliveryState?: "retry-exhausted" | "auth-required" | "rejected";
   failure?: "authentication" | "permission" | ManualSectionRejectionCode;
+  operation?: "resume-packaging";
+  correctionGeneration?: number;
 };
 type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
 const storageHealth = {
@@ -428,6 +430,8 @@ async function submitManualSectionNow(input: {
   id?: string;
   resetEpoch?: number;
   owner?: string;
+  operation?: "resume-packaging";
+  correctionGeneration?: number;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const id = input.id ?? `online:${crypto.randomUUID()}`;
@@ -447,7 +451,7 @@ async function submitManualSectionNow(input: {
       if (!key?.startsWith(ownerPrefix) || key.endsWith(`:${id}`)) continue;
       try {
         const prior = JSON.parse(localStorage.getItem(key) ?? "null");
-        if (["retry-exhausted", "rejected"].includes(prior?.deliveryState)
+        if (!input.operation && ["retry-exhausted", "rejected"].includes(prior?.deliveryState)
           && prior.runId === input.runId && prior.section === input.section && prior.id !== id) {
           localStorage.removeItem(key);
         }
@@ -476,6 +480,7 @@ async function submitManualSectionNow(input: {
         baseValues: input.baseValues, observedGeneration: input.observedGeneration,
         baseRevision: input.baseRevision ?? 0, resetEpoch: immutableResetEpoch,
         deviceId: getOperationalDeviceId(),
+        ...(input.operation ? { operation: input.operation, correctionGeneration: input.correctionGeneration } : {}),
       }),
     });
     if (capturedOwner !== activeOwner) return "identity-mismatch";
@@ -488,6 +493,28 @@ async function submitManualSectionNow(input: {
     if (response.ok) {
       if (capturedOwner !== activeOwner) return "identity-mismatch";
       const canonical = parseManualSectionCanonical(body.data, input.runId, input.section);
+      if (input.operation && (!canonical || body.outcome !== "accepted"
+        || !isRecord(canonical.data.packagingProgress)
+        || !isRecord(canonical.data.packagingProgress[input.runId]))) {
+        throw new Error("Packaging Resume did not include canonical progress");
+      }
+      if (input.operation && canonical) {
+        const progress = (canonical.data.packagingProgress as Record<string, Record<string, unknown>>)[input.runId];
+        if (!Number.isSafeInteger(progress.correctionGeneration)
+          || typeof progress.correctionGeneration !== "number"
+          || progress.correctionGeneration < (input.correctionGeneration ?? 1)
+          || typeof progress.manualOverrideUntil !== "number"
+          || !Number.isFinite(progress.manualOverrideUntil)
+          || typeof body.serverTime !== "number"
+          || !Number.isFinite(body.serverTime)
+          || progress.skidsCompleted !== canonical.sectionValues.skidsCompleted
+          || progress.casesOnCurrentSkid !== canonical.sectionValues.casesOnCurrentSkid
+          || typeof progress.updatedAt !== "number" || !Number.isFinite(progress.updatedAt)
+          || (progress.correctionGeneration === input.correctionGeneration
+            && progress.manualOverrideUntil > body.serverTime)) {
+          throw new Error("Packaging Resume was not canonically acknowledged");
+        }
+      }
       if (canonical) {
         const canonicalServerTime = typeof body.serverTime === "number" && Number.isFinite(body.serverTime)
           ? body.serverTime
@@ -500,7 +527,7 @@ async function submitManualSectionNow(input: {
           version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
           resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
           commandCategory: "correction" as const, deviceId: getOperationalDeviceId(), baseRevision: input.baseRevision ?? 0,
-          occurredAt: Date.now(), values: canonical.sectionValues, state: "accepted" as const,
+          occurredAt: Date.now(), values: input.operation ? undefined : canonical.sectionValues, state: "accepted" as const,
           ...(typeof body.canonicalRevision === "number" && Number.isSafeInteger(body.canonicalRevision)
             ? { canonicalRevision: body.canonicalRevision }
             : {}),
@@ -600,6 +627,8 @@ export function submitManualSection(input: {
   id?: string;
   resetEpoch?: number;
   owner?: string;
+  operation?: "resume-packaging";
+  correctionGeneration?: number;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const sectionFields = MANUAL_SECTION_FIELDS[
@@ -633,7 +662,7 @@ export function submitManualSection(input: {
     // Bind the account at enqueue time. A queued section edit must never be
     // rebound to whichever account is active when an earlier request settles.
     if (!owner || owner !== activeOwner) return "identity-mismatch";
-    const base = manualSectionCanonical.get(key) ?? baseValues;
+    const base = input.operation ? baseValues : manualSectionCanonical.get(key) ?? baseValues;
     const nextValues = sectionFields.reduce<Record<string, number>>((result, field) => {
       result[field] = (Number(base[field]) || 0) + (Number(delta[field]) || 0);
       return result;
@@ -666,6 +695,26 @@ export function submitManualSection(input: {
     }
   });
   return run;
+}
+
+/** Resume must not replace a correction whose canonical acknowledgement is
+ * missing, including a rejected/offline correction restored after reload. */
+export function hasPendingManualSection(runId: string, section: string): boolean {
+  if (!activeOwner) return true;
+  if ([...activeManualSections.values()].some((entry) =>
+    entry.owner === activeOwner && entry.runId === runId && entry.section === section)) return true;
+  try {
+    const prefix = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`;
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const record = JSON.parse(localStorage.getItem(key) ?? "null");
+      if (record?.runId === runId && record?.section === section) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
 }
 function scheduleManualRetry(record: PendingManualSection & { attempts?: number }, wait?: number): void {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
@@ -736,7 +785,7 @@ export async function retryPendingManualSection(id: string): Promise<boolean> {
     const item = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
     if (!item || item.id !== id || item.owner !== activeOwner || ["retry-exhausted", "rejected"].includes(item.deliveryState ?? "")) return false;
     const result = await submitManualSection({ ...item, deliveryState: undefined, failure: undefined } as any);
-    return result === "accepted" || result === "conflicted";
+    return result === "accepted" || (!item.operation && result === "conflicted");
   } catch {
     return false;
   }
@@ -1032,4 +1081,32 @@ export async function flushOperationalIntentOutbox(senderId = getOperationalDevi
     }
   })().finally(() => { activeFlush = undefined; });
   return activeFlush;
+}
+
+/** Only an obsolete control operation may be retired here, never a correction
+ * or an uncertain Resume for the still-current generation. */
+export function retireObsoletePackagingResume(
+  runId: string, observedGeneration: string, correctionGeneration: number,
+): void {
+  const pending = readPendingManualSection(runId, "packaging");
+  if (!pending || pending.operation !== "resume-packaging"
+    || (pending.observedGeneration === observedGeneration
+      && pending.correctionGeneration === correctionGeneration)) return;
+  const key = manualRetryKey(activeOwner!, pending.id);
+  const timer = manualRetryTimers.get(key);
+  if (timer) clearTimeout(timer);
+  manualRetryTimers.delete(key);
+  localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:${pending.id}`);
+}
+
+export function readPendingManualSection(runId: string, section: string): PendingManualSection | undefined {
+  if (!activeOwner) return undefined;
+  const prefix = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`;
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(prefix)) continue;
+    const record = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
+    if (record?.runId === runId && record?.section === section) return record;
+  }
+  return undefined;
 }
