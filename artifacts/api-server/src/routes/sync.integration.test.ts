@@ -1610,6 +1610,37 @@ describe("POST /sync/station-activity — server-confirmed station evidence", ()
       ));
     expect(receipts).toHaveLength(0);
   });
+
+  it("keeps canonical state readable with unknown activity when evidence reads fail, then recovers", async () => {
+    const runId = "station-read-failure-run";
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, currentIndex: 0, runs: [{ id: runId, startedAt: Date.now() - 10_000 }] },
+        runValues: { [runId]: { casesNeeded: 240 } },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    // This suite owns a disposable database. Hide only the evidence table,
+    // not canonical sync state; always restore it before teardown.
+    await db.execute(sql`ALTER TABLE operational_intent_ledger RENAME TO unavailable_station_evidence`);
+    let failedRead: { data: unknown; snapshotId: string; operationalProjection: { stationActivity: unknown } };
+    try {
+      const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, { headers: authHeaders() });
+      expect(response.status).toBe(200);
+      failedRead = await response.json() as typeof failedRead;
+      expect(failedRead.operationalProjection).not.toBeNull();
+      expect(failedRead.operationalProjection.stationActivity).toBeNull();
+    } finally {
+      await db.execute(sql`ALTER TABLE unavailable_station_evidence RENAME TO operational_intent_ledger`);
+    }
+    const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, { headers: authHeaders() });
+    expect(response.status).toBe(200);
+    const recovered = await response.json() as typeof failedRead;
+    expect(recovered.snapshotId).toBe(failedRead!.snapshotId);
+    expect(recovered.data).toEqual(failedRead!.data);
+    expect(recovered.operationalProjection.stationActivity).not.toBeNull();
+    expect(recovered.operationalProjection.stationActivity).toEqual({});
+  });
 });
 
 describe("factory purge retains QC history", () => {

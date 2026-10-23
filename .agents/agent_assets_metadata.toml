@@ -194,3 +194,17 @@ mtime_ms = 1791935372739
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/5408d79e-1101-475c-ad0d-d51b64ea7bd4/83d3aefe-3a96-40b5-85fa-dcf045bc5e4b"
 storage_version_token = "1791935453241142"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "rSRgQ5l9hJNu6h4DEfnrm"
+uri = "file://docs/branch-claims-validation-2026-10-23.md"
+type = "text"
+title = "Branch repair claims — validation report"
+description = "Revision-bound findings, disposable database experiments, targeted verification, full failure ledger and remaining evidence limits. Not a Publish or release approval."
+logical_id = "651cd566-db7a-418e-9f31-ee0f6c28bb2f"
+content_hash = "sha256:1e338ebea27bcb45d6655850a78379cdf7f5de403d90574aa004c10b18624ffb"
+size = 29394
+mtime_ms = 1792756524309
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/651cd566-db7a-418e-9f31-ee0f6c28bb2f/a4a8fc48-b606-494b-8cd6-fa439b94b077"
+storage_version_token = "1792756547046431"
+content_type = "text/markdown"

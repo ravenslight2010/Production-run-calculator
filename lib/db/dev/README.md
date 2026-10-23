@@ -34,3 +34,21 @@ serial-preserving `push`/`push-force`, the approved identity-to-serial developme
 repair, reruns, existing IDs, advanced empty-table counters, and audit grants.
 The forward-conversion SQL/helper remain historical rehearsal inputs only;
 they are not part of normal development or publishing commands.
+
+The retained forward helper resets counters from `MAX(column)`, not from the
+old generator's state. It can therefore rewind populated or empty advanced
+counters and discard explicit sequence grants. Its corrected empty-table
+first value does not make it preservation-safe. The older push-first package
+chain can also report exit code zero despite a Drizzle SQL sequence-name
+collision; always inspect the SQL result separately from process status.
+
+For the bounded historical/current characterization (requires the documented
+Git objects, the pinned workspace toolchain, and local PostgreSQL), run:
+
+```sh
+NODE_ENV=test node --test lib/db/migrations/branch-claims.integration.test.mjs
+```
+
+This creates source-only, frozen-lockfile historical workspaces and private
+loopback database clusters. It never connects the historical helper to normal
+push commands or supplies evidence for a production Publish conversion.

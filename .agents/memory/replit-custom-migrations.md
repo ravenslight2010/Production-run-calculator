@@ -17,3 +17,13 @@ Publish path is demonstrated. Repair schema source and development with approval
 preserve rows and generator high-water marks, then recompute the actual Publish
 diff. If a required trigger/function cannot be represented by that flow, report
 the limitation rather than inventing a production DDL path.
+
+Do not treat Drizzle push's process exit status as proof that its SQL succeeded.
+
+**Why:** A disposable legacy serial-to-identity rehearsal printed a sequence-name
+collision yet returned zero, allowing the package's `&&` chain to continue.
+Rows surviving the later helper also failed to reveal advanced-counter rewind.
+
+**How to apply:** Check SQL diagnostics and catalog/counter/grant postconditions
+independently of exit status. Include populated and advanced-empty generators;
+stored `MAX(id)` alone cannot attest previously issued sequence progress.

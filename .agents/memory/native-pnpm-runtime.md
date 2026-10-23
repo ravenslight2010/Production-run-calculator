@@ -16,3 +16,17 @@ application failure before changing application code. Verify the runtime and
 package-manager versions used by child scripts as well as the parent command.
 Keep engine, lockfile, and TLS constraints intact; machine-specific provisioning
 belongs in ephemeral environment setup, not project memory.
+
+Historical package experiments need their workspace context, not just the
+package directory and symlinked dependencies.
+
+**Why:** Native pnpm can verify/materialize dependencies before running a
+script. A partial archive can fail on missing catalogs or frozen-lockfile
+importers before the historical command executes; a symlinked hoist root can
+also be rejected. These are fixture failures, not historical application bugs.
+
+**How to apply:** Preserve source workspace manifests, catalogs and lockfile
+importers in the disposable snapshot. Install its own frozen dependencies with
+unneeded lifecycle hooks disabled, and distinguish setup failure from the
+command under investigation. Do not regenerate a historical lockfile to make
+the experiment appear successful.

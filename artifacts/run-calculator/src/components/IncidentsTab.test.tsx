@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Incident } from "../inventoryShared";
 
@@ -102,5 +102,12 @@ describe("manager incident cancellation guidance", () => {
     expect(screen.getByText(/the cancellation source is unknown/)).toBeTruthy();
     expect(screen.queryByText(/Related request reference/)).toBeNull();
     expect(screen.queryByText(/retry once|reload or update/i)).toBeNull();
+    // The browser fixture must not assume a new issue starts collapsed.
+    expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeTruthy();
+    const header = screen.getByRole("button", { name: /Auto-captured crash/i });
+    fireEvent.click(header);
+    expect(screen.queryByRole("button", { name: "Mark reviewed" })).toBeNull();
+    fireEvent.click(header);
+    expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeTruthy();
   });
 });

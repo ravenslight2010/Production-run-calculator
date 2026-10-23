@@ -118,6 +118,7 @@ import {
   capSauceStock,
 } from "@workspace/live-calc";
 import { deriveStationActivity } from "../lib/stationActivity";
+import { createStationActivityCache } from "../lib/stationActivityCache";
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
   buildLiveCalcTickFrame,
@@ -592,16 +593,7 @@ const STATION_MANUAL_COMMAND_TYPES = [
   "manual-section:pep2",
   "station-activity-confirmation",
 ] as const;
-const stationActivityRowsCache = new Map<string, {
-  expiresAt: number;
-  rows: Array<{ commandType: string; actionData: unknown; serverReceivedAt: Date; outcome: string }>;
-}>();
-
-async function readStationActivityRows(scope: Scope, date: string, runId: string) {
-  const cacheNow = Date.now();
-  const key = `${scope}:${date}:${runId}`;
-  const cached = stationActivityRowsCache.get(key);
-  if (cached && cached.expiresAt > cacheNow) return cached.rows;
+const stationActivityRowsCache = createStationActivityCache(async (scope, date, runId) => {
   const rows = await db.select({
     commandType: operationalIntentLedgerTable.commandType,
     actionData: operationalIntentLedgerTable.actionData,
@@ -614,25 +606,16 @@ async function readStationActivityRows(scope: Scope, date: string, runId: string
     inArray(operationalIntentLedgerTable.commandType, [...STATION_MANUAL_COMMAND_TYPES]),
     sql`${operationalIntentLedgerTable.actionData}->>'runId' = ${runId}`,
   )).orderBy(desc(operationalIntentLedgerTable.serverReceivedAt));
-  const normalized = rows.map((row) => ({
+  return rows.map((row) => ({
     commandType: row.commandType,
     actionData: row.actionData,
     serverReceivedAt: row.serverReceivedAt,
     outcome: row.outcome,
   }));
-  stationActivityRowsCache.set(key, { expiresAt: cacheNow + 1_000, rows: normalized });
-  if (stationActivityRowsCache.size > 256) {
-    const oldestKey = stationActivityRowsCache.keys().next().value;
-    if (oldestKey) stationActivityRowsCache.delete(oldestKey);
-  }
-  return normalized;
-}
+});
 
 function invalidateStationActivityRows(scope: Scope, date: string): void {
-  const prefix = `${scope}:${date}:`;
-  for (const key of stationActivityRowsCache.keys()) {
-    if (key.startsWith(prefix)) stationActivityRowsCache.delete(key);
-  }
+  stationActivityRowsCache.invalidate(scope, date);
 }
 
 async function computeServerLiveStateWithStationActivity(
@@ -647,7 +630,7 @@ async function computeServerLiveStateWithStationActivity(
   const projection = liveState.operationalProjection;
   if (!projection) return liveState;
   try {
-    const rows = await readStationActivityRows(scope, date, projection.runId);
+    const rows = await stationActivityRowsCache.read(scope, date, projection.runId);
     const stationActivity = deriveStationActivity({
       runId: projection.runId,
       rows,

@@ -1,7 +1,10 @@
 -- Convert the legacy serial ID columns and operational cursor to SQL-standard
 -- identity columns. Run this before drizzle-kit push: adding an identity
 -- sequence after push can collide with a serial sequence Drizzle just created.
--- The migration preserves existing rows and their generated-ID high-water mark.
+-- Historical rehearsal only; NOT a supported deployment migration.
+-- Existing rows survive, but MAX(column) does not preserve an advanced sequence
+-- high-water mark, and replacing a sequence can discard explicit grants.
+-- Do not restore this to push/startup/Publish on the strength of row checks alone.
 DO $$
 DECLARE
   target record;
