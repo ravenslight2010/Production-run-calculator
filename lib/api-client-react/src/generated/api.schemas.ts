@@ -1721,6 +1721,7 @@ export const OperationalIntentAction = {
   resume: 'resume',
   lifecycle: 'lifecycle',
   correction: 'correction',
+  control: 'control',
 } as const;
 
 export type OperationalIntentLifecycle = typeof OperationalIntentLifecycle[keyof typeof OperationalIntentLifecycle];
@@ -1744,6 +1745,47 @@ export type OperationalIntentInventoryLinesItem = {
      * @exclusiveMinimum 0
      */
   qty: number;
+};
+
+export type OperationalControl = {
+  kind: 'auto-track';
+  enabled: boolean;
+} | {
+  kind: 'dough-timer';
+  paused: boolean;
+  /**
+     * @maximum 86400000
+     * @exclusiveMinimum 0
+     */
+  durationMs?: number;
+} | {
+  kind: 'pause-policy';
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  pauseId: string;
+  stopTunnel: boolean;
+} | {
+  kind: 'stoppages';
+  /** @maxItems 200 */
+  values: ({
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  /** @maxLength 500 */
+  reason: string;
+  /**
+     * @minimum 0
+     * @maximum 8640000000000000
+     */
+  startedAt: number;
+  /**
+     * @minimum 0
+     * @maximum 8640000000000000
+     */
+  endedAt?: number;
+  /** @maxLength 2000 */
+  notes?: string;
+  type?: 'stop' | 'pause' | 'manual';
+  stopTunnel?: boolean;
+})[];
 };
 
 export interface OperationalIntent {
@@ -1770,6 +1812,9 @@ export interface OperationalIntent {
   /** @minimum 0 */
   baseRevision?: number;
   action: OperationalIntentAction;
+  control?: OperationalControl;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  pauseId?: string;
   lifecycle?: OperationalIntentLifecycle;
   values?: OperationalIntentValues;
   /** @maxItems 200 */
@@ -2428,6 +2473,13 @@ export interface ManualSectionEditResponse {
   snapshotId: string;
 }
 
+export type ManualSectionEditErrorOutcome = typeof ManualSectionEditErrorOutcome[keyof typeof ManualSectionEditErrorOutcome];
+
+
+export const ManualSectionEditErrorOutcome = {
+  conflicted: 'conflicted',
+} as const;
+
 export type ManualSectionEditErrorCode = typeof ManualSectionEditErrorCode[keyof typeof ManualSectionEditErrorCode];
 
 
@@ -2441,11 +2493,19 @@ export const ManualSectionEditErrorCode = {
 } as const;
 
 /**
- * Safe rejection only; never includes submitted values or canonical recipe data.
+ * Safe rejection without submitted values. An authorized transactional conflict includes the current canonical snapshot so rejected optimistic totals can be replaced while the attempted entry remains in recovery.
  */
 export interface ManualSectionEditError {
   /** @maxLength 64 */
   error: string;
+  outcome?: ManualSectionEditErrorOutcome;
+  data?: SyncPayload;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId?: string;
   code: ManualSectionEditErrorCode;
 }
 
@@ -3045,6 +3105,21 @@ export const SyncWriteValidationErrorReasonCode = {
 export interface SyncWriteValidationError {
   error: string;
   reasonCode: SyncWriteValidationErrorReasonCode;
+}
+
+export interface SyncOperationalConflictResponse {
+  ok: false;
+  data: SyncPayload;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+  operationalUpdateRequired: true;
+  code: 'SYNC_OPERATIONAL_COMMAND_REQUIRED';
+  error: string;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
+  operationalProjection?: OperationalProjection | null;
 }
 
 export interface SyncUpgradeRequiredResponse {

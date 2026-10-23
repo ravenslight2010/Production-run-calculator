@@ -33,12 +33,8 @@ describe("shared live calculation boundary", () => {
 
   it("does not create automatic batch claims without a valid configured weight", () => {
     const base = {
-      type: "cheese",
-      recipe: undefined,
-      ozPerPizza: 1,
-      casesNeeded: 100,
-      pizzasPerCase: 10,
-      ppm: 60,
+      type: "Cheese", recipe: [], ozPerPizza: 2,
+      casesNeeded: 100, pizzasPerCase: 10, ppm: 40,
     };
     expect(computeAppSlotInfo({ ...base, batchLbs: 0 })).toMatchObject({
       effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
@@ -49,20 +45,28 @@ describe("shared live calculation boundary", () => {
     expect(computeAppSlotInfo({ ...base, batchLbs: 40 }).effectiveBatchLbs).toBe(40);
   });
 
-  it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {
+  it.each([0, -1, undefined, Number.NaN])("fails closed on buffer-only quantities with pizzas per case %s", (pizzasPerCase) => {
     const result = computeServerCalc({
       dayState: { runs: [{ id: "run-override", startedAt: 1000 }], currentIndex: 0 },
       runValues: {
         "run-override": {
-          pizzasPerCase: 0,
+          pizzasPerCase,
           casesPerSkid: 20,
           casesNeeded: 100,
           crustsPerCycle: 4,
           cycleSpeed: 10,
           speedAdjustment: 1,
-          tempCrustsPerCycle: 5,
-          tempCycleSpeed: 12,
-          tempFreezerTime: 30,
+          casesPerLayer: 10,
+          sauceOzPerPizza: 2,
+          sauceBarrelLbs: 40,
+          app1Type: "Cheese",
+          app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 40 }],
+          app1OzPerPizza: 2,
+          app1BatchLbs: 40,
+          pep1Type: "Custom",
+          pep1OzPerPizza: 1,
+          pep1Sticks: 2,
+          pep1BatchLbs: 10,
         },
       },
     }, [], 2000);
@@ -116,20 +120,8 @@ describe("shared live calculation boundary", () => {
     });
 
     const schedule = computeAutoTrackSchedule({
-      runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
+      ...input,
       serverWallOwnership: { case: 3 },
-      v: {
-        pizzasPerCase: 12, freezerTime: 30,
-        app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
-        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
-        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
-        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
-      } as never,
-      calc: {
-        pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
-        app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
-      } as never,
-      coordination: { case: { generation: "run-1:2000", nextDueAt: 4000, sequence: 3 } },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
@@ -139,12 +131,13 @@ describe("shared live calculation boundary", () => {
       canonical: true,
       sequence: 3,
     });
+    expect(computeAutoTrackSchedule({ ...input, serverWallOwnership: { case: 4 } })
+      .entries.find((entry) => entry.channel === "case")).toMatchObject({ canonical: false });
   });
 
   it("treats stale-generation coordination as noncanonical fallback", () => {
     const schedule = computeAutoTrackSchedule({
       runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
-      serverWallOwnership: { case: 3 },
       v: {
         pizzasPerCase: 12, freezerTime: 30,
         app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,

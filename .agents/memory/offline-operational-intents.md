@@ -29,6 +29,12 @@ Run completion is one durable server finalization command. While it is pending, 
 
 Recoverable browser commands are bound to the authenticated user and live/sandbox scope. Retry eligibility is a persisted deadline, rate-limit waits cannot be manually bypassed, and a sending record is neither retryable nor discardable. Cross-tab delivery uses a renewable lease plus a per-attempt token; every post-network transition must still match both the captured identity and token.
 
+Same-owner recovery may survive reauthentication, but in-flight replies belong to the original authentication session, not merely its user/scope string.
+
+**Why:** Signing out and back into the same account creates an ABA race: identity strings match again while an earlier request or queued continuation still belongs to the expired session.
+
+**How to apply:** Fence delivery and adoption with a session generation as well as owner, run, scope, and attempt token. Preserve the owner's durable evidence rather than deleting it to implement the fence.
+
 **Why:** A late response after sign-out or lease loss can otherwise adopt another scope's canonical state, resurrect a terminal command, or lift an End fence before atomic finalization. Event-only retries also strand work when connectivity stays online after a transient server failure.
 
 **How to apply:** Schedule one wake-up for the earliest retry deadline, keep review-required records outside terminal-history eviction, quarantine legacy unowned records until explicit recovery, and keep blocked or rejected Ends fenced until retry or explicit discard.

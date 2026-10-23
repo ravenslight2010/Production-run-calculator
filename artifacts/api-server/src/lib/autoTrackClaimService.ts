@@ -105,7 +105,9 @@ export async function executeAutoTrackClaim(
           .for("update");
 
         if (seen) {
-          const snapshot = (seen.snapshot ?? existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
+          // The receipt proves exactly-once delivery, not ownership of today's
+          // baseline. A later correction must survive an old claim retry.
+          const snapshot = (existing?.data ?? emptySyncData(date)) as Record<string, unknown>;
           const channelState = (
             (snapshot as any).autoTrackCoordination?.runs?.[claim.runId]?.[claim.channel] ?? {
               generation: claim.generation,
@@ -121,8 +123,8 @@ export async function executeAutoTrackClaim(
               ReturnType<typeof applyAutoTrackClaim>["outcome"],
             channelState,
             values,
-            canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
-            serverTime: seen.serverReceivedAt.getTime(),
+            canonicalRevision: existing?.canonicalRevision ?? 0,
+            serverTime: Date.now(),
             duplicate: true,
             ...(seen.outcome === "stale" ? { resetStale: reset?.epoch ?? 0 } : {}),
           };

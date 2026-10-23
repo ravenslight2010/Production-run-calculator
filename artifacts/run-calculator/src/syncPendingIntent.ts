@@ -11,6 +11,8 @@ export type PendingSyncIntent = {
   baseSnapshotId: string;
   baseline: SyncPayload;
   payload: SyncPayload;
+  /** Retained original snapshot evidence; never automatically publish its operational delta. */
+  operationalReviewRequired?: boolean;
 };
 
 const MAX_PENDING_RECORD_CHARS = 2_500_000;
@@ -38,6 +40,7 @@ function isPendingIntent(value: unknown): value is PendingSyncIntent {
     && typeof item.date === "string"
     && Number.isFinite(item.epoch)
     && typeof item.baseSnapshotId === "string"
+    && (item.operationalReviewRequired === undefined || typeof item.operationalReviewRequired === "boolean")
     && isSyncPayload(item.baseline)
     && isSyncPayload(item.payload);
 }

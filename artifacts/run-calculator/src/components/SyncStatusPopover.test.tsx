@@ -30,10 +30,24 @@ const baseProps: ComponentProps<typeof SyncStatusPopover> = {
 };
 
 function openPopover() {
-  fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sync status: Connected" }));
 }
 
 describe("SyncStatusPopover wake-recovery activity", () => {
+  it.each([
+    ["delayed", "Delayed"],
+    ["failed", "Sync failed"],
+  ] as const)("names the %s status independently of the compact numeric badge", (status, label) => {
+    render(<SyncStatusPopover {...baseProps} status={status} connected={false}
+      pendingCount={status === "delayed" ? 5 : 0}
+      failedCount={status === "failed" ? 5 : 0} />);
+    const button = screen.getByRole("button", { name: `Sync status: ${label}` });
+    expect(button.textContent).toContain("5");
+    expect(button.getAttribute("data-testid")).toBe("sync-status-button");
+    fireEvent.click(button);
+    expect(screen.getByText(/It is not shared until the server acknowledges it/)).toBeTruthy();
+  });
+
   it("offers correction guidance, not unchanged retry, for a permanently rejected action", async () => {
     setOperationalIntentIdentity({ scope: "live", userId: "rejection-fixture" });
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });

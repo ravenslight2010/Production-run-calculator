@@ -8,6 +8,35 @@ import {
 } from "./runSyncPolicy";
 
 describe("operational intent forced canonical reconciliation", () => {
+  it.each(["start", "pause", "resume"] as const)(
+    "adopts server-issued anchors for accepted %s despite a faster optimistic browser clock", (action) => {
+      const canonical = {
+        id: "run1", brand: "Acme", flavor: "Pep",
+        startedAt: action === "resume" ? 40 : 10,
+        ...(action === "pause" ? { pausedAt: 40, pausedStoppageId: "pause1" } : {}),
+        stoppages: action === "start" ? [] : [{
+          id: "pause1", reason: "", type: "pause" as const, startedAt: 20,
+          ...(action === "resume" ? { endedAt: 40 } : {}),
+        }],
+        metaUpdatedAt: 40,
+      };
+      const result = reconcileOperationalIntentCanonical({
+        dayState: {
+          runs: [{ ...canonical, startedAt: 999, notes: "keep local note", metaUpdatedAt: 1000 }],
+          currentIndex: 0,
+        },
+        runValues: DEFAULT_VALUES, runValuesUpdatedAt: {},
+        payload: { dayState: { runs: [canonical] }, runValues: { run1: DEFAULT_VALUES } },
+        intent: action === "start"
+          ? { runId: "run1", action: "lifecycle", lifecycle: "start" }
+          : { runId: "run1", action },
+        outcome: "accepted",
+      });
+      expect(result.lifecycleChanged).toBe(true);
+      expect(result.dayState.runs[0]).toEqual({ ...canonical, notes: "keep local note" });
+    },
+  );
+
   it("restores a stale correction without overwriting unrelated values", () => {
     const local = {
       ...DEFAULT_VALUES,

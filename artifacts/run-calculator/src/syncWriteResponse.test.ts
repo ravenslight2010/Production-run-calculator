@@ -18,6 +18,40 @@ import {
 } from "./syncWriteResponse";
 
 describe("consumeSyncWriteResponse", () => {
+  it("adopts an explicit operational conflict, but never blindly replays it", async () => {
+    const canonical = { completeness: "complete", dayState: { runs: [] }, runValues: {} };
+    const body = { ok: true, data: canonical, operationalUpdateRequired: true,
+      snapshotId: "a".repeat(64), canonicalRevision: 5, serverTime: 1000 };
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(new Response(JSON.stringify(body), {
+      status: 409, headers: { "content-type": "application/json" },
+    }), { applyCanonical });
+    expect(result.recoverableConflict).toBe(true);
+    expect(applyCanonical).toHaveBeenCalledWith(canonical);
+    expect(shouldReplaySyncWrite({ ...body, partialFallback: true })).toBe(false);
+  });
+
+  it("does not rewind canonical state or its clock when a late reply is obsolete", async () => {
+    const applyCanonical = vi.fn();
+    const onServerTime = vi.fn();
+    let confirmedRevision = 5;
+    let finish!: () => void;
+    const result = consumeSyncWriteResponse(new Response(JSON.stringify({
+      data: { runValues: {} }, canonicalRevision: 6, serverTime: 1000,
+    })), {
+      applyCanonical, onServerTime,
+      canAdoptCanonical: async (body) => {
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return Number(body.canonicalRevision) >= confirmedRevision;
+      },
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    confirmedRevision = 7;
+    finish();
+    await result;
+    expect(applyCanonical).not.toHaveBeenCalled();
+    expect(onServerTime).not.toHaveBeenCalled();
+  });
   it.each([
     ["authorization rejection", { ok: false, status: 403 }, 1],
     ["reset-stale rejection", { ok: true, status: 200, stale: true }, 2],

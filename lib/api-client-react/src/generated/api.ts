@@ -350,6 +350,7 @@ import type {
   SupervisorPin,
   SupervisorPinStatus,
   SupervisorPinVerificationInput,
+  SyncOperationalConflictResponse,
   SyncPeerFrame,
   SyncRecoveryPayload,
   SyncUnchangedResponse,
@@ -24491,7 +24492,7 @@ return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
 
 export const getPutSyncTodayMutationKey = () => ['putSyncToday'] as const;
 
-export const getPutSyncTodayMutationOptions = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse>,
+export const getPutSyncTodayMutationOptions = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse | SyncOperationalConflictResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext> => {
 
@@ -24520,13 +24521,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PutSyncTodayMutationResult = NonNullable<Awaited<ReturnType<typeof putSyncToday>>>
     export type PutSyncTodayMutationBody = BodyType<SyncWriteRequest>
-    export type PutSyncTodayMutationError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse>
+    export type PutSyncTodayMutationError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse | SyncOperationalConflictResponse>
     export type PutSyncTodayMutationVariables = {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}
 
     /**
  * @summary Merge the client-local current-day sync snapshot
  */
-export const usePutSyncToday = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse>,
+export const usePutSyncToday = <TError = ErrorType<SyncWriteValidationError | SyncUpgradeRequiredResponse | SyncOperationalConflictResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof putSyncToday>>,

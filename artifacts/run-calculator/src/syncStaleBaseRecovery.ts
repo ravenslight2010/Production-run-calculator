@@ -12,7 +12,7 @@ export function rebaseStaleSyncIntent(
   baseSnapshot: SyncPayload,
   queuedIntent: SyncPayload,
   canonicalSnapshot: SyncPayload,
-  options: { snapshotId?: string; serverTime?: number } = {},
+  options: { snapshotId?: string; serverTime?: number; enforceOperationalAuthority?: boolean } = {},
 ): StaleBaseRecoveryResult {
   const result = rebaseSyncDocument(baseSnapshot, queuedIntent, canonicalSnapshot, options);
   return {

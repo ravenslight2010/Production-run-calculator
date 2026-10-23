@@ -1,4 +1,5 @@
 import { initializeApplicatorStockOnRunStart, initializeSauceStockOnRunStart } from "@workspace/live-calc";
+import { canonicalSyncJson, isOperationalControl, type OperationalControl } from "@workspace/sync-contract";
 
 /**
  * Versioned, replay-safe offline operator commands.  These are deliberately
@@ -20,7 +21,9 @@ const correctionFields = new Set([
 export type OperationalIntent = {
   version: 1; id: string; date: string; runId: string; observedGeneration: string;
   resetEpoch: number; effectiveAt: number; baseRevision?: number;
-  action: "pause" | "resume" | "lifecycle" | "correction";
+  action: "pause" | "resume" | "lifecycle" | "correction" | "control";
+  control?: OperationalControl;
+  pauseId?: string;
   lifecycle?: "start" | "end";
   values?: Record<string, number>;
   inventoryLines?: Array<{ itemKey: string; qty: number }>;
@@ -34,7 +37,7 @@ export type OperationalIntentOutcome =
 
 export type OperationalIntentValidationIssue =
   | "envelope" | "identity" | "effective-time" | "revision" | "lifecycle" | "inventory-shape"
-  | "inventory-line" | "inventory-order" | "correction";
+  | "inventory-line" | "inventory-order" | "correction" | "control";
 
 export function parseOperationalIntent(
   input: unknown,
@@ -52,7 +55,7 @@ export function parseOperationalIntent(
     || typeof x.runId !== "string" || !ID.test(x.runId)
     || typeof x.observedGeneration !== "string" || !ID.test(x.observedGeneration)
     || !Number.isSafeInteger(x.resetEpoch) || (x.resetEpoch as number) < 0
-    || !["pause", "resume", "lifecycle", "correction"].includes(String(x.action))) return reject("identity");
+    || !["pause", "resume", "lifecycle", "correction", "control"].includes(String(x.action))) return reject("identity");
   if (typeof x.effectiveAt !== "number" || !Number.isFinite(x.effectiveAt)
     || Math.abs(now - x.effectiveAt) > 36 * 60 * 60_000) return reject("effective-time");
   if (x.baseRevision !== undefined
@@ -79,6 +82,10 @@ export function parseOperationalIntent(
       if (!correctionFields.has(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000) return reject("correction");
     }
   }
+  if (x.action === "control" && (!isOperationalControl(x.control) || x.baseRevision === undefined)) return reject("control");
+  if (x.action !== "control" && x.control !== undefined) return reject("control");
+  if (x.pauseId !== undefined && (x.action !== "resume"
+    || typeof x.pauseId !== "string" || !/^[A-Za-z0-9:_-]{1,160}$/.test(x.pauseId))) return reject("control");
   return x as OperationalIntent;
 }
 
@@ -90,7 +97,7 @@ function generation(run: Record<string, any>): string {
 }
 
 /** Must be called while the daily_sync row is locked. */
-export function applyOperationalIntent(stored: unknown, intent: OperationalIntent, now = Date.now()): {
+export function applyOperationalIntent(stored: unknown, intent: OperationalIntent, now = Date.now(), canonicalRevision?: number): {
   data: Record<string, any>; outcome: OperationalIntentOutcome; duplicate: boolean;
 } {
   const data = obj(stored);
@@ -102,6 +109,7 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
   // this reducer testable, this prevents a rejected transaction from leaking a
   // tentative lifecycle change into a later retry.
   const runList = Array.isArray(data.dayState?.runs) ? [...data.dayState.runs] : [];
+  data.dayState = { ...obj(data.dayState), date: intent.date };
   const index = runList.findIndex((r: any) => r?.id === intent.runId);
   let outcome: OperationalIntentOutcome = "review-required";
   if (index >= 0) {
@@ -115,7 +123,8 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
     // transition happened in the claimed paused interval; otherwise changing
     // timing would require recomputing counters and is manager review.
     const safeResumeRebase = intent.action === "resume" && !!run.pausedAt
-      && intent.effectiveAt >= Number(run.pausedAt) && !claimDuringOfflinePause;
+      && !!intent.pauseId && intent.pauseId === run.pausedStoppageId
+      && !claimDuringOfflinePause;
     // Commands that are already true are safe replays after a snapshot upload;
     // anything else against another lifecycle generation needs a manager.
     const alreadyApplied = (intent.action === "pause" && !!run.pausedAt)
@@ -126,12 +135,78 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
       && intent.lifecycle === "start"
       && !!run.startedAt
       && Math.abs(Number(run.startedAt) - intent.effectiveAt) <= 5 * 60_000;
-    if (exactGeneration || alreadyApplied || safeResumeRebase) {
+    if (intent.action === "resume" && intent.pauseId && intent.pauseId !== run.pausedStoppageId) {
+      outcome = "conflicted";
+    } else if (intent.action === "correction" && canonicalRevision !== undefined) {
+      // Released corrections without section baselines cannot establish a new
+      // authoritative manual baseline. Retain the evidence for explicit review;
+      // maintained clients use the existing manual-section command instead.
+      outcome = "review-required";
+    } else if (intent.action === "control") {
+      const control = intent.control;
+      const pause = (Array.isArray(run.stoppages) ? run.stoppages : []).find((stop: any) =>
+        control?.kind === "pause-policy" && stop?.id === control.pauseId
+        && stop.type === "pause" && !stop.endedAt && stop.startedAt === run.pausedAt);
+      // The policy choice may be queued behind its own Pause. Its stable
+      // stoppage ID, short decision window, and one-way default fence that pair.
+      const pairedPausePolicy = control?.kind === "pause-policy" && !!pause
+        && now >= Number(pause.startedAt) && now - Number(pause.startedAt) <= 60_000
+        && pause.stopTunnel !== false;
+      const currentBase = canonicalRevision !== undefined && intent.baseRevision === canonicalRevision;
+      if (!control || (run.endedAt && control.kind !== "stoppages")
+        || (!pairedPausePolicy && (!exactGeneration || !currentBase))) {
+        outcome = "conflicted";
+      } else if (control.kind === "pause-policy") {
+        if (!pause || now - Number(pause.startedAt) > 60_000) outcome = "review-required";
+        else {
+          run.stoppages = run.stoppages.map((stop: any) => stop.id === control.pauseId
+            ? { ...stop, stopTunnel: control.stopTunnel } : stop);
+          outcome = "accepted";
+        }
+      } else if (control.kind === "auto-track") {
+        run.autoTrackDisabled = !control.enabled;
+        outcome = "accepted";
+      } else if (control.kind === "stoppages") {
+        // The open lifecycle pause is not a user-editable historical row.
+        const oldOpen = (Array.isArray(run.stoppages) ? run.stoppages : [])
+          .filter((stop: any) => stop?.type === "pause" && !stop.endedAt);
+        const newOpen = control.values.filter((stop) => stop.type === "pause" && stop.endedAt === undefined);
+        if (canonicalSyncJson(oldOpen) !== canonicalSyncJson(newOpen)
+          || control.values.some((stop) => stop.startedAt > now || (stop.endedAt ?? 0) > now)) {
+          outcome = "review-required";
+        } else {
+          run.stoppages = control.values;
+          outcome = "accepted";
+        }
+      } else if (!run.startedAt || run.pausedAt) {
+        outcome = "review-required";
+      } else {
+        const controls = obj(data.doughTimerControls);
+        controls[intent.runId] = {
+          generation: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
+          pausedAt: control.paused ? now : 0,
+          resumeAt: control.paused && control.durationMs ? now + control.durationMs : 0,
+          updatedAt: now,
+        };
+        data.doughTimerControls = controls;
+        outcome = "accepted";
+      }
+      if (outcome === "accepted") {
+        // Timer controls intentionally do not change the lifecycle generation:
+        // their own locked revision orders them and keeps cadence run-bound.
+        if (control?.kind !== "dough-timer") {
+          run.metaUpdatedAt = Math.max(now, (Number(run.metaUpdatedAt) || 0) + 1);
+        }
+        runList[index] = run;
+        data.dayState = { ...data.dayState, runs: runList };
+      }
+    } else if (exactGeneration || alreadyApplied || safeResumeRebase) {
       outcome = alreadyApplied ? "superseded" : exactGeneration ? "accepted" : "rebased";
       if (!alreadyApplied && intent.action !== "correction") {
         if (intent.action === "pause" && run.startedAt && !run.endedAt) {
           run.pausedAt = now;
-          run.stoppages = [...(Array.isArray(run.stoppages) ? run.stoppages : []), { id: `offline:${intent.id}`, type: "pause", reason: "Offline pause", startedAt: now }];
+          run.pausedStoppageId = `offline:${intent.id}`;
+          run.stoppages = [...(Array.isArray(run.stoppages) ? run.stoppages : []), { id: run.pausedStoppageId, type: "pause", reason: "", startedAt: now, stopTunnel: true }];
         } else if (intent.action === "resume" && run.pausedAt && !run.endedAt && now >= run.pausedAt) {
           const pauseId = run.pausedStoppageId ?? (Array.isArray(run.stoppages)
             ? run.stoppages.filter((s: any) => s?.type === "pause" && !s.endedAt && s.startedAt === run.pausedAt)

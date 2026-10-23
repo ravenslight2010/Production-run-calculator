@@ -17,6 +17,8 @@ export interface SyncWriteResponseBody<T> {
   unchanged?: boolean;
   snapshotId?: string;
   partialFallback?: boolean;
+  operationalUpdateRequired?: boolean;
+  canonicalRevision?: number;
   operationalProjection?: OperationalProjection | null;
   serverTime?: number;
 }
@@ -97,6 +99,7 @@ interface ConsumeSyncWriteResponseOptions<T> {
   onServerTime?: (serverTime: number) => void;
   onStale?: (body: SyncWriteResponseBody<T>) => void | Promise<void>;
   shouldConsume?: () => boolean;
+  canAdoptCanonical?: (body: SyncWriteResponseBody<T>) => boolean | Promise<boolean>;
 }
 
 export async function consumeSyncWriteResponse<T>(
@@ -107,6 +110,7 @@ export async function consumeSyncWriteResponse<T>(
   stale: boolean;
   malformed: boolean;
   recoverableConflict: boolean;
+  ignored?: boolean;
 }> {
   const parsed = await response.clone().json().catch(() => null);
   const body =
@@ -114,7 +118,7 @@ export async function consumeSyncWriteResponse<T>(
       ? parsed as SyncWriteResponseBody<T>
       : null;
   if (options.shouldConsume && !options.shouldConsume()) {
-    return { body, stale: false, malformed: false, recoverableConflict: false };
+    return { body, stale: false, malformed: false, recoverableConflict: false, ignored: true };
   }
   const hasData = body !== null && Object.prototype.hasOwnProperty.call(body, "data");
   const recoverableConflict = isRecoverableStaleBaseFallback(response.status, body);
@@ -126,6 +130,12 @@ export async function consumeSyncWriteResponse<T>(
   const malformed = response.ok && !validEnvelope;
   const stale = body?.stale === true;
 
+  if (!malformed && !stale && (response.ok || recoverableConflict) && body && options.canAdoptCanonical) {
+    const canAdopt = await options.canAdoptCanonical(body);
+    if (!canAdopt || (options.shouldConsume && !options.shouldConsume())) {
+      return { body, stale, malformed, recoverableConflict, ignored: true };
+    }
+  }
   if (!malformed && typeof body?.serverTime === "number" && Number.isFinite(body.serverTime)) {
     options.onServerTime?.(body.serverTime);
   }
@@ -145,14 +155,14 @@ export async function consumeSyncWriteResponse<T>(
   return { body, stale, malformed, recoverableConflict };
 }
 
-/** The only non-2xx sync write that carries canonical rebase data is this legacy-upgrade 409. */
+/** Only explicit canonical 409 envelopes are safe adoption candidates. */
 export function isRecoverableStaleBaseFallback(
   status: number,
   body: SyncWriteResponseBody<unknown> | null,
 ): boolean {
   if (
     status !== 409
-    || body?.partialFallback !== true
+    || (body?.partialFallback !== true && body?.operationalUpdateRequired !== true)
     || !isValidSyncSnapshotId(body.snapshotId)
     || !isSyncRecord(body.data)
   ) return false;
@@ -297,6 +307,7 @@ export function isUnchangedSyncResponse(body: SyncWriteResponseBody<unknown> | n
 /** A stale-base fallback is authoritative recovery data, not an acknowledgement of the attempted write. */
 export function shouldReplaySyncWrite(
   body: SyncWriteResponseBody<unknown> | null | undefined,
+  ordinaryFieldsOnly = false,
 ): boolean {
-  return body?.partialFallback === true;
+  return body?.partialFallback === true && (body.operationalUpdateRequired !== true || ordinaryFieldsOnly);
 }

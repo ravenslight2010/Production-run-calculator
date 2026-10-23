@@ -6,6 +6,7 @@ import {
   AUTO_TRACK_SCHEDULE_EVENT,
   publishDoughTimerControl,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
+  readDoughTimerControlProjection,
 } from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
@@ -195,6 +196,7 @@ interface AutoTrackParams {
   packagingAutoTrackActive?: boolean;
 
   nowTime: Date;
+  serverClockOffsetMs?: number;
 
   elapsedBatchSec: number;
 
@@ -381,6 +383,7 @@ export function useAutoTrack({
   packagingDrainElapsedSec = 0,
   packagingAutoTrackActive = true,
   nowTime,
+  serverClockOffsetMs = 0,
   elapsedBatchSec,
   calc,
   v,
@@ -420,6 +423,9 @@ export function useAutoTrack({
   const [isDoughTimerPaused, setIsDoughTimerPaused] = useState(false);
   const internalAutoSuppressRef = useRef<number>(0);
   const internalDoughAutoSuppressRef = useRef<number>(0);
+  const serverClockOffsetRef = useRef(serverClockOffsetMs);
+  serverClockOffsetRef.current = serverClockOffsetMs;
+  const canonicalNow = useCallback(() => Date.now() + serverClockOffsetRef.current, []);
   // Prefer caller's ref so that suppression latches written by UI consumers
   // (e.g. Home's autoSuppressUntilRef) are seen by this hook's write loop.
   const autoSuppressUntilRef = externalAutoSuppressRef ?? internalAutoSuppressRef;
@@ -534,7 +540,7 @@ export function useAutoTrack({
   const coordinationIdentityRef = useRef(coordinationIdentity);
   coordinationIdentityRef.current = coordinationIdentity;
   const serverOwnsChannel = (channel: AutoTrackChannel): boolean => {
-    const ageMs = Date.now() - serverScheduleAtRef.current;
+    const ageMs = canonicalNow() - serverScheduleAtRef.current;
     return serverOwnedChannelsRef.current[channel] === true
       && ageMs >= 0
       && ageMs <= 30_000;
@@ -605,10 +611,10 @@ useEffect(() => {
       ) return;
       const scheduleAt = typeof schedule.atMs === "number" && Number.isFinite(schedule.atMs)
         ? schedule.atMs
-        : Date.now();
+        : canonicalNow();
       // Ignore reordered frames and timestamps too far ahead of this client.
       // Either could otherwise extend a not-due lease indefinitely.
-      if (scheduleAt < serverScheduleAtRef.current || scheduleAt > Date.now() + 5_000) return;
+      if (scheduleAt < serverScheduleAtRef.current || scheduleAt > canonicalNow() + 5_000) return;
       const owned: Partial<Record<AutoTrackChannel, boolean>> = {};
       for (const entry of schedule.entries) {
         // A schedule is ownership only when it is canonical and explicitly
@@ -991,47 +997,29 @@ useEffect(() => {
   // Does not affect the cases/skids counter or the global auto-track toggle.
   const pauseDoughTimers = useCallback((durationMs?: number) => {
     const nowMs = Date.now();
-    doughTimerPausedRef.current = nowMs;
-    doughTimerResumeAtRef.current =
+    const resumeAt =
       typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0
         ? nowMs + durationMs
         : 0;
-    setIsDoughTimerPaused(true);
-    publishDoughTimerControl({
+    if (!publishDoughTimerControl({
       runId, generation: coordinationIdentityRef.current, pausedAt: nowMs,
-      resumeAt: doughTimerResumeAtRef.current, updatedAt: nowMs,
-    });
-  }, [runId]);
+      resumeAt, updatedAt: nowMs,
+    }, serverClockOffsetRef.current)) return;
+    doughTimerPausedRef.current = nowMs;
+    doughTimerResumeAtRef.current = resumeAt;
+    setIsDoughTimerPaused(true);
+  }, [runId, canonicalNow]);
 
   // Resume dough-timer countdowns through the same re-arm path as automatic
   // resume so either action starts from a full, clean interval.
   const resumeDoughTimers = useCallback(() => {
     const nowMs = Date.now();
-    rearmDoughTimers(nowMs);
-    publishDoughTimerControl({
+    if (!publishDoughTimerControl({
       runId, generation: coordinationIdentityRef.current,
       pausedAt: 0, resumeAt: 0, updatedAt: nowMs,
-    });
-  }, [rearmDoughTimers, runId]);
-
-  useEffect(() => {
-    const adopt = (event: Event) => {
-      const controls = (event as CustomEvent<Record<string, {
-        generation?: string; pausedAt?: number; resumeAt?: number;
-      }>>).detail;
-      const control = controls?.[runId];
-      if (!control || control.generation !== coordinationIdentityRef.current) return;
-      if ((control.pausedAt ?? 0) > 0) {
-        doughTimerPausedRef.current = control.pausedAt!;
-        doughTimerResumeAtRef.current = Math.max(0, control.resumeAt ?? 0);
-        setIsDoughTimerPaused(true);
-      } else {
-        rearmDoughTimers(Date.now());
-      }
-    };
-    window.addEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
-    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
-  }, [rearmDoughTimers, runId]);
+    }, serverClockOffsetRef.current)) return;
+    rearmDoughTimers(nowMs);
+  }, [rearmDoughTimers, runId, canonicalNow]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
@@ -1242,6 +1230,36 @@ useEffect(() => {
       resumeRearmPendingRef.current = false;
     }
   }, [nowTime, rearmCaseTimer, rearmDoughTimers, runStatus]);
+
+  // Restore controls after lifecycle/timing resets, before any timer writes.
+  useEffect(() => {
+    const adopt = (event: Event) => {
+      const controls = (event as CustomEvent<Record<string, {
+        generation?: string; pausedAt?: number; resumeAt?: number;
+      }>>).detail;
+      const control = controls?.[runId];
+      if (!control) {
+        if (doughTimerPausedRef.current > 0) rearmDoughTimers(Date.now());
+        return;
+      }
+      if (control.generation !== coordinationIdentityRef.current) return;
+      if (!Number.isFinite(control.pausedAt ?? 0) || !Number.isFinite(control.resumeAt ?? 0)) return;
+      if ((control.pausedAt ?? 0) > 0) {
+        doughTimerPausedRef.current = control.pausedAt! - serverClockOffsetRef.current;
+        doughTimerResumeAtRef.current = (control.resumeAt ?? 0) > 0
+          ? control.resumeAt! - serverClockOffsetRef.current : 0;
+        setIsDoughTimerPaused(true);
+      } else if (doughTimerPausedRef.current > 0) {
+        rearmDoughTimers(Date.now());
+      }
+    };
+    window.addEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
+    const initial = readDoughTimerControlProjection();
+    if (initial) adopt(new CustomEvent(DOUGH_TIMER_CONTROL_ADOPT_EVENT, { detail: initial }));
+    return () => window.removeEventListener(DOUGH_TIMER_CONTROL_ADOPT_EVENT, adopt);
+  }, [rearmDoughTimers, runId, runGeneration, runStatus, serverClockOffsetMs,
+    autoTrackWakeAcknowledgement, calc.ppm, calc.perTray, calc.perBatch,
+    machine?.spinSec, machine?.hopperSec, v.pizzasPerCase]);
 
   // This barrier is declared before the tick-write effect below. React runs
   // effects in declaration order, so releasing a successful foreground sync
@@ -1853,10 +1871,10 @@ useEffect(() => {
       && nowMs >= doughTimerResumeAtRef.current
     ) {
       rearmDoughTimers(nowMs);
-      publishDoughTimerControl({
+      if (!authoritativeServerAutoTrack) publishDoughTimerControl({
         runId, generation: coordinationIdentityRef.current,
         pausedAt: 0, resumeAt: 0, updatedAt: nowMs,
-      });
+      }, serverClockOffsetRef.current);
       return;
     }
     if (doughTimerPausedRef.current > 0) return;

@@ -6,12 +6,22 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ManualSectionEditErrorCode } from './manualSectionEditErrorCode';
+import type { ManualSectionEditErrorOutcome } from './manualSectionEditErrorOutcome';
+import type { SyncPayload } from './syncPayload';
 
 /**
- * Safe rejection only; never includes submitted values or canonical recipe data.
+ * Safe rejection without submitted values. An authorized transactional conflict includes the current canonical snapshot so rejected optimistic totals can be replaced while the attempted entry remains in recovery.
  */
 export interface ManualSectionEditError {
   /** @maxLength 64 */
   error: string;
+  outcome?: ManualSectionEditErrorOutcome;
+  data?: SyncPayload;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId?: string;
   code: ManualSectionEditErrorCode;
 }

@@ -49,6 +49,10 @@ export default defineConfig({
   testIgnore: [
     // Focused importer safety matrix has its own Chromium/WebKit config.
     "**/task3494-audited-import.spec.ts",
+    // Authority continuity has explicit remaining-only Chromium/WebKit lanes.
+    // Do not duplicate it or alter the reviewed full-suite case inventory.
+    "live-authority.spec.ts",
+    "live-authority-continuation.spec.ts",
     "calendar.spec.ts",
     "release-webkit-smoke.spec.ts",
     // Physical iOS evidence is collected by its dedicated device lane.

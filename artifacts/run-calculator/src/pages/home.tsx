@@ -1,5 +1,6 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer, useSyncExternalStore } from "react";
 import { DEFAULT_RUN_TO_TIME } from "../runToTime";
+import { canonicalOperationalRun, canonicalOperationalValues, canonicalOperationalSnapshotForPublish } from "../domain/canonicalOperationalState";
 import { browserStorage as localStorage } from "../adapters/browserRecordStore";
 import { subscribeFactoryDirectory, factoryDirectoryState } from "../factoryDirectory";
 import { FactoryDirectoryStatus } from "../components/FactoryDirectoryStatus";
@@ -655,9 +656,11 @@ import {
   publishAutoTrackSchedule,
   subscribeAutoTrackCoordination,
   DOUGH_TIMER_CONTROL_EVENT,
+  adoptDoughTimerControls,
+  type DoughTimerControl,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { captureOperationalIdentityFence, capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, operationalIntentBlocksLifecycleAdoption, queueOperationalIntent, reportRejectedManualSectionErrors, retainOperationalSnapshotReview, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
@@ -7182,13 +7185,23 @@ export default function Home() {
   // response is not terminal until this callback has installed its snapshot
   // and receipt, so ordinary snapshot writes and auto-track cannot race it.
   const operationalCanonicalRevisionRef = useRef(0);
+  const operationalRevisionScopeRef = useRef("");
   const operationalServerTimeOffsetRef = useRef(0);
   const operationalAdoptionInFlightRef = useRef(0);
   const operationalAdoptionGenerationRef = useRef(0);
+  function currentOperationalRevision(): number {
+    const scope = `${me?.sandbox ? "sandbox" : "live"}:${me?.userId ?? "signed-out"}:${todayStr()}:${getStoredResetEpoch()}`;
+    if (operationalRevisionScopeRef.current !== scope) {
+      operationalRevisionScopeRef.current = scope;
+      operationalCanonicalRevisionRef.current = 0;
+    }
+    return operationalCanonicalRevisionRef.current;
+  }
+  currentOperationalRevision();
   function adoptOperationalRevision(revision: unknown): void {
     if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) return;
     operationalCanonicalRevisionRef.current = Math.max(
-      operationalCanonicalRevisionRef.current,
+      currentOperationalRevision(),
       revision,
     );
   }
@@ -7338,6 +7351,11 @@ export default function Home() {
     setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
       const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
       operationalAdoptionInFlightRef.current += 1;
+      if (typeof intent.canonicalRevision === "number"
+        && intent.canonicalRevision < currentOperationalRevision()) {
+        operationalAdoptionInFlightRef.current -= 1;
+        return;
+      }
       setAutoTrackBlocked(true);
       setAutoTrackWakeRebaseReason(null);
       adoptOperationalRevision(intent.canonicalRevision);
@@ -7366,18 +7384,8 @@ export default function Home() {
         throw new Error("Operational command response did not include a canonical snapshot");
       }
       const payload = data as SyncPayload;
-      const acceptedFinalization =
-        outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
-      const acceptedStockStart =
-        outcome === "accepted"
-        && intent.action === "lifecycle"
-        && intent.lifecycle === "start"
-        && payload.runValues[intent.runId]?.applicatorStockInitialized === true;
-      if (outcome === "accepted" && !acceptedFinalization && intent.action !== "correction" && !acceptedStockStart) {
-        applySyncCallbackRef.current(payload);
-        adoptReceipt();
-        adoptionSucceeded = true;
-        return;
+      if (intent.action === "control" && intent.control?.kind === "dough-timer") {
+        adoptDoughTimerControls(payload.doughTimerControls);
       }
       if (
         outcome !== "accepted"
@@ -7391,7 +7399,7 @@ export default function Home() {
         adoptionSucceeded = true;
         return;
       }
-      // A finalization/review/rebase response is authoritative for the command it resolves,
+      // An accepted/review/rebase response is authoritative for the command it resolves,
       // even when the rejected browser edit minted a newer LWW stamp. Restore
       // only that command's lifecycle/correction fields before ordinary inbound
       // reconciliation, then feed the ordinary path the preserved hybrid so it
@@ -7492,14 +7500,19 @@ export default function Home() {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     };
+    const controller = new AbortController();
     const pull = () => {
       void consumeOperationalMutationCursor(identity, (snapshot) =>
         applySyncCallbackRef.current(snapshot as SyncPayload),
+        controller.signal,
       );
     };
     pull();
     window.addEventListener("online", pull);
-    return () => window.removeEventListener("online", pull);
+    return () => {
+      controller.abort();
+      window.removeEventListener("online", pull);
+    };
   }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
@@ -7507,12 +7520,23 @@ export default function Home() {
       return Promise.reject(new Error("Station displays are read-only"));
     }
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
+    const identityIsCurrent = captureOperationalIdentityFence();
+    const date = todayStr();
+    const epoch = getStoredResetEpoch();
+    const generation = () => {
+      const run = dayStateRef.current.runs.find((candidate) => candidate.id === claim.runId);
+      return run ? `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}` : undefined;
+    };
+    const observedGeneration = generation();
+    const contextIsCurrent = () => identityIsCurrent() && date === todayStr()
+      && epoch === getStoredResetEpoch() && currentRunIdRef.current === claim.runId
+      && observedGeneration !== undefined && observedGeneration === generation();
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
       .then(async (): Promise<AutoTrackEventResult> => {
     const sharedSyncSettled = () =>
       foregroundSyncAcknowledgement > 1 && !foregroundSyncBarrierRef.current;
-    while (navigator.onLine) {
+    while (navigator.onLine && contextIsCurrent()) {
       if (
         !foregroundSyncBarrierRef.current
         && (pushAcknowledgedRef.current || sharedSyncSettled())
@@ -7520,7 +7544,8 @@ export default function Home() {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
     if (
-      !navigator.onLine
+      !contextIsCurrent()
+      || !navigator.onLine
       || foregroundSyncBarrierRef.current
       || (!pushAcknowledgedRef.current && !sharedSyncSettled())
     ) {
@@ -7545,7 +7570,7 @@ export default function Home() {
         })
       : claim.mutations;
     const response = await fetch(
-      `/api/sync/auto-track/claim?today=${encodeURIComponent(todayStr())}&epoch=${getStoredResetEpoch()}`,
+      `/api/sync/auto-track/claim?today=${encodeURIComponent(date)}&epoch=${epoch}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -7565,6 +7590,8 @@ export default function Home() {
         }),
       },
     );
+    if (!contextIsCurrent()) throw Object.assign(
+      new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
     if (response.status === 401) {
       reportUnauthorized();
       throw Object.assign(new Error("Automatic tracking needs authentication"), { retryable: false });
@@ -7578,7 +7605,11 @@ export default function Home() {
       values?: AutoTrackEventResult["values"];
       data?: SyncPayload;
       snapshotId?: string;
+      canonicalRevision?: number;
+      serverTime?: number;
     } | null;
+    if (!contextIsCurrent()) throw Object.assign(
+      new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
     if (!response.ok || !body?.outcome || !body.state || !body.values) {
       const retryable = response.status === 408
         || response.status === 425
@@ -7592,6 +7623,26 @@ export default function Home() {
     if (body.stale) {
       throw Object.assign(new Error("Automatic tracking is waiting for today's reset"), { retryable: false });
     }
+    if (!Number.isSafeInteger(body.canonicalRevision) || Number(body.canonicalRevision) < 0
+      || !Number.isFinite(body.serverTime) || !body.data
+      || (body.data.dayState?.date !== undefined && body.data.dayState.date !== date)
+      || !Array.isArray(body.data.dayState?.runs)
+      || !body.data.runValues || typeof body.data.runValues !== "object" || Array.isArray(body.data.runValues)
+      || typeof body.snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(body.snapshotId)) {
+      throw Object.assign(new Error("Automatic tracking returned an incomplete confirmation"), { retryable: true });
+    }
+    if (!await syncPayloadMatchesSnapshot(body.data, body.snapshotId)) {
+      throw Object.assign(new Error("Automatic tracking returned an inconsistent snapshot confirmation"), { retryable: true });
+    }
+    if (!contextIsCurrent()) throw Object.assign(
+      new Error("Automatic tracking context changed; its reply was not applied"), { retryable: false });
+    if (Number(body.canonicalRevision) < currentOperationalRevision()) {
+      throw Object.assign(new Error("A newer correction is already confirmed; waiting for its current automatic schedule"), { retryable: true });
+    }
+    adoptOperationalRevision(body.canonicalRevision);
+    const offset = Number(body.serverTime) - Date.now();
+    serverClockOffsetMsRef.current = offset;
+    setServerClockOffsetMs(offset);
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
       adoptedCanonicalSnapshotRef.current = persistedSyncPayload(body.data);
@@ -7722,12 +7773,18 @@ export default function Home() {
         const pending = loadPendingSyncIntent(scope, payload.dayState.date ?? "");
         if (pending) {
           if (pending.epoch !== getStoredResetEpoch()) {
-            clearPendingSyncIntent(scope, pending.date, pending.id);
+            if (retainOperationalSnapshotReview(pending, true)) {
+              clearPendingSyncIntent(scope, pending.date, pending.id);
+            } else {
+              savePendingSyncIntent({ ...pending, operationalReviewRequired: true });
+            }
             recordSyncEvent(
               "stale",
-              "Discarded queued sync recovery after a reset",
+              "Retained queued sync recovery for review after a reset; nothing was replayed",
               "reset-epoch",
             );
+          } else if (pending.operationalReviewRequired) {
+            if (retainOperationalSnapshotReview(pending)) clearPendingSyncIntent(scope, pending.date, pending.id);
           } else if (!isValidSyncSnapshotId(syncSnapshotIdRef.current)) {
             recordSyncEvent(
               "stale",
@@ -7743,9 +7800,17 @@ export default function Home() {
               {
                 snapshotId: syncSnapshotIdRef.current,
                 serverTime: payload.serverTime ?? Date.now() + serverClockOffsetMsRef.current,
+                enforceOperationalAuthority: true,
               },
             );
-            if (recovery.reappliedChanges > 0) {
+            if (recovery.reviewRequiredChanges) {
+              if (retainOperationalSnapshotReview(pending)) {
+                clearPendingSyncIntent(scope, pending.date, pending.id);
+              } else {
+                savePendingSyncIntent({ ...pending, operationalReviewRequired: true });
+              }
+              setWriteError("Older saved operational changes need review in the sync panel. Confirmed server state is shown; nothing was replayed.");
+            } else if (recovery.reappliedChanges > 0) {
               payload = recovery.payload;
               queuedIntentReapplied = true;
               const saved = savePendingSyncIntent({
@@ -7799,6 +7864,7 @@ export default function Home() {
         localResetAt,
         initialSnapshot,
       });
+      if (acceptRemoteDay) adoptDoughTimerControls(payload.doughTimerControls);
 
       // Per-run lost-update guard: compare each run's edit timestamp. We only
       // REJECT a remote run's values when our local edit is STRICTLY newer — so
@@ -7812,7 +7878,7 @@ export default function Home() {
       // stale payload from another day must never advance this independent map.
       const packagingMerge = acceptRemoteDay
         ? reconcilePackagingProgress(
-            atomicSeedSnapshot || remoteResetAt > localResetAt ? {} : localPackaging,
+            {},
             payload.packagingProgress,
           )
         : reconcilePackagingProgress(localPackaging, undefined);
@@ -7905,6 +7971,7 @@ export default function Home() {
           if (app1Progress) acceptedVals = { ...acceptedVals, ...app1Progress };
           const stockProgress = serverOwnedApplicatorStockProgress(payload, id, localVals);
           if (stockProgress) acceptedVals = { ...acceptedVals, ...stockProgress };
+          acceptedVals = canonicalOperationalValues(acceptedVals, vals as FormValues);
           saveRunValues(id, acceptedVals);
         }
         // A partial sync may carry an accepted progress register without a
@@ -8044,7 +8111,11 @@ export default function Home() {
                 const mergedRemote = selectInboundRunLifecycles(
                   overlayRunMetaStamps(prev.runs),
                   remoteRuns,
-                );
+                ).map((run) => {
+                  const remote = remoteRuns.find((candidate) => candidate.id === run.id);
+                  return remote && !operationalIntentBlocksLifecycleAdoption(run.id)
+                    ? canonicalOperationalRun(run, remote) : run;
+                });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
                 const localOnly = prev.runs.filter(r => {
                   if (remoteIds.has(r.id)) return false;
@@ -8536,7 +8607,20 @@ export default function Home() {
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
   useEffect(() => {
-    const sync = () => schedulePush(dayStateRef.current, 0, "edit");
+    const sync = (event: Event) => {
+      const control = (event as CustomEvent<DoughTimerControl>).detail;
+      if (!control) return;
+      const run = dayStateRef.current.runs.find((candidate) => candidate.id === control.runId);
+      if (!run || control.generation !== `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`.slice(0, 160)) {
+        event.preventDefault();
+        return;
+      }
+      if (!queueOperationalControl(control.runId, {
+        kind: "dough-timer", paused: control.pausedAt > 0,
+        ...(control.resumeAt > control.pausedAt && control.pausedAt > 0
+          ? { durationMs: control.resumeAt - control.pausedAt } : {}),
+      })) event.preventDefault();
+    };
     window.addEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
     return () => window.removeEventListener(DOUGH_TIMER_CONTROL_EVENT, sync);
   }, []);
@@ -8682,6 +8766,7 @@ export default function Home() {
       // the foreground adoption barrier.
     },
     onMessage: async (e: MessageEvent, streamDate: string) => {
+      const identityIsCurrent = me ? captureOperationalIdentityFence() : () => screenMode !== null;
       try {
         // The coordination hook fences late callbacks from a closed stream,
         // but keep the date boundary here too so a frame cannot cross
@@ -8714,6 +8799,8 @@ export default function Home() {
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
+        if (!msg.reset && !msg.rollover && typeof msg.canonicalRevision === "number"
+          && msg.canonicalRevision < currentOperationalRevision()) return false;
         // Once an HTTP recovery owner is active it is the sole adoption owner.
         // Ignore stream frames until that owner either succeeds or remains
         // visibly retryable; this prevents two valid transports from applying
@@ -8784,6 +8871,9 @@ export default function Home() {
             || msg.snapshotId !== syncSnapshotIdRef.current
           ) return false;
         }
+        if (!identityIsCurrent() || streamDate !== todayStr()) return false;
+        if (!msg.reset && !msg.rollover && typeof msg.canonicalRevision === "number"
+          && msg.canonicalRevision < currentOperationalRevision()) return false;
         adoptOperationalRevision(msg.canonicalRevision);
         if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
           const offset = msg.serverTime - Date.now();
@@ -9048,6 +9138,9 @@ export default function Home() {
             },
             isCurrent: () => isCurrentRecovery() && !requestSignal.aborted,
             adoptUnchanged: (body) => {
+              if (typeof body.canonicalRevision === "number" && body.canonicalRevision < currentOperationalRevision()) {
+                throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
+              }
               adoptOperationalRevision(body.canonicalRevision);
               if (body.operationalProjection) {
                 adoptOperationalProjection(
@@ -9059,6 +9152,9 @@ export default function Home() {
               pushAcknowledgedRef.current = true;
             },
             adoptCanonical: (payload, responseSnapshot) => {
+              if (typeof payload.canonicalRevision === "number" && payload.canonicalRevision < currentOperationalRevision()) {
+                throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
+              }
               adoptOperationalRevision(payload.canonicalRevision);
               syncSnapshotIdRef.current = responseSnapshot;
               adoptedCanonicalSnapshotRef.current = persistedSyncPayload(payload);
@@ -9480,6 +9576,18 @@ export default function Home() {
   ): Promise<{ body: unknown; stale: boolean; recoverableConflict: boolean }> {
     const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
+      canAdoptCanonical: async (body) => {
+        if (applyToLiveDay && (!Number.isSafeInteger(body.canonicalRevision) || Number(body.canonicalRevision) < 0)) {
+          throw new Error("Shared sync returned an incomplete server confirmation");
+        }
+        if (applyToLiveDay && Number(body.canonicalRevision) < currentOperationalRevision()) return false;
+        if (body.data && (!isValidSyncSnapshotId(body.snapshotId)
+          || !await syncPayloadMatchesSnapshot(body.data, body.snapshotId))) {
+          throw new Error("Shared sync returned a snapshot that does not match its confirmation");
+        }
+        return (!shouldConsume || shouldConsume())
+          && (!applyToLiveDay || Number(body.canonicalRevision) >= currentOperationalRevision());
+      },
       onServerTime: (serverTime) => {
         const offset = serverTime - Date.now();
         serverClockOffsetMsRef.current = offset;
@@ -9492,12 +9600,17 @@ export default function Home() {
         ? (canonical) => applySyncCallbackRef.current(canonical)
         : undefined,
     });
+    if (result.ignored) return { body: null, stale: false, recoverableConflict: result.recoverableConflict };
+    if (res.headers.get("X-Operational-Update-Required") === "commands-required") {
+      setWriteError("The server kept its newer confirmed live state. Use the live controls for operational changes; saved unconfirmed actions remain available in the sync panel for review.");
+    }
     if (result.malformed) {
       throw new Error("sync write returned a malformed response");
     }
     if (res.status === 409 && !result.recoverableConflict) {
       throw new Error("sync write returned a non-recoverable conflict");
     }
+    if (!applyToLiveDay) return result;
     const snapshot = result.body?.snapshotId;
     adoptOperationalRevision(
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
@@ -9654,10 +9767,17 @@ export default function Home() {
   ) {
     if (screenMode !== null) return;
     if (generation !== syncPushGenerationRef.current) return;
+    const ownsSession = captureOperationalIdentityFence();
+    const deliveryIsCurrent = () => {
+      if (generation !== syncPushGenerationRef.current) return false;
+      if (ownsSession()) return true;
+      syncPushQueueRef.current.finish({ drainQueued: false });
+      return false;
+    };
     const pendingScope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
     const pendingDate = payload.dayState.date ?? todayStr();
     const priorIntent = loadPendingSyncIntent(pendingScope, pendingDate);
-    const matchesPriorIntent = priorIntent
+    const matchesPriorIntent = priorIntent && !priorIntent.operationalReviewRequired
       && JSON.stringify(priorIntent.payload) === JSON.stringify(payload);
     const baseSnapshot =
       timing?.baseSnapshot
@@ -9670,7 +9790,7 @@ export default function Home() {
       ?? genId();
     const work = { payload, sig, ...timing, baseSnapshot, pendingIntentId };
     if (pendingScope && baseSnapshot) {
-      const saved = savePendingSyncIntent({
+      const saved = (!priorIntent?.operationalReviewRequired || retainOperationalSnapshotReview(priorIntent)) && savePendingSyncIntent({
         version: 1,
         id: pendingIntentId,
         scope: pendingScope,
@@ -9742,7 +9862,7 @@ export default function Home() {
       queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
       responseStatus = res.status;
-      if (generation !== syncPushGenerationRef.current) return;
+      if (!deliveryIsCurrent()) return;
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
       if (res.status === 401 || res.status === 403) {
@@ -9781,10 +9901,10 @@ export default function Home() {
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
         true,
-        () => generation === syncPushGenerationRef.current,
+        deliveryIsCurrent,
       );
       recoverableConflictResponse = canonicalResult.recoverableConflict;
-      if (generation !== syncPushGenerationRef.current) return;
+      if (!deliveryIsCurrent()) return;
       if (!res.ok && !canonicalResult.recoverableConflict) {
         throw new Error(`Sync write failed: ${res.status}`);
       }
@@ -9792,12 +9912,12 @@ export default function Home() {
       // local change. Canonical response consumption runs first; rebuild from
       // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
-        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+        | { partialFallback?: boolean; operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
         | null
         | undefined;
       let replayedAfterPartialFallback = false;
       let recoveredWithoutReplay = false;
-      if (shouldReplaySyncWrite(partialFallbackBody)) {
+      if (shouldReplaySyncWrite(partialFallbackBody, checkOperationalSnapshotRecovery(work, partialFallbackBody))) {
         replayedAfterPartialFallback = true;
         if (!partialFallbackBody?.data) {
           work.recoveryBlocked = true;
@@ -9826,18 +9946,18 @@ export default function Home() {
           canonicalResult = await consumeCanonicalSyncWriteResponse(
             res,
             true,
-            () => generation === syncPushGenerationRef.current,
+            deliveryIsCurrent,
           );
           recoverableConflictResponse = canonicalResult.recoverableConflict;
-          if (generation !== syncPushGenerationRef.current) return;
+          if (!deliveryIsCurrent()) return;
           if (!res.ok && !canonicalResult.recoverableConflict) {
             throw new Error(`Sync recovery write failed: ${res.status}`);
           }
           const secondFallback = canonicalResult.body as
-            | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+            | { partialFallback?: boolean; operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
             | null
             | undefined;
-          if (shouldReplaySyncWrite(secondFallback)) {
+          if (shouldReplaySyncWrite(secondFallback, checkOperationalSnapshotRecovery(work, secondFallback))) {
             if (!secondFallback?.data) {
               work.recoveryBlocked = true;
               throw new Error("Repeated stale sync response omitted canonical data");
@@ -9983,7 +10103,7 @@ export default function Home() {
         }
       }
     }).catch(() => {
-      if (generation !== syncPushGenerationRef.current) return;
+      if (!deliveryIsCurrent()) return;
       if (controller.signal.aborted) {
         emitProductionRunSaveOutcome("incomplete", requestStartedAt);
         syncPushQueueRef.current.finish({ drainQueued: false });
@@ -10037,6 +10157,7 @@ export default function Home() {
         if (syncRetryTimerRef.current) clearTimeout(syncRetryTimerRef.current);
         syncRetryTimerRef.current = setTimeout(() => {
           syncRetryTimerRef.current = null;
+          if (!deliveryIsCurrent()) return;
           setSyncRetryWaiting(false);
           const queued = syncPushQueueRef.current.takeQueued();
           const next = queued ?? work;
@@ -10151,7 +10272,7 @@ export default function Home() {
     // factory KV store. Run tombstones are also retained in live sync because
     // the server's additive same-day run merge needs them atomically with the
     // shortened run list to prevent a stale peer from restoring removed runs.
-    return {
+    return canonicalOperationalSnapshotForPublish({
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       baseSnapshotId: syncSnapshotIdRef.current,
@@ -10168,7 +10289,7 @@ export default function Home() {
       deletedItems: loadDeletedItems(),
       deletedStamps: loadDeletedStamps(),
       undeletedStamps: loadUndeletedStamps(),
-    };
+    }, adoptedCanonicalSnapshotRef.current);
   }
 
   // A short debounce keeps ordinary edits responsive without turning a burst
@@ -10310,6 +10431,32 @@ export default function Home() {
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
   }
+  function checkOperationalSnapshotRecovery(
+    work: { payload: SyncPayload; baseSnapshot?: SyncPayload; pendingIntentId?: string; recoveryBlocked?: boolean },
+    body: { operationalUpdateRequired?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number } | null | undefined,
+  ): boolean {
+    if (body?.operationalUpdateRequired !== true) return false;
+    let safe = false;
+    if (work.baseSnapshot && body.data) {
+      const check = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, persistedSyncPayload(body.data), {
+        enforceOperationalAuthority: true,
+      });
+      safe = check.reviewRequiredChanges === 0;
+    }
+    if (!safe) {
+      work.recoveryBlocked = true;
+      const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+      const date = work.payload.dayState.date ?? todayStr();
+      const pending = loadPendingSyncIntent(scope, date);
+      if (pending && pending.id === work.pendingIntentId) {
+        if (retainOperationalSnapshotReview(pending)) clearPendingSyncIntent(scope, date, pending.id);
+        else savePendingSyncIntent({ ...pending, operationalReviewRequired: true });
+      }
+      throw new Error("Operational snapshot changes require review; the original recovery request has not been replayed");
+    }
+    return true;
+  }
+
   function rebasePendingSyncWork(
     work: {
       payload: SyncPayload;
@@ -10330,7 +10477,11 @@ export default function Home() {
       const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
         snapshotId,
         serverTime,
+        enforceOperationalAuthority: true,
       });
+      if (recovery.reviewRequiredChanges) {
+        checkOperationalSnapshotRecovery(work, { operationalUpdateRequired: true, data: canonical });
+      }
       work.baseSnapshot = canonical;
       work.payload = recovery.payload;
       work.sig = JSON.stringify(recovery.payload);
@@ -11534,6 +11685,7 @@ export default function Home() {
     pauseDecisionRunId,
     dismissPauseDecision: setPauseDecisionRunId,
   } = useRunLifecycleManager({
+    getOperationalNowMs: () => Date.now() + serverClockOffsetMsRef.current,
     dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
     flushFormWrites: flushPendingHomeFormWrites,
     loadRunValues: loadPackagingAwareRunValues, saveRunValues, markRunValuesUpdated,
@@ -11544,6 +11696,7 @@ export default function Home() {
     operationalIntentBlocksLifecycle,
     showForegroundRecoveryNotice, recordSyncEvent,
     queueOperationalIntent, flushOperationalIntentOutbox, browserIsOnline,
+    queueOperationalControl,
     capturePreEndLifecycle, computeRunConsumptionLines, effectiveValuesForRun,
     overlayRunMetaStamps, isolatePendingRunPackagingProgress,
     recordManualPackagingProgress, persistManualPackagingProgress,
@@ -12680,6 +12833,44 @@ export default function Home() {
     savedFlashTimer.current = setTimeout(() => { if (savedFlashRef.current) savedFlashRef.current.style.opacity = "0"; }, 1800);
   }
 
+  function queueOperationalControl(
+    runId: string,
+    control: import("@workspace/sync-contract").OperationalControl,
+  ): boolean {
+    const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
+    if (!run || screenMode !== null || foregroundSyncBarrierRef.current) {
+      setWriteError("This control is not confirmed. Wait for recovery, then try again.");
+      return false;
+    }
+    if (control.kind !== "pause-policy" && operationalIntentBlocksLifecycle(runId)) {
+      setWriteError("A run action is still pending or needs review. Confirm that action before changing this control.");
+      return false;
+    }
+    try {
+      queueOperationalIntent({
+        runId, action: "control", control,
+        date: dayStateRef.current.date ?? todayStr(),
+        observedGeneration: `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`.slice(0, 160),
+        baseRevision: operationalCanonicalRevisionRef.current,
+        effectiveAt: Date.now(),
+      });
+      void flushOperationalIntentOutbox();
+      return true;
+    } catch {
+      setWriteError("This control could not be saved for delivery. Your last confirmed state is unchanged; please try again.");
+      return false;
+    }
+  }
+
+  function queueStoppageChanges(runs: RunMeta[]): boolean {
+    for (const run of runs) {
+      const previous = dayStateRef.current.runs.find((candidate) => candidate.id === run.id);
+      if (previous && !deepEqual(previous.stoppages, run.stoppages)
+        && !queueOperationalControl(run.id, { kind: "stoppages", values: run.stoppages ?? [] })) return false;
+    }
+    return true;
+  }
+
   // ── Downtime log ──────────────────────────────────────────────────────────
   function logStop(reason = "", notes = "") {
     const id = genId();
@@ -12690,6 +12881,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     setActiveStopId(id);
@@ -12705,6 +12897,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 600);
@@ -12724,6 +12917,7 @@ export default function Home() {
       i === dayState.currentIndex ? { ...r, stoppages: merged } : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
@@ -12738,6 +12932,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     setActiveStopId(null);
@@ -12752,6 +12947,7 @@ export default function Home() {
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
+    if (!queueStoppageChanges(newRuns)) return;
     setDayState(newDs);
     saveDayState(newDs);
     if (activeStopId === stopId) setActiveStopId(null);
@@ -12759,11 +12955,14 @@ export default function Home() {
   }
 
   function updateRunMeta(id: string, patch: Partial<RunMeta>) {
+    if (patch.autoTrackDisabled !== undefined
+      && !queueOperationalControl(id, { kind: "auto-track", enabled: !patch.autoTrackDisabled })) return false;
     const newRuns = dayState.runs.map(r => r.id === id ? { ...r, ...patch } : r);
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 600);
+    return true;
   }
 
   function buildRunCsvRow(date: string, run: RunMeta, vals: FormValues): string[] {
@@ -17784,6 +17983,7 @@ export default function Home() {
               pendingCount={syncPendingCount}
               failedCount={syncFailedCount}
               diagnostics={syncDiagnostics}
+              pendingScope={me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : undefined}
               canViewConflicts={canManageStaff}
               onRetry={retryLatestSync}
               onExportDiagnostics={exportSyncDiagnostics}
@@ -19965,9 +20165,9 @@ export default function Home() {
         claimAutoTrackEvent={claimAutoTrackEvent}
         onAutomaticClaimFailure={reportSauceAutoTrackFailure}
         onAutomaticClaimSuccess={clearSauceAutoTrackFailure}
-        onAutoTrackProgressChange={(enabled) => {
-          updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
-        }}
+          onAutoTrackProgressChange={(enabled) =>
+            updateRunMeta(currentRunId, { autoTrackDisabled: !enabled })
+          }
         operationalSnapshotReceipt={serverCalcReceipt}
         operationalServerCalc={serverCalc}
         operationalProjection={serverProjection}

@@ -24,6 +24,13 @@ import {
 } from "./operationalIntentOutbox";
 import { subscribeToManualSectionErrors } from "./manualSectionErrors";
 
+function acceptedPackagingResponse(runId: string, values: Record<string, number>): Response {
+  return Response.json({
+    outcome: "accepted", canonicalRevision: 1, serverTime: Date.now(),
+    data: { runValues: { [runId]: { skidsCompleted: 0, casesOnCurrentSkid: 0, ...values } } },
+  });
+}
+
 describe("manual section locks", () => {
   afterEach(() => clearManualSectionLocks());
 
@@ -35,7 +42,7 @@ describe("manual section locks", () => {
     const adopter = vi.fn();
     setOperationalIntentCanonicalAdopter(adopter);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      outcome: "accepted", serverTime: 200,
+      outcome: "accepted", canonicalRevision: 1, serverTime: 200,
       data: {
         runValues: { r: { skidsCompleted: 1, casesOnCurrentSkid: 3 } },
         packagingProgress: { r: { correctionGeneration: 2, manualOverrideUntil: 200, updatedAt: 200, skidsCompleted: 1, casesOnCurrentSkid: 3 } },
@@ -105,7 +112,7 @@ describe("manual section locks", () => {
     if (failure === "hidden-timeout") fetchSpy.mockRejectedValueOnce(new DOMException("fixture suspended request", "AbortError"));
     else fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ code: "section_changed" }), { status: failure }));
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({
-      outcome: "accepted", serverTime: 300,
+      outcome: "accepted", canonicalRevision: 1, serverTime: 300,
       data: {
         runValues: { r: { skidsCompleted: 1, casesOnCurrentSkid: 3 } },
         packagingProgress: { r: {
@@ -322,7 +329,7 @@ describe("manual section locks", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { runValues: { bad: { skidsCompleted: 99 } } } }), { status }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ outcome: "accepted", data: {} }), { status: 200 }));
+      .mockResolvedValueOnce(acceptedPackagingResponse("manual-auth-run", { skidsCompleted: 2 }));
     const id = `manual-auth-${status}`;
     const result = await submitManualSection({
       id, runId: "manual-auth-run", section: "packaging",
@@ -349,7 +356,7 @@ describe("manual section locks", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { runValues: { bad: {} } } }), {
         status: 429, headers: { "Retry-After": "1" },
       }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ outcome: "accepted", data: {} }), { status: 200 }));
+      .mockResolvedValueOnce(acceptedPackagingResponse("manual-rate-run", { skidsCompleted: 2 }));
     const result = await submitManualSection({
       id: "manual-rate-id", runId: "manual-rate-run", section: "packaging",
       values: { skidsCompleted: 2 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 0 },
@@ -468,7 +475,7 @@ describe("manual section locks", () => {
     expect(failed).toBe("persistence-failed");
     expect(localStorage.getItem(`${prefix}old-id`)).not.toBeNull();
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(originalSet);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ outcome: "accepted", data: {} }), { status: 200 }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(acceptedPackagingResponse("run-replace", { skidsCompleted: 3, casesOnCurrentSkid: 2 }));
     await submitManualSection({
       id: "new-id-2", runId: "run-replace", section: "packaging", date: "2032-04-04",
       resetEpoch: 1, values: { skidsCompleted: 3 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 2 },
@@ -494,10 +501,10 @@ describe("manual section locks", () => {
     const first = submitManualSection({ id: "shared-id", owner: "live:userA", runId: "run-shared", section: "packaging", values: { skidsCompleted: 2 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 0 }, date: "2032-05-05", observedGeneration: "run-shared:1" });
     setOperationalIntentIdentity({ scope: "sandbox", userId: "userA" });
     const second = submitManualSection({ id: "shared-id", owner: "sandbox:userA", runId: "run-shared", section: "packaging", values: { skidsCompleted: 3 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 0 }, date: "2032-05-05", observedGeneration: "run-shared:1" });
-    resolveOld(new Response(JSON.stringify({ outcome: "accepted", data: { runValues: { "run-shared": { skidsCompleted: 2, casesOnCurrentSkid: 0 } } } }), { status: 200 }));
+    resolveOld(acceptedPackagingResponse("run-shared", { skidsCompleted: 2 }));
     expect(await first).toBe("identity-mismatch");
     expect(fenceActiveManualSectionValues({ "run-shared": { skidsCompleted: 3, casesOnCurrentSkid: 4 } })["run-shared"]).toBeUndefined();
-    resolveNew(new Response(JSON.stringify({ outcome: "accepted", data: { runValues: { "run-shared": { skidsCompleted: 3, casesOnCurrentSkid: 0 } } } }), { status: 200 }));
+    resolveNew(acceptedPackagingResponse("run-shared", { skidsCompleted: 3 }));
     expect(await second).toBe("accepted");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -516,7 +523,7 @@ describe("manual section locks", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     setOperationalIntentIdentity({ scope: "live", userId: "userA" });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ outcome: "accepted", data: {} }), { status: 200 }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(acceptedPackagingResponse("run-old", { skidsCompleted: 2 }));
     await retryPendingManualSections();
     expect(localStorage.getItem("run-calculator:manual-section-pending:v1:live:userA:old-user-id")).toBeNull();
   });

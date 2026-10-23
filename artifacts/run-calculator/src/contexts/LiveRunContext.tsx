@@ -165,7 +165,7 @@ export interface LiveRunProviderProps {
     claim: AutoTrackEventClaim,
     outcome: AutoTrackEventResult["outcome"],
   ) => void;
-  onAutoTrackProgressChange?: (enabled: boolean) => void;
+  onAutoTrackProgressChange?: (enabled: boolean) => boolean | void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
   operationalProjection?: OperationalProjection | null;
@@ -252,7 +252,7 @@ export function LiveRunProvider({
     }
     if (!currentRun?.startedAt) return 0;
     if (currentRun.endedAt) return Number(ve.freezerTime);
-    const refTime = currentRun.pausedAt ?? nowTime.getTime();
+    const refTime = currentRun.pausedAt ?? operationalNowMs;
     const elapsed = (refTime - currentRun.startedAt) / 60000;
     return Math.min(elapsed, Number(ve.freezerTime));
   })();
@@ -293,7 +293,7 @@ export function LiveRunProvider({
       v,
       ve,
       currentRun,
-      nowTimeMs: nowTime.getTime(),
+      nowTimeMs: operationalNowMs,
       doughSubTab,
       defaultPepTypes: DEFAULT_PEP_TYPES,
     });
@@ -301,7 +301,7 @@ export function LiveRunProvider({
       recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
     }
     return result;
-  }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab, adoptServerCalc, operationalServerCalc]);
+  }, [v, ve, liveFreezerMin, currentRun, operationalNowMs, doughSubTab, adoptServerCalc, operationalServerCalc]);
 
   const currentRunDowntimeMs = useMemo(
     () =>
@@ -322,7 +322,7 @@ export function LiveRunProvider({
         })),
       })
     : currentRun?.startedAt
-      ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
+      ? Math.max(0, ((currentRun.pausedAt ?? operationalNowMs) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
       : 0;
   const elapsedBatchSec = confirmedProjection
     ? confirmedProjection.effectiveElapsedSec + (
@@ -454,7 +454,7 @@ export function LiveRunProvider({
     preTunnelMin: ve.preTunnelMin,
     postTunnelMin: ve.postTunnelMin,
     freezerTime: Number(ve.freezerTime),
-    nowMs: nowTime.getTime(),
+    nowMs: operationalNowMs,
   });
 
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
@@ -555,6 +555,7 @@ export function LiveRunProvider({
       packagingDrainElapsedSec,
       packagingAutoTrackActive,
       nowTime,
+      serverClockOffsetMs,
       elapsedBatchSec,
       calc,
       v: ve,
@@ -580,8 +581,8 @@ export function LiveRunProvider({
   const setAutoTrackProgress = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
     (next) => {
       const enabled = typeof next === "function" ? next(autoTrackProgress) : next;
+      if (onAutoTrackProgressChange?.(enabled) === false) return;
       setLocalAutoTrackProgress(enabled);
-      onAutoTrackProgressChange?.(enabled);
     },
     [autoTrackProgress, onAutoTrackProgressChange, setLocalAutoTrackProgress],
   );

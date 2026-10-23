@@ -11,6 +11,7 @@ import type { Scope } from "./requestScope";
 import { appendSyncOutboxEvent } from "./syncOutbox";
 import { emptySyncData } from "./syncContract";
 import { applyOperationalIntent, type OperationalIntent } from "./operationalIntents";
+import { isExactOperationalCommandRetry } from "./operationalCommandIdentity";
 import type { consumeRunInTransaction } from "../routes/inventory";
 
 export type OperationalIntentCommand = {
@@ -69,13 +70,22 @@ export async function reconcileOperationalIntentInTransaction(
 
   // A duplicate returns the snapshot produced by its original transaction,
   // rather than whichever later command currently owns the daily document.
+  if (seen && !isExactOperationalCommandRetry(seen, command)) return {
+    // Do not disclose the old receipt or execute the substituted operation.
+    // The ordinary conflict outcome retains the caller's local evidence.
+    data: (existing?.data ?? emptySyncData(intent.date)) as Record<string, any>,
+    outcome: "conflicted",
+    duplicate: true,
+    canonicalRevision: existing?.canonicalRevision ?? 0,
+    serverTime,
+  };
   if (seen) return {
-    data: seen.snapshot ?? existing?.data ?? emptySyncData(intent.date),
+    data: existing?.data ?? seen.snapshot ?? emptySyncData(intent.date),
     outcome: seen.outcome as ReturnType<typeof applyOperationalIntent>["outcome"],
     duplicate: true,
     cursor: seen.sequence,
-    canonicalRevision: seen.canonicalRevision ?? existing?.canonicalRevision ?? 0,
-    serverTime: seen.serverReceivedAt?.getTime() ?? serverTime,
+    canonicalRevision: existing?.canonicalRevision ?? seen.canonicalRevision ?? 0,
+    serverTime,
   };
 
   if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
@@ -122,7 +132,7 @@ export async function reconcileOperationalIntentInTransaction(
     };
   }
 
-  const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
+  const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now, existing?.canonicalRevision ?? 0);
   applied.data.dayState = { ...applied.data.dayState, date: intent.date };
   if (
     applied.outcome === "accepted"

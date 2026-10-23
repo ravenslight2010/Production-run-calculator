@@ -3,6 +3,17 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+When a manual-counter browser fixture requires fixed totals, disable automatic
+tracking in the canonical seeded run as well as matching local recovery data.
+
+**Why:** Legitimate server coordination can otherwise consume staged supply
+between UI steps, making a correct live baseline look like a hydration failure.
+Browser-only preferences do not disable the server coordinator.
+
+**How to apply:** Set the fixture's canonical `autoTrackDisabled` control, or
+derive assertions from an observed canonical baseline when automatic work is
+part of the scenario. Keep production defaults and station math unchanged.
+
 Browser tests that reload the app must seed master-data names through the server-backed fixture path or use names already present in the server pool; browser-only localStorage seeds can be replaced during sync hydration.
 
 **Why:** The app reconciles factory master data during startup, so a localStorage-only brand can disappear after reload even though the test wrote it before navigation.

@@ -9,6 +9,7 @@ import {
 import { genId, todayStr } from "../utils";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { defaultDayBreaks } from "../dayTimeline";
+import type { OperationalControl } from "@workspace/sync-contract";
 import {
   APPLICATOR_STOCK_CHANNELS,
   APPLICATOR_STOCK_REGISTERS,
@@ -390,7 +391,8 @@ export function serverOwnedApplicatorStockProgress(
 
 type OperationalCanonicalIntent = {
   runId: string;
-  action: "pause" | "resume" | "lifecycle" | "correction";
+  action: "pause" | "resume" | "lifecycle" | "correction" | "control";
+  control?: OperationalControl;
   lifecycle?: "start" | "end";
   values?: Record<string, number>;
 };
@@ -437,26 +439,12 @@ export function reconcileOperationalIntentCanonical(args: {
   lifecycleChanged: boolean;
   valueFields: Array<keyof FormValues>;
 } {
-  const unchanged = {
-    dayState: args.dayState,
-    runValues: args.runValues,
-    runValuesUpdatedAt: args.runValuesUpdatedAt,
-    lifecycleChanged: false,
-    valueFields: [] as Array<keyof FormValues>,
-  };
-  // Accepted finalization is special: the server owns the completion stamp and
-  // committed inventory in the same transaction. Adopt that exact lifecycle
-  // before the outbox drops its snapshot fence. Other accepted commands already
-  // match their optimistic local projection.
-  const acceptedStockStart = args.intent.action === "lifecycle"
-    && args.intent.lifecycle === "start"
+  // Every accepted lifecycle uses server-issued anchors, not the optimistic
+  // browser clock. Start/Pause/Resume are just as authoritative as atomic End.
+  const acceptedStockStart = args.outcome === "accepted"
+    && args.intent.action === "lifecycle" && args.intent.lifecycle === "start"
     && (args.payload.runValues[args.intent.runId]?.applicatorStockInitialized === true
       || args.payload.runValues[args.intent.runId]?.sauceStockInitialized === true);
-  if (args.outcome === "accepted"
-    && args.intent.action !== "correction"
-    && !acceptedStockStart
-    && !(args.intent.action === "lifecycle" && args.intent.lifecycle === "end")) return unchanged;
-
   let dayState = args.dayState;
   let lifecycleChanged = false;
   if (args.intent.action !== "correction") {
@@ -472,6 +460,8 @@ export function reconcileOperationalIntentCanonical(args: {
         endedAt: canonical.endedAt,
         stoppages: canonical.stoppages,
         metaUpdatedAt: canonical.metaUpdatedAt,
+        ...(args.intent.action === "control" && args.intent.control?.kind === "auto-track"
+          ? { autoTrackDisabled: canonical.autoTrackDisabled } : {}),
       };
       if (!deepEqual(local, restored)) {
         const runs = [...args.dayState.runs];

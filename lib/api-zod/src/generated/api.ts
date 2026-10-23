@@ -999,6 +999,18 @@ export const submitOperationalIntentBodyIntentRunIdMax = 160;
 export const submitOperationalIntentBodyIntentObservedGenerationMax = 160;
 export const submitOperationalIntentBodyIntentResetEpochMin = 0;
 export const submitOperationalIntentBodyIntentBaseRevisionMin = 0;
+export const submitOperationalIntentBodyIntentControlTwoDurationMsExclusiveMin = 0;
+export const submitOperationalIntentBodyIntentControlTwoDurationMsMax = 86400000;
+export const submitOperationalIntentBodyIntentControlThreePauseIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitOperationalIntentBodyIntentControlFourValuesItemIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitOperationalIntentBodyIntentControlFourValuesItemReasonMax = 500;
+export const submitOperationalIntentBodyIntentControlFourValuesItemStartedAtMin = 0;
+export const submitOperationalIntentBodyIntentControlFourValuesItemStartedAtMax = 8640000000000000;
+export const submitOperationalIntentBodyIntentControlFourValuesItemEndedAtMin = 0;
+export const submitOperationalIntentBodyIntentControlFourValuesItemEndedAtMax = 8640000000000000;
+export const submitOperationalIntentBodyIntentControlFourValuesItemNotesMax = 2000;
+export const submitOperationalIntentBodyIntentControlFourValuesMax = 200;
+export const submitOperationalIntentBodyIntentPauseIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitOperationalIntentBodyIntentValuesMinOne = 0;
 export const submitOperationalIntentBodyIntentValuesMaxOne = 1000000;
 export const submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax = 300;
@@ -10035,7 +10047,31 @@ export const SubmitOperationalIntentBody = zod.object({
   "resetEpoch": zod.int().min(submitOperationalIntentBodyIntentResetEpochMin),
   "effectiveAt": zod.number(),
   "baseRevision": zod.int().min(submitOperationalIntentBodyIntentBaseRevisionMin).optional(),
-  "action": zod.enum(['pause', 'resume', 'lifecycle', 'correction']),
+  "action": zod.enum(['pause', 'resume', 'lifecycle', 'correction', 'control']),
+  "control": zod.union([zod.object({
+  "kind": zod.enum(['auto-track']),
+  "enabled": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['dough-timer']),
+  "paused": zod.boolean(),
+  "durationMs": zod.number().gt(submitOperationalIntentBodyIntentControlTwoDurationMsExclusiveMin).max(submitOperationalIntentBodyIntentControlTwoDurationMsMax).optional()
+}),zod.object({
+  "kind": zod.enum(['pause-policy']),
+  "pauseId": zod.string().regex(submitOperationalIntentBodyIntentControlThreePauseIdRegExp),
+  "stopTunnel": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['stoppages']),
+  "values": zod.array(zod.object({
+  "id": zod.string().regex(submitOperationalIntentBodyIntentControlFourValuesItemIdRegExp),
+  "reason": zod.string().max(submitOperationalIntentBodyIntentControlFourValuesItemReasonMax),
+  "startedAt": zod.number().min(submitOperationalIntentBodyIntentControlFourValuesItemStartedAtMin).max(submitOperationalIntentBodyIntentControlFourValuesItemStartedAtMax),
+  "endedAt": zod.number().min(submitOperationalIntentBodyIntentControlFourValuesItemEndedAtMin).max(submitOperationalIntentBodyIntentControlFourValuesItemEndedAtMax).optional(),
+  "notes": zod.string().max(submitOperationalIntentBodyIntentControlFourValuesItemNotesMax).optional(),
+  "type": zod.enum(['stop', 'pause', 'manual']).optional(),
+  "stopTunnel": zod.boolean().optional()
+})).max(submitOperationalIntentBodyIntentControlFourValuesMax)
+})]).optional(),
+  "pauseId": zod.string().regex(submitOperationalIntentBodyIntentPauseIdRegExp).optional(),
   "lifecycle": zod.enum(['start', 'end']).optional(),
   "values": zod.record(zod.string(), zod.number().min(submitOperationalIntentBodyIntentValuesMinOne).max(submitOperationalIntentBodyIntentValuesMaxOne)).optional(),
   "inventoryLines": zod.array(zod.object({

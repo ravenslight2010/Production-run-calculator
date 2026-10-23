@@ -509,6 +509,14 @@ test("source boundary identifies a workspace package manifest with invalid JSON"
     homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
     helperSource: "",
     packageSource: "export const bridge = true;",
+    // Exercise our manifest parser, independently of whether the installed
+    // pnpm rejects this deliberately corrupt fixture during discovery first.
+    runWorkspaceList: (workspaceRoot) => ({
+      status: 0,
+      stdout: JSON.stringify([
+        { path: path.join(workspaceRoot, "lib/home-bridge") },
+      ]),
+    }),
   });
   const manifestPath = path.join(
     fixture.workspaceRoot,

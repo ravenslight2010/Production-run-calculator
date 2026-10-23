@@ -243,7 +243,6 @@ describe("Sauce auto-track warning surface", () => {
     await waitFor(() => expect(screen.queryByTestId("sauce-auto-track-failure")).toBeNull());
   });
 });
-
 const STATIONS = [
   {
     name: "Sauce",
@@ -415,7 +414,7 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
 
   it.each(PEPPERONI_REGISTERS.flatMap((register) =>
     ["34.25", "0", ""].map((draft) => ({ register, draft })),
-  ))("restores the raw $register draft '$draft' after setup hides every stock row, saving only on Save", ({ register, draft }) => {
+  ))("restores raw $register draft '$draft' after temporary removal of every pepperoni row, saving only on Save", ({ register, draft }) => {
     const queue = vi.fn();
     render(<FrontlineNavigationFixture
       values={{ ...PEPPERONI_VALUES, [`${register}StockLbs`]: 5 }}
@@ -428,16 +427,33 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
       if (other !== register) fireEvent.change(screen.getByTestId(`setup-${other}-type`), { target: { value: "" } });
     }
     const before = screen.getByTestId("stock-form-values").textContent;
+    const stockField = `${register}StockLbs`;
+    const persisted = loadRunValues(RUN_ID);
+    fireEvent.change(input(register), { target: { value: "12.25" } });
     fireEvent.change(input(register), { target: { value: draft } });
     fireEvent.change(setup, { target: { value: "" } });
     expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
+    navigateAwayAndBack();
     fireEvent.change(setup, { target: { value: originalType } });
     expect(input(register).value).toBe(draft);
     expect(screen.getByTestId("stock-form-values").textContent).toBe(before);
+    expect(loadRunValues(RUN_ID)).toEqual(persisted);
     expect(queue).not.toHaveBeenCalled();
     fireEvent.click(within(input(register).parentElement!).getByRole("button", { name: "Save" }));
     expect(queue).toHaveBeenCalledTimes(1);
-    expect(queue.mock.calls[0][1]).toMatchObject({ [`${register}StockLbs`]: Number(draft) });
+    expect(queue.mock.calls[0][0]).toBe(RUN_ID);
+    expect(queue.mock.calls[0][1][stockField]).toBe(Number(draft));
+  });
+
+  it("clears only the filled slot while preserving another unfinished draft", () => {
+    render(fixture());
+    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    navigateAwayAndBack();
+    fireEvent.click(within(input("pep1").parentElement!).getByRole("button", { name: "Fill to cap" }));
+    navigateAwayAndBack();
+    expect(input("pep1").value).toBe(input("pep1").max);
+    expect(input("pep2b").value).toBe("34.5");
   });
 
   it.each(PEPPERONI_REGISTERS)("discards a hidden %s draft when setup replaces its ingredient", (register) => {
@@ -452,6 +468,20 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
     fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
     fireEvent.change(setup, { target: { value: originalType } });
     expect(input(register).value).toBe(savedStock);
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pep1", "change-pep1-type"], ["pep1b", "change-pep1-additional-type"],
+    ["pep2", "change-pep2-type"], ["pep2b", "change-pep2-additional-type"],
+  ])("does not transfer an unfinished %s draft to a different ingredient", (register, change) => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    fireEvent.change(input(register), { target: { value: "12.25" } });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByTestId(change));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
+    expect(input(register).value).not.toBe("12.25");
     expect(queue).not.toHaveBeenCalled();
   });
 
@@ -483,22 +513,50 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
   it.each(["", "0", "9999"])("retains a raw pepperoni draft %j across navigation without saving", (draft) => {
     const queue = vi.fn();
     render(fixture(queue));
-    fireEvent.change(input("pep1"), { target: { value: "5" } });
+    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
     fireEvent.change(input("pep1"), { target: { value: draft } });
     navigateAwayAndBack();
     expect(input("pep1").value).toBe(draft);
     expect(queue).not.toHaveBeenCalled();
   });
 
-  it("clears only the filled slot while preserving another unfinished draft", () => {
-    render(fixture());
-    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
+  it("preserves both hidden Pep-2 drafts through combined mode and navigation", () => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    fireEvent.change(input("pep2"), { target: { value: "12.25" } });
     fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
+    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
     navigateAwayAndBack();
-    fireEvent.click(within(input("pep1").parentElement!).getByRole("button", { name: "Fill to cap" }));
-    navigateAwayAndBack();
-    expect(input("pep1").value).toBe(input("pep1").max);
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2").value).toBe("12.25");
     expect(input("pep2b").value).toBe("34.5");
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("does not revive a hidden additional-Pep-2 draft after its ingredient changes", () => {
+    render(fixture());
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    fireEvent.click(screen.getByTestId("change-pep2-additional-type"));
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2b").value).not.toBe("34.5");
+  });
+
+  it("discards a run's drafts when switching runs while Frontline is unmounted", () => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    fireEvent.change(input("pep2"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
+    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    navigateAwayAndBack();
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2").value).toBe("12.25");
+    expect(input("pep2b").value).toBe("34.5");
+    expect(queue).not.toHaveBeenCalled();
   });
 
   it("does not revive a hidden additional-Pep-2 draft after its ingredient changes", () => {
@@ -568,6 +626,7 @@ describe("Frontline on-line applicator supply", () => {
     render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
     expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
     expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("batches");
+
     fireEvent.click(screen.getByRole("button", { name: "Increase app1 batches on line" }));
     expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("1");
     expect(queueManualCorrection).toHaveBeenCalledTimes(1);
@@ -582,6 +641,7 @@ describe("Frontline on-line applicator supply", () => {
     expect(queueManualCorrection.mock.calls[0][2]).toEqual(expect.objectContaining({
       app1StockLbs: expect.any(Number),
     }));
+
     fireEvent.click(screen.getByRole("button", { name: "Decrease app1 batches on line" }));
     expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("0");
     expect(queueManualCorrection).toHaveBeenCalledTimes(2);
@@ -788,24 +848,11 @@ describe("live station startup", () => {
   });
 
   it("advances Packaging once when the ended run is fully drained, including on mount", () => {
-      const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
-      const runs = [fullyDrained, NEXT_RUN];
-      const selectedRunId = { current: RUN_ID };
-      const switchToRun = vi.fn(
-        (newIndex: number, expectedCurrentRunId?: string) => {
-          // Model the real lifecycle manager's expected-run fence. The
-          // foreground/manual selection has already won before this stale
-          // station effect tries to advance the old draining run.
-          if (
-            expectedCurrentRunId &&
-            selectedRunId.current !== expectedCurrentRunId
-          ) {
-            return false;
-          }
-          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-          return true;
-        },
-      );
+    const fullyDrained = {
+      ...ENDED_RUN, startedAt: Date.now() - 60 * 60_000,
+      endedAt: Date.now() - 40 * 60_000,
+    };
+    const switchToRun = vi.fn();
     render(
       <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
         <LivePackagingTabContent />
@@ -1105,8 +1152,10 @@ describe("live station edits and stamped browser persistence", () => {
       editedStamp,
     );
     expect(acceptsStalePeer).toBe(false);
+
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
     expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
     expect(loadRunValues(RUN_ID).sauceStockBarrels).toBe(1.3);
   });
+
 });

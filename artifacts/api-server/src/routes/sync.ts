@@ -1,4 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { hasOperationalSnapshotMutation } from "../lib/operationalSnapshotAuthority";
+import { isExactOperationalCommandRetry } from "../lib/operationalCommandIdentity";
 import { createHash, randomUUID } from "node:crypto";
 import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
 import {
@@ -48,7 +50,7 @@ import {
 } from "@workspace/db";
 import { and, eq, gt, gte, lte, asc, desc, sql, inArray } from "drizzle-orm";
 import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
-import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
+import { protectRunValues, preserveAndInvalidateAutoTrackCoordination, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
@@ -235,6 +237,7 @@ type ProtectedUpsertResult = {
   serverTime: number;
   staleEpoch?: number;
   legacyRejected?: boolean;
+  operationalRejected?: boolean;
 };
 
 const LEGACY_SYNC_SUNSET = "Wed, 21 Oct 2026 00:00:00 GMT";
@@ -1630,6 +1633,7 @@ async function upsertProtected(
         // hold a newer local marker before it receives this row, but that marker
         // must never erase other operators' scheduled or live runs.
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
+        const operationalRejected = hasOperationalSnapshotMutation(serverOwnedPayload, canonicalExisting);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
           // The exact locked snapshot is the causal ordering signal for
@@ -1637,6 +1641,7 @@ async function upsertProtected(
           // regardless of client clock order and receive a server-time stamp.
           acceptCurrentBaseRunValueEdits: currentBaseSnapshotValidated,
           nowMs: serverTime,
+          enforceOperationalAuthority: true,
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
@@ -1694,6 +1699,7 @@ async function upsertProtected(
           // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
           inventoryChanged,
+          operationalRejected,
           partialFallback: false,
           retries: attempt,
           canonicalRevision,
@@ -1895,13 +1901,22 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
   const responseBody = buildSyncWriteEnvelope(merged, {
-    requestedSnapshotId: requestedId,
+    requestedSnapshotId: result.operationalRejected ? undefined : requestedId,
     partialFallback: result.partialFallback,
     ...(merged === null
       ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(today))) }
       : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  if (result.operationalRejected) {
+    res.status(409);
+    res.setHeader("X-Operational-Update-Required", "commands-required");
+    Object.assign(responseBody, {
+      ok: false, operationalUpdateRequired: true, code: "SYNC_OPERATIONAL_COMMAND_REQUIRED",
+      error: "Live operational fields were not applied. Use an updated device's live controls or review saved actions. The returned snapshot includes any accepted setup edits.",
+    });
+    res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  }
   const telemetryMode: SyncPutMode = result.partialFallback
     ? "fallback"
     : !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
@@ -1941,8 +1956,12 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 // Atomic, section-scoped correction. The daily row is the serialization point;
 // the operational ledger makes retries return the original canonical answer.
 router.post("/sync/manual-section", async (req: Request, res: Response): Promise<void> => {
-  const reject = (status: 400 | 409, code: ManualSectionRejectionCode) => {
-    res.status(status).json({ error: "Manual section edit was rejected", code });
+  const reject = (status: 400 | 409, code: ManualSectionRejectionCode,
+    canonical?: { data: Record<string, any>; revision: number; serverTime: number }) => {
+    res.status(status).json({ error: "Manual section edit was rejected", code,
+      ...(canonical ? { outcome: "conflicted", data: canonical.data,
+        canonicalRevision: canonical.revision, serverTime: canonical.serverTime,
+        snapshotId: syncSnapshotId(canonical.data) } : {}) });
   };
   let requestAborted = false;
   req.once("aborted", () => { requestAborted = true; });
@@ -2045,10 +2064,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, date),
         eq(operationalIntentLedgerTable.intentId, id))).for("update");
     if (seen) {
-      if (resumePackaging && (seen.commandType !== "packaging:resume"
-        || (seen.actionData as Record<string, unknown>)?.runId !== runId
-        || (seen.actionData as Record<string, unknown>)?.observedGeneration !== observedGeneration
-        || (seen.actionData as Record<string, unknown>)?.correctionGeneration !== correctionGeneration)) {
+      if (!isExactOperationalCommandRetry(seen, {
+        commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`,
+        actorId: req.userId ?? "unknown", deviceId: (deviceId as string | undefined) ?? "unknown",
+        baseRevision: baseRevision as number,
+        actionData: { runId, section, values, baseValues, observedGeneration,
+          ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration } : {}) },
+      })) {
         return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "section_changed" };
       }
       return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
@@ -2169,6 +2191,12 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     if (hasSauceStockUpdate) updatedRunValues.sauceStockInitialized = true;
     next.runValues = { ...(next.runValues ?? {}), [runId]: updatedRunValues };
     next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
+    // A section command replaces the old snapshot mutation, including its
+    // channel invalidation. Revoke sleeping claims with the locked revision,
+    // never a caller's clock or a reused per-millisecond generation.
+    Object.assign(next, preserveAndInvalidateAutoTrackCoordination(
+      next, current.autoTrackCoordination, current, currentRevision + 1,
+    ));
     if (section === "packaging") {
       const progressMap = current.packagingProgress
         && typeof current.packagingProgress === "object"
@@ -2211,8 +2239,8 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       scope, date, intentId: id, outcome: "accepted", snapshot: next,
       commandType: resumePackaging ? "packaging:resume" : `manual-section:${section}`, actorId: req.userId ?? "unknown",
       deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
-      canonicalRevision: revision, actionData: { runId, section, values, baseValues,
-        ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration, observedGeneration } : {}) }, serverReceivedAt: new Date(),
+      canonicalRevision: revision, actionData: { runId, section, values, baseValues, observedGeneration,
+        ...(resumePackaging ? { operation: "resume-packaging", correctionGeneration } : {}) }, serverReceivedAt: new Date(),
     });
     await appendSyncOutboxEvent(tx, {
       kind: "day-state",
@@ -2243,7 +2271,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
   }
   if (requestAborted) return;
   if (result.status !== 200) {
-    reject(result.status, result.rejectionCode ?? "invalid_edit");
+    reject(result.status, result.rejectionCode ?? "invalid_edit", result);
     return;
   }
   res.status(result.status).json({
@@ -2420,6 +2448,8 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     date: intent.date,
     runId: intent.runId,
     action: intent.action,
+    control: intent.control,
+    pauseId: intent.pauseId,
     lifecycle: intent.lifecycle,
     effectiveAt: intent.effectiveAt,
     observedGeneration: intent.observedGeneration,
@@ -3055,15 +3085,24 @@ router.put(
   res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
   const responseBody = buildSyncWriteEnvelope(merged, {
-    requestedSnapshotId: requestedId,
+    requestedSnapshotId: result.operationalRejected ? undefined : requestedId,
     partialFallback: result.partialFallback,
     ...(merged === null
       ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(date))) }
       : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  if (result.operationalRejected) {
+    res.status(409);
+    res.setHeader("X-Operational-Update-Required", "commands-required");
+    Object.assign(responseBody, {
+      ok: false, operationalUpdateRequired: true, code: "SYNC_OPERATIONAL_COMMAND_REQUIRED",
+      error: "Live operational fields were not applied. Use an updated device's live controls or review saved actions. The returned snapshot includes any accepted setup edits.",
+    });
+    res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  }
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
-    res.json(responseBody);
+    res.json({ ...responseBody, canonicalRevision: result.canonicalRevision, serverTime: result.serverTime });
   },
 );
 

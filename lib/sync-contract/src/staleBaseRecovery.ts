@@ -1,9 +1,12 @@
+import { COMMAND_OWNED_RUN_FIELDS, COMMAND_OWNED_VALUE_FIELDS } from "./index";
+
 type JsonRecord = Record<string, unknown>;
 
 export type StaleBaseRecoveryResult = {
   payload: JsonRecord;
   reappliedChanges: number;
   retainedServerConflicts: number;
+  reviewRequiredChanges?: number;
 };
 
 const COUNT_LIMIT = 1_000;
@@ -35,6 +38,57 @@ function cloneJson<T>(value: T): T {
 
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Compare intent against its captured base, not against a peer's newer totals. */
+function fenceOperationalRecovery(base: JsonRecord, local: JsonRecord, server: JsonRecord): number {
+  const rows = (doc: JsonRecord): JsonRecord[] =>
+    isRecord(doc.dayState) && Array.isArray(doc.dayState.runs)
+      ? doc.dayState.runs.filter(isRecord) : [];
+  const values = (doc: JsonRecord): JsonRecord => isRecord(doc.runValues) ? doc.runValues : {};
+  const baseRuns = new Map(rows(base).map((row) => [row.id, row]));
+  const localRuns = new Map(rows(local).map((row) => [row.id, row]));
+  const serverRuns = new Map(rows(server).map((row) => [row.id, row]));
+  let review = 0;
+  for (const id of new Set([...baseRuns.keys(), ...localRuns.keys()])) {
+    for (const field of COMMAND_OWNED_RUN_FIELDS) {
+      const fallback = field === "stoppages" ? [] : field === "autoTrackDisabled" ? false : field === "pausedStoppageId" ? "" : 0;
+      if (!same(baseRuns.get(id)?.[field] ?? fallback, localRuns.get(id)?.[field] ?? fallback)) review++;
+    }
+  }
+  for (const id of new Set([...Object.keys(values(base)), ...Object.keys(values(local))])) {
+    const before = isRecord(values(base)[id]) ? values(base)[id] as JsonRecord : {};
+    const requested = isRecord(values(local)[id]) ? values(local)[id] as JsonRecord : {};
+    for (const field of COMMAND_OWNED_VALUE_FIELDS) {
+      const fallback = field.endsWith("Initialized") ? false : 0;
+      if (!same(before[field] ?? fallback, requested[field] ?? fallback)) review++;
+    }
+  }
+  for (const field of ["packagingProgress", "doughTimerControls"]) {
+    if (!same(base[field], local[field])) review++;
+  }
+  for (const doc of [base, local]) {
+    for (const run of rows(doc)) {
+      const canonical = serverRuns.get(run.id);
+      for (const field of [...COMMAND_OWNED_RUN_FIELDS, "metaUpdatedAt"]) {
+        if (canonical?.[field] === undefined) delete run[field];
+        else run[field] = cloneJson(canonical[field]);
+      }
+    }
+    for (const [id, row] of Object.entries(values(doc))) {
+      if (!isRecord(row)) continue;
+      const canonical = isRecord(values(server)[id]) ? values(server)[id] as JsonRecord : {};
+      for (const field of COMMAND_OWNED_VALUE_FIELDS) {
+        if (canonical[field] === undefined) delete row[field];
+        else row[field] = cloneJson(canonical[field]);
+      }
+    }
+    for (const field of ["packagingProgress", "doughTimerControls", "autoTrackCoordination", "autoTrackServerState", "operationalIntentHistory"]) {
+      if (server[field] === undefined) delete doc[field];
+      else doc[field] = cloneJson(server[field]);
+    }
+  }
+  return Math.min(COUNT_LIMIT, review);
 }
 
 function addCount(value: number): number {
@@ -240,7 +294,7 @@ export function rebaseStaleSyncIntent(
   baseInput: unknown,
   intentInput: unknown,
   canonicalInput: unknown,
-  options: { snapshotId?: string; serverTime?: number } = {},
+  options: { snapshotId?: string; serverTime?: number; enforceOperationalAuthority?: boolean } = {},
 ): StaleBaseRecoveryResult {
   if (!isRecord(baseInput) || !isRecord(intentInput) || !isRecord(canonicalInput)) {
     throw new TypeError("Stale sync recovery requires three document objects");
@@ -249,8 +303,10 @@ export function rebaseStaleSyncIntent(
   const queuedIntent = intentInput;
   const canonicalSnapshot = canonicalInput;
   const local = materializeIntent(baseSnapshot, queuedIntent);
-  const base = baseSnapshot;
+  const base = options.enforceOperationalAuthority ? cloneJson(baseSnapshot) : baseSnapshot;
   const server = canonicalSnapshot;
+  const reviewRequiredChanges = options.enforceOperationalAuthority
+    ? fenceOperationalRecovery(base, local, server) : 0;
   const counts = { reappliedChanges: 0, retainedServerConflicts: 0 };
   const output: JsonRecord = cloneJson(server);
   const topLevelKeys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(server)]);
@@ -364,5 +420,6 @@ export function rebaseStaleSyncIntent(
     payload: output,
     reappliedChanges: counts.reappliedChanges,
     retainedServerConflicts: counts.retainedServerConflicts,
+    ...(options.enforceOperationalAuthority ? { reviewRequiredChanges } : {}),
   };
 }

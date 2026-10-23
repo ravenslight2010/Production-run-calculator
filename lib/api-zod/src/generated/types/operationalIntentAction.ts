@@ -14,4 +14,5 @@ export const OperationalIntentAction = {
   resume: 'resume',
   lifecycle: 'lifecycle',
   correction: 'correction',
+  control: 'control',
 } as const;

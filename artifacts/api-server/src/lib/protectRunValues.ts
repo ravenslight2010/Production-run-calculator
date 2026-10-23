@@ -2,6 +2,7 @@ import {
   FACTORY_SPEED_ADJUSTMENT_BASELINE,
   FACTORY_TIMING_DEFAULTS,
 } from "@workspace/factory-constants";
+import { fenceOperationalSnapshot } from "./operationalSnapshotAuthority";
 
 // Per-run + run-list protective merge AND payload sanitization for the shared
 // day-state sync row.
@@ -527,10 +528,11 @@ function withMergedStamps(
   return out;
 }
 
-function preserveAndInvalidateAutoTrackCoordination(
+export function preserveAndInvalidateAutoTrackCoordination(
   protectedPayload: unknown,
   existingCoordination: unknown,
   existingPayload: Record<string, unknown>,
+  mutationRevision?: number,
 ): unknown {
   if (!isPlainObject(protectedPayload)) return protectedPayload;
   const mergeControls = () => {
@@ -609,7 +611,7 @@ function preserveAndInvalidateAutoTrackCoordination(
     for (const channel of changedChannels) {
       if (!Object.prototype.hasOwnProperty.call(runCoordination, channel)) continue;
       runCoordination[channel] = {
-        generation: `manual:${stamp}`,
+        generation: `manual:${mutationRevision ?? stamp}`,
         sequence: 0,
         // Sauce and applicator coordination use pause-aware net-production
         // seconds, not epoch milliseconds. Zero tells clients to rebuild the
@@ -653,9 +655,18 @@ export function protectRunValues(
     allowRunListReplacement?: boolean;
     acceptCurrentBaseRunValueEdits?: boolean;
     nowMs?: number;
+    enforceOperationalAuthority?: boolean;
   } = {},
 ): unknown {
   if (!isPlainObject(incomingInput)) return incomingInput;
+  if (options.enforceOperationalAuthority) {
+    return fenceOperationalSnapshot(
+      protectRunValues(fenceOperationalSnapshot(incomingInput, existing), existing, {
+        ...options, enforceOperationalAuthority: false,
+      }),
+      existing,
+    );
+  }
   const nowMs = Number.isFinite(options.nowMs) ? Number(options.nowMs) : Date.now();
   let incoming = capFutureRunValueStamps(incomingInput, nowMs);
   if (options.acceptCurrentBaseRunValueEdits && !isPlainObject(existing)) {

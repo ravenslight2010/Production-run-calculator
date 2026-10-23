@@ -1,4 +1,5 @@
 export const SYNC_SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
+export { isOperationalControl, type OperationalControl } from "./operationalControl";
 
 export const SYNC_DELTA_MAP_SECTIONS = [
   "runValues",
@@ -57,6 +58,25 @@ export function isManualSection(value: unknown): value is ManualSection {
 export function isManualSectionField(value: unknown): value is ManualSectionField {
   return typeof value === "string" && MANUAL_SECTION_FIELD_SET.has(value);
 }
+
+/** Snapshot transport carries these facts but can never command them. */
+export const COMMAND_OWNED_RUN_FIELDS = [
+  "startedAt", "pausedAt", "pausedStoppageId", "endedAt", "stoppages", "autoTrackDisabled",
+] as const;
+
+export const COMMAND_OWNED_VALUE_FIELDS: readonly string[] = [
+  ...Object.values(MANUAL_SECTION_FIELDS).flat(),
+  "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration",
+  "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration", "sauceStockInitialized",
+  "applicatorStockInitialized",
+  ...[1, 2, 3, 4].flatMap((slot) => [
+    `app${slot}BatchAnchorNetSec`, `app${slot}BatchCorrectionGeneration`,
+    `app${slot}StockAnchorNetSec`, `app${slot}StockCorrectionGeneration`, `app${slot}StockConsumedLbs`,
+  ]),
+  ...["pep1", "pep1b", "pep2", "pep2b"].flatMap((slot) => [
+    `${slot}StockAnchorNetSec`, `${slot}StockCorrectionGeneration`,
+  ]),
+];
 
 export function manualSectionKey(runId: string, section: ManualSection): string {
   return `${runId}:${section}`;

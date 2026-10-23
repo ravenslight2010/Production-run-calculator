@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import type { DayState, FormValues, RunMeta, Stoppage } from "../types";
 import type { OperationalIntent, PreEndLifecycle } from "../operationalIntentOutbox";
+import type { OperationalControl } from "@workspace/sync-contract";
 import { useEvent } from "./useEvent";
 import { initializeApplicatorStockOnRunStart, initializeSauceStockOnRunStart } from "@workspace/live-calc";
 
@@ -14,6 +15,8 @@ type InventoryLine = { itemKey: string; qty: number };
  * needs so lifecycle ordering cannot gradually diverge between controls.
  */
 export function useRunLifecycleManager(deps: {
+  /** Optimistic anchors use server time; UI deadlines and cadence refs stay local. */
+  getOperationalNowMs?: () => number;
   dayStateRef: MutableRefObject<DayState>;
   setDayState: Dispatch<SetStateAction<DayState>>;
   saveDayState: (state: DayState) => void;
@@ -21,6 +24,7 @@ export function useRunLifecycleManager(deps: {
   lastFormRunIdRef: MutableRefObject<string>;
   currentRun: RunMeta | undefined;
   currentRunId: string;
+  queueOperationalControl?: (runId: string, control: OperationalControl) => boolean;
   flushFormWrites: () => void;
   loadRunValues: (runId: string) => FormValues;
   saveRunValues: (runId: string, values: FormValues) => void;
@@ -209,9 +213,11 @@ export function useRunLifecycleManager(deps: {
       return;
     }
     deps.flushFormWrites();
-    const now = Date.now();
+    const now = deps.getOperationalNowMs?.() ?? Date.now();
     const activeRunId = activeRun.id;
-    const observedRuns = deps.overlayRunMetaStamps(base.runs);
+    // Canonical adoption owns lifecycle generations. Durable browser stamps
+    // describe local setup/recovery, not an acknowledged server command base.
+    const observedRuns = base.runs;
     const observedActiveRun = observedRuns[index] ?? activeRun;
     deps.queueOperationalIntent({
       runId: activeRunId,
@@ -305,8 +311,8 @@ export function useRunLifecycleManager(deps: {
       return;
     }
     deps.flushFormWrites();
-    const now = Date.now();
-    const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
+    const now = deps.getOperationalNowMs?.() ?? Date.now();
+    const observed = run;
     const pauseIntent = deps.queueOperationalIntent({
       runId: run.id,
       observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,
@@ -326,7 +332,7 @@ export function useRunLifecycleManager(deps: {
     deps.schedulePush(next, 0);
     deps.setActiveTab("run");
     pauseDecisionPauseIdRef.current = stop.id;
-    pauseDecisionStartedAtRef.current = now;
+    pauseDecisionStartedAtRef.current = Date.now();
     setPauseDecisionRunId(run.id);
   });
   pauseRunRef.current = pauseRun;
@@ -352,6 +358,8 @@ export function useRunLifecycleManager(deps: {
       return stop;
     });
     if (changed) {
+      if (deps.queueOperationalControl
+        && !deps.queueOperationalControl(runId, { kind: "pause-policy", pauseId, stopTunnel })) return;
       const next = { ...base, runs: base.runs.map((candidate) => candidate.id === runId ? { ...candidate, stoppages } : candidate) };
       deps.dayStateRef.current = next;
       deps.setDayState(next);
@@ -373,13 +381,14 @@ export function useRunLifecycleManager(deps: {
       return;
     }
     deps.flushFormWrites();
-    const now = Date.now();
-    const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
+    const now = deps.getOperationalNowMs?.() ?? Date.now();
+    const observed = run;
     deps.queueOperationalIntent({
       runId: run.id,
       observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,
       effectiveAt: now,
       action: "resume",
+      pauseId: run.pausedStoppageId,
       baseRevision: canonicalRevision(),
       preLifecycle: deps.capturePreEndLifecycle(observed),
     });
@@ -429,8 +438,8 @@ export function useRunLifecycleManager(deps: {
     const values = deps.form.getValues();
     deps.saveRunValues(activeRun.id, values);
     if (deps.canManageProfiles && (activeRun.brand || activeRun.flavor) && deps.saveProfile(activeRun.brand, activeRun.flavor, values)) void deps.propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
-    const endedAt = Date.now();
-    const observed = deps.overlayRunMetaStamps([activeRun])[0];
+    const endedAt = deps.getOperationalNowMs?.() ?? Date.now();
+    const observed = activeRun;
     deps.queueOperationalIntent({
       runId: activeRun.id,
       observedGeneration: `${activeRun.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,

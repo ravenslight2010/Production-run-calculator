@@ -6545,11 +6545,17 @@ paths:
                       - $ref: "#/components/schemas/OperationalProjection"
                       - { type: "null" }
         "409":
-          description: Legacy unversioned complete writes are retired; the write was not applied and data is the authoritative snapshot to adopt before retrying with the current protocol.
+          description: Either an obsolete complete-write protocol was rejected, or command-owned operational fields were preserved. Adopt the returned canonical state. For operational conflicts, unrelated setup edits may have committed, but the attempted operational changes did not; use live commands or review saved actions, never blindly replay the snapshot.
+          headers:
+            X-Operational-Update-Required:
+              description: Present when live changes require operational commands rather than snapshots.
+              schema: { type: string, enum: [commands-required] }
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SyncUpgradeRequiredResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/SyncUpgradeRequiredResponse"
+                  - $ref: "#/components/schemas/SyncOperationalConflictResponse"
         "400":
           description: The sync write payload is malformed or exceeds the sanitized payload limit; no payload content is returned.
           content:
@@ -8019,7 +8025,10 @@ components:
         baseRevision: { type: integer, minimum: 0 }
         action:
           type: string
-          enum: [pause, resume, lifecycle, correction]
+          enum: [pause, resume, lifecycle, correction, control]
+        control:
+          $ref: "#/components/schemas/OperationalControl"
+        pauseId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
         lifecycle:
           type: string
           enum: [start, end]
@@ -8035,6 +8044,48 @@ components:
             properties:
               itemKey: { type: string, minLength: 1, maxLength: 300 }
               qty: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+    OperationalControl:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, enabled]
+          properties:
+            kind: { type: string, enum: [auto-track] }
+            enabled: { type: boolean }
+        - type: object
+          additionalProperties: false
+          required: [kind, paused]
+          properties:
+            kind: { type: string, enum: [dough-timer] }
+            paused: { type: boolean }
+            durationMs: { type: number, exclusiveMinimum: 0, maximum: 86400000 }
+        - type: object
+          additionalProperties: false
+          required: [kind, pauseId, stopTunnel]
+          properties:
+            kind: { type: string, enum: [pause-policy] }
+            pauseId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+            stopTunnel: { type: boolean }
+        - type: object
+          additionalProperties: false
+          required: [kind, values]
+          properties:
+            kind: { type: string, enum: [stoppages] }
+            values:
+              type: array
+              maxItems: 200
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, reason, startedAt]
+                properties:
+                  id: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+                  reason: { type: string, maxLength: 500 }
+                  startedAt: { type: number, minimum: 0, maximum: 8640000000000000 }
+                  endedAt: { type: number, minimum: 0, maximum: 8640000000000000 }
+                  notes: { type: string, maxLength: 2000 }
+                  type: { type: string, enum: [stop, pause, manual] }
+                  stopTunnel: { type: boolean }
     OperationalIntentRequest:
       type: object
       required: [intent]
@@ -8174,10 +8225,18 @@ components:
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
     ManualSectionEditError:
       type: object
-      description: Safe rejection only; never includes submitted values or canonical recipe data.
+      description: >-
+        Safe rejection without submitted values. An authorized transactional
+        conflict includes the current canonical snapshot so rejected optimistic
+        totals can be replaced while the attempted entry remains in recovery.
       required: [error, code]
       properties:
         error: { type: string, maxLength: 64 }
+        outcome: { type: string, enum: [conflicted] }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
         code:
           type: string
           enum: [invalid_edit, invalid_values, invalid_baseline, reset_changed, run_changed, section_changed]
@@ -8585,6 +8644,22 @@ components:
           type: string
           enum: [SYNC_PAYLOAD_NOT_OBJECT, SYNC_PAYLOAD_TOO_LARGE]
 
+    SyncOperationalConflictResponse:
+      type: object
+      required: [ok, data, snapshotId, operationalUpdateRequired, code, error, canonicalRevision, serverTime]
+      properties:
+        ok: { type: boolean, const: false }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        operationalUpdateRequired: { type: boolean, const: true }
+        code: { type: string, const: SYNC_OPERATIONAL_COMMAND_REQUIRED }
+        error: { type: string }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        operationalProjection:
+          oneOf:
+            - $ref: "#/components/schemas/OperationalProjection"
+            - { type: "null" }
     SyncUpgradeRequiredResponse:
       type: object
       required: [ok, data, snapshotId, partialFallback, error, code, recoveryRequired, canonicalRevision, serverTime]

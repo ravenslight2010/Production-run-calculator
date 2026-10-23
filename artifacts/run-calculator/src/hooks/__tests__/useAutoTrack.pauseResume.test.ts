@@ -32,6 +32,7 @@ import { renderHook, act } from "@testing-library/react";
 import type { UseFormReturn } from "react-hook-form";
 import { getAutoTrackTiming, useAutoTrack } from "../useAutoTrack";
 import type { FormValues } from "../../types";
+import { adoptDoughTimerControls, setDoughTimerControlOwner } from "../../autoTrackCoordinationClient";
 
 // ── Fake form ────────────────────────────────────────────────────────────────
 function makeFakeForm(initial: Partial<Record<string, number>> = {}): {
@@ -97,7 +98,44 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     vi.setSystemTime(T0);
   });
   afterEach(() => {
+    setDoughTimerControlOwner(undefined);
+    localStorage.clear();
     vi.useRealTimers();
+  });
+
+  it("adopts a pre-mount canonical timed hold with clock skew, then resumes without held-time catch-up", () => {
+    const offset = 3_600_000;
+    setDoughTimerControlOwner("live:timer-fixture");
+    adoptDoughTimerControls({ "run-held": {
+      generation: "run-held:100", pausedAt: T0 + offset, resumeAt: T0 + offset + 60_000, updatedAt: T0 + offset,
+    } });
+    const { form, store } = makeFakeForm({ skidsCompleted: 3, casesOnCurrentSkid: 1 });
+    const base: Parameters<typeof useAutoTrack>[0] = {
+      runId: "run-held", runGeneration: "100", runStatus: "running",
+      nowTime: ms(T0), elapsedBatchSec: ELAPSED_SEC, calc: BASE_CALC, v: BASE_V,
+      form, serverClockOffsetMs: offset,
+    };
+    const { result, rerender, unmount } = renderHook((props) => useAutoTrack(props), { initialProps: base });
+    expect(result.current.isDoughTimerPaused).toBe(true);
+    expect(store.traysOnLine).toBe(5);
+    act(() => {
+      vi.setSystemTime(T0 + 59_000);
+      rerender({ ...base, nowTime: ms(T0 + 59_000) });
+    });
+    expect(result.current.isDoughTimerPaused).toBe(true);
+    expect(store.traysOnLine).toBe(5);
+    act(() => {
+      vi.setSystemTime(T0 + 60_000);
+      rerender({ ...base, nowTime: ms(T0 + 60_000) });
+    });
+    expect(result.current.isDoughTimerPaused).toBe(false);
+    expect(store.traysOnLine).toBe(5);
+    act(() => {
+      vi.setSystemTime(T0 + 61_000);
+      rerender({ ...base, nowTime: ms(T0 + 61_000) });
+    });
+    expect(store.traysOnLine).toBe(5);
+    unmount();
   });
 
   // ───────────────────────────────────────────────────────────────────────────
