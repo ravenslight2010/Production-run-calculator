@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { replaceWindowsMetadataFile, runWindowsMetadataHelper } from "./metadata-maintenance-windows.mts";
+import { exportApplyLog } from "./distill-applylog-export.mts";
 
 assert.equal(process.platform, "win32", "Windows lock cases must run on native Windows, not Linux emulation");
 assert.equal(process.arch, "x64", "the supported Windows runtime is x64");
@@ -108,6 +109,15 @@ async function holdWindowsHandle(target: ReturnType<typeof fixture>, kind: "gate
 }
 
 try {
+  const forbiddenExportPath = path.join(root, "must-not-be-created.jsonl");
+  await assert.rejects(exportApplyLog({
+    apiBase: "https://example.invalid",
+    cookieFile: path.join(root, "must-not-be-read.cookie"),
+    out: forbiddenExportPath,
+    repoRoot: root,
+  }), /Private Apply-log export is not supported on Windows/u);
+  assert.equal(fs.existsSync(forbiddenExportPath), false);
+
   const live = fixture("active-owner");
   const currentIdentity = runWindowsMetadataHelper({ operation: "identity", ownerPid: process.pid });
   fs.writeFileSync(live.lockPath, owner(process.pid, currentIdentity), { flag: "wx" });

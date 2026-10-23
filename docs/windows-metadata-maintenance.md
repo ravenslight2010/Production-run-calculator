@@ -30,6 +30,8 @@ continues to use `flock` and procfs; Windows does not use WSL or emulate Linux.
 The broader `test:distill-backfill` command remains a Linux check: it also runs
 private Apply-log export tests with POSIX file-permission requirements. Windows
 support for that exporter is not part of this metadata-only command's approval.
+The exporter rejects Windows before reading credentials or fetching private
+records; an NTFS ACL and retention contract needs separate approval.
 
 Windows holds an exclusive OS file handle on a persistent recovery-gate file
 through validation and the entire atomic replacement. Windows releases the
