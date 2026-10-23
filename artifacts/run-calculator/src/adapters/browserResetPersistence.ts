@@ -29,6 +29,8 @@ export function applyResetWipe(serverEpoch: number): boolean {
         && !key.startsWith(APPLICATOR_EVIDENCE_CACHE_PREFIX)
         && !key.startsWith(APPLICATOR_EVIDENCE_CONFLICT_PREFIX)
         && !key.startsWith(OPERATIONAL_INTENT_OUTBOX_PREFIX)
+         && !key.startsWith("run-calc-fkv-queue-")
+         && !key.startsWith("run-calc-fkv-legacy-review:")
     );
     for (const key of keys) localStorage.removeItem(key);
     browserRecordStore.record(RESET_EPOCH_KEY, () => 0, {

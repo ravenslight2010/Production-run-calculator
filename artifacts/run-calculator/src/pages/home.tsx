@@ -1,5 +1,10 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer, useSyncExternalStore } from "react";
 import { DEFAULT_RUN_TO_TIME } from "../runToTime";
+import { browserStorage as localStorage } from "../adapters/browserRecordStore";
+import { subscribeFactoryDirectory, factoryDirectoryState } from "../factoryDirectory";
+import { FactoryDirectoryStatus } from "../components/FactoryDirectoryStatus";
+import { FactoryDirectoryBoundary } from "../components/FactoryDirectoryBoundary";
+import { purgeLegacyPinCopies } from "../purgeLegacyPinCopies";
 import { reviewProfileImport } from "../importProfileReview";
 import { ImportReviewCancelledError } from "../importSafetyReview";
 import { reviewScheduleImport, scheduleAppliedValues } from "../importScheduleReview";
@@ -88,7 +93,6 @@ import {
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
   DEFAULT_STOP_REASONS,
-  DEFAULT_SUPERVISOR_PIN,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
@@ -425,7 +429,7 @@ import { IngredientSelect, TypeDropdown } from "../components/SetupPickerControl
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
-import { updateSupervisorPin } from "../supervisorPinApi";
+import { updateSupervisorPin, verifySupervisorPin } from "../supervisorPinApi";
 import {
   buildFreezerPullPlan,
   isMatchingSurplusProduct,
@@ -933,11 +937,7 @@ const loadLiveSummaryTabContent = () =>
 //
 // Data-hygiene migrations below are kept — they are no-ops on empty data but still
 // heal devices that carry legacy data.
-applyPepTaxonomyMigrationIfNeeded();
-applyIngredientDedupeMigrationIfNeeded();
 applyMachineTimeDefaultsHealIfNeeded();
-applyStrayMixRecategorizeIfNeeded();
-applyMixCheeseOverlapDedupeIfNeeded();
 // applyMixSlotRecategorizeIfNeeded / applyProfileCleanupIfNeeded /
 // purgeOrphanedProfilesIfNeeded rewrite PROFILES, which are manager-only
 // writes (manage-profiles capability) — they run in a capability-gated effect
@@ -1790,18 +1790,9 @@ function emitProductionRunSaveOutcome(
   });
 }
 
-function loadCachedSupervisorPin(): string | null {
-  try {
-    return typeof window === "undefined"
-      ? null
-      : localStorage.getItem(SUPERVISOR_PIN_KEY);
-  } catch {
-    // The server-backed preference still works when this offline cache is blocked.
-    return null;
-  }
-}
-
 export default function Home() {
+  const directoryReady = useSyncExternalStore(subscribeFactoryDirectory,
+    () => factoryDirectoryState().status === "ready", () => false);
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const specImportOperationRef = useRef<string | null>(null);
   const specImportStartedAtRef = useRef<number | null>(null);
@@ -3140,24 +3131,24 @@ export default function Home() {
   // manager device performs the heal. Each is marker-guarded (no-op re-runs).
   const profileBootHealsRef = useRef(false);
   useEffect(() => {
-    if (!canManageProfiles || profileBootHealsRef.current) return;
+    if (!canManageProfiles || !directoryReady || profileBootHealsRef.current) return;
     profileBootHealsRef.current = true;
     applyMixSlotRecategorizeIfNeeded();
     applyProfileCleanupIfNeeded();
-  }, [canManageProfiles]);
+  }, [canManageProfiles, directoryReady]);
   // Orphan cleanup can write profile tombstones back to the server. Do not
   // treat a populated local Brands cache as authoritative: wait until the
-  // accepted sync merge has persisted its canonical Brands snapshot.
+  // authenticated directory read has supplied the canonical Brands snapshot.
   useEffect(() => {
     if (
-      !canManageProfiles ||
+      !canManageProfiles || !directoryReady ||
       !adoptedBrandsForProfilePurge ||
       adoptedBrandsForProfilePurge.length === 0
     ) {
       return;
     }
     purgeOrphanedProfilesIfNeeded(adoptedBrandsForProfilePurge);
-  }, [canManageProfiles, adoptedBrandsForProfilePurge]);
+  }, [canManageProfiles, directoryReady, adoptedBrandsForProfilePurge]);
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
   const canManageAllergens = hasCapability("manage-allergens");
@@ -4270,17 +4261,17 @@ export default function Home() {
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
+  const pinIdentityRef = useRef("");
+  const pinAttemptRef = useRef(0);
+  const [pinVerifying, setPinVerifying] = useState(false);
+  pinIdentityRef.current = `${me?.userId}:${me?.sandbox}`;
   // Managers (server role) always have supervisor access without entering the
   // PIN; the PIN remains for operators on shared, logged-in devices. An empty
   // facility PIN ("") means "no gate" — every signed-in user is a supervisor
   // (mirrors the mobile no-PIN unlocked state for parity). We resolve from the
   // live server value when loaded, else the offline cache, so a cleared PIN
   // unlocks here even before the query resolves (matching mobile's local read).
-  const resolvedPin =
-    typeof serverPin === "string"
-      ? serverPin
-      : loadCachedSupervisorPin();
-  const noFacilityPin = resolvedPin === "";
+  const noFacilityPin = serverPin?.configured === false;
   const isSupervisor =
     isManager ||
     serverRole === "supervisor" ||
@@ -4341,10 +4332,13 @@ export default function Home() {
   // PIN cleared on another device must survive a reload/offline session here, or
   // the stale non-empty cache would wrongly re-lock this device.
   useEffect(() => {
-    if (typeof serverPin === "string") {
-      try { localStorage.setItem(SUPERVISOR_PIN_KEY, serverPin); } catch {}
-    }
-  }, [serverPin]);
+    pinAttemptRef.current++;
+    setRole("operator");
+    setPinVerifying(false);
+    setPinInput("");
+    setPinError("");
+    purgeLegacyPinCopies();
+  }, [serverPin, me?.userId, me?.sandbox]);
 
   // ── Downtime / stoppage log ───────────────────────────────────────────────
   const [showStopDialog, setShowStopDialog] = useState(false);
@@ -8147,70 +8141,8 @@ export default function Home() {
         }
       }
 
-      // ── Brands ──
-      if (payload.brands && payload.brands.length > 0) {
-        const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
-        const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
-        // Trim+case-insensitive dedup before the deletion-tombstone filter so
-        // trailing-space near-duplicates from an old import can't survive.
-        const preDrop = (() => {
-          const seen = new Map<string, string>();
-          for (const b of [...local, ...remoteSanitized]) {
-            const k = b.trim().toLowerCase();
-            if (!seen.has(k)) seen.set(k, b.trim());
-          }
-          return [...seen.values()];
-        })();
-        const merged = dropDeleted(preDrop, deletedMap, "brands").sort((a, b) => a.localeCompare(b));
-        saveList(BRANDS_KEY, merged);
-        setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
-        setAdoptedBrandsForProfilePurge((current) =>
-          current && arraysEqual(current, merged) ? current : merged,
-        );
-      }
-
-      // ── Brand flavors ──
-      if (payload.brandFlavors) {
-        const local = loadBrandFlavors();
-        const merged: Record<string, string[]> = {};
-        for (const [brand, flavors] of Object.entries(local)) {
-          if (STALE_BRANDS.includes(brand)) continue;
-          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
-          merged[brand] = dropDeleted(flavors, deletedMap, flavorNamespace(brand));
-        }
-        for (const [brand, flavors] of Object.entries(payload.brandFlavors)) {
-          if (STALE_BRANDS.includes(brand)) continue;
-          // A brand deleted on any peer takes its flavors with it — don't let an
-          // incoming flavor list resurrect a deleted brand.
-          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
-          merged[brand] = dropDeleted(
-            [...new Set([...(merged[brand] ?? []), ...flavors])],
-            deletedMap,
-            flavorNamespace(brand),
-          ).sort((a, b) => a.localeCompare(b));
-        }
-        saveBrandFlavors(merged);
-        setBrandFlavors(prev =>
-          JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged
-        );
-      }
-
-      // ── Ingredient types ──
-      // Rename legacy/near-duplicate names from incoming sync so an un-migrated
-      // peer can't re-add old spellings to the list.
-      if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
-        const local = dropMergedAway(loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES), tombSet);
-        const cleanedRemote = payload.ingredientTypes.map(t => INGREDIENT_RENAMES[t] ?? t);
-        const merged = dropDeleted(
-          dropMergedAway([...new Set([...local, ...cleanedRemote])], tombSet),
-          deletedMap,
-          "ingredientTypes",
-        ).sort((a, b) => a.localeCompare(b));
-        if (!arraysEqual(merged, loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES))) {
-          saveList(INGREDIENT_TYPES_KEY, merged);
-          setIngredientTypes(merged);
-        }
-      }
+      // Migrated directories are not adopted from old day-state snapshots.
+      // Scoped factory reads and canonical write acknowledgments own them.
 
       // Templates are no longer reconciled from the sync payload — merging them
       // out of the additive day-state union here would resurrect server-deleted
@@ -8239,12 +8171,6 @@ export default function Home() {
         saveList(key, merged);
         setter(merged);
       }
-      // Drop retired pep names + rename legacy ones from incoming sync so a peer that
-      // hasn't migrated yet can't re-add "Diced Pepperoni"/"Pep - Cured" to the list.
-      const cleanedRemotePep = (payload.pepTypes ?? [])
-        .map(t => PEP_TYPE_RENAMES[t] ?? t)
-        .filter(t => !RETIRED_PEP_TYPES.includes(t));
-      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
       // Die types deliberately NOT merged from the day-state sync payload any
       // more: they are a factory-wide server pool now (see the reconcile effect
       // near addDieType). Unioning a stale peer's list here would resurrect
@@ -8255,58 +8181,6 @@ export default function Home() {
       mergeList(SHIPPER_KEY, DEFAULT_SHIPPERS, payload.shipper, setShipper, "shipper", false);
       mergeList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, payload.skidStacking, setSkidStacking, "skidStacking", false);
       mergeList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, payload.gripSheets, setGripSheets, "gripSheets", false);
-      const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
-      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
-      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");
-      // Strip topping items from incoming frontline payload — old server payloads may still carry them
-      const toppingSet = new Set(MIX_SEED.frontlineIngredients);
-      const cleanedIncomingFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => !toppingSet.has(i));
-      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients, "frontlineIngredients");
-      // Redirect any toppings from the incoming frontline payload into mix ingredients
-      const toppingsFromFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => toppingSet.has(i));
-      const incomingMix = [...new Set([...(payload.mixIngredients ?? []), ...toppingsFromFrontline])];
-      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients, "mixIngredients");
-      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames, "doughRecipeNames");
-      // Filter mix-category names out of the incoming frontline list (server may still have old data)
-      // Pre-clean localStorage so mergeList doesn't re-add mix names from the local side
-      const cleanedLocalFrontline = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
-      saveList(FRONTLINE_RECIPE_NAMES_KEY, cleanedLocalFrontline);
-      const incomingFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
-      const incomingMixFromFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => SEED_MIX_RECIPE_NAMES.has(n));
-      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], incomingFrontline, setFrontlineRecipeNames, "frontlineRecipeNames");
-      // Merge mix recipe names from both the redirected frontline names and the dedicated payload field
-      const allIncomingMix = [...new Set([...incomingMixFromFrontline, ...(payload.mixRecipeNames ?? [])])];
-      if (allIncomingMix.length > 0) {
-        mergeList(MIX_RECIPE_NAMES_KEY, [], allIncomingMix, setMixRecipeNames, "mixRecipeNames");
-      }
-      mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames, "cheeseRecipeNames");
-
-      // ── Recipe presets (remote wins for same name, local-only kept) ──
-      // Presets are keyed by recipe name, so a recipe-name merge folds keys away
-      // and tombstones them under the category namespace. Drop any key tombstoned
-      // there before/after the union, or a stale remote payload resurrects the
-      // folded-away recipe-name preset key (mirrors the list dropDeleted guard).
-      if (payload.doughRecipePresets && Object.keys(payload.doughRecipePresets).length > 0) {
-        const merged = { ...loadDoughRecipePresets(), ...payload.doughRecipePresets };
-        saveDoughRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "doughRecipeNames"));
-      }
-      if (payload.frontlineRecipePresets && Object.keys(payload.frontlineRecipePresets).length > 0) {
-        const merged = { ...loadFrontlineRecipePresets(), ...payload.frontlineRecipePresets };
-        saveFrontlineRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "frontlineRecipeNames"));
-      }
-      if (payload.cheeseRecipePresets && Object.keys(payload.cheeseRecipePresets).length > 0) {
-        const merged = { ...loadCheeseRecipePresets(), ...payload.cheeseRecipePresets };
-        // Mix recipe rows live in the same map keyed by name; a name moved
-        // Cheese → Mix is tombstoned under "cheeseRecipeNames" but its rows
-        // must survive while the name is alive in the mix list (mergeList for
-        // mix names ran above, so storage is current).
-        const mixAwareDeleted = dropTombstonesForAliveNames(
-          deletedMap,
-          "cheeseRecipeNames",
-          loadList(MIX_RECIPE_NAMES_KEY, []),
-        );
-        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, mixAwareDeleted, "cheeseRecipeNames"));
-      }
 
       // ── Brand+flavor profiles: NO LONGER applied from the sync payload ──
       // Profiles moved to their own factory-wide server pool (/api/brand-profiles)
@@ -8427,10 +8301,22 @@ export default function Home() {
   // register the storage mutation hook so every subsequent localStorage write
   // for a cached key also fires a server write-through PUT.
   useEffect(() => {
+    let cancelled = false;
+    const unsubscribe = subscribeFactoryDirectory(() => {
+      refreshFactoryDataConsumers();
+    });
     (async () => {
       try {
         const data = await fetchFactoryData();
+        if (cancelled) return;
         hydrateFromServer(data);
+        setAdoptedBrandsForProfilePurge(loadList(BRANDS_KEY, []));
+        if (canManageFactorySettings) {
+          applyPepTaxonomyMigrationIfNeeded();
+          applyIngredientDedupeMigrationIfNeeded();
+          applyStrayMixRecategorizeIfNeeded();
+          applyMixCheeseOverlapDedupeIfNeeded();
+        }
         refreshFactoryDataConsumers();
         // Only flush after comparing each durable operation with the server
         // timestamp. A pre-read flush could let a sleeping device overwrite a
@@ -8452,8 +8338,9 @@ export default function Home() {
         putFactoryKey(key, value);
       }
     });
+    return () => { cancelled = true; unsubscribe(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screenMode]);
+  }, [screenMode, me?.userId, me?.sandbox, canManageFactorySettings]);
 
   // ── Brand+flavor profile pool reconcile (boot) ──
   // Profiles live in their own factory-wide server pool with per-profile
@@ -8539,6 +8426,10 @@ export default function Home() {
         if (!current()) return;
       }
       if (families.has("supervisor-pin")) {
+        pinAttemptRef.current++;
+        setRole("operator");
+        setPinInput("");
+        pinIdentityRef.current = "";
         await cycleCountQc.invalidateQueries({ queryKey: ["supervisorPin"] }).catch(() => {});
         if (!current()) return;
       }
@@ -12343,29 +12234,24 @@ export default function Home() {
     maybeLearnTypeRename("dieType", oldName, trimmed);
   }
 
-  function checkPin() {
-    // Resolve the facility PIN: live server value when loaded, else the offline
-    // cache, else the default. An empty resolved value ("") means "no gate" — we
-    // unlock without comparing. Using the same resolution offline ensures a PIN
-    // cleared on another device unlocks here too (not just when serverPin is live).
-    const stored =
-      (typeof serverPin === "string" ? serverPin : null) ??
-      localStorage.getItem(SUPERVISOR_PIN_KEY) ??
-      DEFAULT_SUPERVISOR_PIN;
-    if (stored === "") {
+  async function checkPin() {
+    if (pinVerifying) return;
+    const identity = `${me?.userId}:${me?.sandbox}`;
+    const attempt = ++pinAttemptRef.current;
+    const entered = pinInput;
+    setPinInput("");
+    setPinVerifying(true);
+    try {
+      await verifySupervisorPin(entered);
+      if (pinIdentityRef.current !== identity || pinAttemptRef.current !== attempt) return;
       setRole("supervisor");
       setShowPinDialog(false);
-      setPinInput("");
       setPinError("");
-      return;
-    }
-    if (pinInput === stored) {
-      setRole("supervisor");
-      setShowPinDialog(false);
-      setPinInput("");
-      setPinError("");
-    } else {
-      setPinError("Incorrect PIN. Try again.");
+    } catch (error) {
+      if (pinIdentityRef.current !== identity || pinAttemptRef.current !== attempt) return;
+      setPinError(error instanceof Error ? error.message : "Verification unavailable. Retry online.");
+    } finally {
+      if (pinAttemptRef.current === attempt) setPinVerifying(false);
     }
   }
 
@@ -15714,7 +15600,7 @@ export default function Home() {
     renameBrand, renameCatalogEntry, renameCheeseIngredient, renameCheeseRecipeName, renameDieType, renameDoughIngredient,
     renameDoughRecipeName, renameFlavor, renameFrontlineIngredient, renameFrontlineRecipeName, renameIngredientType, renameMixIngredient,
     renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
-    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin,
+    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm,
     resumeRun, revalidate, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
@@ -15813,7 +15699,7 @@ export default function Home() {
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
     premixImportPrepared, premixImportProgress, productionStartTime, productionRules,
-    promotingRecipeKind, productionStartTime, resolvedPin, pauseDecisionRunId, role, ruleViolations,
+    promotingRecipeKind, productionStartTime, pauseDecisionRunId, role, ruleViolations,
     runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
     scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
@@ -15982,6 +15868,7 @@ export default function Home() {
         swipeCueTimer.current = setTimeout(() => setSwipeCue(null), 450);
       }}
     >
+      <FactoryDirectoryStatus />
       {/* ── Alerts & Floor Mode settings (per-user, follows the account) ── */}
       <AlertSettingsDialog
         open={showAlertSettings}
@@ -16417,10 +16304,11 @@ export default function Home() {
         const handlePinSave = () => {
           if (!newPin) { setPinChangeMsg("Enter a new PIN."); return; }
           if (newPin !== newPinConfirm) { setPinChangeMsg("PINs don't match."); return; }
-          updateSupervisorPin(newPin)
+          const entered = newPin;
+          setNewPin(""); setNewPinConfirm("");
+          updateSupervisorPin(entered)
             .then((saved) => {
-              try { localStorage.setItem(SUPERVISOR_PIN_KEY, saved); } catch {}
-              cycleCountQc.setQueryData(["supervisorPin"], saved);
+              cycleCountQc.setQueriesData({ queryKey: ["supervisorPin"] }, saved);
               setNewPin(""); setNewPinConfirm("");
               setPinChangeMsg("PIN updated successfully.");
             })
@@ -16438,8 +16326,7 @@ export default function Home() {
         const handlePinClear = () => {
           updateSupervisorPin("")
             .then((saved) => {
-              try { localStorage.setItem(SUPERVISOR_PIN_KEY, saved); } catch {}
-              cycleCountQc.setQueryData(["supervisorPin"], saved);
+              cycleCountQc.setQueriesData({ queryKey: ["supervisorPin"] }, saved);
               setNewPin(""); setNewPinConfirm("");
               setPinChangeMsg("PIN removed — settings are now unlocked.");
             })
@@ -16504,7 +16391,9 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+              <fieldset disabled={!directoryReady && !["pin", "staff", "audit", "rules", "runs", "ai-corrections", "cycleCount", "freezer"].includes(manageCategory)}
+                className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                {!directoryReady && <p role="status" className="mb-3 text-sm text-amber-500">Operational lists unavailable. Connect online and use Retry operational lists above.</p>}
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <div className="space-y-4">
@@ -17099,13 +16988,13 @@ export default function Home() {
                       className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                       Save PIN
                     </button>
-                    {serverPin ? (
+                    {serverPin?.configured ? (
                       <button type="button" onClick={handlePinClear}
                         className="w-full px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:text-foreground">
                         Remove PIN lock
                       </button>
                     ) : (
-                      <p className="text-xs text-center text-muted-foreground">No PIN set — all settings are unlocked.</p>
+                      <p className="text-xs text-center text-muted-foreground">{serverPin?.configured === false ? "No PIN set — all settings are unlocked." : "PIN status unavailable. Connect online and retry."}</p>
                     )}
                   </div>
                 )}
@@ -17623,7 +17512,7 @@ export default function Home() {
                     )}
                   </div>
                 )}
-              </div>
+              </fieldset>
             </div>
           </div>
         );
@@ -17633,7 +17522,7 @@ export default function Home() {
       {showPinDialog && (
           <div
            className={HOME_DIALOG_OVERLAY_CLASS}
-          onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
+          onClick={() => { pinAttemptRef.current++; setPinVerifying(false); setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
             role="dialog"
@@ -17661,14 +17550,15 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
+                onClick={() => { pinAttemptRef.current++; setPinVerifying(false); setShowPinDialog(false); setPinInput(""); setPinError(""); }}
                 className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted transition-colors"
               >Cancel</button>
               <button
                 type="button"
                 onClick={checkPin}
+                disabled={pinVerifying}
                 className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-              >Unlock</button>
+              >{pinVerifying ? "Verifying online…" : "Unlock"}</button>
             </div>
           </div>
         </div>
@@ -19884,7 +19774,7 @@ export default function Home() {
   );
 
   return (
-    <Profiler id="home" onRender={recordHomeCommit}>
+    <FactoryDirectoryBoundary><Profiler id="home" onRender={recordHomeCommit}>
       <HomeCtx.Provider value={homeCtxValue}>
         <HomeTabCtx.Provider value={homeTabCtxValue}>
         <DepartmentProvider value={departmentContext}>
@@ -19941,7 +19831,7 @@ export default function Home() {
         </DepartmentProvider>
         </HomeTabCtx.Provider>
       </HomeCtx.Provider>
-    </Profiler>
+    </Profiler></FactoryDirectoryBoundary>
   );
 }
 

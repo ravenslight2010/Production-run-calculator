@@ -102,6 +102,7 @@ import type {
   FreezerSurplusMutationResponse,
   GetBuildInfo503,
   GetFieldChecksParams,
+  GetOperationalFactoryDirectory200,
   GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
@@ -313,6 +314,8 @@ import type {
   SummaryInput,
   SummaryResult,
   SupervisorPin,
+  SupervisorPinStatus,
+  SupervisorPinVerificationInput,
   SyncPeerFrame,
   SyncRecoveryPayload,
   SyncUnchangedResponse,
@@ -328,6 +331,7 @@ import type {
   UpdateManagerActionItem200,
   UpdateRunSuggestionInput,
   UsernameAvailability,
+  VerifySupervisorPin200,
   WasteInsightInput,
   WasteInsightResult
 } from './api.schemas';
@@ -12259,6 +12263,196 @@ export const useDeleteRunTemplates = <TError = ErrorType<void>,
       return useMutation(getDeleteRunTemplatesMutationOptions(options), queryClient);
     }
 
+export const getGetOperationalFactoryDirectoryUrl = () => {
+
+
+
+
+  return `/api/factory-data/operational`
+}
+
+/**
+ * Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
+ * @summary Read allowlisted operational lists, recipe presets and settings
+ */
+export const getOperationalFactoryDirectory = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetOperationalFactoryDirectory200> => {
+
+  return customFetch<GetOperationalFactoryDirectory200>(getGetOperationalFactoryDirectoryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOperationalFactoryDirectoryQueryKey = () => {
+    return [
+    `/api/factory-data/operational`
+    ] as const;
+    }
+
+
+export const getGetOperationalFactoryDirectoryQueryOptions = <TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOperationalFactoryDirectoryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>> = ({ signal }) => getOperationalFactoryDirectory({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOperationalFactoryDirectoryQueryResult = NonNullable<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>>
+export type GetOperationalFactoryDirectoryQueryError = ErrorType<void>
+
+
+export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOperationalFactoryDirectory>>,
+          TError,
+          Awaited<ReturnType<typeof getOperationalFactoryDirectory>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOperationalFactoryDirectory>>,
+          TError,
+          Awaited<ReturnType<typeof getOperationalFactoryDirectory>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read allowlisted operational lists, recipe presets and settings
+ */
+
+export function useGetOperationalFactoryDirectory<TData = Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOperationalFactoryDirectory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOperationalFactoryDirectoryQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getVerifySupervisorPinUrl = () => {
+
+
+
+
+  return `/api/supervisor-pin/verify`
+}
+
+/**
+ * @summary Verify an entered PIN online without returning the facility PIN
+ */
+export const verifySupervisorPin = async (supervisorPinVerificationInput: SupervisorPinVerificationInput, options?: Parameters<typeof customFetch>[1]): Promise<VerifySupervisorPin200> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<VerifySupervisorPin200>(getVerifySupervisorPinUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(supervisorPinVerificationInput)
+  }
+);}
+
+
+
+
+
+export const getVerifySupervisorPinMutationKey = () => ['verifySupervisorPin'] as const;
+
+export const getVerifySupervisorPinMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifySupervisorPin>>, TError,VerifySupervisorPinMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifySupervisorPin>>, TError,VerifySupervisorPinMutationVariables, TContext> => {
+
+const mutationKey = getVerifySupervisorPinMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifySupervisorPin>>, VerifySupervisorPinMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifySupervisorPin(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifySupervisorPinMutationResult = NonNullable<Awaited<ReturnType<typeof verifySupervisorPin>>>
+    export type VerifySupervisorPinMutationBody = BodyType<SupervisorPinVerificationInput>
+    export type VerifySupervisorPinMutationError = ErrorType<void>
+    export type VerifySupervisorPinMutationVariables = {data: BodyType<SupervisorPinVerificationInput>}
+
+    /**
+ * @summary Verify an entered PIN online without returning the facility PIN
+ */
+export const useVerifySupervisorPin = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifySupervisorPin>>, TError,VerifySupervisorPinMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof verifySupervisorPin>>,
+        TError,
+        VerifySupervisorPinMutationVariables,
+        TContext
+      > => {
+      return useMutation(getVerifySupervisorPinMutationOptions(options), queryClient);
+    }
+
 export const getGetSupervisorPinUrl = () => {
 
 
@@ -12268,12 +12462,12 @@ export const getGetSupervisorPinUrl = () => {
 }
 
 /**
- * Returns the facility supervisor PIN. Reading is available to any signed-in user so both apps can perform the local PIN compare that gates supervisor actions (the PIN is a low-security convenience gate, not a secret).
- * @summary Get the facility-wide supervisor PIN
+ * Returns only whether a PIN is configured. Older clients must update; no compatibility endpoint returns the PIN.
+ * @summary Get nonsecret configured status
  */
-export const getSupervisorPin = async ( options?: Parameters<typeof customFetch>[1]): Promise<SupervisorPin> => {
+export const getSupervisorPin = async ( options?: Parameters<typeof customFetch>[1]): Promise<SupervisorPinStatus> => {
 
-  return customFetch<SupervisorPin>(getGetSupervisorPinUrl(),
+  return customFetch<SupervisorPinStatus>(getGetSupervisorPinUrl(),
   {
     ...options,
     method: 'GET'
@@ -12340,7 +12534,7 @@ export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervi
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get the facility-wide supervisor PIN
+ * @summary Get nonsecret configured status
  */
 
 export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>(
@@ -12373,7 +12567,7 @@ export const getUpdateSupervisorPinUrl = () => {
  * Sets the facility supervisor PIN. Manager capability required so the facility-wide gate isn't changed out from under everyone by any user.
  * @summary Update the facility-wide supervisor PIN (manager only)
  */
-export const updateSupervisorPin = async (supervisorPin: SupervisorPin, options?: Parameters<typeof customFetch>[1]): Promise<SupervisorPin> => {
+export const updateSupervisorPin = async (supervisorPin: SupervisorPin, options?: Parameters<typeof customFetch>[1]): Promise<SupervisorPinStatus> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -12389,7 +12583,7 @@ export const updateSupervisorPin = async (supervisorPin: SupervisorPin, options?
     }
     return headers;
   };
-return customFetch<SupervisorPin>(getUpdateSupervisorPinUrl(),
+return customFetch<SupervisorPinStatus>(getUpdateSupervisorPinUrl(),
   {
     ...options,
     method: 'PUT',

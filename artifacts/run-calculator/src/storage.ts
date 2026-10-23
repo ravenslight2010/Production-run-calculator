@@ -164,6 +164,8 @@ import {
   withProfileCacheProjection,
   writeCachedProfileBlobs,
 } from "./profileCache";
+import { MEMORY_DIRECTORY_KEYS, DIRECTORY_METADATA_KEYS, directoryEntries } from "./factoryDirectory";
+import { purgeLegacyPinCopies } from "./purgeLegacyPinCopies";
 
 type ProfileBlobEntry = {
   key: string;
@@ -250,7 +252,7 @@ export function loadList(key: string, fallback: string[]): string[] {
       }
     }
   } catch {}
-  return fallback;
+  return MEMORY_DIRECTORY_KEYS.has(key) ? [] : fallback;
 }
 
 /** Current local formula pool with explicit units for import safety checks. */
@@ -302,6 +304,7 @@ function notifyKv(key: string, value: unknown): void {
 }
 
 export function saveList(key: string, list: string[]): void {
+  if (localStorage.getItem(key) === JSON.stringify(list)) return;
   try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
   notifyKv(key, list);
 }
@@ -486,7 +489,7 @@ export function loadBrandFlavors(): Record<string, string[]> {
   try {
     const raw = localStorage.getItem(BRAND_FLAVORS_KEY);
     if (raw) return JSON.parse(raw) as Record<string, string[]>;
-    const oldFlavors = loadList(FLAVORS_KEY, []);
+    const oldFlavors = MEMORY_DIRECTORY_KEYS.has(BRAND_FLAVORS_KEY) ? [] : loadList(FLAVORS_KEY, []);
     if (oldFlavors.length > 0) {
       const brands = loadList(BRANDS_KEY, []);
       const seeded: Record<string, string[]> = {};
@@ -498,6 +501,7 @@ export function loadBrandFlavors(): Record<string, string[]> {
 }
 
 export function saveBrandFlavors(bf: Record<string, string[]>): void {
+  if (localStorage.getItem(BRAND_FLAVORS_KEY) === JSON.stringify(bf)) return;
   try { localStorage.setItem(BRAND_FLAVORS_KEY, JSON.stringify(bf)); } catch {}
   notifyKv(BRAND_FLAVORS_KEY, bf);
 }
@@ -1666,6 +1670,7 @@ export function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
   try { return JSON.parse(localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, DoughRecipePreset>; } catch { return {}; }
 }
 export function saveDoughRecipePresets(p: Record<string, DoughRecipePreset>): void {
+  if (localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) === JSON.stringify(p)) return;
   try { localStorage.setItem(DOUGH_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
   notifyKv(DOUGH_RECIPE_PRESETS_KEY, p);
 }
@@ -1674,6 +1679,7 @@ export function loadFrontlineRecipePresets(): Record<string, RecipeRow[]> {
   try { return JSON.parse(localStorage.getItem(FRONTLINE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
 }
 export function saveFrontlineRecipePresets(p: Record<string, RecipeRow[]>): void {
+  if (localStorage.getItem(FRONTLINE_RECIPE_PRESETS_KEY) === JSON.stringify(p)) return;
   try { localStorage.setItem(FRONTLINE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
   notifyKv(FRONTLINE_RECIPE_PRESETS_KEY, p);
 }
@@ -1682,6 +1688,7 @@ export function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
   try { return JSON.parse(localStorage.getItem(CHEESE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
 }
 export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
+  if (localStorage.getItem(CHEESE_RECIPE_PRESETS_KEY) === JSON.stringify(p)) return;
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
   notifyKv(CHEESE_RECIPE_PRESETS_KEY, p);
 }
@@ -2186,8 +2193,13 @@ export function removeStaleRecipeReference(
 // everything is the only universally-correct undo, so we accept the size cost
 // (bounded by MAX_CHANGE_HISTORY + quota-safe trimming on write).
 const APP_KEY_PREFIX = "run-calc-";
+function excludedFromMasterUndo(key: string): boolean {
+  return key === "run-calc-supervisor-pin" || key.startsWith("run-calc-fkv-")
+    || /(?:outbox|queue|operational-intent)/i.test(key);
+}
 
 export function captureMasterDataSnapshot(): Record<string, string> {
+  purgeLegacyPinCopies();
   const snap: Record<string, string> = {};
   if (typeof localStorage === "undefined") return snap;
   for (let i = 0; i < localStorage.length; i++) {
@@ -2197,9 +2209,14 @@ export function captureMasterDataSnapshot(): Record<string, string> {
       || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
       || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
     ) continue;
-    if (!k.startsWith(APP_KEY_PREFIX)) continue;
+    if (!k.startsWith(APP_KEY_PREFIX) || excludedFromMasterUndo(k)) continue;
     const v = localStorage.getItem(k);
     if (v !== null) snap[k] = v;
+  }
+  for (const [key, raw] of directoryEntries()) snap[key] = raw;
+  for (const key of DIRECTORY_METADATA_KEYS) {
+    const raw = localStorage.getItem(key);
+    if (raw !== null) snap[key] = raw;
   }
   return snap;
 }
@@ -2210,6 +2227,8 @@ export function captureMasterDataSnapshot(): Record<string, string> {
 export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
   if (typeof localStorage === "undefined") return;
   const present = new Set<string>();
+  for (const [key] of directoryEntries()) present.add(key);
+  for (const key of DIRECTORY_METADATA_KEYS) present.add(key);
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     // Master-data undo/reset must never discard append-only completed history or
@@ -2219,20 +2238,32 @@ export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
       k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY && k !== HISTORY_KEY
       && !k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
       && !k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+      && !excludedFromMasterUndo(k)
     ) present.add(k);
   }
   for (const k of present) {
     if (!(k in snap)) {
-      try { localStorage.removeItem(k); } catch {}
+      try {
+        if (MEMORY_DIRECTORY_KEYS.has(k) || DIRECTORY_METADATA_KEYS.has(k)) {
+          const empty = k.includes("presets") || k.includes("brand-flavors") || DIRECTORY_METADATA_KEYS.has(k) ? {} : [];
+          localStorage.setItem(k, JSON.stringify(empty));
+          notifyKv(k, empty);
+        } else localStorage.removeItem(k);
+      } catch {}
     }
   }
   for (const [k, v] of Object.entries(snap)) {
     if (
       k === HISTORY_KEY || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
       || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
+      || excludedFromMasterUndo(k)
     ) continue;
-    try { localStorage.setItem(k, v); } catch {}
+    try {
+      localStorage.setItem(k, v);
+      if (MEMORY_DIRECTORY_KEYS.has(k) || DIRECTORY_METADATA_KEYS.has(k)) notifyKv(k, JSON.parse(v));
+    } catch {}
   }
+  purgeLegacyPinCopies();
 }
 
 export function loadChangeHistory(): MasterDataChange[] {

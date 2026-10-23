@@ -1,3 +1,6 @@
+export {
+  OPERATIONAL_DIRECTORY_KEYS, OPERATIONAL_FACTORY_SETTING_KEYS, OPERATIONAL_FACTORY_READ_KEYS,
+} from "./operationalDirectory";
 /**
  * Factory-standard multiplier used when a run or die setting has no explicit
  * Speed Adjustment. Keep compatibility-only historical blank sentinels local

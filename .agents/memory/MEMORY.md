@@ -127,7 +127,7 @@
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
-- [Local validation runtime](local-validation-runtime-index.md) — runner locks, pinned Node/CA conflicts, Docker healthcheck `setns`, loopback probes, and offline browser fixtures.
+- [Local validation runtime](local-validation-runtime-index.md) — native pnpm bootstrap, runner locks, pinned Node/CA conflicts, loopback probes, and offline browser fixtures.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [SSE topology](sse-topology-choice.md) + [publish](production-publish-workflow.md) — derive DB peaks from samples; provider metrics stay manual; peer SSE unsupported.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.

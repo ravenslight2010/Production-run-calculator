@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // Spec-sheet dough NAME apply contract (mirror of specImportSauceName.test.ts).

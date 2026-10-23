@@ -14,6 +14,8 @@
 // both, so a regression in either would fail here.
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { browserStorage as localStorage } from "./adapters/browserRecordStore";
+import { resetFactoryDataSyncForTests, setFactoryDataIdentity, hydrateFromServer } from "./factoryDataSync";
 import {
   applyRecipeNameMerge,
   saveRunValues,
@@ -34,7 +36,10 @@ import {
 const run = (doughRecipeName: string): FormValues => ({ ...DEFAULT_VALUES, doughRecipeName });
 
 beforeEach(() => {
-  localStorage.clear();
+  window.localStorage.clear();
+  resetFactoryDataSyncForTests();
+  setFactoryDataIdentity("live:merge-fixture", true);
+  hydrateFromServer({});
 });
 
 describe("applyRecipeNameMerge (dough)", () => {

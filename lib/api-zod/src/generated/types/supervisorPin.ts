@@ -7,6 +7,9 @@
  */
 
 export interface SupervisorPin {
-  /** The facility supervisor PIN */
+  /**
+     * Entered PIN for a manager-authorized change; empty removes the gate
+     * @pattern ^(|\d{4,8})$
+     */
   pin: string;
 }

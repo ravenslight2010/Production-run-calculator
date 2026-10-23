@@ -21,6 +21,12 @@ import { markExpectedAuthLifecycleCancellation } from "./performanceDiagnostics"
 import { AuthContext } from "./useAuth";
 import { resetMasterDataTransportCache } from "./masterData";
 import { setProfileCacheIdentity } from "./profileCache";
+import { setFactoryDataIdentity } from "./factoryDataSync";
+
+function setDirectorySession(user: StaffMember | null): void {
+  setFactoryDataIdentity(user ? `${user.sandbox ? "sandbox" : "live"}:${user.userId}` : null,
+    user?.capabilities.includes("manage-factory-settings") ?? false);
+}
 
 const AUTH_SESSION_PROBE_TIMEOUT_MS = 8_000;
 const AUTH_SESSION_PROBE_MAX_ATTEMPTS = 2;
@@ -104,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           userId: user.userId,
           scope: user.sandbox ? "sandbox" : "live",
         });
+        setDirectorySession(user);
         setSessionEndedReason(null);
         return user;
       } catch (err) {
@@ -154,11 +161,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refetch]);
 
   useEffect(() => {
+    setDirectorySession(me);
     setProfileCacheIdentity(me ? {
       userId: me.userId,
       scope: me.sandbox ? "sandbox" : "live",
     } : null);
-  }, [me?.sandbox, me?.userId]);
+  }, [me?.sandbox, me?.userId, me?.capabilities]);
 
   // On every identity change we (a) write the new identity straight into ["me"]
   // from the auth response (mirroring mobile's setMe), and (b) drop every OTHER
@@ -175,6 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // honor AbortSignal.
       await qc.cancelQueries({ queryKey: ["me"], exact: true });
       resetMasterDataTransportCache();
+      setDirectorySession(identity);
       setProfileCacheIdentity(identity ? {
         userId: identity.userId,
         scope: identity.sandbox ? "sandbox" : "live",
@@ -252,6 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionEndedReason(null);
     resetMasterDataTransportCache();
     setProfileCacheIdentity(null);
+    setDirectorySession(null);
     qc.setQueryData(["me"], null);
   }, [advanceAuthEpoch, qc]);
 

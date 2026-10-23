@@ -3300,23 +3300,84 @@ paths:
         "400":
           description: Invalid input
 
+  /factory-data/operational:
+    get:
+      operationId: getOperationalFactoryDirectory
+      tags: [factoryData]
+      summary: Read allowlisted operational lists, recipe presets and settings
+      description: Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
+      responses:
+        "200":
+          description: Canonical directory values with revision timestamps
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      required: [value, updatedAt]
+                      properties:
+                        value: {}
+                        updatedAt:
+                          type: string
+                          format: date-time
+        "401":
+          description: Authentication required
+        "503":
+          description: Directory unavailable
+
+  /supervisor-pin/verify:
+    post:
+      operationId: verifySupervisorPin
+      tags: [supervisorPin]
+      summary: Verify an entered PIN online without returning the facility PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupervisorPinVerificationInput"
+      responses:
+        "200":
+          description: PIN verified
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verified]
+                properties:
+                  verified:
+                    type: boolean
+        "400":
+          description: Invalid PIN format
+        "401":
+          description: Authentication expired
+        "403":
+          description: Incorrect PIN
+        "429":
+          description: Too many verification attempts
+        "503":
+          description: Verification unavailable
+
   /supervisor-pin:
     get:
       operationId: getSupervisorPin
       tags: [supervisorPin]
-      summary: Get the facility-wide supervisor PIN
+      summary: Get nonsecret configured status
       description: >-
-        Returns the facility supervisor PIN. Reading is available to any
-        signed-in user so both apps can perform the local PIN compare that gates
-        supervisor actions (the PIN is a low-security convenience gate, not a
-        secret).
+        Returns only whether a PIN is configured. Older clients must update;
+        no compatibility endpoint returns the PIN.
       responses:
         "200":
           description: The current supervisor PIN
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SupervisorPin"
+                $ref: "#/components/schemas/SupervisorPinStatus"
     put:
       operationId: updateSupervisorPin
       tags: [supervisorPin]
@@ -3336,7 +3397,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SupervisorPin"
+                $ref: "#/components/schemas/SupervisorPinStatus"
         "400":
           description: Invalid input
         "403":
@@ -13140,7 +13201,23 @@ components:
       properties:
         pin:
           type: string
-          description: The facility supervisor PIN
+          pattern: '^(|\d{4,8})$'
+          description: Entered PIN for a manager-authorized change; empty removes the gate
+
+    SupervisorPinStatus:
+      type: object
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+
+    SupervisorPinVerificationInput:
+      type: object
+      required: [pin]
+      properties:
+        pin:
+          type: string
+          pattern: '^\d{4,8}$'
 
     MixComponent:
       type: object

@@ -34,6 +34,8 @@ let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let factoryKvTable: DbModule["factoryKvTable"];
+let supervisorPinSettingsTable: DbModule["supervisorPinSettingsTable"];
+let rateLimitCountersTable: DbModule["rateLimitCountersTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
 
@@ -78,6 +80,8 @@ beforeAll(async () => {
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   factoryKvTable = dbMod.factoryKvTable;
+  supervisorPinSettingsTable = dbMod.supervisorPinSettingsTable;
+  rateLimitCountersTable = dbMod.rateLimitCountersTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   pool.on("error", () => {});
 
@@ -109,7 +113,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${factoryKvTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${factoryKvTable}, ${supervisorPinSettingsTable}, ${rateLimitCountersTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
 });
@@ -141,6 +145,41 @@ async function putFactoryData(userId: string, key: string, value: unknown): Prom
 }
 
 describe("GET /factory-data", () => {
+  it("allows staff to read only the operational allowlist, never administrative settings", async () => {
+    const mgr = await freshUser("manager");
+    const op = await freshUser("operator");
+    await putFactoryData(mgr, "run-calc-brands", ["Fixture brand"]);
+    await putFactoryData(mgr, "run-calc-dough-recipe-presets", { Fixture: { rows: [] } });
+    await putFactoryData(mgr, "run-calc-shift-start-time", "08:00");
+    const operationalSettings = {
+      "run-calc-stop-reasons": ["Fixture special stop"],
+      "run-calc-circles": ["Fixture circle"], "run-calc-shippers": ["Fixture shipper"],
+      "run-calc-skid-stacking": ["Fixture stack"], "run-calc-grip-sheets": ["Fixture grip"],
+      "run-calc-production-start-time": "08:25",
+    };
+    for (const [key, value] of Object.entries(operationalSettings)) {
+      expect((await putFactoryData(mgr, key, value)).status).toBe(200);
+    }
+    await putFactoryData(mgr, "private-admin-setting", { private: true });
+    const res = await fetch(`${baseUrl}/api/factory-data/operational`, {
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(op)}` },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    const body = await res.json() as { data: Record<string, { value: unknown }> };
+    expect(Object.keys(body.data).sort()).toEqual([
+      "run-calc-brands", "run-calc-dough-recipe-presets", "run-calc-shift-start-time",
+      ...Object.keys(operationalSettings),
+    ].sort());
+    expect(body.data["run-calc-shift-start-time"].value).toBe("08:00");
+    for (const [key, value] of Object.entries(operationalSettings)) {
+      expect(body.data[key].value).toEqual(value);
+      expect((await putFactoryData(op, key, [])).status).toBe(403);
+    }
+    expect((await getFactoryData(op)).status).toBe(403);
+    expect((await putFactoryData(op, "run-calc-brands", [])).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/factory-data/operational`)).status).toBe(401);
+  });
   it("returns empty data object when no keys exist", async () => {
     const mgr = await freshUser("manager");
     const res = await getFactoryData(mgr);
@@ -171,6 +210,81 @@ describe("GET /factory-data", () => {
   it("rejects unauthenticated requests with 401", async () => {
     const res = await fetch(`${baseUrl}/api/factory-data`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe("server-only PIN verification", () => {
+  async function pinRequest(userId: string | null, method: string, pin?: string) {
+    return fetch(`${baseUrl}/api/supervisor-pin${method === "POST" ? "/verify" : ""}`, {
+      method,
+      headers: { "content-type": "application/json",
+        ...(userId ? { authorization: `Bearer ${signLegacyTokenForTests(userId)}` } : {}) },
+      ...(pin === undefined ? {} : { body: JSON.stringify({ pin }) }),
+    });
+  }
+  it("never returns the configured PIN on reads or manager updates", async () => {
+    const manager = await freshUser("manager");
+    const staff = await freshUser("operator");
+    const update = await pinRequest(manager, "PUT", "6372");
+    expect(update.status).toBe(200);
+    expect(await update.json()).toEqual({ configured: true });
+    const read = await pinRequest(staff, "GET");
+    expect(await read.json()).toEqual({ configured: true });
+    expect(read.headers.get("cache-control")).toContain("no-store");
+    expect((await pinRequest(staff, "PUT", "8888")).status).toBe(403);
+    expect((await pinRequest(null, "GET")).status).toBe(401);
+    expect((await pinRequest(null, "POST", "6372")).status).toBe(401);
+  });
+  it("distinguishes incorrect, invalid, correct and explicitly empty PIN policies", async () => {
+    const manager = await freshUser("manager"); const staff = await freshUser("operator");
+    await pinRequest(manager, "PUT", "6372");
+    expect((await pinRequest(staff, "POST", "abcd")).status).toBe(400);
+    expect((await pinRequest(staff, "POST", "1")).status).toBe(400);
+    expect((await pinRequest(staff, "POST", "1111")).status).toBe(403);
+    const correct = await pinRequest(staff, "POST", "6372");
+    expect(correct.status).toBe(200); expect(await correct.json()).toEqual({ verified: true });
+    expect(await (await pinRequest(manager, "PUT", "")).json()).toEqual({ configured: false });
+    expect(await (await pinRequest(staff, "GET")).json()).toEqual({ configured: false });
+    expect((await pinRequest(staff, "POST", "1111")).status).toBe(200);
+    expect((await pinRequest(manager, "PUT", "not-a-pin")).status).toBe(400);
+  });
+  it("limits low-entropy attempts using shared storage by principal", async () => {
+    const manager = await freshUser("manager"); const staff = await freshUser("operator");
+    await pinRequest(manager, "PUT", "6372");
+    for (let i = 0; i < 10; i++) expect((await pinRequest(staff, "POST", "1111")).status).toBe(403);
+    const blocked = await pinRequest(staff, "POST", "6372");
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+    // A different authenticated principal retains its own bound, subject to the source cap.
+    expect((await pinRequest(manager, "POST", "6372")).status).toBe(200);
+  });
+  it("isolates status and verification between live and sandbox", async () => {
+    const live = await freshUser("manager");
+    const sandbox = await freshUser("manager");
+    await db.execute(sql`UPDATE ${usersTable} SET sandbox = true WHERE id = ${sandbox}`);
+    clearUserValidityCache();
+    await pinRequest(live, "PUT", "6372");
+    await pinRequest(sandbox, "PUT", "");
+    expect(await (await pinRequest(live, "GET")).json()).toEqual({ configured: true });
+    expect(await (await pinRequest(sandbox, "GET")).json()).toEqual({ configured: false });
+    expect((await pinRequest(live, "POST", "1111")).status).toBe(403);
+    expect((await pinRequest(sandbox, "POST", "1111")).status).toBe(200);
+  });
+  it("fails closed when the shared verification limiter is unavailable", async () => {
+    const { PostgresRateLimitStore } = await import("../middlewares/rateLimitStore");
+    const manager = await freshUser("manager");
+    const unavailable = vi.spyOn(PostgresRateLimitStore.prototype, "hit").mockRejectedValueOnce(new Error("fixture unavailable"));
+    try { expect((await pinRequest(manager, "POST", "6372")).status).toBe(503); }
+    finally { unavailable.mockRestore(); }
+  });
+  it("bounds attempts from one source across multiple authenticated principals", async () => {
+    const manager = await freshUser("manager");
+    await pinRequest(manager, "PUT", "6372");
+    for (let n = 0; n < 4; n++) {
+      const staff = await freshUser("operator");
+      for (let i = 0; i < 10; i++) expect((await pinRequest(staff, "POST", "1111")).status).toBe(403);
+    }
+    expect((await pinRequest(manager, "POST", "6372")).status).toBe(429);
   });
 });
 

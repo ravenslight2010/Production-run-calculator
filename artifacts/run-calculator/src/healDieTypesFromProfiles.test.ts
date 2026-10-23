@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 import { describe, it, expect, beforeEach } from "vitest";
 import { healDieTypesFromProfiles, saveList, tombstoneDeleted, rewriteDieTypeInProfiles } from "./storage";
 import { PROFILE_KEY, CRUST_PROFILE_KEY, DIE_TYPES_KEY } from "./types";

@@ -696,7 +696,6 @@ export const DEFAULT_STOP_REASONS = [
   "Equipment jam", "Changeover", "Break", "Maintenance",
   "Quality hold", "Staffing", "Waiting on dough",
 ];
-export const DEFAULT_SUPERVISOR_PIN = "1234";
 
 // Factory-wide shift timing constants (stored as HH:MM strings in factory KV).
 export const SHIFT_START_TIME_KEY = "run-calc-shift-start-time";

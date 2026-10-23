@@ -266,6 +266,8 @@ export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const verifySupervisorPinBodyPinRegExp = new RegExp('^\\d{4,8}$');
+export const updateSupervisorPinBodyPinRegExp = new RegExp('^(|\\d{4,8})$');
 export const getPublishedSourceLibraryReconciliationCaptureResponseRevisionMax = 128;
 export const getPublishedSourceLibraryReconciliationCaptureResponseEvidenceIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getPublishedSourceLibraryReconciliationCaptureResponseHealIdMax = 128;
@@ -5361,11 +5363,37 @@ export const DeleteRunTemplatesResponse = zod.object({
 
 
 /**
- * Returns the facility supervisor PIN. Reading is available to any signed-in user so both apps can perform the local PIN compare that gates supervisor actions (the PIN is a low-security convenience gate, not a secret).
- * @summary Get the facility-wide supervisor PIN
+ * Authenticated scope-isolated read of directories, presets, stoppage reasons, packaging options and shift/production start times. Excludes administrative data. No write permission is granted.
+ * @summary Read allowlisted operational lists, recipe presets and settings
+ */
+export const GetOperationalFactoryDirectoryResponse = zod.object({
+  "data": zod.record(zod.string(), zod.object({
+  "value": zod.unknown(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Verify an entered PIN online without returning the facility PIN
+ */
+
+
+export const VerifySupervisorPinBody = zod.object({
+  "pin": zod.string().regex(verifySupervisorPinBodyPinRegExp)
+})
+
+export const VerifySupervisorPinResponse = zod.object({
+  "verified": zod.boolean()
+})
+
+
+/**
+ * Returns only whether a PIN is configured. Older clients must update; no compatibility endpoint returns the PIN.
+ * @summary Get nonsecret configured status
  */
 export const GetSupervisorPinResponse = zod.object({
-  "pin": zod.string().describe('The facility supervisor PIN')
+  "configured": zod.boolean()
 })
 
 
@@ -5373,12 +5401,14 @@ export const GetSupervisorPinResponse = zod.object({
  * Sets the facility supervisor PIN. Manager capability required so the facility-wide gate isn't changed out from under everyone by any user.
  * @summary Update the facility-wide supervisor PIN (manager only)
  */
+
+
 export const UpdateSupervisorPinBody = zod.object({
-  "pin": zod.string().describe('The facility supervisor PIN')
+  "pin": zod.string().regex(updateSupervisorPinBodyPinRegExp).describe('Entered PIN for a manager-authorized change; empty removes the gate')
 })
 
 export const UpdateSupervisorPinResponse = zod.object({
-  "pin": zod.string().describe('The facility supervisor PIN')
+  "configured": zod.boolean()
 })
 
 

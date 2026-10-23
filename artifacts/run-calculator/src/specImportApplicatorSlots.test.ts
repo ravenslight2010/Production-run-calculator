@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // Physical line stations: the pep/stick applicators sit BETWEEN Applicator 2

@@ -1,3 +1,4 @@
+import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // @vitest-environment jsdom
 //
 // Ready-made sauce name apply contract. A spec sheet can name a bought sauce

@@ -7351,7 +7351,19 @@ export type DeleteRunTemplatesInput = (unknown & {
 });
 
 export interface SupervisorPin {
-  /** The facility supervisor PIN */
+  /**
+     * Entered PIN for a manager-authorized change; empty removes the gate
+     * @pattern ^(|\d{4,8})$
+     */
+  pin: string;
+}
+
+export interface SupervisorPinStatus {
+  configured: boolean;
+}
+
+export interface SupervisorPinVerificationInput {
+  /** @pattern ^\d{4,8}$ */
   pin: string;
 }
 
@@ -9293,6 +9305,19 @@ export type ObserveRunSuggestion200 = {
 
 export type FollowUpRunSuggestion200 = {
   ok: boolean;
+};
+
+export type GetOperationalFactoryDirectory200Data = {[key: string]: {
+  value: unknown;
+  updatedAt: string;
+}};
+
+export type GetOperationalFactoryDirectory200 = {
+  data: GetOperationalFactoryDirectory200Data;
+};
+
+export type VerifySupervisorPin200 = {
+  verified: boolean;
 };
 
 export type AuditAiMemoryHealth200 = {
