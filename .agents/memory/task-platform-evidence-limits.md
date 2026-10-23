@@ -9,6 +9,12 @@ Assignment and mode are also separate evidence questions. A read-only task recor
 
 A task record's `updatedAt` is not a task-run transition timestamp, and a state label alone cannot establish why a run waited. Attribute a platform-managed wait only from task-run logs or other platform-owned diagnostics; keep repository filesystem-lock evidence separate. If the authorized session exposes records but not run logs, state that exact evidence gap and ask Replit to inspect the task-run history rather than inferring causality.
 
+Public status history is evidence of broad incidents only: a matching incident can establish that a platform issue was reported, but cannot tie it to one user's run; an all-clear page cannot rule out account-, region-, client-, or run-specific faults. Correlate an exact task/thread/run identifier and local-time window with platform-owned start/end, queue/wait, apply/lock, cancellation, and error records before assigning a platform cause.
+
+**Why:** Public Agent/task incidents have occurred, while an individual session's task-run and client records may remain private to the Replit UI or support systems.
+
+**How to apply:** Use public status for service context, not root-cause attribution. Preserve the exact missing run evidence and hand it to the platform owner rather than inferring from task-card update times or current service status.
+
 A client-side queue read followed by creation is not an atomic acceptance snapshot. Retrofitting dependencies after submission can race with acceptance and launch. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
 
 ## Genuine dependencies, not global sequencing

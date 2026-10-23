@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  groupManagedProcesses,
+  parseManagedProcessLine,
+} from "./stop-artifact-workflows.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const launcher = "bash scripts/src/run-release-node.sh ";
@@ -42,6 +46,172 @@ test("post-merge selects Node before Corepack and package scripts", () => {
   const install = hook.indexOf("CI=true pnpm install");
   assert.ok(reentry > 0 && preflight > reentry && stop > preflight);
   assert.ok(corepack > stop && install > corepack);
+});
+
+function makePostMergeFixture(t) {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "post-merge-phases-"));
+  t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(fixture, "scripts", "src"), { recursive: true });
+  fs.mkdirSync(path.join(fixture, "bin"), { recursive: true });
+  fs.mkdirSync(path.join(fixture, ".config"), { recursive: true });
+  fs.copyFileSync(
+    path.join(root, "scripts", "post-merge.sh"),
+    path.join(fixture, "scripts", "post-merge.sh"),
+  );
+
+  const executables = {
+    "scripts/src/run-release-node.sh": `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == env && "$2" == REPLIT_PINNED_NODE_READY=1 &&
+  "$3" == bash && "$4" == scripts/post-merge.sh ]]
+cd "$FIXTURE_ROOT"
+exec env REPLIT_PINNED_NODE_READY=1 bash scripts/post-merge.sh
+`,
+    "bin/node": `#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  scripts/src/check-routine-node-version.mjs) exit "\${TEST_NODE_CHECK_STATUS:-0}" ;;
+  scripts/src/stop-artifact-workflows.mjs) exit "\${TEST_STOP_STATUS:-0}" ;;
+  *) printf 'unexpected fake node operation\\n' >&2; exit 90 ;;
+esac
+`,
+    "bin/corepack": `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == enable && "$2" == --install-directory && "$4" == pnpm ]]
+exit "\${TEST_COREPACK_STATUS:-0}"
+`,
+    "bin/pnpm": `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == install ]]; then
+  exit "\${TEST_INSTALL_STATUS:-0}"
+fi
+if [[ "$1" == --filter && "$2" == db && "$3" == push-force ]]; then
+  count=0
+  [[ -f "$FIXTURE_ROOT/push-attempt-count" ]] &&
+    read -r count <"$FIXTURE_ROOT/push-attempt-count"
+  count=$((count + 1))
+  printf '%s\\n' "$count" >"$FIXTURE_ROOT/push-attempt-count"
+  if (( count <= \${TEST_PUSH_FAILURES:-0} )); then
+    exit 37
+  fi
+  exit 0
+fi
+if [[ "$1" == run && "$2" == prepare:publish ]]; then
+  exit "\${TEST_PREPARE_STATUS:-0}"
+fi
+printf 'unexpected fake pnpm operation\\n' >&2
+exit 91
+`,
+    "bin/sleep": `#!/usr/bin/env bash
+exit 0
+`,
+  };
+  for (const [relativePath, contents] of Object.entries(executables)) {
+    const absolutePath = path.join(fixture, relativePath);
+    fs.writeFileSync(absolutePath, contents, { mode: 0o755 });
+  }
+  return fixture;
+}
+
+function runPostMergeFixture(fixture, overrides = {}) {
+  return spawnSync("bash", ["scripts/post-merge.sh"], {
+    cwd: fixture,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...overrides,
+      FIXTURE_ROOT: fixture,
+      PATH: `${path.join(fixture, "bin")}:${process.env.PATH}`,
+    },
+  });
+}
+
+test("post-merge phase events stay bounded and preserve retries and failures", (t) => {
+  const fixture = makePostMergeFixture(t);
+  const success = runPostMergeFixture(fixture, {
+    TEST_PUSH_FAILURES: "1",
+    TEST_PRIVATE_VALUE: "DO_NOT_LOG_THIS_VALUE",
+  });
+  assert.equal(success.status, 0, success.stderr);
+  for (const phase of [
+    "node-version-check",
+    "stop-artifact-workflows",
+    "corepack-enable",
+    "frozen-install",
+    "schema-push-attempt-1",
+    "schema-push-attempt-2",
+    "prepare-publish",
+  ]) {
+    assert.match(
+      success.stderr,
+      new RegExp(`post-merge phase=start name=${phase} timestamp_utc=\\d{4}-\\d\\d-\\d\\dT`),
+    );
+    assert.match(
+      success.stderr,
+      new RegExp(`post-merge phase=end name=${phase} outcome=(success|failure) elapsed_seconds=\\d+ exit_code=\\d+ timestamp_utc=\\d{4}-`),
+    );
+  }
+  assert.match(
+    success.stderr,
+    /post-merge phase=end name=schema-push-attempt-1 outcome=failure elapsed_seconds=\d+ exit_code=37/,
+  );
+  assert.match(
+    success.stderr,
+    /post-merge phase=end name=schema-push-attempt-2 outcome=success elapsed_seconds=\d+ exit_code=0/,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(fixture, "push-attempt-count"), "utf8").trim(),
+    "2",
+  );
+  assert.doesNotMatch(success.stderr, /DO_NOT_LOG_THIS_VALUE/);
+
+  const failedFixture = makePostMergeFixture(t);
+  const failure = runPostMergeFixture(failedFixture, { TEST_INSTALL_STATUS: "23" });
+  assert.equal(failure.status, 23, failure.stderr);
+  assert.match(
+    failure.stderr,
+    /post-merge phase=end name=frozen-install outcome=failure elapsed_seconds=\d+ exit_code=23/,
+  );
+  assert.doesNotMatch(failure.stderr, /name=schema-push-attempt-|name=prepare-publish/);
+
+  const exhaustedFixture = makePostMergeFixture(t);
+  const exhausted = runPostMergeFixture(exhaustedFixture, {
+    TEST_PUSH_FAILURES: "4",
+  });
+  assert.equal(exhausted.status, 37, exhausted.stderr);
+  assert.match(
+    exhausted.stderr,
+    /post-merge phase=end name=schema-push-attempt-4 outcome=failure elapsed_seconds=\d+ exit_code=37/,
+  );
+  assert.match(exhausted.stderr, /db push-force failed after 4 attempts/);
+  assert.doesNotMatch(exhausted.stderr, /name=prepare-publish/);
+  assert.equal(
+    fs.readFileSync(path.join(exhaustedFixture, "push-attempt-count"), "utf8").trim(),
+    "4",
+  );
+});
+
+test("artifact workflow cleanup retains only process identity and artifact class", () => {
+  const parsed = parseManagedProcessLine(
+    "420 400 pnpm --filter @workspace/api-server run dev --debug-token PRIVATE_SENTINEL",
+  );
+  assert.deepEqual(parsed, { pid: 420, pgid: 400, artifact: "api-server" });
+  assert.doesNotMatch(JSON.stringify(parsed), /PRIVATE_SENTINEL/);
+
+  const groups = groupManagedProcesses([
+    "420 400 pnpm --filter @workspace/api-server run dev PRIVATE_SENTINEL",
+    "421 400 node /path/to/api-server/dist/index.mjs PRIVATE_SENTINEL",
+    "510 510 pnpm --filter @workspace/run-calculator run dev",
+    "700 700 unrelated-service --filter @workspace/api-server run dev",
+  ]);
+  assert.deepEqual(
+    [...groups.entries()],
+    [
+      [400, { pid: 420, pgid: 400, artifact: "api-server" }],
+      [510, { pid: 510, pgid: 510, artifact: "run-calculator" }],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify([...groups]), /PRIVATE_SENTINEL/);
 });
 
 function makeShellFixture(

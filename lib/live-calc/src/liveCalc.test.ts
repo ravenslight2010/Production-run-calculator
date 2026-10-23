@@ -117,6 +117,7 @@ describe("shared live calculation boundary", () => {
 
     const schedule = computeAutoTrackSchedule({
       runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
+      serverWallOwnership: { case: 3 },
       v: {
         pizzasPerCase: 12, freezerTime: 30,
         app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
@@ -129,7 +130,6 @@ describe("shared live calculation boundary", () => {
         app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
       } as never,
       coordination: { case: { generation: "run-1:2000", nextDueAt: 4000, sequence: 3 } },
-      serverWallOwnership: { case: 3 },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
@@ -144,6 +144,7 @@ describe("shared live calculation boundary", () => {
   it("treats stale-generation coordination as noncanonical fallback", () => {
     const schedule = computeAutoTrackSchedule({
       runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
+      serverWallOwnership: { case: 3 },
       v: {
         pizzasPerCase: 12, freezerTime: 30,
         app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
