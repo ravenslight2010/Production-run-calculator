@@ -30,10 +30,11 @@ const contract = {
 const digest = "a".repeat(64);
 
 assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("linux"));
-for (const unsupportedPlatform of ["darwin", "win32"] as const) {
+assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("win32"));
+for (const unsupportedPlatform of ["darwin"] as const) {
   assert.throws(
     () => assertMetadataMaintenancePlatformSupported(unsupportedPlatform),
-    /supported only on Linux.*supported Linux x64 environment.*leave existing metadata locks untouched/u,
+    /metadata updates require Linux x64 or native Windows x64.*leave existing metadata locks untouched/u,
   );
 }
 
@@ -395,6 +396,9 @@ const redaction = {
 fs.writeFileSync(redactionPath, JSON.stringify(redaction), { mode: 0o600 });
 
 try {
+  // Linux's procfs/flock recovery fixtures are not Windows emulation.
+  // Native Windows recovery and crash cases have their own focused suite.
+  if (process.platform === "linux") {
   const syntheticLockEntry = {
     date: "2026-10-21",
     changeType: "metadata-only",
@@ -671,6 +675,10 @@ try {
   );
   assert.equal(fs.existsSync(racingLockPath), false);
   assert.equal(fs.existsSync(`${racingLockPath}.recovery`), false);
+  }
+  if (process.platform === "win32") {
+    await import("./distill-backfill-windows.test.mts");
+  }
 
   fs.writeFileSync(decisionPath, JSON.stringify({
     ...makeDecision("no-go"),
