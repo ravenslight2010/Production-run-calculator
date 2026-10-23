@@ -14,6 +14,7 @@ import {
   runMetadataMaintenanceCommand,
   runBackfill,
 } from "./distill-backfill.mts";
+import { readProcessIdentity, type ProcessIdentity } from "./metadata-process-identity.mts";
 import {
   hashCriticalGoldEvidence,
   hashHumanApplyRecord,
@@ -30,10 +31,11 @@ const contract = {
 const digest = "a".repeat(64);
 
 assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("linux"));
-for (const unsupportedPlatform of ["darwin", "win32"] as const) {
+assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("darwin"));
+for (const unsupportedPlatform of ["win32"] as const) {
   assert.throws(
     () => assertMetadataMaintenancePlatformSupported(unsupportedPlatform),
-    /supported only on Linux.*supported Linux x64 environment.*leave existing metadata locks untouched/u,
+    /supported only on Linux and macOS.*supported Linux x64 or macOS environment.*leave existing metadata locks untouched/u,
   );
 }
 
@@ -142,7 +144,7 @@ function spawnRecoveryGuardHolder(lockPath: string): {
 } {
   const recoveryPath = `${lockPath}.recovery`;
   const gatePath = `${recoveryPath}.gate`;
-  const holderScript = [
+  const linuxHolderScript = [
     `const fs = require("node:fs");`,
     "const stat = fs.readFileSync(`/proc/${process.pid}/stat`, \"utf8\");",
     "const fields = stat.slice(stat.lastIndexOf(\")\") + 1).trim().split(/\\s+/u);",
@@ -151,11 +153,25 @@ function spawnRecoveryGuardHolder(lockPath: string): {
     `process.stdout.write("recovery-ready\\n");`,
     "setInterval(() => {}, 1000);",
   ].join("\n");
-  const child = spawn(
-    "flock",
-    ["--no-fork", "--exclusive", gatePath, process.execPath, "-e", holderScript],
-    { stdio: ["ignore", "pipe", "ignore"] },
-  );
+  const darwinHolderScript = [
+    `const fs = require("node:fs");`,
+    `const { execFileSync } = require("node:child_process");`,
+    `const helper = ${JSON.stringify(path.join(workspaceRoot, "scripts/src/metadata-darwin.py"))};`,
+    `const owner = { pid: process.pid, identity: JSON.parse(execFileSync("python3", [helper, "identity", String(process.pid)], { encoding: "utf8" })) };`,
+    `fs.writeFileSync(${JSON.stringify(recoveryPath)}, JSON.stringify(owner) + String.fromCharCode(10), { mode: 0o600 });`,
+    `process.stdout.write("recovery-ready\\n");`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+  const child = process.platform === "darwin"
+    ? spawn("python3", [
+      path.join(workspaceRoot, "scripts/src/metadata-darwin.py"),
+      "gate", gatePath, process.execPath, "-e", darwinHolderScript,
+    ], { stdio: ["ignore", "pipe", "ignore"] })
+    : spawn(
+      "flock",
+      ["--no-fork", "--exclusive", gatePath, process.execPath, "-e", linuxHolderScript],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
   const ready = new Promise<void>((resolve, reject) => {
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
@@ -233,17 +249,8 @@ function writeJsonl(filePath: string, records: unknown[]) {
   fs.writeFileSync(filePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, { mode: 0o600 });
 }
 
-function readTestLinuxProcessIdentity(pid: number) {
-  const statContents = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-  const commandEnd = statContents.lastIndexOf(")");
-  const fields = commandEnd < 0 ? [] : statContents.slice(commandEnd + 1).trim().split(/\s+/u);
-  const startTimeTicks = fields[19];
-  assert.ok(startTimeTicks && /^\d+$/u.test(startTimeTicks));
-  return {
-    platform: "linux" as const,
-    bootId: fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
-    startTimeTicks,
-  };
+function readTestProcessIdentity(pid: number): ProcessIdentity {
+  return readProcessIdentity(pid);
 }
 
 function makeOptions({
@@ -297,7 +304,9 @@ function makeOptions({
   } as const;
 }
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "distill-backfill-test-"));
+// macOS's temporary directory may be an alias under /var for /private/var.
+// Use canonical fixture paths without weakening the repository boundary guard.
+const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "distill-backfill-test-")));
 const repoRoot = path.join(tempRoot, "repo");
 const privateRoot = path.join(tempRoot, "private");
 fs.mkdirSync(path.join(repoRoot, "docs", "evidence"), { recursive: true });
@@ -409,11 +418,9 @@ try {
   assert.throws(() => process.kill(abandonedOwnerPid, 0), { code: "ESRCH" });
   const abandonedOwner = {
     pid: abandonedOwnerPid,
-    identity: {
-      platform: "linux" as const,
-      bootId: "00000000-0000-0000-0000-000000000000",
-      startTimeTicks: "123",
-    },
+    identity: process.platform === "darwin"
+      ? { platform: "darwin" as const, bootId: "00000000-0000-0000-0000-000000000000", startTimeMicros: "123" }
+      : { platform: "linux" as const, bootId: "00000000-0000-0000-0000-000000000000", startTimeTicks: "123" },
   };
 
   const interruptedRecoveryDecisionPath = path.join(repoRoot, "docs", "evidence", "interrupted-recovery.json");
@@ -467,7 +474,7 @@ try {
   assert.equal(fs.readFileSync(`${malformedRecoveryLockPath}.recovery`, "utf8"), "not-a-pid\n");
   assert.equal(fs.existsSync(malformedRecoveryLockPath), false);
 
-  const unverifiedIdentityCases = [
+  const unverifiedIdentityCases = process.platform === "linux" ? [
     {
       name: "unreadable-owner-process-record",
       readIdentityFile(filePath: string) {
@@ -486,7 +493,7 @@ try {
         return fs.readFileSync(filePath, "utf8");
       },
     },
-  ];
+  ] : [];
   for (const testCase of unverifiedIdentityCases) {
     const unverifiedDecisionPath = path.join(
       repoRoot,
@@ -499,7 +506,7 @@ try {
     const unverifiedLockPath = `${unverifiedDecisionPath}.metadata-maintenance.lock`;
     const originalLockContents = `${JSON.stringify({
       pid: process.pid,
-      identity: readTestLinuxProcessIdentity(process.pid),
+      identity: readTestProcessIdentity(process.pid),
     })}\n`;
     fs.writeFileSync(unverifiedLockPath, originalLockContents, { mode: 0o600 });
 
@@ -521,6 +528,65 @@ try {
     assert.equal(fs.readFileSync(unverifiedLockPath, "utf8"), originalLockContents);
     assert.equal(fs.readFileSync(unverifiedDecisionPath, "utf8"), originalDecisionContents);
     assert.equal(fs.existsSync(`${unverifiedLockPath}.recovery`), false);
+  }
+
+  const unverifiableDarwinDecisionPath = path.join(
+    repoRoot,
+    "docs",
+    "evidence",
+    "unverifiable-process-identity.json",
+  );
+  const unverifiableDarwinContents = `${JSON.stringify(makeDecision("no-go"))}\n`;
+  fs.writeFileSync(unverifiableDarwinDecisionPath, unverifiableDarwinContents);
+  const unverifiableDarwinLockPath =
+    `${unverifiableDarwinDecisionPath}.metadata-maintenance.lock`;
+  const currentIdentity = readTestProcessIdentity(process.pid);
+  const unverifiableLockContents = `${JSON.stringify({
+    pid: process.pid,
+    identity: currentIdentity,
+  })}\n`;
+  fs.writeFileSync(unverifiableDarwinLockPath, unverifiableLockContents, { mode: 0o600 });
+  assert.throws(
+    () => appendMetadataMaintenanceEntryFileWithRecoveryGate(
+      unverifiableDarwinDecisionPath,
+      syntheticLockEntry,
+      undefined,
+      () => { throw new Error("synthetic process identity unavailable"); },
+    ),
+    /cannot establish whether metadata lock owner .* leave the lock untouched/u,
+  );
+  assert.equal(fs.readFileSync(unverifiableDarwinLockPath, "utf8"), unverifiableLockContents);
+  assert.equal(fs.readFileSync(unverifiableDarwinDecisionPath, "utf8"), unverifiableDarwinContents);
+  assert.equal(fs.existsSync(`${unverifiableDarwinLockPath}.recovery`), false);
+
+  for (const [ownerLabel, pid] of [["live", process.pid], ["dead", abandonedOwnerPid]] as const) {
+    for (const lockKind of ["update", "recovery"] as const) {
+      const foreignDecisionPath = path.join(
+        repoRoot, "docs", "evidence", `foreign-${ownerLabel}-${lockKind}.json`,
+      );
+      const originalDecision = `${JSON.stringify(makeDecision("no-go"))}\n`;
+      fs.writeFileSync(foreignDecisionPath, originalDecision);
+      const foreignUpdatePath = `${foreignDecisionPath}.metadata-maintenance.lock`;
+      const foreignLockPath = lockKind === "recovery"
+        ? `${foreignUpdatePath}.recovery` : foreignUpdatePath;
+      const foreignContents = `${JSON.stringify({
+        pid,
+        identity: process.platform === "darwin"
+          ? { platform: "linux", bootId: currentIdentity.bootId, startTimeTicks: "123" }
+          : { platform: "darwin", bootId: currentIdentity.bootId, startTimeMicros: "123" },
+      })}\n`;
+      fs.writeFileSync(foreignLockPath, foreignContents, { mode: 0o600 });
+      assert.throws(
+        () => appendMetadataMaintenanceEntryFile(foreignDecisionPath, syntheticLockEntry),
+        /cannot establish whether metadata lock owner .* leave the lock untouched/u,
+      );
+      assert.equal(fs.readFileSync(foreignLockPath, "utf8"), foreignContents);
+      assert.equal(fs.readFileSync(foreignDecisionPath, "utf8"), originalDecision);
+      assert.equal(
+        fs.existsSync(lockKind === "recovery" ? foreignUpdatePath : `${foreignUpdatePath}.recovery`),
+        false,
+      );
+    }
   }
 
   const activeLockDecisionPath = path.join(repoRoot, "docs", "evidence", "active-lock.json");
@@ -547,7 +613,7 @@ try {
   try {
     const activeOwner = {
       pid: activeHolder.pid!,
-      identity: readTestLinuxProcessIdentity(activeHolder.pid!),
+      identity: readTestProcessIdentity(activeHolder.pid!),
     };
     fs.writeFileSync(activeLockPath, `${JSON.stringify(activeOwner)}\n`);
     assert.throws(
@@ -595,8 +661,8 @@ try {
   const reusedPidOwner = {
     pid: process.pid,
     identity: {
-      ...readTestLinuxProcessIdentity(process.pid),
-      startTimeTicks: "0",
+      ...readTestProcessIdentity(process.pid),
+      ...(process.platform === "darwin" ? { startTimeMicros: "1" } : { startTimeTicks: "1" }),
     },
   };
   fs.writeFileSync(reusedPidLockPath, `${JSON.stringify(reusedPidOwner)}\n`, { mode: 0o600 });
