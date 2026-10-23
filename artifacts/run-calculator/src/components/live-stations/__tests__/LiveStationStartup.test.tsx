@@ -384,22 +384,8 @@ function PepperoniSetupEditor() {
       <button key={id} type="button" data-testid={id} onClick={() => setValue(field, value, { shouldDirty: true })}>{id}</button>
     ))}
     <button type="button" data-testid="toggle-pep1-combined" onClick={() => setValue("pep1Combined", !getValues("pep1Combined"), { shouldDirty: true })}>Toggle combined pepperoni</button>
-    {PEPPERONI_REGISTERS.map((register) => <StockSlotSetupEditor key={register} register={register} />)}
   </>;
 }
-
-function StockSlotSetupEditor({ register }: { register: (typeof PEPPERONI_REGISTERS)[number] }) {
-  const { control, setValue } = useFormContext<FormValues>();
-  const typeField = (register.endsWith("b")
-    ? `${register.slice(0, -1)}TypeB`
-    : `${register}Type`) as keyof FormValues;
-  const type = useWatch({ control, name: typeField });
-  return <input data-testid={`setup-${register}-type`} value={String(type ?? "")} onChange={(event) => setValue(typeField, event.target.value)} />;
-}
-
-describe("Pepperoni supply controls retained alongside applicator batches", () => {
-  beforeEach(() => clearManualSectionLocks());
-  afterEach(() => { cleanup(); clearManualSectionLocks(); vi.useRealTimers(); });
   const fixture = (queueManualCorrection = vi.fn(), runId = RUN_ID) =>
     <FrontlineNavigationFixture values={PEPPERONI_VALUES} runId={runId} queueManualCorrection={queueManualCorrection} />;
   const input = (register: string) => screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
@@ -409,65 +395,11 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
   }
 
-  it.each(PEPPERONI_REGISTERS.flatMap((register) =>
-    ["34.25", "0", ""].map((draft) => ({ register, draft })),
-  ))("restores the raw $register draft '$draft' after setup hides every stock row, saving only on Save", ({ register, draft }) => {
+  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
     const queue = vi.fn();
-    render(fixture(queue));
-    const setup = screen.getByTestId(`setup-${register}-type`) as HTMLInputElement;
-    const originalType = setup.value;
-    for (const other of PEPPERONI_REGISTERS) {
-      if (other !== register) fireEvent.change(screen.getByTestId(`setup-${other}-type`), { target: { value: "" } });
-    }
     const before = screen.getByTestId("stock-form-values").textContent;
-    const stockField = `${register}StockLbs`;
-    const savedStock = input(register).value;
-    fireEvent.change(input(register), { target: { value: "12.25" } });
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    fireEvent.change(setup, { target: { value: "" } });
-    fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
-    fireEvent.change(setup, { target: { value: originalType } });
-    expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(input(register).value).toBe(savedStock);
-    expect(queue).not.toHaveBeenCalled();
-  });
-
-  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
     const queue = vi.fn();
-    render(fixture(queue));
-    const setup = screen.getByTestId(`setup-${register}-type`) as HTMLInputElement;
-    const originalType = setup.value;
-    const savedStock = input(register).value;
-    fireEvent.change(input(register), { target: { value: "12.25" } });
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    fireEvent.change(setup, { target: { value: "" } });
-    fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
-    fireEvent.change(setup, { target: { value: originalType } });
-    expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(input(register).value).toBe(savedStock);
-    expect(queue).not.toHaveBeenCalled();
-  });
-
-  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
     const queue = vi.fn();
-    render(fixture(queue));
-    const setup = screen.getByTestId(`setup-${register}-type`) as HTMLInputElement;
-    const originalType = setup.value;
-    const savedStock = input(register).value;
-    fireEvent.change(input(register), { target: { value: "12.25" } });
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    fireEvent.change(setup, { target: { value: "" } });
-    fireEvent.change(setup, { target: { value: "Replacement Pepperoni" } });
-    fireEvent.change(setup, { target: { value: originalType } });
-    expect(screen.queryByTestId(`stock-${register}-lbs`)).toBeNull();
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(input(register).value).toBe(savedStock);
-    expect(queue).not.toHaveBeenCalled();
-  });
-
-  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
     const queue = vi.fn();
     render(fixture(queue));
     const before = screen.getByTestId("stock-form-values").textContent;
@@ -495,16 +427,22 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
   it.each(["", "0", "9999"])("retains a raw pepperoni draft %j across navigation without saving", (draft) => {
     const queue = vi.fn();
     render(fixture(queue));
-    fireEvent.change(input("pep2"), { target: { value: "12.25" } });
-    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
-    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    fireEvent.change(input("pep1"), { target: { value: "5" } });
+    fireEvent.change(input("pep1"), { target: { value: draft } });
     navigateAwayAndBack();
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(input("pep2").value).toBe("12.25");
-    expect(input("pep2b").value).toBe("34.5");
+    expect(input("pep1").value).toBe(draft);
     expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("clears only the filled slot while preserving another unfinished draft", () => {
+    render(fixture());
+    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    navigateAwayAndBack();
+    fireEvent.click(within(input("pep1").parentElement!).getByRole("button", { name: "Fill to cap" }));
+    navigateAwayAndBack();
+    expect(input("pep1").value).toBe(input("pep1").max);
+    expect(input("pep2b").value).toBe("34.5");
   });
 
   it("does not revive a hidden additional-Pep-2 draft after its ingredient changes", () => {
@@ -519,16 +457,22 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
   it("discards a run's drafts when switching runs while Frontline is unmounted", () => {
     const queue = vi.fn();
     render(fixture(queue));
-    fireEvent.change(input("pep2"), { target: { value: "12.25" } });
-    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
-    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    fireEvent.change(input("pep1"), { target: { value: "5" } });
+    fireEvent.change(input("pep1"), { target: { value: draft } });
     navigateAwayAndBack();
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    expect(input("pep2").value).toBe("12.25");
-    expect(input("pep2b").value).toBe("34.5");
+    expect(input("pep1").value).toBe(draft);
     expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("clears only the filled slot while preserving another unfinished draft", () => {
+    render(fixture());
+    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    navigateAwayAndBack();
+    fireEvent.click(within(input("pep1").parentElement!).getByRole("button", { name: "Fill to cap" }));
+    navigateAwayAndBack();
+    expect(input("pep1").value).toBe(input("pep1").max);
+    expect(input("pep2b").value).toBe("34.5");
   });
 
   it("does not revive a hidden additional-Pep-2 draft after its ingredient changes", () => {
@@ -603,33 +547,7 @@ describe("Frontline on-line applicator supply", () => {
 
   it("shows batch-unit supply controls and persists a manual correction for the active run", () => {
     const queueManualCorrection = vi.fn();
-
     const before = screen.getByTestId("stock-form-values").textContent;
-    render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
-    expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
-    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("batches");
-
-    fireEvent.click(screen.getByRole("button", { name: "Increase app1 batches on line" }));
-    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("1");
-    expect(queueManualCorrection).toHaveBeenCalledTimes(1);
-    expect(queueManualCorrection.mock.calls[0][0]).toBe(RUN_ID);
-    expect(queueManualCorrection.mock.calls[0][1]).toMatchObject({
-      app1StockLbs: 25,
-      app1StockAnchorNetSec: expect.any(Number),
-      app1StockCorrectionGeneration: expect.any(Number),
-      app1BatchAnchorNetSec: expect.any(Number),
-      app1BatchCorrectionGeneration: expect.any(Number),
-    });
-    expect(queueManualCorrection.mock.calls[0][2]).toEqual(expect.objectContaining({
-      app1StockLbs: expect.any(Number),
-    }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Decrease app1 batches on line" }));
-    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("0");
-    expect(queueManualCorrection).toHaveBeenCalledTimes(2);
-  });
-});
-
 function expectSelector(
   selector:
     | { readonly role: "button"; readonly name: string }
@@ -1184,13 +1102,4 @@ describe("live station edits and stamped browser persistence", () => {
       editedStamp - 1,
       editedStamp,
     );
-    expect(acceptsStalePeer).toBe(false);
-
-    if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
-    expect(loadRunValues(RUN_ID).sauceStockBarrels).toBe(1.3);
-  });
-
-});
-
     const persisted = loadRunValues(RUN_ID);

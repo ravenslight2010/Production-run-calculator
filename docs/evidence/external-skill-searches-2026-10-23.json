@@ -1,0 +1,386 @@
+{
+  "date": "2026-10-23",
+  "searches": [
+    {
+      "id": "browser",
+      "query": "Which original repositories provide e2e-reviewer playwright-test-generator and playwright-debugger agent skills?",
+      "searchQueries": [
+        "\"e2e-reviewer\" SKILL.md",
+        "\"playwright-test-generator\" skill",
+        "\"playwright-debugger\" skill"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "description: 'Use when someone wants to add, write, create, or scaffold new Playwright end-to-end tests for a page, flow, form, component, uncovered route, or first-project setup. \ne2e-reviewer), generating Cypress tests, or writing unit, component, or integration tests",
+            "title": "e2e-skills/skills/playwright-test-generator/SKILL.md at main · voidmatcha/e2e-skills · GitHub",
+            "url": "https://github.com/voidmatcha/e2e-skills/blob/main/skills/playwright-test-generator/SKILL.md"
+          },
+          {
+            "snippet": "|Review Playwright/Cypress tests or PR/diff changes |`e2e-reviewer` |P0/P1/P2 findings with concrete fixes and introduced/worsened/pre-existing attribution, each carrying the evidence it was decided \n* Independent product-review r",
+            "title": "GitHub - voidmatcha/e2e-skills: Playwright and Cypress skills for Claude Code and Codex: generate tests, catch false-green tests and test smells, debug failures. · GitHub",
+            "url": "https://github.com/voidmatcha/e2e-skills"
+          },
+          {
+            "snippet": "\n# playwright-debugger\n\nUse when a Playwright end-to-end test has already run and failed and the user wants the root cause and a concrete fix. \n\\# Playwright Failed Test Debugger Diagnose Playwright test failures from report files. Classifies root causes and pr",
+            "title": "playwright-debugger Agent Skill | voidmatcha/e2e-skills",
+            "url": "https://skillsmp.com/creators/voidmatcha/e2e-skills/skills-playwright-debugger"
+          },
+          {
+            "snippet": "- `playwright-test-generator` — generates Playwright E2E tests from scratch (coverage-gap analysis → live-browser exploration → approval gate → review).\n\n`e2e-skills` is a bundle of four Agent Skills for end-to-end test work on Playwright and Cypress projects:\n\n",
+            "title": "E2E Skills",
+            "url": "https://raw.githubusercontent.com/voidmatcha/e2e-skills/HEAD/AGENTS.md"
+          },
+          {
+            "snippet": "Use when a Playwright end-to-end test has already run and failed and the user wants the root cause and a concrete fix. \nInspect the source before running it.\n\n`npx skills add https://github.com/voidmatcha/e2e-skills --skill playwright-debugger`\n\nThe command stays on one line. ",
+            "title": "playwright-debugger Agent Skill | voidmatcha/e2e-skills",
+            "url": "https://skillsmp.com/creators/voidmatcha/e2e-skills/benchmarks-subagent-routing-v1-confirmation-v1-evaluated-snapshot-skills-playwright-debugger"
+          },
+          {
+            "snippet": "Playwright comes with three Playwright Test Agents out of the box: **🎭 planner** , **🎭 generator** and **🎭 healer** .\n\n\n* **🎭 planner** explores the app and produces a Markdown test plan\n* **🎭 generator** transforms the Markdown plan into the Playwright Test files\n",
+            "title": "Agents | Playwright",
+            "url": "https://playwright.dev/docs/test-agents"
+          },
+          {
+            "snippet": "-reviewer-skill-md/opengraph-image\n---\n\n\n# e2e-reviewer\n\nUse when reviewing Playwright or Cypress E2E specs, Page Objects (POM), PRs, pull requests, patches, ",
+            "title": "e2e-reviewer | voidmatcha/e2e-skills Agent Skill | SkillsMP",
+            "url": "https://skillsmp.com/creators/voidmatcha/e2e-skills/benchmarks-subagent-routing-v1-confirmation-v1-evaluated-snapshot-skills-e2e-reviewer"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "state",
+      "query": "Which agent skills cover offline synchronization state machines production math and property based testing?",
+      "searchQueries": [
+        "agent skills offline sync state machine",
+        "Trail of Bits property based testing skills"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "Guidance for property-based testing across languages, including Echidna and Medusa for\nEVM smart contracts.\n\n## What it does\n\n\n* **Spots PBT opportunities** — encode/decode pairs, validators, normalizers, pure\n  functions with wide input domains, smart-contract invariants\n\nIt is _less_ affe",
+            "title": "skills/plugins/property-based-testing/skills/property-based-testing at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/tree/main/plugins/property-based-testing/skills/property-based-testing"
+          },
+          {
+            "snippet": "| property-based-testing | Write, review, and triage property-based tests — Hypothesis, fast-check, proptest, and Echidna or Medusa for Solidity invariants |\n\n| regression-hunt | Find and validate regressions across PRs and commits using discovery, reproduction, and replayed evidence |\n",
+            "title": "skills/README.md at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/blob/main/README.md"
+          },
+          {
+            "snippet": "skills/pr-improver)\n* [property-based-testing Writes, reviews, and debugs property-based tests — Hypothesis, fast-check, proptest, jqwik, rapid, and Echidna or Medusa for Solidity invariants. ",
+            "title": "trailofbits/skills — Agent Skills | MDSkill",
+            "url": "https://mdskill.dev/trailofbits/skills"
+          },
+          {
+            "snippet": "flake8/black, and mypy.](https://officialskills.sh/trailofbits/skills/modern-python) [12 property-based-testing testing Guides property-based testing across Python, JavaScript, Rust, and ",
+            "title": "Trail of Bits — 21 Agent Skills | officialskills.sh",
+            "url": "https://officialskills.sh/trailofbits/skills"
+          },
+          {
+            "snippet": "Guides property-based testing across Python, JavaScript, Rust, and Solidity/Vyper. Detects high-value patterns like serialization pairs, normalizers, and smart contract state invariants, then \n* Writing roundtrip tests for encode/decode function pairs\n* Generating fuzz inputs for URL and config",
+            "title": "Trail of Bits/property-based-testing — Agent Skills | officialskills.sh",
+            "url": "https://officialskills.sh/trailofbits/skills/property-based-testing"
+          },
+          {
+            "snippet": "regressions, with reproducible failures and explicit validation gaps |\n|[property-based-testing](https://github.com/trailofbits/skills/blob/main/plugins/property-based-testing) |Write, review, and \ntriage property-based te",
+            "title": "GitHub - trailofbits/skills: Trail of Bits skills for security research, vulnerability detection, and audit workflows · GitHub",
+            "url": "https://github.com/trailofbits/skills"
+          },
+          {
+            "snippet": "by [Trail of Bits](https://github.com/trailofbits) · [Security](https://agenticskills.io/category/security)\n\nProperty-based testing for multiple languages and smart contracts.\n\n\nClaude Code Codex Cursor Multi Platform\n\n7\\.6K stars\n\nUpdated 1 month ago\n\n5 contributors\n\n## Install This Skill\n\nC",
+            "title": "Property-Based Testing — AI Agent Skill by Trail of Bits | AgenticSkills",
+            "url": "https://agenticskills.io/skills/property-based-testing"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "data",
+      "query": "Which maintained original agent skill repositories cover Excel imports PostgreSQL Drizzle and accessibility?",
+      "searchQueries": [
+        "agent skills xlsx spreadsheet Anthropic",
+        "Supabase postgres best practices skills",
+        "agent skills accessibility web quality"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "- Path: skills/xlsx/SKILL.md\n- Ref: main\n- Lines: 99\n\n---\n\n---\nname: xlsx\ndescription: \"Use this skill any time a spreadsheet file is the primary input or output. \nmessy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. ",
+            "title": "skills/skills/xlsx/SKILL.md at main · anthropics/skills · GitHub",
+            "url": "https://github.com/anthropics/skills/blob/main/skills/xlsx/SKILL.md"
+          },
+          {
+            "snippet": "- Ref: main\n- Lines: 64\n\n---\n\n---\nname: supabase-postgres-best-practices\ndescription: \"Postgres best practices maintained by Supabase, for Postgres running anywhere. \n# Supabase Postgres Best Practices\n\nComprehensive performance optimization guide for Postgres, maintained by Supabase. ",
+            "title": "agent-skills/skills/supabase-postgres-best-practices/SKILL.md at main · supabase/agent-skills · GitHub",
+            "url": "https://github.com/supabase/agent-skills/blob/main/skills/supabase-postgres-best-practices/SKILL.md"
+          },
+          {
+            "snippet": "official [data](https://officialskills.sh/?category=data)\n\nA collection of Postgres optimization rules organized by impact, covering query performance, connection management, RLS, schema design, and ",
+            "title": "Supabase/postgres-best-practices — Agent Skills | officialskills.sh",
+            "url": "https://officialskills.sh/supabase/skills/postgres-best-practices"
+          },
+          {
+            "snippet": "# supabase/agent-skills — skills/supabase-postgres-best-practices\n\n- Page: GitHub directory listing\n- URL: https://github.com/supabase/agent-skills/tree/main/skills/supabase-postgres-best-practices\n",
+            "title": "agent-skills/skills/supabase-postgres-best-practices at main · supabase/agent-skills · GitHub",
+            "url": "https://github.com/supabase/agent-skills/tree/main/skills/supabase-postgres-best-practices"
+          },
+          {
+            "snippet": "description: \"Postgres best practices maintained by Supabase, for Postgres running anywhere. Load this skill BEFORE writing or changing anything that lives in a Postgres database: creating or \neouts, EXPLAIN plans, connection exhaustion, locking, bloat, or rows visible to the wrong user or tenant. ",
+            "title": "opencode-supabase/skills/supabase-postgres-best-practices/SKILL.md at main · supabase-community/opencode-supabase · GitHub",
+            "url": "https://github.com/supabase-community/opencode-supabase/blob/main/skills/supabase-postgres-best-practices/SKILL.md"
+          },
+          {
+            "snippet": "Triggers: Supabase products (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues); client libraries and SSR integrations (supabase-js, @supabase/ssr) in Next.js, React, \nn** the user reports that this skill gave incorrect guidance or is missing information.",
+            "title": "agent-skills/skills/supabase/SKILL.md at main · supabase/agent-skills · GitHub",
+            "url": "https://github.com/supabase/agent-skills/blob/main/skills/supabase/SKILL.md"
+          },
+          {
+            "snippet": "[supabase-postgres-best-practices](https://tessl.io/registry/skills/github/supabase/agent-skills/supabase-postgres-best-practices)\n\n## supabase-postgres-best-practices\n\n",
+            "title": "Tessl • The package manager for agent skills",
+            "url": "https://tessl.io/registry/skills/github/supabase/agent-skills/supabase-postgres-best-practices"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "future",
+      "query": "Which original agent skills cover local LLM evaluation React decomposition and food allergen quality workflows?",
+      "searchQueries": [
+        "Hugging Face skills model evaluation",
+        "Vercel react composition patterns skills",
+        "agent skill food allergen HACCP"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "  React composition patterns that scale. Use when refactoring components with\n  boolean prop proliferation, building flexible component libraries, or\n  designing reusable APIs. \ncomposing internals. These patterns make codebases easier for both hum",
+            "title": "agent-skills/skills/composition-patterns/SKILL.md at main · vercel-labs/agent-skills · GitHub",
+            "url": "https://github.com/vercel-labs/agent-skills/blob/main/skills/composition-patterns//SKILL.md?plain=1"
+          },
+          {
+            "snippet": "Adds and manages evaluation results in Hugging Face model cards using the model-index metadata format. \nSupports extracting benchmark tables from README files, importing scores from the Artificial Analysis API, and running evaluations with vLLM or lighteval on local GPUs or HF Jobs infrastructure.\n\n",
+            "title": "Hugging Face/hugging-face-evaluation — Agent Skills | officialskills.sh",
+            "url": "https://officialskills.sh/huggingface/skills/hugging-face-evaluation"
+          },
+          {
+            "snippet": "- package.json\n- skills.sh.json\n\n## README.md\n\n# Agent Skills\n\nA collection of skills for AI coding agents. Skills are packaged instructions and scripts that extend agent capabilities.\n\n\n* Accessibility ( `prefers-reduced-motion` )\n\n### composition-patterns\n\nReact composition patterns that scale. ",
+            "title": "GitHub - vercel-labs/agent-skills: Vercel's official collection of agent skills · GitHub",
+            "url": "https://github.com/vercel-labs/agent-skills"
+          },
+          {
+            "snippet": "Hugging Face provides a curated set of Skills built for AI builders. Train models, create datasets, run evaluations, track experiments. \n| [`huggingface-llm-trainer`](https://github.com/huggingface/skills/tree/main/skills/huggingface-llm-trainer) | Train or fine-tune LLMs with TRL (",
+            "title": "Skills",
+            "url": "https://huggingface.co/docs/hub/main/agents-skills"
+          },
+          {
+            "snippet": "- Repository: vercel-labs/agent-skills\n- Path: skills/react-best-practices/AGENTS.md\n- Ref: main\n- Lines: 3810\n\n---\n\n# React Best Practices\n\n**Version 1.0.0**  \nVercel Engineering  \nJanuary 2026\n\n",
+            "title": "agent-skills/skills/react-best-practices/AGENTS.md at main · vercel-labs/agent-skills · GitHub",
+            "url": "https://github.com/vercel-labs/agent-skills/blob/main/skills/react-best-practices/AGENTS.md"
+          },
+          {
+            "snippet": "\n# hugging-face-evaluation-manager\n\nAdd and manage evaluation results in Hugging Face model cards. ",
+            "title": "hugging-face-evaluation-manager Agent Skill | SkillsMP",
+            "url": "https://skillsmp.com/ko/creators/aisa-group/skill-inject/data-skills-hf-model-evaluation"
+          },
+          {
+            "snippet": "This skill is for **running evaluations against models on the Hugging Face Hub on local hardware** .\n\nIt covers:\n\n* `inspect-ai` with local inference\n* `lighteval` with local inference\n\n[### Hugging Face Model Trainer by Hugging Face S-rank Train models with TRL: SFT, DPO, GRPO fine-tuning and G",
+            "title": "Hugging Face Evaluation — AI Agent Skill by Hugging Face | AgenticSkills",
+            "url": "https://agenticskills.io/skills/hugging-face-evaluation"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "pwa",
+      "query": "What original agent skills specifically cover offline PWA service worker updates multi-device conflict recovery?",
+      "searchQueries": [
+        "github SKILL.md offline sync recovery",
+        "github SKILL.md PWA service worker updates"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "\n**Goal:** Queue user actions taken offline and replay them when connectivity returns.\n*   **Sync Registration:** When a network request fails (e.g., form submission, data save), store the request ",
+            "title": "awesome-agent-skills/skills/pwa-offline-first/SKILL.md at main · mayurrathi/awesome-agent-skills · GitHub",
+            "url": "https://github.com/mayurrathi/awesome-agent-skills/blob/main/skills/pwa-offline-first/SKILL.md"
+          },
+          {
+            "snippet": "> and `_localVersion` so the queue knows what is outstanding. Deletes are tombstones, never\n> removals, or a delayed sync resurrects them. The Background Sync API is Chromium-only, so an\n> ",
+            "title": "skills/dist/plugins/web-pwa-offline-first/skills/web-pwa-offline-first/SKILL.md at main · agents-inc/skills · GitHub",
+            "url": "https://github.com/agents-inc/skills/blob/main/dist/plugins/web-pwa-offline-first/skills/web-pwa-offline-first/SKILL.md"
+          },
+          {
+            "snippet": "It's all in [SKILL.md](https://github.com/mattiasgeniar/offline-first-pwa/blob/main/SKILL.md) . Service worker caching strategy, precaching, in-app update\n\n- Created: 2026-08-19T13:43:00.000Z\n- Commits: 2\n\n## Top-level files\n\n- AGENTS.md\n- README.md\n- SKILL.md\n\n## README.md\n\n# offline-first-pwa\n\n",
+            "title": "GitHub - mattiasgeniar/offline-first-pwa: Agent skill: the rules for building offline-first PWAs that launch instantly from the home screen · GitHub",
+            "url": "https://github.com/mattiasgeniar/offline-first-pwa"
+          },
+          {
+            "snippet": "skills/src/skills/web-pwa-offline-first/examples/sync.md at ...\nSynchronization Patterns Conflict resolution and synchronization patterns for offline-first applications. See SKILL.md for concepts.",
+            "title": "skills/src/skills/web-pwa-offline-first/examples/sync.md at ...",
+            "url": "https://github.com/agents-inc/skills/blob/main/src/skills/web-pwa-offline-first/examples/sync.md"
+          },
+          {
+            "snippet": "- Description: A production-ready offline-first web app with IndexedDB, Service Worker caching, AES-GCM encryption, background sync, and conflict resolution. PWA installable with full CRUD operations.\n* Practical conflict resolution",
+            "title": "GitHub - JaiAakash21/Offline-First-App: A production-ready offline-first web app with IndexedDB, Service Worker caching, AES-GCM encryption, background sync, and conflict resolution. PWA installable with full CRUD operations. · GitHub",
+            "url": "https://github.com/JaiAakash21/Offline-First-App"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "math",
+      "query": "What original agent skills address dimensional analysis unit conversion and stateful testing for production counters?",
+      "searchQueries": [
+        "trailofbits dimensional-analysis SKILL.md",
+        "github SKILL.md stateful model based testing"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "-analysis pipeline for codebases that perform numeric computations with mixed units, precisions, or scaling factors. \ndescription: \"Annotates codebases with dimensional analysis comments documenting units, dimensions, and decimal scaling. \nThis skill orchestrates a dimensional",
+            "title": "skills/plugins/dimensional-analysis/skills/dimensional-analysis/SKILL.md at 442fc9d6c89b1e937e6f7a477e7071ea75fcbea4 · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/blob/442fc9d6c89b1e937e6f7a477e7071ea75fcbea4/plugins/dimensional-analysis/skills/dimensional-analysis/SKILL.md"
+          },
+          {
+            "snippet": "Audits code for unit and decimal-scaling bugs and annotates it with dimensional comments recording the units of each value. \n[dimensional-analysis](https://tessl.io/registry/skills/github/trailofbits/skills/dimensional-analysis)\n\nSkill Public\n\n## dimensional-analysis\n\n",
+            "title": "Tessl • The package manager for agent skills",
+            "url": "https://tessl.io/registry/skills/github/trailofbits/skills/dimensional-analysis/evals"
+          },
+          {
+            "snippet": "|[dimensional-analysis](https://github.com/trailofbits/skills/blob/main/plugins/dimensional-analysis) |Annotate codebases with dimensional analysis comments to detect unit mismatches and formula bugs ",
+            "title": "GitHub - trailofbits/skills: Trail of Bits skills for security research, vulnerability detection, and audit workflows · GitHub",
+            "url": "https://github.com/trailofbits/skills"
+          },
+          {
+            "snippet": "| dimensional-analysis | Annotate codebases with dimensional analysis comments to detect unit mismatches and formula bugs |\n\n| fp-check | Systematic false positive verification for security bug analysis with mandatory gate reviews |\n",
+            "title": "skills/README.md at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/blob/main/README.md"
+          },
+          {
+            "snippet": "Guidance for property-based testing across languages, including Echidna and Medusa for\nEVM smart contracts.\n\n## What it does\n\n\nTo readmit it, run the query against the fixture with and without the plugin and\ncompare the answers. \nIt is _less_ affe",
+            "title": "skills/plugins/property-based-testing/skills/property-based-testing at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/tree/main/plugins/property-based-testing/skills/property-based-testing"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "security",
+      "query": "Which original agent skills address operational diagnostic data privacy and security review?",
+      "searchQueries": [
+        "trailofbits skills differential review supply chain",
+        "github SKILL.md observability privacy diagnostics"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "description: \"Performs security-focused differential review of code changes. Adapts analysis depth to codebase size, uses git blame for context, calculates blast radius by counting callers, checks \nSecurity-focused code review fo",
+            "title": "skills/plugins/differential-review/skills/differential-review/SKILL.md at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/blob/main/plugins/differential-review/skills/differential-review/SKILL.md"
+          },
+          {
+            "snippet": "|[differential-review](https://github.com/trailofbits/skills/blob/main/plugins/differential-review) |Security-focused differential review of code changes with git history analysis |\n\n|[supply-chain-risk-auditor](https://github.com/trailofbits/skills/blob/main/plugins/supply-chain-risk-auditor) |A",
+            "title": "GitHub - trailofbits/skills: Trail of Bits skills for security research, vulnerability detection, and audit workflows · GitHub",
+            "url": "https://github.com/trailofbits/skills"
+          },
+          {
+            "snippet": "# Differential Review\n\nSecurity-focused differential review of code changes with git history analysis and blast radius estimation.\n\n**Author:** Omar Inuwa\n\n## When to Use\n\n",
+            "title": "skills/plugins/differential-review at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/tree/main/plugins/differential-review"
+          },
+          {
+            "snippet": "# trailofbits/skills\n\n- Page: GitHub repository\n- URL: https://github.com/trailofbits/skills\n- Description: Trail of Bits Claude Code skills for security research, vulnerability detection, and audit \ntor) |Audit GitHub Actions workflows for AI agent security vulnerabilities |\n|[audit-cont",
+            "title": "GitHub - trailofbits/skills: Trail of Bits Claude Code skills for security research, vulnerability detection, and audit workflows · GitHub",
+            "url": "https://github.com/trailofbits/skills?spm=a2c6h.13046898.publish-article.20.78d16ffaUF7L7Q"
+          },
+          {
+            "snippet": "Detailed phase-by-phase workflow for security-focused code review.\n\n## Pre-Analysis: Baseline Context Building\n\n**FIRST ACTION - Build complete baseline understanding:**\n\n\n# Scope = entire relevant project (e.g., packages/contracts/contracts/ for Solidity, src/ for Rust, etc.)\n\n---\n\n## Phase ",
+            "title": "skills/plugins/differential-review/skills/differential-review/methodology.md at main · trailofbits/skills · GitHub",
+            "url": "https://github.com/trailofbits/skills/blob/main/plugins/differential-review/skills/differential-review/methodology.md"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "qc",
+      "query": "Which original agent skills support food quality allergen records without prescribing compliance decisions?",
+      "searchQueries": [
+        "github SKILL.md HACCP allergens food safety",
+        "github agent skills quality control food"
+      ],
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "f4c302d2d4c342d436c617373696669636174696f6e2d6f72616e6765)\n\nA comprehensive governance framework for **AI Agent Skills** — from classification to quality assurance to tooling.\n\n## Why This Matters\n\n",
+            "title": "GitHub - yuzhaopeng-up/skill-framework: L0-L4 AI Agent Skill Governance Framework - 200+ Skills, YAML Templates, Classification System · GitHub",
+            "url": "https://github.com/yuzhaopeng-up/skill-framework"
+          },
+          {
+            "snippet": "* Pre-operational Inspection Records: These are often scheduled, conducted, and recorded to confirm that the cleaning and sanitation, premises and equipment and GMP supports to Allergen Management ",
+            "title": "Allergen Management | Food Quality & Safety | haccp.com",
+            "url": "https://haccp.com/information/allergen-management"
+          },
+          {
+            "snippet": "### List all ingredients and raw materials with their allergens. Update whenever a new item is added. This acts as the foundation of your plan.\n\n### **Supplier Allergen Info & Approval**\n\n",
+            "title": "HACCP allergen control program checklist",
+            "url": "https://www.fooddocs.com/hubfs/HACCP_Allergen_Control_Program_Checklist.pdf"
+          },
+          {
+            "snippet": "use** — the dominant food manufacturing hazard category [[3]]() .\n2. **Cross-contamination and cross-contact** — allergen and pathogen pathways combine in shared equipment.\n3. \n**Receiving**\n\nLot+temperature record\n\n▼\n\n2\n\n**Co\nMmowW Food — Food safety, made visible.\n\n[Start Free](https:/",
+            "title": "HACCP For Food Manufacturing Japan (2026)",
+            "url": "https://mmoww.net/food/library/haccp-for-food-manufacturing-jp/en"
+          },
+          {
+            "snippet": "\nThe Agent Skills format was originally developed by [Anthropic](https://www.anthropic.com/) , released as an open standard, and has been adopted by a growing number of agent products. \n**For compatible agents** : Support for skills lets end users give agents new capabilities out of the box. ",
+            "title": "Overview - Agent Skills",
+            "url": "http://skill.md/"
+          }
+        ],
+        "searchAnswer": null
+      }
+    },
+    {
+      "id": "license-and-contrast",
+      "query": "Where are the actual MIT license terms for Vercel agent skills composition patterns, and what does WCAG define as large-scale text?",
+      "result": {
+        "resultPages": [
+          {
+            "snippet": "use a wider range of color choices for large text, which is helpful for design of\npages, particularly titles. 18 point text or 14 point bold text is judged to be large\n\n    Large-scale text and images of large-scale text have a contrast ratio of at least 3:1;\nIncidental\n",
+            "title": "Understanding Success Criterion 1.4.3: Contrast (Minimum) | WAI | W3C",
+            "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum"
+          },
+          {
+            "snippet": "use a wider range of color choices for large text, which is helpful for design of\npages, particularly titles. 18 point text or 14 point bold text is judged to be large\n\n    Large-scale text and images of large-scale text have a contrast ratio of at least 3:1;\nIncidental\n",
+            "title": "Understanding Success Criterion 1.4.3: Contrast (Minimum) | WAI | W3C",
+            "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html"
+          },
+          {
+            "snippet": "use a wider range of color choices for large text, which is helpful for design of\npages, particularly titles. 18 point text or 14 point bold text is judged to be large\n\n    Large-scale text and images of large-scale text have a contrast ratio of at least 3:1;\nIncidental\n",
+            "title": "Understanding Success Criterion 1.4.3: Contrast (Minimum) | WAI | W3C",
+            "url": "https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html"
+          },
+          {
+            "snippet": "  React composition patterns that scale. Use when refactoring components with\n  boolean prop proliferation, building flexible component libraries, or\n  designing reusable APIs. \ncomposing internals. These patterns make codebases easier for both humans",
+            "title": "agent-skills/skills/composition-patterns/SKILL.md at main · vercel-labs/agent-skills · GitHub",
+            "url": "https://github.com/vercel-labs/agent-skills/blob/main/skills/composition-patterns/SKILL.md"
+          },
+          {
+            "snippet": "of at least 4\\. 5:1, except for the following:\n(Level AA)\n\n* **Large Text:** Large-scale text and images of large-scale text have a contrast ratio of at least 3:1;\n\n* **Large Text:** Large-scale text and images of large-scale text have a contrast ratio of at least 4\\. 5:1;\n",
+            "title": "Web Content Accessibility Guidelines (WCAG)  2.0",
+            "url": "https://www.w3.org/TR/WCAG20"
+          }
+        ],
+        "searchAnswer": null
+      }
+    }
+  ]
+}

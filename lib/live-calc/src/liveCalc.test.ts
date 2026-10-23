@@ -54,7 +54,7 @@ describe("shared live calculation boundary", () => {
       dayState: { runs: [{ id: "run-override", startedAt: 1000 }], currentIndex: 0 },
       runValues: {
         "run-override": {
-          pizzasPerCase: 10,
+          pizzasPerCase: 0,
           casesPerSkid: 20,
           casesNeeded: 100,
           crustsPerCycle: 4,
@@ -128,7 +128,8 @@ describe("shared live calculation boundary", () => {
         pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
         app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
       } as never,
-      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
+      coordination: { case: { generation: "run-1:2000", nextDueAt: 4000, sequence: 3 } },
+      serverWallOwnership: { case: 3 },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
