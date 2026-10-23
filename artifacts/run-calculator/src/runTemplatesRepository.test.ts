@@ -10,24 +10,118 @@ import {
   replaceRunTemplates,
   saveRunTemplate,
   setRunTemplatesScope,
+  setRunTemplatesWriteTimeoutForTests,
+  settleRunTemplatesFlushesForTests,
 } from "./runTemplatesRepository";
 
 const template = (name = "Template"): RunTemplate =>
   ({ id: "one", name, values: {}, createdAt: "2026-01-01T00:00:00.000Z" } as RunTemplate);
 const response = (templates: unknown[]) => ({ ok: true, json: async () => ({ templates }) }) as Response;
+const originalFetch = globalThis.fetch;
+let restoreTimeout: () => void;
 
 beforeEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   localStorage.clear();
   setRunTemplatesScope("live");
-  vi.restoreAllMocks();
+  restoreTimeout = setRunTemplatesWriteTimeoutForTests(50);
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 });
 
-afterEach(() => {
-  vi.useRealTimers();
-});
+async function cleanupRepository(): Promise<void> {
+  try {
+    // Do not reset storage, scope or fetch while optimistic work still owns it.
+    // This also waits for follow-up rounds and work started in another scope.
+    await settleRunTemplatesFlushesForTests();
+  } finally {
+    restoreTimeout();
+    localStorage.clear();
+    setRunTemplatesScope("live");
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+}
+
+afterEach(cleanupRepository);
 
 describe("run template repository", () => {
+  it("restores nested timeout overrides and the 30-second production default", async () => {
+    restoreTimeout();
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    const fetchMock = vi.fn(async () => response([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreOuter = setRunTemplatesWriteTimeoutForTests(75);
+    const restoreInner = setRunTemplatesWriteTimeoutForTests(25);
+    try {
+      saveRunTemplate(template());
+      await settleRunTemplatesFlushesForTests();
+      expect(timer.mock.calls.at(-1)?.[1]).toBe(25);
+      restoreInner();
+      deleteRunTemplate("one");
+      await settleRunTemplatesFlushesForTests();
+      expect(timer.mock.calls.at(-1)?.[1]).toBe(75);
+      restoreOuter();
+      saveRunTemplate(template());
+      await settleRunTemplatesFlushesForTests();
+      expect(timer.mock.calls.at(-1)?.[1]).toBe(30_000);
+    } finally {
+      restoreInner();
+      restoreOuter();
+    }
+  });
+
+  it("settles both scopes and restores globals even when the test body fails", async () => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal("fetch", vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        signals.push(init!.signal!);
+        init!.signal!.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }),
+    ));
+    await expect((async () => {
+      try {
+        saveRunTemplate(template("live"));
+        setRunTemplatesScope("sandbox");
+        saveRunTemplate(template("sandbox"));
+        throw new Error("simulated assertion failure");
+      } finally {
+        await cleanupRepository();
+      }
+    })()).rejects.toThrow("simulated assertion failure");
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(globalThis.fetch).toBe(originalFetch);
+    expect(vi.isFakeTimers()).toBe(false);
+    expect(localStorage.length).toBe(0);
+  });
+
+  describe.each(["live", "sandbox"] as const)("%s successive cases", (scope) => {
+    it("leaves an optimistic request for teardown to settle", () => {
+      setRunTemplatesScope(scope);
+      const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+      vi.stubGlobal("fetch", fetchMock);
+      saveRunTemplate(template("previous case"));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // Intentionally do not await: afterEach must drain the module registry.
+    });
+
+    it("starts its own write rather than joining the preceding case", async () => {
+      setRunTemplatesScope(scope);
+      const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) =>
+        response((JSON.parse(String(init?.body)) as { templates: unknown[] }).templates),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      saveRunTemplate(template("next case"));
+      await flushRunTemplates();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+      expect(JSON.parse(localStorage.getItem(`run-calc-templates-outbox-v1:${scope}`)!)).toEqual([]);
+    });
+  });
+
   it("falls back safely when snapshot or outbox JSON has the wrong schema", () => {
     localStorage.setItem("run-calc-templates:live", JSON.stringify({ bad: true }));
     localStorage.setItem("run-calc-templates-outbox-v1:live", JSON.stringify("bad"));
@@ -58,18 +152,22 @@ describe("run template repository", () => {
     // The optimistic kick plus this second edit becomes one latest outbox op;
     // no parallel flush is allowed.
     saveRunTemplate(template("newer"));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await settleRunTemplatesFlushesForTests();
     // The newer edit is sent in a subsequent round, never in parallel with
     // the first request.
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/run-templates")).toHaveLength(2);
   });
 
-  it.each(["save", "delete"] as const)(
-    "bounds a hung %s write and keeps its outbox entry without retrying it",
-    async (operation) => {
-      vi.useFakeTimers();
+  it.each([
+    ["live", "save"], ["live", "delete"], ["sandbox", "save"], ["sandbox", "delete"],
+  ] as const)(
+    "bounds a hung %s %s write and keeps its outbox entry without retrying it",
+    async (scope, operation) => {
+      setRunTemplatesScope(scope);
+      let signal: AbortSignal | null | undefined;
       const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
         new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
           init?.signal?.addEventListener("abort", () => {
             reject(new DOMException("Client stopped waiting", "AbortError"));
           }, { once: true });
@@ -80,24 +178,25 @@ describe("run template repository", () => {
       if (operation === "save") {
         saveRunTemplate(template());
       } else {
-        localStorage.setItem("run-calc-templates:live", JSON.stringify([
+        localStorage.setItem(`run-calc-templates:${scope}`, JSON.stringify([
           { ...template(), revision: 1, deleted: false },
         ]));
         deleteRunTemplate("one");
       }
 
       const flushing = flushRunTemplates();
-      await vi.advanceTimersByTimeAsync(30_000);
       await flushing;
+      await settleRunTemplatesFlushesForTests();
 
+      expect(vi.isFakeTimers()).toBe(false);
+      expect(signal?.aborted).toBe(true);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0]?.[1]?.method).toBe(operation === "save" ? "POST" : "DELETE");
-      expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
+      expect(JSON.parse(localStorage.getItem(`run-calc-templates-outbox-v1:${scope}`)!)).toHaveLength(1);
     },
   );
 
   it("recovers a save committed after client timeout with a read, not a write retry", async () => {
-    vi.useFakeTimers();
     let serverTemplates: unknown[] = [];
     const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {
@@ -116,7 +215,6 @@ describe("run template repository", () => {
 
     saveRunTemplate(template("committed"));
     const flushing = flushRunTemplates();
-    await vi.advanceTimersByTimeAsync(30_000);
     await flushing;
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -131,7 +229,6 @@ describe("run template repository", () => {
   });
 
   it("keeps an uncommitted timed-out save queued after canonical recovery without replay", async () => {
-    vi.useFakeTimers();
     const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {
         return new Promise<Response>((_resolve, reject) => {
@@ -146,7 +243,6 @@ describe("run template repository", () => {
 
     saveRunTemplate(template("not committed"));
     const flushing = flushRunTemplates();
-    await vi.advanceTimersByTimeAsync(30_000);
     await flushing;
     await reconcileRunTemplates();
 
@@ -220,5 +316,36 @@ describe("run template repository", () => {
     expect(localRunTemplates().map((item) => item.name)).toEqual(["live"]);
     expect(localStorage.getItem("run-calc-templates-outbox-v1:sandbox")).toContain("sandbox-one");
     expect(localStorage.getItem("run-calc-templates-outbox-v1:live")).not.toContain("sandbox-one");
+  });
+
+  it("does not adopt a delayed live response into sandbox or coalesce their writes", async () => {
+    let finishLive!: (value: Response) => void;
+    const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      const submitted = (JSON.parse(String(init?.body)) as { templates: unknown[] }).templates;
+      return submitted.some((item) => (item as RunTemplate).name === "live")
+        ? new Promise<Response>((resolve) => { finishLive = resolve; })
+        : Promise.resolve(response(submitted));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    saveRunTemplate(template("live"));
+    setRunTemplatesScope("sandbox");
+    saveRunTemplate(template("sandbox"));
+    await flushRunTemplates();
+    finishLive(response([{ ...template("live"), revision: Number.MAX_SAFE_INTEGER, deleted: false }]));
+    await settleRunTemplatesFlushesForTests();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(localRunTemplates()).toEqual([template("sandbox")]);
+    expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:sandbox")!)).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
+  });
+
+  it("keeps rejected writes queued without automatic replay", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 403 }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    saveRunTemplate(template());
+    await settleRunTemplatesFlushesForTests();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(localRunTemplates()).toEqual([template()]);
+    expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
   });
 });

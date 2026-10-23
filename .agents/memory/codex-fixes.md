@@ -1436,3 +1436,36 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: CI invokes the package's standard test command, so placing the contract there ensures guide/runner drift fails routine validation. The test setup must use the suppression channel the tray countdown actually observes.
 
 **Verification**: Focused contract passed; full calculator suite passed (3,507 passed, 1 skipped); workspace typecheck passed.
+
+## Run-template timeout test isolation
+
+**Date**: 2026-10-23
+
+**Files changed**:
+- `artifacts/run-calculator/src/runTemplatesRepository.ts`
+- `artifacts/run-calculator/src/runTemplatesRepository.test.ts`
+
+**What was wrong**: Optimistic writes could outlive a test and remain in the
+module-level flush registry. Timeout cases depended on advancing fake time and
+teardown did not settle work or restore stubbed globals.
+
+**What the fix was**: Recovered the restorable write-timeout override while
+retaining the 30-second production default. Added an observation-only test drain
+for existing flushes in both scopes, including successful follow-up rounds.
+Teardown waits before resetting fixture state and restores overrides, mocks,
+globals, and timers in `finally`. Timeout cases use real aborts, with explicit
+successive-case and failed-body cleanup coverage.
+
+**Why it was needed**: Cleanup must not deliver queued timeout writes merely to
+wait for previous work. Both scopes must settle so the next case cannot coalesce
+against a previous case's promise. This is a local regression repair, not evidence
+for the uploaded document's claimed historical CI cause or permanent CI stability.
+
+**Evidence**: `.local/task-evidence/run-template-recovery/` retains the protected
+baseline, revision/source hashes, bounded repeated runs, full client context,
+typechecks, recovery audit, applicability matrix, and full failure ledger.
+
+**Verification**: 20/20 focused runs (32 tests each); full calculator suite
+3,518 passed / 1 existing skipped; workspace typecheck passed, including calculator
+checks after rebuilding stale library declarations; recovery audit unchanged at
+9 pass / 1 documented difference / 0 missing.
