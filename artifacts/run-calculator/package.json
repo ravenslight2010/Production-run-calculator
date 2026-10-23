@@ -13,6 +13,7 @@
     "test:home-deferred-build-registration": "node --test scripts/check-home-deferred-build-registration.test.mjs",
     "test:home-startup-budget": "node --test scripts/check-home-startup-budget.test.mjs",
     "test:import-performance-budgets": "node --test scripts/check-import-performance-budgets.test.mjs",
+    "test:client-performance-budgets": "node --test scripts/check-client-performance-budgets.test.mjs",
     "check:as-any-budget": "node scripts/check-as-any-budget.mjs",
     "test:as-any-budget": "node --test scripts/check-as-any-budget.test.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
