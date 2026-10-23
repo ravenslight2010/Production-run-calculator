@@ -211,6 +211,9 @@ import type {
   QcComponentCheckInput,
   QcComponentCheckResponse,
   QcCorrectionInput,
+  QcDateCodeCheckInput,
+  QcDateCodeReferenceInput,
+  QcDateCodeReferencesResponse,
   QcEventResponse,
   QcHistoryResponse,
   QcLabelCheckInput,
@@ -4783,6 +4786,375 @@ export const useRecordQcComponentCheck = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRecordQcComponentCheckMutationOptions(options), queryClient);
+    }
+
+export const getGetQcDateCodeReferencesUrl = () => {
+
+
+
+
+  return `/api/qc/date-code-references`
+}
+
+/**
+ * QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
+ * @summary List scoped exact-text date-code references
+ */
+export const getQcDateCodeReferences = async ( options?: Parameters<typeof customFetch>[1]): Promise<QcDateCodeReferencesResponse> => {
+
+  return customFetch<QcDateCodeReferencesResponse>(getGetQcDateCodeReferencesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcDateCodeReferencesQueryKey = () => {
+    return [
+    `/api/qc/date-code-references`
+    ] as const;
+    }
+
+
+export const getGetQcDateCodeReferencesQueryOptions = <TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcDateCodeReferencesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcDateCodeReferences>>> = ({ signal }) => getQcDateCodeReferences({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcDateCodeReferencesQueryResult = NonNullable<Awaited<ReturnType<typeof getQcDateCodeReferences>>>
+export type GetQcDateCodeReferencesQueryError = ErrorType<void>
+
+
+export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcDateCodeReferences>>,
+          TError,
+          Awaited<ReturnType<typeof getQcDateCodeReferences>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcDateCodeReferences>>,
+          TError,
+          Awaited<ReturnType<typeof getQcDateCodeReferences>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List scoped exact-text date-code references
+ */
+
+export function useGetQcDateCodeReferences<TData = Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcDateCodeReferences>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcDateCodeReferencesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveQcDateCodeReferenceUrl = () => {
+
+
+
+
+  return `/api/qc/date-code-references`
+}
+
+/**
+ * Applicability is the canonical run/product plus explicit batch and packaging context. Source version is required. This does not configure shelf life or a decoder.
+ * @summary Manager creates a draft exact-text date-code reference version
+ */
+export const saveQcDateCodeReference = async (qcDateCodeReferenceInput: QcDateCodeReferenceInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcComponentCheckResponse>(getSaveQcDateCodeReferenceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcDateCodeReferenceInput)
+  }
+);}
+
+
+
+
+
+export const getSaveQcDateCodeReferenceMutationKey = () => ['saveQcDateCodeReference'] as const;
+
+export const getSaveQcDateCodeReferenceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveQcDateCodeReference>>, TError,SaveQcDateCodeReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveQcDateCodeReference>>, TError,SaveQcDateCodeReferenceMutationVariables, TContext> => {
+
+const mutationKey = getSaveQcDateCodeReferenceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveQcDateCodeReference>>, SaveQcDateCodeReferenceMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveQcDateCodeReference(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveQcDateCodeReferenceMutationResult = NonNullable<Awaited<ReturnType<typeof saveQcDateCodeReference>>>
+    export type SaveQcDateCodeReferenceMutationBody = BodyType<QcDateCodeReferenceInput>
+    export type SaveQcDateCodeReferenceMutationError = ErrorType<void>
+    export type SaveQcDateCodeReferenceMutationVariables = {data: BodyType<QcDateCodeReferenceInput>}
+
+    /**
+ * @summary Manager creates a draft exact-text date-code reference version
+ */
+export const useSaveQcDateCodeReference = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveQcDateCodeReference>>, TError,SaveQcDateCodeReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof saveQcDateCodeReference>>,
+        TError,
+        SaveQcDateCodeReferenceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveQcDateCodeReferenceMutationOptions(options), queryClient);
+    }
+
+export const getReviewQcDateCodeReferenceUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/date-code-references/${eventId}/review`
+}
+
+/**
+ * @summary Manager explicitly approves or withdraws the latest date-code reference version
+ */
+export const reviewQcDateCodeReference = async (eventId: number,
+    qcLabelReferenceReviewInput: QcLabelReferenceReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcComponentCheckResponse>(getReviewQcDateCodeReferenceUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcLabelReferenceReviewInput)
+  }
+);}
+
+
+
+
+
+export const getReviewQcDateCodeReferenceMutationKey = () => ['reviewQcDateCodeReference'] as const;
+
+export const getReviewQcDateCodeReferenceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewQcDateCodeReference>>, TError,ReviewQcDateCodeReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reviewQcDateCodeReference>>, TError,ReviewQcDateCodeReferenceMutationVariables, TContext> => {
+
+const mutationKey = getReviewQcDateCodeReferenceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewQcDateCodeReference>>, ReviewQcDateCodeReferenceMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  reviewQcDateCodeReference(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewQcDateCodeReferenceMutationResult = NonNullable<Awaited<ReturnType<typeof reviewQcDateCodeReference>>>
+    export type ReviewQcDateCodeReferenceMutationBody = BodyType<QcLabelReferenceReviewInput>
+    export type ReviewQcDateCodeReferenceMutationError = ErrorType<void>
+    export type ReviewQcDateCodeReferenceMutationVariables = {eventId: number;data: BodyType<QcLabelReferenceReviewInput>}
+
+    /**
+ * @summary Manager explicitly approves or withdraws the latest date-code reference version
+ */
+export const useReviewQcDateCodeReference = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewQcDateCodeReference>>, TError,ReviewQcDateCodeReferenceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reviewQcDateCodeReference>>,
+        TError,
+        ReviewQcDateCodeReferenceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReviewQcDateCodeReferenceMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcDateCodeCheckUrl = () => {
+
+
+
+
+  return `/api/qc/date-code-checks`
+}
+
+/**
+ * Advisory evidence only, not date validity, expiry, shelf-life or release approval. Missing, unreadable and ambiguous values stay not evaluated. Expected values and outcomes are not accepted from the client. Only an applicable approved reference is snapshotted; unavailable or inapplicable IDs return a generic reason without protected reference contents.
+ * @summary Record date-code observations with server-owned exact-text comparison
+ */
+export const recordQcDateCodeCheck = async (qcDateCodeCheckInput: QcDateCodeCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcComponentCheckResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcComponentCheckResponse>(getRecordQcDateCodeCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcDateCodeCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcDateCodeCheckMutationKey = () => ['recordQcDateCodeCheck'] as const;
+
+export const getRecordQcDateCodeCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcDateCodeCheck>>, TError,RecordQcDateCodeCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcDateCodeCheck>>, TError,RecordQcDateCodeCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcDateCodeCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcDateCodeCheck>>, RecordQcDateCodeCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcDateCodeCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcDateCodeCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcDateCodeCheck>>>
+    export type RecordQcDateCodeCheckMutationBody = BodyType<QcDateCodeCheckInput>
+    export type RecordQcDateCodeCheckMutationError = ErrorType<void>
+    export type RecordQcDateCodeCheckMutationVariables = {data: BodyType<QcDateCodeCheckInput>}
+
+    /**
+ * @summary Record date-code observations with server-owned exact-text comparison
+ */
+export const useRecordQcDateCodeCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcDateCodeCheck>>, TError,RecordQcDateCodeCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcDateCodeCheck>>,
+        TError,
+        RecordQcDateCodeCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcDateCodeCheckMutationOptions(options), queryClient);
     }
 
 export const getGetQcLabelReferencesUrl = () => {

@@ -200,6 +200,11 @@ vi.mock("../masterData", () => ({
 }));
 
 vi.mock("./QualityHistoryTab", () => ({ default: () => null }));
+// Date-code form and comparison have their own focused hook/state tests.
+vi.mock("./QcDateCodeVerification", () => ({
+  default: () => <section data-testid="qc-date-code-verification" />,
+  QcDateCodeComparison: () => null,
+}));
 
 afterEach(() => {
   cleanup();

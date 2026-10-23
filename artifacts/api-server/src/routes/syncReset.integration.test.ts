@@ -300,6 +300,12 @@ describe("POST /sync/reset", () => {
         eventType: "brix-check", runId: "reset-run", actorId: MANAGER,
         payload: { measurementKind: "brix", actualBrix: 8, outcome: "not-evaluated" },
       },
+      ...(["live", "sandbox"] as const).flatMap((scope) =>
+        (["date-code-check", "date-code-reference", "date-code-reference-review"] as const).map((eventType) => ({
+          scope, eventType, operationId: `reset-${scope}-${eventType}`, recordId: `${scope}-${eventType}`,
+          runId: eventType === "date-code-check" ? "reset-run" : null, actorId: MANAGER,
+          payload: { outcome: "not-evaluated", fixture: true },
+        }))),
     ]);
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
@@ -322,6 +328,10 @@ describe("POST /sync/reset", () => {
       .toEqual(["live", "sandbox"]);
     expect(qcEvents.filter((event) => event.eventType === "brix-check").map((event) => event.scope).sort())
       .toEqual(["live", "sandbox"]);
+    for (const type of ["date-code-check", "date-code-reference", "date-code-reference-review"]) {
+      expect(qcEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
+        .toEqual(["live", "sandbox"]);
+    }
   });
 
   it("increments the epoch on each reset", async () => {

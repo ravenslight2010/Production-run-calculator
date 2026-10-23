@@ -30,6 +30,7 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/DataHealthWorkspace.tsx",
   "/src/components/DeferredManagementSurface.tsx",
   "/src/components/ImportHistoryPanel.tsx",
+  "/src/components/MixedImportReviewQueue.tsx",
   "/src/components/ImportGoldLabCard.tsx",
   "/src/components/MixReconcilePanel.tsx",
   "/src/components/GlanceOverlay.tsx",

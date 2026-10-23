@@ -1242,6 +1242,108 @@ paths:
         "404": { description: Run not found in canonical production records }
         "409": { description: Operation ID conflicts with a prior event }
 
+  /qc/date-code-references:
+    get:
+      operationId: getQcDateCodeReferences
+      tags: [qc]
+      summary: List scoped exact-text date-code references
+      description: QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
+      responses:
+        "200":
+          description: Latest reference versions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcDateCodeReferencesResponse" }
+        "401": { description: Not authenticated }
+        "403": { description: QC capability required }
+        "503": { description: Bounded reference review limit exceeded }
+    post:
+      operationId: saveQcDateCodeReference
+      tags: [qc]
+      summary: Manager creates a draft exact-text date-code reference version
+      description: Applicability is the canonical run/product plus explicit batch and packaging context. Source version is required. This does not configure shelf life or a decoder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcDateCodeReferenceInput" }
+      responses:
+        "201":
+          description: Draft saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "200":
+          description: Idempotent retry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "400": { description: Invalid bounded input }
+        "401": { description: Not authenticated }
+        "403": { description: QC management capability required }
+        "404": { description: Run or reference unavailable in this scope }
+        "409": { description: Operation conflict or unavailable canonical run }
+
+  /qc/date-code-references/{eventId}/review:
+    post:
+      operationId: reviewQcDateCodeReference
+      tags: [qc]
+      summary: Manager explicitly approves or withdraws the latest date-code reference version
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcLabelReferenceReviewInput" }
+      responses:
+        "201":
+          description: Review saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "200":
+          description: Idempotent retry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "400": { description: Invalid input or incomplete required reference fields }
+        "401": { description: Not authenticated }
+        "403": { description: QC management capability required }
+        "404": { description: Reference unavailable in this scope }
+        "409": { description: Stale version or operation/review conflict }
+
+  /qc/date-code-checks:
+    post:
+      operationId: recordQcDateCodeCheck
+      tags: [qc]
+      summary: Record date-code observations with server-owned exact-text comparison
+      description: Advisory evidence only, not date validity, expiry, shelf-life or release approval. Missing, unreadable and ambiguous values stay not evaluated. Expected values and outcomes are not accepted from the client. Only an applicable approved reference is snapshotted; unavailable or inapplicable IDs return a generic reason without protected reference contents.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcDateCodeCheckInput" }
+      responses:
+        "201":
+          description: Observation and immutable comparison snapshot saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "200":
+          description: Idempotent retry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcComponentCheckResponse" }
+        "400": { description: Invalid bounded input or client-supplied authority }
+        "401": { description: Not authenticated }
+        "403": { description: QC recording capability required }
+        "404": { description: Run or linked label check unavailable in this scope/run }
+        "409": { description: Operation conflict or canonical source unavailable }
+
   /qc/label-references:
     get:
       operationId: getQcLabelReferences
@@ -8564,7 +8666,7 @@ components:
         recordId: { type: string, format: uuid }
         eventType:
           type: string
-          enum: [lot, weight, brix-check, component-check, label-check, label-reference, label-reference-review, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+          enum: [lot, weight, brix-check, component-check, label-check, label-reference, label-reference-review, date-code-check, date-code-reference, date-code-reference-review, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
         runId: { type: string, nullable: true }
         profileKey: { type: string, nullable: true }
         ingredientId: { type: string, nullable: true }
@@ -8755,6 +8857,91 @@ components:
       properties:
         event: { $ref: "#/components/schemas/QcEvent" }
         duplicate: { type: boolean }
+
+    QcDateCodeText:
+      type: object
+      additionalProperties: false
+      required: [productionCode, bestByCode, otherCode]
+      properties:
+        productionCode: { type: string, maxLength: 200 }
+        bestByCode: { type: string, maxLength: 200 }
+        otherCode: { type: string, maxLength: 200 }
+
+    QcDateCodeReadability:
+      type: object
+      additionalProperties: false
+      required: [productionCode, bestByCode, otherCode]
+      properties:
+        productionCode: { type: string, enum: [readable, missing, unreadable, ambiguous] }
+        bestByCode: { type: string, enum: [readable, missing, unreadable, ambiguous] }
+        otherCode: { type: string, enum: [readable, missing, unreadable, ambiguous] }
+
+    QcDateCodeCheckInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, runId, batchContext, context, observed, readability]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        batchContext: { type: string, minLength: 1, maxLength: 200 }
+        context: { type: string, enum: [shipper-case, carton-label, product-pack] }
+        referenceEventId: { type: integer, minimum: 1, description: Exact configuration event version selected for comparison }
+        labelCheckEventId: { type: integer, minimum: 1, description: Optional label-check event in the same authenticated scope and run }
+        observed: { $ref: "#/components/schemas/QcDateCodeText" }
+        readability: { $ref: "#/components/schemas/QcDateCodeReadability" }
+        note: { type: string, maxLength: 1000 }
+
+    QcDateCodeReferenceInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, runId, batchContext, context, expected, requiredFields, sourceIdentity, sourceVersion, sourceDescription]
+      properties:
+        operationId: { type: string, format: uuid }
+        referenceId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        batchContext: { type: string, minLength: 1, maxLength: 200 }
+        context: { type: string, enum: [shipper-case, carton-label, product-pack] }
+        expected: { $ref: "#/components/schemas/QcDateCodeText" }
+        requiredFields:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items: { type: string, enum: [productionCode, bestByCode, otherCode] }
+        sourceIdentity: { type: string, minLength: 1, maxLength: 200 }
+        sourceVersion: { type: string, minLength: 1, maxLength: 120 }
+        sourceDescription: { type: string, minLength: 1, maxLength: 500 }
+
+    QcDateCodeReference:
+      type: object
+      required: [referenceId, version, runId, batchContext, context, productKey, expected, requiredFields, sourceIdentity, sourceVersion, sourceDescription, configurationEventId, state, reviewedBy, reviewedAt]
+      properties:
+        referenceId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        runId: { type: string }
+        batchContext: { type: string }
+        context: { type: string, enum: [shipper-case, carton-label, product-pack] }
+        productKey: { type: string }
+        expected: { $ref: "#/components/schemas/QcDateCodeText" }
+        requiredFields:
+          type: array
+          items: { type: string, enum: [productionCode, bestByCode, otherCode] }
+        sourceIdentity: { type: string }
+        sourceVersion: { type: string }
+        sourceDescription: { type: string }
+        configurationEventId: { type: integer }
+        state: { type: string, enum: [draft, approved, withdrawn] }
+        reviewedBy: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+
+    QcDateCodeReferencesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items: { $ref: "#/components/schemas/QcDateCodeReference" }
 
     QcLabelField:
       type: string
@@ -9105,6 +9292,21 @@ components:
               - payload.referenceSnapshot.expected.dateText
               - payload.referenceSnapshot.sourceIdentity
               - payload.referenceSnapshot.sourceDescription
+              - payload.batchContext
+              - payload.observed.productionCode
+              - payload.observed.bestByCode
+              - payload.observed.otherCode
+              - payload.fieldResults.productionCode.observed
+              - payload.fieldResults.productionCode.expected
+              - payload.fieldResults.bestByCode.observed
+              - payload.fieldResults.bestByCode.expected
+              - payload.fieldResults.otherCode.observed
+              - payload.fieldResults.otherCode.expected
+              - payload.referenceSnapshot.expected.productionCode
+              - payload.referenceSnapshot.expected.bestByCode
+              - payload.referenceSnapshot.expected.otherCode
+              - payload.referenceSnapshot.batchContext
+              - payload.referenceSnapshot.sourceVersion
 
     Capability:
       type: string

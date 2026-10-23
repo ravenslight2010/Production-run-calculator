@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { and, desc, eq, gt, gte, inArray, lt, lte, max, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, lte, max, notInArray, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import * as z from "zod";
 import {
@@ -19,6 +19,8 @@ import {
   type QcComponentObservation,
 } from "../lib/qcComponentChecks";
 import { evaluateQcBrixCheck } from "../lib/qcBrixChecks";
+import { dateCodeObservedSchema, dateCodeReadabilitySchema, evaluateDateCodeCheck } from "../lib/qcDateCodeChecks";
+import { registerDateCodeWorkflows } from "./qcDateCodeWorkflows";
 import {
   evaluateQcLabelCheck,
   normalizeQcLabelObserved,
@@ -291,6 +293,21 @@ const redactionBodySchema = z.object({
     "payload.referenceSnapshot.expected.dateText",
     "payload.referenceSnapshot.sourceIdentity",
     "payload.referenceSnapshot.sourceDescription",
+    "payload.batchContext",
+    "payload.observed.productionCode",
+    "payload.observed.bestByCode",
+    "payload.observed.otherCode",
+    "payload.fieldResults.productionCode.observed",
+    "payload.fieldResults.productionCode.expected",
+    "payload.fieldResults.bestByCode.observed",
+    "payload.fieldResults.bestByCode.expected",
+    "payload.fieldResults.otherCode.observed",
+    "payload.fieldResults.otherCode.expected",
+    "payload.referenceSnapshot.expected.productionCode",
+    "payload.referenceSnapshot.expected.bestByCode",
+    "payload.referenceSnapshot.expected.otherCode",
+    "payload.referenceSnapshot.batchContext",
+    "payload.referenceSnapshot.sourceVersion",
   ]))
     .min(1)
     .max(24)
@@ -1081,7 +1098,7 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
       if (replacement && typeof replacement === "object" && !Array.isArray(replacement)) {
         const replacementFields = replacement as Record<string, unknown>;
         const prior = corrections.get(target) ?? {};
-        if (rowTypes.get(target) === "label-check" && recordObject(replacementFields.observed)) {
+        if (["label-check", "date-code-check"].includes(rowTypes.get(target) ?? "") && recordObject(replacementFields.observed)) {
           corrections.set(target, {
             ...prior,
             ...replacementFields,
@@ -1144,7 +1161,7 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
     };
     const replacement = corrections.get(String(row.id));
     if (replacement) {
-      output.payload = row.eventType === "label-check" && recordObject(replacement.observed)
+      output.payload = ["label-check", "date-code-check"].includes(row.eventType) && recordObject(replacement.observed)
         ? {
           ...output.payload,
           ...replacement,
@@ -1237,6 +1254,11 @@ async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = f
       if (row.eventType === "label-check") {
         output.payload = evaluateStoredLabelCheck(output.payload);
       }
+      if (row.eventType === "date-code-check") {
+        // Readability corrections are a complete map, while observed text may
+        // be patched field by field. Always compare with the original snapshot.
+        output.payload = evaluateDateCodeCheck(output.payload);
+      }
       output.corrected = true;
     }
     const station = correctedStations.get(String(row.id));
@@ -1297,6 +1319,14 @@ function validateCorrection(
               });
             }
           })
+        : eventType === "date-code-check"
+          ? z.object({
+            observed: dateCodeObservedSchema.partial().optional(),
+            readability: dateCodeReadabilitySchema.optional(),
+            note: correctionNote,
+          }).strict().refine((replacement) =>
+            Boolean(replacement.readability || replacement.note !== undefined || Object.keys(replacement.observed ?? {}).length),
+          "Change observed text, readability or note")
         : eventType === "label-check"
           ? z.object({
             observed: labelObservedSchema.partial().optional(),
@@ -2721,6 +2751,14 @@ router.get("/qc/history", requireCapability("record-qc"), async (req, res) => {
   try {
     const scope = currentScope();
     const conditions = [eq(qcWorkflowEventsTable.scope, scope)];
+    // Reference administration is manager-only. Operators see approved
+    // references through the approved list and immutable applied check snapshots,
+    // never draft/version/review payloads through the general ledger.
+    if (req.capabilities?.includes("manage-qc") !== true) {
+      conditions.push(notInArray(qcWorkflowEventsTable.eventType, [
+        "date-code-reference", "date-code-reference-review",
+      ]));
+    }
     if (filters.runId) conditions.push(eq(qcWorkflowEventsTable.runId, filters.runId));
     if (filters.ingredientId) conditions.push(eq(qcWorkflowEventsTable.ingredientId, filters.ingredientId));
     if (filters.station) conditions.push(eq(qcWorkflowEventsTable.station, filters.station));
@@ -2831,7 +2869,7 @@ router.post("/qc/events/:eventId/corrections", requireCapability("manage-qc"), a
       eq(qcWorkflowEventsTable.scope, currentScope()),
       eq(qcWorkflowEventsTable.id, eventId),
     )).limit(1);
-    if (!target || !["lot", "weight", "brix-check", "component-check", "label-check", "allergen-review", "cleaning"].includes(target.eventType)) {
+    if (!target || !["lot", "weight", "brix-check", "component-check", "label-check", "date-code-check", "allergen-review", "cleaning"].includes(target.eventType)) {
       safeError(res, 404, "Correctable QC record not found");
       return;
     }
@@ -2947,5 +2985,11 @@ router.post("/qc/events/:eventId/redactions", requireCapability("manage-qc"), as
     reportRouteError(req, res, "failed to record QC redaction", error);
   }
 });
+
+export const qcDateCodeDependencies = {
+  requireValid, currentActor, safeError, publicEvent, reportRouteError,
+  resolveCanonicalRunSource, lockRun,
+};
+registerDateCodeWorkflows(router, qcDateCodeDependencies);
 
 export default router;

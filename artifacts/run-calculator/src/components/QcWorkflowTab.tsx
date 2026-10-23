@@ -73,6 +73,7 @@ import {
 } from "../qcWeightCheckSchedule";
 import QcAllergenActivityReport from "./QcAllergenActivityReport";
 import QcLabelVerification, { QcLabelComparison } from "./QcLabelVerification";
+import QcDateCodeVerification, { QcDateCodeComparison } from "./QcDateCodeVerification";
 import QualityHistoryTab from "./QualityHistoryTab";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
 
@@ -814,6 +815,15 @@ export default function QcWorkflowTab({
       setReplacementJson(JSON.stringify(
         event.eventType === "component-check"
           ? componentReplacement
+          : event.eventType === "date-code-check"
+            ? {
+              observed: Object.fromEntries(Object.entries(
+                event.payload.observed && typeof event.payload.observed === "object" ? event.payload.observed : {},
+              ).filter(([field, value]) => ["productionCode", "bestByCode", "otherCode"].includes(field)
+                && typeof value === "string" && !event.redactedFields?.includes(`payload.observed.${field}`))),
+              readability: event.payload.readability,
+              ...(!event.redactedFields?.includes("payload.note") ? { note: event.payload.note } : {}),
+            }
           : event.eventType === "label-check"
             ? labelReplacement
             : event.payload,
@@ -920,6 +930,14 @@ export default function QcWorkflowTab({
             profileKey={profileKey}
             canRecordQc={canRecordQc}
             canManageQc={canManageQc}
+          />
+          <QcDateCodeVerification
+            key={runId}
+            runId={runId}
+            profileKey={profileKey}
+            canRecordQc={canRecordQc}
+            canManageQc={canManageQc}
+            labelChecks={runEvidenceMatchesSelection ? runItems?.filter((event) => event.eventType === "label-check") : []}
           />
           {runIsActive && runStartedAt !== null && (
             <section
@@ -1625,6 +1643,9 @@ export default function QcWorkflowTab({
                         {event.eventType === "label-check" && (
                           <QcLabelComparison event={event} />
                         )}
+                        {event.eventType === "date-code-check" && (
+                          <QcDateCodeComparison event={event} />
+                        )}
                         {event.eventType === "component-check" && (
                           <div className="rounded-lg border border-border/70 bg-background p-3" data-testid={`qc-component-history-${event.id}`}>
                             <div className="flex flex-wrap items-center gap-2">
@@ -1690,7 +1711,21 @@ export default function QcWorkflowTab({
                                 setRedactionOperationKey(operationId());
                               }} placeholder="Why does this field need redaction?" rows={2} />
                               <div className="space-y-1.5">
-                                {(event.eventType === "label-check" ? [
+                                {(event.eventType === "date-code-check" ? [
+                                  ["actorId", "Actor identifier"],
+                                  ["payload.note", "Observation note"],
+                                  ["payload.batchContext", "Batch / pack context"],
+                                  ...["productionCode", "bestByCode", "otherCode"].flatMap((field) => [
+                                    [`payload.observed.${field}`, `${field} observed text`],
+                                    [`payload.fieldResults.${field}.observed`, `${field} result observation`],
+                                    [`payload.fieldResults.${field}.expected`, `${field} result expected text`],
+                                    [`payload.referenceSnapshot.expected.${field}`, `${field} reference expected text`],
+                                  ]),
+                                  ["payload.referenceSnapshot.batchContext", "Reference batch / pack context"],
+                                  ["payload.referenceSnapshot.sourceIdentity", "Reference source identity"],
+                                  ["payload.referenceSnapshot.sourceVersion", "Reference source version"],
+                                  ["payload.referenceSnapshot.sourceDescription", "Reference source description"],
+                                ] : event.eventType === "label-check" ? [
                                   ["actorId", "Actor identifier"],
                                   ["payload.note", "Observation note"],
                                   ["payload.observed.productName", "Observed product name"],

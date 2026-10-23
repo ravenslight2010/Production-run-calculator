@@ -3163,6 +3163,9 @@ export const QcEventEventType = {
   'label-check': 'label-check',
   'label-reference': 'label-reference',
   'label-reference-review': 'label-reference-review',
+  'date-code-check': 'date-code-check',
+  'date-code-reference': 'date-code-reference',
+  'date-code-reference-review': 'date-code-reference-review',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
   'cleaning-verification': 'cleaning-verification',
@@ -3564,6 +3567,197 @@ export interface QcComponentChecklist {
 export interface QcComponentCheckResponse {
   event: QcEvent;
   duplicate: boolean;
+}
+
+export interface QcDateCodeText {
+  /** @maxLength 200 */
+  productionCode: string;
+  /** @maxLength 200 */
+  bestByCode: string;
+  /** @maxLength 200 */
+  otherCode: string;
+}
+
+export type QcDateCodeReadabilityProductionCode = typeof QcDateCodeReadabilityProductionCode[keyof typeof QcDateCodeReadabilityProductionCode];
+
+
+export const QcDateCodeReadabilityProductionCode = {
+  readable: 'readable',
+  missing: 'missing',
+  unreadable: 'unreadable',
+  ambiguous: 'ambiguous',
+} as const;
+
+export type QcDateCodeReadabilityBestByCode = typeof QcDateCodeReadabilityBestByCode[keyof typeof QcDateCodeReadabilityBestByCode];
+
+
+export const QcDateCodeReadabilityBestByCode = {
+  readable: 'readable',
+  missing: 'missing',
+  unreadable: 'unreadable',
+  ambiguous: 'ambiguous',
+} as const;
+
+export type QcDateCodeReadabilityOtherCode = typeof QcDateCodeReadabilityOtherCode[keyof typeof QcDateCodeReadabilityOtherCode];
+
+
+export const QcDateCodeReadabilityOtherCode = {
+  readable: 'readable',
+  missing: 'missing',
+  unreadable: 'unreadable',
+  ambiguous: 'ambiguous',
+} as const;
+
+export interface QcDateCodeReadability {
+  productionCode: QcDateCodeReadabilityProductionCode;
+  bestByCode: QcDateCodeReadabilityBestByCode;
+  otherCode: QcDateCodeReadabilityOtherCode;
+}
+
+export type QcDateCodeCheckInputContext = typeof QcDateCodeCheckInputContext[keyof typeof QcDateCodeCheckInputContext];
+
+
+export const QcDateCodeCheckInputContext = {
+  'shipper-case': 'shipper-case',
+  'carton-label': 'carton-label',
+  'product-pack': 'product-pack',
+} as const;
+
+export interface QcDateCodeCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  batchContext: string;
+  context: QcDateCodeCheckInputContext;
+  /**
+     * Exact configuration event version selected for comparison
+     * @minimum 1
+     */
+  referenceEventId?: number;
+  /**
+     * Optional label-check event in the same authenticated scope and run
+     * @minimum 1
+     */
+  labelCheckEventId?: number;
+  observed: QcDateCodeText;
+  readability: QcDateCodeReadability;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcDateCodeReferenceInputContext = typeof QcDateCodeReferenceInputContext[keyof typeof QcDateCodeReferenceInputContext];
+
+
+export const QcDateCodeReferenceInputContext = {
+  'shipper-case': 'shipper-case',
+  'carton-label': 'carton-label',
+  'product-pack': 'product-pack',
+} as const;
+
+export type QcDateCodeReferenceInputRequiredFieldsItem = typeof QcDateCodeReferenceInputRequiredFieldsItem[keyof typeof QcDateCodeReferenceInputRequiredFieldsItem];
+
+
+export const QcDateCodeReferenceInputRequiredFieldsItem = {
+  productionCode: 'productionCode',
+  bestByCode: 'bestByCode',
+  otherCode: 'otherCode',
+} as const;
+
+export interface QcDateCodeReferenceInput {
+  operationId: string;
+  referenceId?: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  batchContext: string;
+  context: QcDateCodeReferenceInputContext;
+  expected: QcDateCodeText;
+  /**
+     * @minItems 1
+     * @maxItems 3
+     */
+  requiredFields: QcDateCodeReferenceInputRequiredFieldsItem[];
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  sourceIdentity: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  sourceVersion: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  sourceDescription: string;
+}
+
+export type QcDateCodeReferenceContext = typeof QcDateCodeReferenceContext[keyof typeof QcDateCodeReferenceContext];
+
+
+export const QcDateCodeReferenceContext = {
+  'shipper-case': 'shipper-case',
+  'carton-label': 'carton-label',
+  'product-pack': 'product-pack',
+} as const;
+
+export type QcDateCodeReferenceRequiredFieldsItem = typeof QcDateCodeReferenceRequiredFieldsItem[keyof typeof QcDateCodeReferenceRequiredFieldsItem];
+
+
+export const QcDateCodeReferenceRequiredFieldsItem = {
+  productionCode: 'productionCode',
+  bestByCode: 'bestByCode',
+  otherCode: 'otherCode',
+} as const;
+
+export type QcDateCodeReferenceState = typeof QcDateCodeReferenceState[keyof typeof QcDateCodeReferenceState];
+
+
+export const QcDateCodeReferenceState = {
+  draft: 'draft',
+  approved: 'approved',
+  withdrawn: 'withdrawn',
+} as const;
+
+export interface QcDateCodeReference {
+  referenceId: string;
+  /** @minimum 1 */
+  version: number;
+  runId: string;
+  batchContext: string;
+  context: QcDateCodeReferenceContext;
+  productKey: string;
+  expected: QcDateCodeText;
+  requiredFields: QcDateCodeReferenceRequiredFieldsItem[];
+  sourceIdentity: string;
+  sourceVersion: string;
+  sourceDescription: string;
+  configurationEventId: number;
+  state: QcDateCodeReferenceState;
+  /** @nullable */
+  reviewedBy: string | null;
+  /** @nullable */
+  reviewedAt: string | null;
+}
+
+export interface QcDateCodeReferencesResponse {
+  /** @maxItems 200 */
+  items: QcDateCodeReference[];
 }
 
 export type QcLabelField = typeof QcLabelField[keyof typeof QcLabelField];
@@ -4106,6 +4300,21 @@ export const QcRedactionInputFieldsItem = {
   payloadreferenceSnapshotexpecteddateText: 'payload.referenceSnapshot.expected.dateText',
   payloadreferenceSnapshotsourceIdentity: 'payload.referenceSnapshot.sourceIdentity',
   payloadreferenceSnapshotsourceDescription: 'payload.referenceSnapshot.sourceDescription',
+  payloadbatchContext: 'payload.batchContext',
+  payloadobservedproductionCode: 'payload.observed.productionCode',
+  payloadobservedbestByCode: 'payload.observed.bestByCode',
+  payloadobservedotherCode: 'payload.observed.otherCode',
+  payloadfieldResultsproductionCodeobserved: 'payload.fieldResults.productionCode.observed',
+  payloadfieldResultsproductionCodeexpected: 'payload.fieldResults.productionCode.expected',
+  payloadfieldResultsbestByCodeobserved: 'payload.fieldResults.bestByCode.observed',
+  payloadfieldResultsbestByCodeexpected: 'payload.fieldResults.bestByCode.expected',
+  payloadfieldResultsotherCodeobserved: 'payload.fieldResults.otherCode.observed',
+  payloadfieldResultsotherCodeexpected: 'payload.fieldResults.otherCode.expected',
+  payloadreferenceSnapshotexpectedproductionCode: 'payload.referenceSnapshot.expected.productionCode',
+  payloadreferenceSnapshotexpectedbestByCode: 'payload.referenceSnapshot.expected.bestByCode',
+  payloadreferenceSnapshotexpectedotherCode: 'payload.referenceSnapshot.expected.otherCode',
+  payloadreferenceSnapshotbatchContext: 'payload.referenceSnapshot.batchContext',
+  payloadreferenceSnapshotsourceVersion: 'payload.referenceSnapshot.sourceVersion',
 } as const;
 
 export interface QcRedactionInput {

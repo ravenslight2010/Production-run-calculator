@@ -80,6 +80,26 @@ export const recordQcComponentCheckBodyRunIdMax = 200;
 export const recordQcComponentCheckBodyObservationsItemComponentIdMax = 80;
 export const recordQcComponentCheckBodyObservationsMax = 200;
 export const recordQcComponentCheckBodyNoteMax = 1000;
+export const getQcDateCodeReferencesResponseItemsItemExpectedProductionCodeMax = 200;
+export const getQcDateCodeReferencesResponseItemsItemExpectedBestByCodeMax = 200;
+export const getQcDateCodeReferencesResponseItemsItemExpectedOtherCodeMax = 200;
+export const getQcDateCodeReferencesResponseItemsMax = 200;
+export const saveQcDateCodeReferenceBodyRunIdMax = 200;
+export const saveQcDateCodeReferenceBodyBatchContextMax = 200;
+export const saveQcDateCodeReferenceBodyExpectedProductionCodeMax = 200;
+export const saveQcDateCodeReferenceBodyExpectedBestByCodeMax = 200;
+export const saveQcDateCodeReferenceBodyExpectedOtherCodeMax = 200;
+export const saveQcDateCodeReferenceBodyRequiredFieldsMax = 3;
+export const saveQcDateCodeReferenceBodySourceIdentityMax = 200;
+export const saveQcDateCodeReferenceBodySourceVersionMax = 120;
+export const saveQcDateCodeReferenceBodySourceDescriptionMax = 500;
+export const reviewQcDateCodeReferenceBodyReasonMax = 500;
+export const recordQcDateCodeCheckBodyRunIdMax = 200;
+export const recordQcDateCodeCheckBodyBatchContextMax = 200;
+export const recordQcDateCodeCheckBodyObservedProductionCodeMax = 200;
+export const recordQcDateCodeCheckBodyObservedBestByCodeMax = 200;
+export const recordQcDateCodeCheckBodyObservedOtherCodeMax = 200;
+export const recordQcDateCodeCheckBodyNoteMax = 1000;
 export const getQcLabelReferencesResponseItemsMax = 200;
 export const saveQcLabelReferenceBodyProductKeyMax = 120;
 export const saveQcLabelReferenceBodyExpectedProductNameMax = 200;
@@ -1917,7 +1937,7 @@ export const SetQcTargetResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -1958,7 +1978,7 @@ export const SetQcBrixTargetResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -1998,7 +2018,7 @@ export const RecordQcLotResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2041,7 +2061,7 @@ export const RecordQcWeightCheckResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2086,7 +2106,7 @@ export const RecordQcBrixCheckResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2127,7 +2147,194 @@ export const RecordQcComponentCheckResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+}),
+  "duplicate": zod.boolean()
+})
+
+
+/**
+ * QC recording capability required. Only managers see drafts and withdrawn references or configuration/review ledger rows. Approved applied comparisons retain their historical snapshots. No date policy is inferred.
+ * @summary List scoped exact-text date-code references
+ */
+
+
+
+
+
+
+
+export const GetQcDateCodeReferencesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "referenceId": zod.uuid(),
+  "version": zod.int().min(1),
+  "runId": zod.string(),
+  "batchContext": zod.string(),
+  "context": zod.enum(['shipper-case', 'carton-label', 'product-pack']),
+  "productKey": zod.string(),
+  "expected": zod.object({
+  "productionCode": zod.string().max(getQcDateCodeReferencesResponseItemsItemExpectedProductionCodeMax),
+  "bestByCode": zod.string().max(getQcDateCodeReferencesResponseItemsItemExpectedBestByCodeMax),
+  "otherCode": zod.string().max(getQcDateCodeReferencesResponseItemsItemExpectedOtherCodeMax)
+}),
+  "requiredFields": zod.array(zod.enum(['productionCode', 'bestByCode', 'otherCode'])),
+  "sourceIdentity": zod.string(),
+  "sourceVersion": zod.string(),
+  "sourceDescription": zod.string(),
+  "configurationEventId": zod.int(),
+  "state": zod.enum(['draft', 'approved', 'withdrawn']),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable()
+})).max(getQcDateCodeReferencesResponseItemsMax)
+})
+
+
+/**
+ * Applicability is the canonical run/product plus explicit batch and packaging context. Source version is required. This does not configure shelf life or a decoder.
+ * @summary Manager creates a draft exact-text date-code reference version
+ */
+
+
+
+
+
+
+
+
+
+
+
+export const SaveQcDateCodeReferenceBody = zod.object({
+  "operationId": zod.uuid(),
+  "referenceId": zod.uuid().optional(),
+  "runId": zod.string().min(1).max(saveQcDateCodeReferenceBodyRunIdMax),
+  "batchContext": zod.string().min(1).max(saveQcDateCodeReferenceBodyBatchContextMax),
+  "context": zod.enum(['shipper-case', 'carton-label', 'product-pack']),
+  "expected": zod.object({
+  "productionCode": zod.string().max(saveQcDateCodeReferenceBodyExpectedProductionCodeMax),
+  "bestByCode": zod.string().max(saveQcDateCodeReferenceBodyExpectedBestByCodeMax),
+  "otherCode": zod.string().max(saveQcDateCodeReferenceBodyExpectedOtherCodeMax)
+}),
+  "requiredFields": zod.array(zod.enum(['productionCode', 'bestByCode', 'otherCode'])).min(1).max(saveQcDateCodeReferenceBodyRequiredFieldsMax),
+  "sourceIdentity": zod.string().min(1).max(saveQcDateCodeReferenceBodySourceIdentityMax),
+  "sourceVersion": zod.string().min(1).max(saveQcDateCodeReferenceBodySourceVersionMax),
+  "sourceDescription": zod.string().min(1).max(saveQcDateCodeReferenceBodySourceDescriptionMax)
+})
+
+export const SaveQcDateCodeReferenceResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+}),
+  "duplicate": zod.boolean()
+})
+
+
+/**
+ * @summary Manager explicitly approves or withdraws the latest date-code reference version
+ */
+
+
+
+export const ReviewQcDateCodeReferenceParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const ReviewQcDateCodeReferenceBody = zod.object({
+  "operationId": zod.uuid(),
+  "decision": zod.enum(['approved', 'withdrawn']),
+  "reason": zod.string().min(1).max(reviewQcDateCodeReferenceBodyReasonMax)
+})
+
+export const ReviewQcDateCodeReferenceResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+}),
+  "duplicate": zod.boolean()
+})
+
+
+/**
+ * Advisory evidence only, not date validity, expiry, shelf-life or release approval. Missing, unreadable and ambiguous values stay not evaluated. Expected values and outcomes are not accepted from the client. Only an applicable approved reference is snapshotted; unavailable or inapplicable IDs return a generic reason without protected reference contents.
+ * @summary Record date-code observations with server-owned exact-text comparison
+ */
+
+
+
+
+
+
+
+
+
+
+export const RecordQcDateCodeCheckBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcDateCodeCheckBodyRunIdMax),
+  "batchContext": zod.string().min(1).max(recordQcDateCodeCheckBodyBatchContextMax),
+  "context": zod.enum(['shipper-case', 'carton-label', 'product-pack']),
+  "referenceEventId": zod.int().min(1).optional().describe('Exact configuration event version selected for comparison'),
+  "labelCheckEventId": zod.int().min(1).optional().describe('Optional label-check event in the same authenticated scope and run'),
+  "observed": zod.object({
+  "productionCode": zod.string().max(recordQcDateCodeCheckBodyObservedProductionCodeMax),
+  "bestByCode": zod.string().max(recordQcDateCodeCheckBodyObservedBestByCodeMax),
+  "otherCode": zod.string().max(recordQcDateCodeCheckBodyObservedOtherCodeMax)
+}),
+  "readability": zod.object({
+  "productionCode": zod.enum(['readable', 'missing', 'unreadable', 'ambiguous']),
+  "bestByCode": zod.enum(['readable', 'missing', 'unreadable', 'ambiguous']),
+  "otherCode": zod.enum(['readable', 'missing', 'unreadable', 'ambiguous'])
+}),
+  "note": zod.string().max(recordQcDateCodeCheckBodyNoteMax).optional()
+})
+
+export const RecordQcDateCodeCheckResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2208,7 +2415,7 @@ export const SaveQcLabelReferenceResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2248,7 +2455,7 @@ export const ReviewQcLabelReferenceResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2293,7 +2500,7 @@ export const RecordQcLabelCheckResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2331,7 +2538,7 @@ export const GetQcRunResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2510,7 +2717,7 @@ export const RecordQcAllergenReviewResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2548,7 +2755,7 @@ export const RecordQcCleaningResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2587,7 +2794,7 @@ export const VerifyQcCleaningResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2622,7 +2829,7 @@ export const SignoffQcRunResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2663,7 +2870,7 @@ export const GetQcHistoryResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2724,7 +2931,7 @@ export const CorrectQcEventResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),
@@ -2757,7 +2964,7 @@ export const RedactQcEventParams = zod.object({
 export const RedactQcEventBody = zod.object({
   "operationId": zod.uuid(),
   "reason": zod.string().min(1).max(redactQcEventBodyReasonMax),
-  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.instrument', 'payload.lotNumber', 'payload.expectedComponents', 'payload.observed.productName', 'payload.observed.lotText', 'payload.observed.dateText', 'payload.fieldResults.productName.observed', 'payload.fieldResults.productName.expected', 'payload.fieldResults.lotText.observed', 'payload.fieldResults.lotText.expected', 'payload.fieldResults.dateText.observed', 'payload.fieldResults.dateText.expected', 'payload.referenceSnapshot.expected.productName', 'payload.referenceSnapshot.expected.lotText', 'payload.referenceSnapshot.expected.dateText', 'payload.referenceSnapshot.sourceIdentity', 'payload.referenceSnapshot.sourceDescription'])).min(1).max(redactQcEventBodyFieldsMax)
+  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.instrument', 'payload.lotNumber', 'payload.expectedComponents', 'payload.observed.productName', 'payload.observed.lotText', 'payload.observed.dateText', 'payload.fieldResults.productName.observed', 'payload.fieldResults.productName.expected', 'payload.fieldResults.lotText.observed', 'payload.fieldResults.lotText.expected', 'payload.fieldResults.dateText.observed', 'payload.fieldResults.dateText.expected', 'payload.referenceSnapshot.expected.productName', 'payload.referenceSnapshot.expected.lotText', 'payload.referenceSnapshot.expected.dateText', 'payload.referenceSnapshot.sourceIdentity', 'payload.referenceSnapshot.sourceDescription', 'payload.batchContext', 'payload.observed.productionCode', 'payload.observed.bestByCode', 'payload.observed.otherCode', 'payload.fieldResults.productionCode.observed', 'payload.fieldResults.productionCode.expected', 'payload.fieldResults.bestByCode.observed', 'payload.fieldResults.bestByCode.expected', 'payload.fieldResults.otherCode.observed', 'payload.fieldResults.otherCode.expected', 'payload.referenceSnapshot.expected.productionCode', 'payload.referenceSnapshot.expected.bestByCode', 'payload.referenceSnapshot.expected.otherCode', 'payload.referenceSnapshot.batchContext', 'payload.referenceSnapshot.sourceVersion'])).min(1).max(redactQcEventBodyFieldsMax)
 })
 
 export const RedactQcEventResponse = zod.object({
@@ -2765,7 +2972,7 @@ export const RedactQcEventResponse = zod.object({
   "id": zod.int(),
   "operationId": zod.uuid(),
   "recordId": zod.uuid(),
-  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "eventType": zod.enum(['lot', 'weight', 'brix-check', 'component-check', 'label-check', 'label-reference', 'label-reference-review', 'date-code-check', 'date-code-reference', 'date-code-reference-review', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
   "runId": zod.string().nullable(),
   "profileKey": zod.string().nullable(),
   "ingredientId": zod.string().nullable(),

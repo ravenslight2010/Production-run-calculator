@@ -1,6 +1,6 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Approved Phase 1 implemented; advisory Brix Slice 0, component identity/presence Slice 1, and text-only label verification Slice 2 implemented; real approved label references remain unavailable and later gates remain deferred
+**Status:** Approved Phase 1 and advisory Slices 0–3 implemented; date-code functional checks verified with synthetic references; WebKit background network diagnostics remain unresolved. The API/web preview startup blocker was repaired without changing project dependencies. Real approved label/date-code references remain unavailable and later gates remain deferred
 **Updated:** 2026-10-22
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
@@ -51,13 +51,77 @@ QC can record observed product name, lot text, date text, and optional notes for
 - Scoped history, manager CSV, audited observed-text corrections, nested redactions, and run sign-off reopening include label evidence. Non-run configuration/review events do not reopen unrelated runs. Corrections recompute against the original reference snapshot.
 - Stable operation IDs support acknowledged retries. No new database table or column is introduced; evidence remains outside day-state and survives reset/purge.
 - **Real reference availability: missing.** No authoritative finished-label master was found. Synthetic manager-approved test references are not operational approval. Until an authorized owner approves applicable real reference data, the shipped operational status is **observation only / not evaluated**.
-- No artwork/photos/OCR, AI recognition, ingredient/allergen/nutrition declarations, regulatory claims, generated shelf life, packaging hold, shipping clearance, or run-start block is included. Literal date text is not the separately planned date-code verification slice.
+- No artwork/photos/OCR, AI recognition, ingredient/allergen/nutrition declarations, regulatory claims, generated shelf life, packaging hold, shipping clearance, or run-start block is included. Label text fields do not confer date-code authority; the exact-text date-code workflow is separately delivered by Slice 3.
 
 Evidence and exact results: [coverage/check map](../.local/tasks/evidence/qc-slice-2-label-verification/coverage-check-map.md) and [failure ledger](../.local/tasks/evidence/qc-slice-2-label-verification/failure-ledger.md). Responsive Chromium/WebKit checks are not physical Android Chrome or iOS Safari/PWA evidence. This task makes no production-readiness or publishing claim.
 
 Verification after completion-check repairs: comparison tests 6/6; QC UI tests 17/17; selected QC/authorization integration checks 11/11, including wrong-product and unknown canonical identity; strengthened applicability regression 1/1; retention checks 5/5; generated API runtime/parity and the exact configured workspace typecheck passed. The corrected authenticated Chromium/WebKit journeys passed 2/2 with references bound to canonical run products, each covering desktop, phone, tablet portrait and tablet landscape. Physical Android/iOS checks were not run. The unrelated whole-directory browser syntax gate remains blocked by existing malformed manager-attention/merge specs, as recorded in the failure ledger.
 
 Slice 8 enforcement remains deferred pending explicit owner policy; it is neither shipped nor formally declined. Slice 9 allergen expansion is not adopted by this request.
+
+## Approved Master-Program Slice 3 — Advisory Date-Code Evidence
+
+QC records literal production, best-by, or other approved code text for a
+canonical run, explicit batch/pack context and shipper-case/carton-label/product-pack
+context. Each field also records readability: readable, missing, unreadable or
+ambiguous. All fields may be unknown; recording unknowns is not a pass.
+
+- `record-qc` records/views; `manage-qc` creates reference drafts and explicitly
+  approves or withdraws the latest version with a reason. Reference configuration
+  captures exact expected text, required fields, source identity, source version
+  and description. It applies only to its exact server-resolved run/product,
+  batch/pack and packaging context.
+- Recording accepts an exact configuration event ID, not client-authoritative
+  expectations or outcomes. Draft, withdrawn, stale, ambiguous or inapplicable
+  references yield **not-evaluated**. Missing/unreadable/ambiguous observations
+  remain not evaluated. Any evaluated mismatch fails overall; pass requires all
+  required fields to match. Only NFC normalization and boundary trimming apply.
+  Unavailable/inapplicable selections retain no reference contents, only a generic
+  unavailable reason. Configuration/review ledger rows are manager-only; an
+  operator cannot use guessed IDs or facility history to read protected drafts.
+  Approved applicable comparisons retain their authorized historical snapshots.
+- An optional label-check event link must be in the same authenticated scope and
+  run. The server validates the link and snapshots its identity.
+- Checks snapshot observations, readability, reference/source/review evidence
+  and server results in `qc_workflow_events`. Corrections recompute against the
+  original reference snapshot; corrections and redactions append evidence.
+  Run-linked evidence reopens sign-off; non-run configuration/review events do not.
+  Scoped history, manager CSV and reset/purge retention reuse the existing ledger.
+- No new table, column, database migration or production data change is required.
+- **Real date-code policy/reference availability: MISSING.** Synthetic approved
+  references prove the bounded comparison workflow only. A facility owner must
+  supply/approve applicable real exact text and its source/version for operational
+  comparisons. Otherwise the workflow is observation-only / not evaluated.
+
+This records evidence, not date validity, finished-product shelf-life, regulatory
+certification, expiry enforcement, release approval or shipping clearance.
+No expected code comes from today's date, run time, ingredient expiration, AI,
+an assumed format or a decoder. Date generation/interpretation would require
+separate owner-approved format/timezone/production-date policy.
+
+Verification: the expanded QC API/unit batch passed 18 cases after the protected
+reference authorization repair; separate reset/purge retention checks, 21 UI
+tests, root/API typechecks and generated-contract checks also passed. A later
+completion validation stalled before TypeScript while bootstrapping pnpm. The
+full root typecheck passed again using the exact pinned manager directly; the
+ignored tool-cache bin layout was then repaired so bare `pnpm` resolves the same
+version. API and web workflows are running, proxied API/web requests return
+HTTP 200, and all API health checks report ok. No project dependency version,
+workflow command, production data or production schema was changed.
+Chromium passed the scoped authenticated flow; both engines completed all
+date-code workflow and four-viewport assertions. WebKit's original global
+zero-pageerror check failed on background network diagnostics; the scoped reload
+probe also retained background failures while authentication and QC navigation
+succeeded. The new test distinguishes narrowly identified local WebKit background
+network messages from unexpected JS/QC errors, retaining all diagnostics. This
+classifier passed two pure tests and the final spec was discovery-checked, not
+browser-rerun. This is **not** a clean Safari/browser-health claim.
+
+Evidence: [coverage/check map](../.local/tasks/evidence/qc-slice-3-date-code-verification/coverage-check-map.md)
+and [failure ledger](../.local/tasks/evidence/qc-slice-3-date-code-verification/failure-ledger.md).
+Physical Android Chrome and iOS Safari/PWA are not run; browser emulation is not
+physical-device evidence. Slice 8 remains deferred pending explicit owner policy,
+not shipped or formally declined. Slice 9 is not adopted.
 
 ## QC Phase 1 — Approved and Implemented
 
@@ -88,7 +152,7 @@ Slice 8 enforcement remains deferred pending explicit owner policy; it is neithe
 
 Shipping holds or release enforcement; regulatory or food-label declarations; shipper-label and date-code checks; import or recipe approval; trend/analytics; cross-contact analytics; lot-to-customer traceability; line clearance; finished-lot identification; mock recall; and HACCP evidence.
 
-The Phase 1 exclusions above are historical scope boundaries. Advisory text-only label observation/comparison is now separately delivered by master-program Slice 2; date-code verification and enforcement remain outside that slice.
+The Phase 1 exclusions above are historical scope boundaries. Advisory text-only label observation/comparison is separately delivered by master-program Slice 2, and exact-text date-code evidence by Slice 3. Enforcement remains deferred.
 
 ## Critical Requirements
 
@@ -215,15 +279,14 @@ The server resolves expected effective components from canonical run settings an
 Artwork, photos/OCR, weight/ingredient/allergen/nutrition declarations, regulatory claims, shelf-life generation and packaging/shipping enforcement are not part of this slice.
 
 ### 6. Date Verification
-**What exists**: Nothing specific
-**What's needed**:
-- Pizza/carton date code verification (production date, best-by date)
-- Compare printed dates against expected dates
-- Flag date mismatches
-- One-tap check per carton/batch
+**What exists**: Slice 3 advisory literal production/best-by/other code recording,
+versioned manager-approved exact-text references with run/batch/pack applicability,
+server comparison, immutable snapshots and optional same-run label linkage.
+The existing QC ledger owns persistence; no separate `date_checks` table is needed.
 
-**Data model additions**:
-- `date_checks` table: run_id, product_type (pizza/carton), batch_id, expected_prod_date, expected_bestby_date, actual_prod_date, actual_bestby_date, status, checked_by, checked_at
+**Operational gap**: Real approved finished-product date-code references and any
+generation/decoding policy are unavailable. No shelf life, current-date mapping,
+ingredient-expiration mapping or calendar validity is inferred.
 
 ### 7. Recipe & Future Planning
 **What exists**: Setup tab has recipe editors (dough, sauce, frontline), brand/flavor management
@@ -256,7 +319,7 @@ Artwork, photos/OCR, weight/ingredient/allergen/nutrition declarations, regulato
 
 ### Phase 2: Verification Workflows
 6. **Label verification** — advisory text-only Slice 2 implemented; approved real references still unavailable
-7. **Date verification** — date code check form
+7. **Date verification** — Slice 3 exact-text advisory workflow implemented and functionally verified; real references unavailable; WebKit background diagnostics retained separately
 
 ### Phase 3: Integration & Planning
 8. **Import approval queue** — QC sign-off on imports
@@ -305,7 +368,11 @@ Every path is capability-gated and derives facility scope from the authenticated
 
 ## Deferred API and Workflow Gates
 
-Date-code verification, label artwork/OCR, import/recipe approval, dashboards, trend/analytics, PDF export, lot-to-customer traceability, holds, release enforcement, and label/regulatory claims remain deferred. Advisory text-only label observations/comparisons are delivered separately by Slice 2.
+Date-code generation/decoding and date-validity certification, label artwork/OCR,
+import/recipe approval, dashboards, trend/analytics, PDF export, lot-to-customer
+traceability, holds, release enforcement, and label/regulatory claims remain
+deferred. Advisory text-only label observations/comparisons are delivered by
+Slice 2 and exact-text date-code evidence by Slice 3.
 
 ## Slice 2 API
 
@@ -315,3 +382,14 @@ Date-code verification, label artwork/OCR, import/recipe approval, dashboards, t
 - `POST /api/qc/label-checks` — record observed text; the server resolves reference authority and computes results.
 
 Label events reuse the existing history, CSV, correction/redaction and sign-off endpoints. No observation request accepts client-supplied expected values, review authority or outcomes.
+
+## Slice 3 API
+
+- `GET /api/qc/date-code-references` — scoped latest reference versions; operators see approved versions only.
+- Manager-only `POST /api/qc/date-code-references` — save a draft/new version for an explicit canonical run and batch/pack context.
+- Manager-only `POST /api/qc/date-code-references/:eventId/review` — approve/withdraw the latest version with a reason.
+- `POST /api/qc/date-code-checks` — record text/readability; server resolves exact reference authority, validates optional label linkage and computes results.
+
+Date-code checks reuse the existing history, CSV, correction/redaction and sign-off
+endpoints. A recorded pass means a literal text match only, never a valid date or
+release approval.

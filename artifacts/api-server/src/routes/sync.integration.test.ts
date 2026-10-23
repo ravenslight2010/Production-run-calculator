@@ -1650,6 +1650,12 @@ describe("factory purge retains QC history", () => {
         eventType: "brix-check", runId: "purge-run", actorId: SANDBOX,
         payload: { measurementKind: "brix", actualBrix: 8, outcome: "not-evaluated" },
       },
+      ...(["live", "sandbox"] as const).flatMap((scope) =>
+        (["date-code-check", "date-code-reference", "date-code-reference-review"] as const).map((eventType) => ({
+          scope, eventType, operationId: `purge-${scope}-${eventType}`, recordId: `${scope}-${eventType}`,
+          runId: eventType === "date-code-check" ? "purge-run" : null, actorId: MANAGER,
+          payload: { outcome: "not-evaluated", fixture: true },
+        }))),
     ]);
     await db.insert(inventoryItemsTable).values([
       { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
@@ -1668,6 +1674,10 @@ describe("factory purge retains QC history", () => {
     expect(checks.map((row) => row.summary).sort()).toEqual(["Live retained check", "Sandbox retained check"]);
     expect(checks.map((row) => row.reviewerId).sort()).toEqual([MANAGER, SANDBOX].sort());
     const workflowEvents = await db.select().from(qcWorkflowEventsTable);
+    for (const type of ["date-code-check", "date-code-reference", "date-code-reference-review"]) {
+      expect(workflowEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
+        .toEqual(["live", "sandbox"]);
+    }
     expect(workflowEvents.filter((row) => row.eventType === "lot").map((row) => row.payload.lotNumber).sort())
       .toEqual(["Live QC retained", "Sandbox QC retained"]);
     expect(workflowEvents.filter((row) => row.eventType === "allergen-review").map((row) => row.scope).sort())

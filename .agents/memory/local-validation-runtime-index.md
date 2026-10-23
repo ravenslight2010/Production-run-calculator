@@ -18,6 +18,7 @@ explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwri
 
 - [Runner locks](release-runner-lock-history.md) — local lock history is private, not platform task history.
 - [Pinned Node](pinned-node-nix-runner.md) — use the exact installed Node when provisioning fails.
+- [Pinned pnpm bootstrap](pnpm-workspace-tool-cache.md) — workspace-local tool provisioning can recurse before a validation command starts.
 - [Docker healthcheck exec](docker-healthcheck-setns.md) — if healthchecks and `docker exec` both fail with `setns`, preserve CI health semantics and validate on a supported runner.
 - [Loopback probes](release-runner-loopback-probes.md) — bypass only local readiness probes, not TLS guards.
 - [Browser routing](local-browser-suite-routing.md) — offline installs and scoped loopback exceptions.

@@ -3053,6 +3053,239 @@ async function seedQcLabelRun(runIds: string | string[], missingIdentity: string
 }
 
 describe("QC workflows", () => {
+  type DateCodeFixtureEvent = { id: number; eventType: string; payload: Record<string, any> };
+  const dateCodeJson = (response: Response) => response.json() as Promise<{
+    event: DateCodeFixtureEvent;
+    items: DateCodeFixtureEvent[];
+    signoff: { reopened: boolean };
+  }>;
+  it("records date-code evidence with exact approved versions, isolated links and immutable correction history", async () => {
+    const runId = "date-code-run";
+    const otherRun = "date-code-other";
+    await seedQcLabelRun([runId, otherRun]);
+    const observed = { productionCode: "SYNTH-P001", bestByCode: "SYNTH-B001", otherCode: "" };
+    const readability = { productionCode: "readable", bestByCode: "readable", otherCode: "missing" };
+    const input = { runId, batchContext: "SYNTH-BATCH-1", context: "carton-label", observed, readability };
+    const record = async (changes: Record<string, unknown> = {}) => {
+      const response = await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", { operationId: randomUUID(), ...input, ...changes });
+      expect(response.status).toBe(201);
+      return (await dateCodeJson(response)).event;
+    };
+    const observation = await record();
+    expect(observation.payload).toMatchObject({ outcome: "not-evaluated", referenceSnapshot: null, observed });
+    expect(observation.payload).not.toHaveProperty("request");
+    for (const extra of [{ expected: observed }, { outcome: "pass" }, { batchContext: "" }, { observed: { ...observed, productionCode: "X".repeat(201) } }]) {
+      expect((await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", { operationId: randomUUID(), ...input, ...extra })).status).toBe(400);
+    }
+    const missing = await record({ observed: { productionCode: "", bestByCode: "", otherCode: "" },
+      readability: { productionCode: "missing", bestByCode: "unreadable", otherCode: "ambiguous" } });
+    expect(missing.payload.outcome).toBe("not-evaluated");
+    const referenceInput = { operationId: randomUUID(), runId, batchContext: input.batchContext, context: input.context,
+      expected: observed, requiredFields: ["productionCode", "bestByCode"], sourceIdentity: "SYNTH-SOURCE",
+      sourceVersion: "approved-document-1", sourceDescription: "Synthetic exact text only, no real date policy." };
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/date-code-references", referenceInput)).status).toBe(403);
+    const draftResponse = await req(QC_MANAGER, "POST", "/api/qc/date-code-references", referenceInput);
+    expect(draftResponse.status).toBe(201);
+    const draft = (await dateCodeJson(draftResponse)).event;
+    expect((await req(QC_MANAGER, "POST", "/api/qc/date-code-references", referenceInput)).status).toBe(200);
+    expect((await req(QC_MANAGER, "POST", "/api/qc/date-code-references", { ...referenceInput, operationId: randomUUID() })).status).toBe(409);
+    expect((await record({ referenceEventId: draft.id })).payload.outcome).toBe("not-evaluated");
+    expect((await req(QC_OPERATOR, "GET", "/api/qc/date-code-references").then(dateCodeJson)).items).toHaveLength(0);
+    const reviewInput = { operationId: randomUUID(), decision: "approved", reason: "Synthetic reference only." };
+    expect((await req(QC_OPERATOR, "POST", `/api/qc/date-code-references/${draft.id}/review`, reviewInput)).status).toBe(403);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${draft.id}/review`, reviewInput)).status).toBe(201);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${draft.id}/review`, reviewInput)).status).toBe(200);
+    const matching = await record({ referenceEventId: draft.id });
+    expect(matching.payload).toMatchObject({ outcome: "pass", referenceSnapshot: { sourceVersion: "approved-document-1",
+      expected: observed, version: 1, state: "approved", runId, batchContext: input.batchContext } });
+    for (const extra of [{ batchContext: "OTHER-BATCH" }, { runId: otherRun }, { context: "product-pack" }]) {
+      expect((await record({ referenceEventId: draft.id, ...extra })).payload).toMatchObject({
+        outcome: "not-evaluated", referenceSnapshot: null,
+      });
+    }
+    const unreadable = await record({ referenceEventId: draft.id,
+      readability: { ...readability, productionCode: "unreadable" } });
+    expect(unreadable.payload.outcome).toBe("not-evaluated");
+    const mismatchInput = { operationId: randomUUID(), ...input, referenceEventId: draft.id,
+      observed: { ...observed, bestByCode: "DIFFERENT" } };
+    const mismatchResponse = await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", mismatchInput);
+    expect(mismatchResponse.status).toBe(201);
+    const mismatch = (await dateCodeJson(mismatchResponse)).event;
+    expect(mismatch.payload).toMatchObject({ outcome: "fail", fieldResults: { bestByCode: { state: "fail" } } });
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", mismatchInput)).status).toBe(200);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", { ...mismatchInput, note: "changed" })).status).toBe(409);
+    const labelResponse = await req(QC_OPERATOR, "POST", "/api/qc/label-checks", {
+      operationId: randomUUID(), runId, context: "carton-label",
+      observed: { productName: "SYNTH", lotText: "", dateText: "" },
+    });
+    expect(labelResponse.status).toBe(201);
+    const label = (await dateCodeJson(labelResponse)).event;
+    expect((await record({ labelCheckEventId: label.id })).payload.labelSnapshot.eventId).toBe(label.id);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks",
+      { operationId: randomUUID(), ...input, runId: otherRun, labelCheckEventId: label.id })).status).toBe(404);
+    const [foreignLabel] = await db.insert(qcWorkflowEventsTable).values({
+      operationId: randomUUID(), recordId: randomUUID(), scope: "sandbox", actorId: SANDBOX,
+      eventType: "label-check", runId, payload: {},
+    }).returning();
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks",
+      { operationId: randomUUID(), ...input, labelCheckEventId: foreignLabel.id })).status).toBe(404);
+    expect((await req(QC_MANAGER, "POST", "/api/qc/run-signoffs", { operationId: randomUUID(), runId })).status).toBe(201);
+    const version2Response = await req(QC_MANAGER, "POST", "/api/qc/date-code-references", {
+      ...referenceInput, operationId: randomUUID(), referenceId: draft.payload.value.referenceId,
+      sourceVersion: "approved-document-2", expected: { ...observed, bestByCode: "NEW-CODE" },
+    });
+    expect(version2Response.status).toBe(201);
+    const version2 = (await dateCodeJson(version2Response)).event;
+    expect((await req(QC_MANAGER, "GET", `/api/qc/runs/${runId}`).then(dateCodeJson)).signoff.reopened).toBe(false);
+    expect((await record({ referenceEventId: draft.id })).payload.referenceSnapshot).toBeNull();
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${draft.id}/review`,
+      { ...reviewInput, operationId: randomUUID() })).status).toBe(409);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${version2.id}/review`,
+      { ...reviewInput, operationId: randomUUID() })).status).toBe(201);
+    expect((await record({ referenceEventId: version2.id })).payload.outcome).toBe("fail");
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${version2.id}/review`, {
+      operationId: randomUUID(), decision: "withdrawn", reason: "Withdraw synthetic authority.",
+    })).status).toBe(201);
+    expect((await record({ referenceEventId: version2.id })).payload).toMatchObject({
+      outcome: "not-evaluated", referenceSnapshot: null,
+    });
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${mismatch.id}/corrections`, {
+      operationId: randomUUID(), reason: "Correct synthetic transcription", replacement: { observed: { bestByCode: observed.bestByCode } },
+    })).status).toBe(201);
+    const history = await req(QC_MANAGER, "GET", `/api/qc/history?runId=${runId}`).then(dateCodeJson);
+    expect(history.items.find((event: any) => event.id === mismatch.id)?.payload).toMatchObject({
+      outcome: "pass", referenceSnapshot: { version: 1, sourceVersion: "approved-document-1" },
+    });
+    expect((await req(QC_MANAGER, "GET", `/api/qc/runs/${runId}`).then(dateCodeJson)).signoff.reopened).toBe(true);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${mismatch.id}/corrections`, {
+      operationId: randomUUID(), reason: "forged expectation", replacement: { referenceSnapshot: {} },
+    })).status).toBe(400);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${mismatch.id}/redactions`, {
+      operationId: randomUUID(), reason: "Synthetic privacy request",
+      fields: ["payload.observed.bestByCode", "payload.fieldResults.bestByCode.observed",
+        "payload.fieldResults.bestByCode.expected", "payload.referenceSnapshot.expected.bestByCode"],
+    })).status).toBe(201);
+    const redactedHistory = await req(QC_OPERATOR, "GET", `/api/qc/history?runId=${runId}`).then(dateCodeJson);
+    const redacted = redactedHistory.items.find((event: any) => event.id === mismatch.id);
+    expect(redacted).toBeDefined();
+    expect(redacted?.payload.observed.bestByCode).not.toBe(observed.bestByCode);
+    const csvResponse = await req(QC_MANAGER, "GET", `/api/qc/history.csv?runId=${runId}`);
+    expect(csvResponse.status).toBe(200);
+    expect(await csvResponse.text()).toContain("date-code-check");
+    expect((await req(QC_OPERATOR, "GET", `/api/qc/history.csv?runId=${runId}`)).status).toBe(403);
+    const [original] = await db.select().from(qcWorkflowEventsTable).where(eq(qcWorkflowEventsTable.id, mismatch.id));
+    expect(original.payload.observed).toMatchObject({ bestByCode: "DIFFERENT" });
+    expect(original.payload.outcome).toBe("fail");
+    const concurrentInput = { operationId: randomUUID(), ...input };
+    const concurrent = await Promise.all([1, 2].map(() =>
+      req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", concurrentInput)));
+    expect(concurrent.map((response) => response.status).sort()).toEqual([200, 201]);
+    const concurrentBodies = await Promise.all(concurrent.map(dateCodeJson));
+    expect(concurrentBodies[0].event.id).toBe(concurrentBodies[1].event.id);
+  });
+
+  it("does not disclose date-code draft or withdrawn reference contents through check responses or history", async () => {
+    const runId = "date-code-private-run";
+    await seedQcLabelRun(runId);
+    const secrets = ["MANAGER-EXPECTED-SECRET", "MANAGER-SOURCE-SECRET", "MANAGER-VERSION-SECRET", "MANAGER-DESCRIPTION-SECRET"];
+    const configured = await req(QC_MANAGER, "POST", "/api/qc/date-code-references", {
+      operationId: randomUUID(), runId, batchContext: "PRIVATE-BATCH", context: "shipper-case",
+      expected: { productionCode: secrets[0], bestByCode: "", otherCode: "" }, requiredFields: ["productionCode"],
+      sourceIdentity: secrets[1], sourceVersion: secrets[2], sourceDescription: secrets[3],
+    }).then(dateCodeJson);
+    const referenceId = configured.event.id;
+    const checkInput = {
+      operationId: randomUUID(), runId, batchContext: "PRIVATE-BATCH", context: "shipper-case",
+      referenceEventId: referenceId,
+      observed: { productionCode: "OPERATOR-OBSERVATION", bestByCode: "", otherCode: "" },
+      readability: { productionCode: "readable", bestByCode: "missing", otherCode: "missing" },
+    };
+    const unavailable = async (input = checkInput) => {
+      const response = await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", input);
+      expect([200, 201]).toContain(response.status);
+      const body = await dateCodeJson(response);
+      expect(body.event.payload).toMatchObject({ outcome: "not-evaluated", referenceSnapshot: null,
+        referenceUnavailableReason: "Selected reference is unavailable or not applicable." });
+      for (const secret of secrets) expect(JSON.stringify(body)).not.toContain(secret);
+      for (const field of Object.values(body.event.payload.fieldResults) as Array<{ expected: unknown }>) {
+        expect(field.expected).toBeNull();
+      }
+      return body.event;
+    };
+    const draftCheck = await unavailable();
+    await unavailable(); // Replays the same safe persisted event.
+    const operatorFacilityHistory = await req(QC_OPERATOR, "GET", "/api/qc/history").then(dateCodeJson);
+    for (const secret of secrets) expect(JSON.stringify(operatorFacilityHistory)).not.toContain(secret);
+    expect(operatorFacilityHistory.items.some((event) =>
+      ["date-code-reference", "date-code-reference-review"].includes(event.eventType))).toBe(false);
+    expect(JSON.stringify(await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`).then(dateCodeJson)))
+      .not.toContain(secrets[0]);
+    expect(JSON.stringify(await req(QC_MANAGER, "GET", "/api/qc/history").then(dateCodeJson))).toContain(secrets[1]);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${referenceId}/review`, {
+      operationId: randomUUID(), decision: "approved", reason: "Synthetic approved source.",
+    })).status).toBe(201);
+    const applied = await req(QC_OPERATOR, "POST", "/api/qc/date-code-checks", {
+      ...checkInput, operationId: randomUUID(),
+    }).then(dateCodeJson);
+    expect(applied.event.payload).toMatchObject({ outcome: "fail",
+      referenceSnapshot: { expected: { productionCode: secrets[0] }, sourceIdentity: secrets[1], state: "approved" } });
+    await unavailable({ ...checkInput, operationId: randomUUID(), batchContext: "OTHER-BATCH" });
+    await unavailable({ ...checkInput, operationId: randomUUID(), referenceEventId: 2147483647 });
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${referenceId}/review`, {
+      operationId: randomUUID(), decision: "withdrawn", reason: "MANAGER-REVIEW-SECRET",
+    })).status).toBe(201);
+    const withdrawnCheck = await unavailable({ ...checkInput, operationId: randomUUID() });
+    const history = await req(QC_OPERATOR, "GET", `/api/qc/history?runId=${runId}`).then(dateCodeJson);
+    for (const id of [draftCheck.id, withdrawnCheck.id]) {
+      const projected = history.items.find((event) => event.id === id);
+      expect(projected?.payload.referenceSnapshot).toBeNull();
+      for (const secret of [...secrets, "MANAGER-REVIEW-SECRET"]) expect(JSON.stringify(projected)).not.toContain(secret);
+    }
+    // Historical comparisons retain the authority they had at recording time.
+    expect(history.items.find((event) => event.id === applied.event.id)?.payload.referenceSnapshot.sourceIdentity).toBe(secrets[1]);
+    const postWithdrawalHistory = await req(QC_OPERATOR, "GET", "/api/qc/history").then(dateCodeJson);
+    expect(postWithdrawalHistory.items.some((event) =>
+      ["date-code-reference", "date-code-reference-review"].includes(event.eventType))).toBe(false);
+    expect(JSON.stringify(postWithdrawalHistory)).not.toContain("MANAGER-REVIEW-SECRET");
+    expect((await req(QC_OPERATOR, "GET", "/api/qc/date-code-references").then(dateCodeJson)).items).toHaveLength(0);
+  });
+
+  it("rejects incomplete date-code approval and isolates reference authority by scope", async () => {
+    const runId = "date-code-incomplete";
+    await seedQcLabelRun([runId]);
+    const reference = await req(QC_MANAGER, "POST", "/api/qc/date-code-references", {
+      operationId: randomUUID(), runId, batchContext: "B1", context: "product-pack",
+      expected: { productionCode: "", bestByCode: "", otherCode: "" }, requiredFields: ["productionCode"],
+      sourceIdentity: "SYNTH", sourceVersion: "1", sourceDescription: "Synthetic incomplete reference.",
+    });
+    expect(reference.status).toBe(201);
+    const event = (await dateCodeJson(reference)).event;
+    expect((await req(QC_MANAGER, "POST", `/api/qc/date-code-references/${event.id}/review`, {
+      operationId: randomUUID(), decision: "approved", reason: "Incomplete fixture.",
+    })).status).toBe(400);
+    const unknownReference = await req(QC_MANAGER, "POST", "/api/qc/date-code-references", {
+      operationId: randomUUID(), runId: "unknown-run", batchContext: "B1", context: "product-pack",
+      expected: { productionCode: "X", bestByCode: "", otherCode: "" }, requiredFields: ["productionCode"],
+      sourceIdentity: "SYNTH", sourceVersion: "1", sourceDescription: "Synthetic.",
+    });
+    expect(unknownReference.status).toBe(404);
+    expect((await req(null, "GET", "/api/qc/date-code-references")).status).toBe(401);
+    expect((await req(OPERATOR, "GET", "/api/qc/date-code-references")).status).toBe(403);
+    const checkInput = { operationId: randomUUID(), runId, batchContext: "B1", context: "product-pack",
+      observed: { productionCode: "X", bestByCode: "", otherCode: "" },
+      readability: { productionCode: "readable", bestByCode: "missing", otherCode: "missing" } };
+    expect((await req(null, "POST", "/api/qc/date-code-checks", checkInput)).status).toBe(401);
+    expect((await req(OPERATOR, "POST", "/api/qc/date-code-checks", checkInput)).status).toBe(403);
+    await db.update(rolesTable).set({ capabilities: ["record-qc", "manage-qc"] }).where(eq(rolesTable.name, "operator"));
+    const sandboxRefs = await req(SANDBOX, "GET", "/api/qc/date-code-references").then(dateCodeJson);
+    expect(sandboxRefs.items).toHaveLength(0);
+    expect((await req(SANDBOX, "POST", `/api/qc/date-code-references/${event.id}/review`, {
+      operationId: randomUUID(), decision: "approved", reason: "Cross-scope fixture.",
+    })).status).toBe(404);
+    // The canonical run exists only in live. A sandbox caller cannot borrow it.
+    expect((await req(SANDBOX, "POST", "/api/qc/date-code-checks", checkInput)).status).toBe(404);
+  });
+
   it("never evaluates an approved label reference for another product or an unknown canonical product", async () => {
     const matchingRun = "label-product-a";
     const otherRun = "label-product-b";
