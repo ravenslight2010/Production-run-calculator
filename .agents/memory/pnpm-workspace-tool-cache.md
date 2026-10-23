@@ -16,3 +16,26 @@ exact workspace pin and obtains it via npm in a private temporary cache; child
 commands inherit that selected pnpm, and the cache is removed afterward. Keep
 the existing pinned Node and HTTPS-only safeguards enabled. Do not change
 `packageManager` or the lockfile to work around local tool provisioning.
+
+Ad-hoc external tool links can outlive their temporary targets. Also, a version
+check through a shell or Node launcher is not proof that a direct child-process
+spawn can execute the same entry.
+
+**Why:** A cached link survived a resume after its target disappeared. Later,
+the package's plain-text fallback worked through a shell-mediated launcher but
+failed with ENOEXEC when the API starter spawned it directly.
+
+**How to apply:** Prefer the canonical runner for checks. When restoring an
+existing app workflow that uses a bare manager, verify its exact pin and a
+direct child-process version check. Provision with integrity verification and
+use the verified native executable or a proper executable launcher. Never
+weaken TLS, change the repository pin or count an unstarted check as passed.
+
+Recursive provisioning can exhaust the container's process/thread limit,
+making unrelated app workflows fail.
+
+**Why:** Concurrent launches once amplified a recursive version switch into
+dozens of installer processes; application code was not the cause.
+
+**How to apply:** Inspect process ancestry, stop only the confirmed recursive
+installer tree, repair tool provisioning and then restore affected workflows.

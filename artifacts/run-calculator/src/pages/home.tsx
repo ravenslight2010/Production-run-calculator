@@ -17742,6 +17742,7 @@ export default function Home() {
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
+                className="[&_[role=menuitem]]:min-h-10"
                 onCloseAutoFocus={(event) => {
                   if (!openAlertSettingsAfterMenuCloseRef.current) return;
                   openAlertSettingsAfterMenuCloseRef.current = false;

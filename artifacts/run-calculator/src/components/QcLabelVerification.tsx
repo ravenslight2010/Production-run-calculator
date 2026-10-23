@@ -29,8 +29,8 @@ const contexts = [
 
 const labelClass = "mb-1.5 block text-xs font-semibold text-muted-foreground";
 const inputClass = "min-h-10 w-full min-w-0 appearance-none rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60";
-const buttonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50";
-const quietButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50";
+const buttonClass = "inline-flex min-h-10 max-w-full flex-wrap items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50";
+const quietButtonClass = "inline-flex min-h-10 max-w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50";
 
 function uuid() {
   return crypto.randomUUID();
@@ -138,7 +138,7 @@ export function QcLabelComparison({ event }: { event: QcEvent }) {
     : null;
 
   return (
-    <section className="rounded-lg border border-border/70 bg-background p-3" data-testid={`qc-label-result-${event.id}`}>
+    <section className="rounded-lg border border-border/70 bg-background p-[min(.75rem,3vw)]" data-testid={`qc-label-result-${event.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-bold">Observed label text · {payload.context === "carton-label" ? "Carton label" : "Shipper case"}</p>
@@ -151,7 +151,7 @@ export function QcLabelComparison({ event }: { event: QcEvent }) {
         <StatusTag value={outcome} />
       </div>
       {reason && <p className="mt-2 text-xs text-amber-900 dark:text-amber-200">{reason}</p>}
-      <dl className="mt-3 grid min-w-0 gap-2 sm:grid-cols-3">
+      <dl className="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
         {LABEL_FIELDS.map(({ key, label }) => {
           const item = results[key] && typeof results[key] === "object"
             ? results[key] as Record<string, unknown>
@@ -388,7 +388,7 @@ export default function QcLabelVerification({
   };
 
   return (
-    <section className="space-y-4 rounded-xl border border-border/80 bg-card p-4 shadow-sm sm:p-5" data-testid="qc-label-verification">
+    <section className="min-w-0 space-y-4 rounded-xl border border-border/80 bg-card p-[min(1rem,4vw)] shadow-sm sm:p-5" data-testid="qc-label-verification">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-bold">Shipper label text check</h2>
@@ -402,7 +402,7 @@ export default function QcLabelVerification({
       </header>
 
       {referenceQuery.isError ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-300/70 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200" role="alert">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-300/70 bg-rose-50 p-[min(.75rem,3vw)] text-xs text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200" role="alert">
           <span>Approved label references could not be loaded. You can still save observations; the server determines whether a comparison is available.</span>
           <button type="button" className={quietButtonClass} onClick={() => void referenceQuery.refetch()}>
             <RotateCcw className="h-3.5 w-3.5" /> Retry
@@ -410,7 +410,7 @@ export default function QcLabelVerification({
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-3 md:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
         <label className="block min-w-0">
           <span className={labelClass}>Packaging context</span>
           <select
@@ -448,9 +448,9 @@ export default function QcLabelVerification({
       </div>
 
       {selectedReference ? (
-        <div className="rounded-lg border border-emerald-700/20 bg-emerald-50/70 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+        <div className="rounded-lg border border-emerald-700/20 bg-emerald-50/70 p-[min(.75rem,3vw)] dark:border-emerald-900/50 dark:bg-emerald-950/20">
           <p className="text-xs font-semibold">Approved reference · version {selectedReference.version}</p>
-          <dl className="mt-2 grid min-w-0 gap-2 text-xs sm:grid-cols-3">
+          <dl className="mt-2 grid min-w-0 grid-cols-1 gap-2 text-xs sm:grid-cols-3">
             {LABEL_FIELDS.map(({ key, label }) => (
               <div key={key} className="min-w-0">
                 <dt className="text-[10px] font-semibold uppercase text-muted-foreground">
@@ -466,7 +466,7 @@ export default function QcLabelVerification({
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs leading-5">
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-[min(.75rem,3vw)] text-xs leading-5">
           <p className="font-semibold">Observation-only mode</p>
           <p className="text-muted-foreground">
             No approved reference is selected for this context. You can still save the observation; every comparison will be not evaluated. This is not an approved label claim, packaging hold, or shipping clearance.
@@ -474,7 +474,7 @@ export default function QcLabelVerification({
         </div>
       )}
 
-      <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         {LABEL_FIELDS.map(({ key, label, maxLength }) => (
           <TextField
             key={key}
@@ -512,8 +512,11 @@ export default function QcLabelVerification({
         {!canRecordQc && <span className="text-xs text-muted-foreground">QC recording permission is required to save an observation.</span>}
       </div>
       {checkMutation.error && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-300/70 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200" role="alert">
-          <span className="flex min-w-0 items-start gap-2"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{errorText(checkMutation.error)}</span>
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 rounded-lg border border-rose-300/70 bg-rose-50 p-[min(.75rem,3vw)] text-xs text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200" role="alert">
+          <span className="flex min-w-0 items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{errorText(checkMutation.error)}</span>
+          </span>
           <button type="button" className={quietButtonClass} onClick={submitCheck} disabled={checkMutation.isPending}>Retry saved values</button>
         </div>
       )}
@@ -535,9 +538,9 @@ export default function QcLabelVerification({
           {referenceQuery.isLoading ? (
             <p className="text-xs text-muted-foreground">Loading current reference status…</p>
           ) : referenceQuery.data?.items.length ? (
-            <div className="grid min-w-0 gap-2 lg:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
               {references.map((reference) => (
-                <article key={reference.referenceId} className="min-w-0 rounded-lg border border-border/70 p-3">
+                <article key={reference.referenceId} className="min-w-0 rounded-lg border border-border/70 p-[min(.75rem,3vw)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="break-words text-xs font-bold">{reference.productKey} · v{reference.version}</p>
@@ -579,13 +582,13 @@ export default function QcLabelVerification({
               ))}
             </div>
           ) : (
-            <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">No label references have been configured. Until a source is reviewed and approved, checks operate in observation-only mode.</p>
+            <p className="rounded-lg border border-dashed border-border p-[min(.75rem,3vw)] text-xs text-muted-foreground">No label references have been configured. Until a source is reviewed and approved, checks operate in observation-only mode.</p>
           )}
           <p className="text-[11px] text-muted-foreground">
             To review older versions or export their audit trail, clear the Run ID filter in QC evidence history below.
           </p>
 
-          <div className="grid min-w-0 gap-3 rounded-lg border border-border/70 p-3 md:grid-cols-2">
+          <div className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border/70 p-[min(.75rem,3vw)] md:grid-cols-2">
             <label className="block min-w-0">
               <span className={labelClass}>Packaging context</span>
               <select
@@ -662,7 +665,7 @@ export default function QcLabelVerification({
             </div>
           </div>
 
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <TextAreaField
               label="Approval or withdrawal reason"
               value={reviewReason}

@@ -11,7 +11,7 @@ const webkitOptions = webkitLaunchOptions();
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "qc-workflows-authenticated.spec.ts",
-  timeout: 120_000,
+  timeout: 180_000,
   retries: 0,
   workers: 1,
   outputDir: "test-results/qc-workflows",

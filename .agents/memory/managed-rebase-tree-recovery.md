@@ -104,3 +104,15 @@ resolved tree.
 boundaries, and verify the final diff consists of the intended additions plus
 explicitly justified fixture changes. Run the focused file and package typecheck
 again on the resolved tree before resubmitting completion.
+
+Ignored build-stage identity records can also become incompatible when a base
+refresh changes the source-fingerprint policy.
+
+**Why:** A retained stage record from the older policy made the production-mode
+Vite config-loader check fail before TypeScript started. The application source
+and normal development server were not the cause.
+
+**How to apply:** Distinguish a stale generated record from a source failure.
+For local checks, preserve/quarantine the ignored stale stage metadata and rerun
+the failed check. For publishing, regenerate identity through its canonical
+preparation flow; never edit identity fields or weaken their validation.

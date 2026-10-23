@@ -27,7 +27,7 @@ export default function RunAllergenFootprintPanel({
         <h3 id="run-allergen-footprint-title" className="text-sm font-semibold">
           Derived ingredient allergen footprint
         </h3>
-        <span className="rounded border border-border/70 bg-background/70 px-2 py-1 font-mono text-xs" data-testid="qc-allergen-run-id">
+        <span className="max-w-full break-all rounded border border-border/70 bg-background/70 px-2 py-1 font-mono text-xs" data-testid="qc-allergen-run-id">
           Run {runId || "not selected"}
         </span>
       </div>
@@ -89,7 +89,7 @@ export default function RunAllergenFootprintPanel({
                 {footprint.allergens.map(({ allergen, ingredientNames }) => (
                   <li
                     key={allergen}
-                    className="text-sm"
+                    className="break-words text-sm [overflow-wrap:anywhere]"
                     data-testid={`run-allergen-${allergen}`}
                   >
                     <span className="font-semibold">{titleCase(allergen)}:</span>{" "}
@@ -113,7 +113,7 @@ export default function RunAllergenFootprintPanel({
                 {footprint.unknownIngredients.map((ingredient) => (
                   <li
                     key={ingredient.key}
-                    className="text-sm"
+                    className="break-words text-sm [overflow-wrap:anywhere]"
                     data-testid="run-allergen-unknown-ingredient"
                   >
                     <span className="font-medium">{ingredient.name}</span>

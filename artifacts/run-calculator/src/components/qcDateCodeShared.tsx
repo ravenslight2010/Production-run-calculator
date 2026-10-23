@@ -81,7 +81,7 @@ export function QcDateCodeComparison({ event }: { event: QcEvent }) {
         <ResultTag value={outcome} />
       </div>
       {reason && <p className="mt-2 text-xs text-amber-900 dark:text-amber-200">{reason}</p>}
-      <dl className="mt-3 grid min-w-0 gap-2 sm:grid-cols-3">
+      <dl className="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
         {DATE_CODE_FIELDS.map(({ key, label }) => {
           const item = obj(results[key]);
           return (

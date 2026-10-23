@@ -3,6 +3,7 @@ import {
   test,
   type Browser,
   type BrowserContext,
+  type Locator,
   type Page,
   type TestInfo,
 } from "@playwright/test";
@@ -18,6 +19,16 @@ import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const VIEWPORT = { width: 1440, height: 1000 };
+const RESPONSIVE_VIEWPORTS = [
+  { name: "phone-320", width: 320, height: 740 },
+  { name: "phone-375", width: 375, height: 812 },
+  { name: "phone-390", width: 390, height: 844 },
+  { name: "phone-430", width: 430, height: 932 },
+  { name: "tablet-portrait", width: 768, height: 1024 },
+  { name: "tablet-landscape", width: 1024, height: 768 },
+  { name: "phone-short-landscape", width: 568, height: 320 },
+  { name: "desktop", width: 1440, height: 900 },
+] as const;
 
 type AuthenticatedPage = { context: BrowserContext; page: Page };
 
@@ -51,8 +62,179 @@ async function openAuthenticatedPage(
 
 async function openQc(page: Page): Promise<void> {
   await page.getByTitle("More").click();
-  await page.getByRole("menuitem", { name: "QC workflows & history", exact: true }).click();
+  const qcMenuItem = page.getByRole("menuitem", { name: "QC workflows & history", exact: true });
+  await expect(qcMenuItem).toBeVisible();
+  await qcMenuItem.scrollIntoViewIfNeeded();
+  const menuItemGeometry = await qcMenuItem.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      height: rect.height,
+      reachable: hit === element || element.contains(hit),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(menuItemGeometry.left).toBeGreaterThanOrEqual(-1);
+  expect(menuItemGeometry.right).toBeLessThanOrEqual(menuItemGeometry.viewportWidth + 1);
+  expect(menuItemGeometry.top).toBeGreaterThanOrEqual(-1);
+  expect(menuItemGeometry.bottom).toBeLessThanOrEqual(menuItemGeometry.viewportHeight + 1);
+  expect(menuItemGeometry.height).toBeGreaterThanOrEqual(40);
+  expect(menuItemGeometry.reachable).toBe(true);
+  await qcMenuItem.click();
   await expect(page.getByTestId("qc-workflow-tab")).toBeVisible();
+}
+
+async function assertQcViewport(
+  page: Page,
+  surfaceName: string,
+  viewport: { name: string; width: number; height: number },
+): Promise<void> {
+  console.info(`[qc-responsive] ${surfaceName}: ${viewport.name}`);
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  const geometry = await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('[data-testid="qc-workflow-tab"]');
+    if (!root) return null;
+    const rootRect = root.getBoundingClientRect();
+    const runReference = root.querySelector<HTMLElement>('[data-testid="text-qc-run-id"]');
+    const allergenRunReference = root.querySelector<HTMLElement>(
+      '[data-testid="qc-allergen-run-id"]',
+    );
+    const touchControls = Array.from(root.querySelectorAll<HTMLElement>(
+      '[data-testid^="tab-qc-"], [data-testid^="button-date-code-readability-"], [data-testid="button-toggle-allergen-activity"], [data-testid="button-toggle-qc-import-review"]',
+    )).filter((element) => !element.closest('[hidden], [aria-hidden="true"]'))
+      .map((element) => ({
+        label: element.getAttribute("aria-label") || element.textContent?.trim() || element.tagName,
+        height: element.getBoundingClientRect().height,
+      }));
+    const stationTabs = Array.from(document.querySelectorAll<HTMLElement>('.station-nav [role="tab"]'))
+      .map((element) => {
+        const bounds = element.getBoundingClientRect();
+        const label = element.querySelector<HTMLElement>("span");
+        const labelBounds = label?.getBoundingClientRect();
+        return {
+          left: bounds.left,
+          right: bounds.right,
+          top: bounds.top,
+          bottom: bounds.bottom,
+          height: bounds.height,
+          labelRight: labelBounds?.right ?? 0,
+          labelBottom: labelBounds?.bottom ?? 0,
+          labelClientWidth: label?.clientWidth ?? 0,
+          labelScrollWidth: label?.scrollWidth ?? 0,
+          labelClientHeight: label?.clientHeight ?? 0,
+          labelScrollHeight: label?.scrollHeight ?? 0,
+        };
+      });
+    return {
+      rootLeft: rootRect.left,
+      rootRight: rootRect.right,
+      rootWidth: root.clientWidth,
+      rootScrollWidth: root.scrollWidth,
+      runReferenceWidth: runReference?.clientWidth ?? 0,
+      runReferenceScrollWidth: runReference?.scrollWidth ?? 0,
+      allergenRunReferenceWidth: allergenRunReference?.clientWidth ?? 0,
+      allergenRunReferenceScrollWidth: allergenRunReference?.scrollWidth ?? 0,
+      viewportWidth: window.innerWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      bodyScrollWidth: document.body.scrollWidth,
+      overflowSources: document.body.scrollWidth > window.innerWidth + 1
+        ? Array.from(document.body.querySelectorAll<HTMLElement>("*"))
+          .map((element) => ({ element, bounds: element.getBoundingClientRect() }))
+          .filter(({ bounds }) => bounds.width > 0 && (bounds.left < -1 || bounds.right > window.innerWidth + 1))
+          .sort((a, b) => b.bounds.right - a.bounds.right)
+          .slice(0, 8)
+          .map(({ element, bounds }) => ({
+            tag: element.tagName,
+            testId: element.dataset.testid,
+            classes: element.className,
+            left: bounds.left,
+            right: bounds.right,
+          }))
+        : [],
+      touchControls,
+      stationTabs,
+    };
+  });
+  expect(geometry, `${surfaceName} should render at ${viewport.name}`).not.toBeNull();
+  expect(geometry!.rootLeft, `${surfaceName} left edge at ${viewport.name}`).toBeGreaterThanOrEqual(-1);
+  expect(geometry!.rootRight, `${surfaceName} right edge at ${viewport.name}`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry!.runReferenceWidth, `${surfaceName} run reference at ${viewport.name}`).toBeGreaterThan(0);
+  expect(geometry!.runReferenceScrollWidth, `${surfaceName} run reference text at ${viewport.name}`)
+    .toBeLessThanOrEqual(geometry!.runReferenceWidth + 1);
+  if (geometry!.allergenRunReferenceWidth > 0) {
+    expect(geometry!.allergenRunReferenceScrollWidth, `${surfaceName} allergen run reference at ${viewport.name}`)
+      .toBeLessThanOrEqual(geometry!.allergenRunReferenceWidth + 1);
+  }
+  expect(geometry!.documentScrollWidth, `${surfaceName} document at ${viewport.name}`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry!.bodyScrollWidth, `${surfaceName} body at ${viewport.name}: ${JSON.stringify(geometry!.overflowSources)}`)
+    .toBeLessThanOrEqual(viewport.width + 1);
+  for (const control of geometry!.touchControls) {
+    expect(control.height, `${surfaceName} ${control.label} touch target at ${viewport.name}`)
+      .toBeGreaterThanOrEqual(40);
+  }
+  for (const tab of geometry!.stationTabs) {
+    expect(tab.left, `${surfaceName} station tab left edge`).toBeGreaterThanOrEqual(-1);
+    expect(tab.right, `${surfaceName} station tab right edge`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(tab.top, `${surfaceName} station tab top edge`).toBeGreaterThanOrEqual(-1);
+    expect(tab.bottom, `${surfaceName} station tab bottom edge`).toBeLessThanOrEqual(viewport.height + 1);
+    expect(tab.height, `${surfaceName} station tab touch height`).toBeGreaterThanOrEqual(44);
+    expect(tab.labelRight, `${surfaceName} station label right edge`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(tab.labelBottom, `${surfaceName} station label bottom edge`).toBeLessThanOrEqual(viewport.height + 1);
+    expect(tab.labelScrollWidth, `${surfaceName} full station label width`).toBeLessThanOrEqual(tab.labelClientWidth + 1);
+    expect(tab.labelScrollHeight, `${surfaceName} full station label height`).toBeLessThanOrEqual(tab.labelClientHeight + 1);
+  }
+}
+
+async function assertQcVerificationFields(page: Page, viewport: { name: string; width: number; height: number }): Promise<void> {
+  const panels = page.locator('[data-testid="qc-label-verification"], [data-testid="qc-date-code-verification"]');
+  await expect(panels).toHaveCount(2);
+  const fields = await panels.evaluateAll((roots) => roots.flatMap((root) =>
+    Array.from(root.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([type="radio"]), select, textarea'))
+      .map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return { panel: (root as HTMLElement).dataset.testid, left: bounds.left, right: bounds.right, width: bounds.width };
+      })));
+  expect(fields.length).toBeGreaterThan(8);
+  for (const field of fields) {
+    expect(field.left, `${viewport.name} ${field.panel} field left`).toBeGreaterThanOrEqual(-1);
+    expect(field.right, `${viewport.name} ${field.panel} field right`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(field.width, `${viewport.name} ${field.panel} field readable width`).toBeGreaterThanOrEqual(150);
+  }
+}
+
+async function assertQcActionReachable(
+  action: Locator,
+  actionName: string,
+  viewport: { name: string; width: number; height: number },
+): Promise<void> {
+  await action.scrollIntoViewIfNeeded();
+  const geometry = await action.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + Math.min(2, rect.height / 2)));
+    const hit = document.elementFromPoint(x, y);
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      height: rect.height,
+      hit: hit === element || element.contains(hit),
+    };
+  });
+  expect(geometry.left, `${viewport.name} ${actionName} left edge`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.right, `${viewport.name} ${actionName} right edge`).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry.top, `${viewport.name} ${actionName} top edge`).toBeGreaterThanOrEqual(-1);
+  expect(geometry.bottom, `${viewport.name} ${actionName} bottom edge`).toBeLessThanOrEqual(viewport.height + 1);
+  expect(geometry.height, `${viewport.name} ${actionName} touch height`).toBeGreaterThanOrEqual(40);
+  expect(geometry.hit, `${viewport.name} ${actionName} should receive pointer input`).toBe(true);
+  await action.focus();
+  await expect(action, `${viewport.name} ${actionName} should be keyboard focusable`).toBeFocused();
 }
 
 function attachBrowserDiagnostics(page: Page, label: string, entries: string[]): void {
@@ -75,9 +257,24 @@ function attachBrowserDiagnostics(page: Page, label: string, entries: string[]):
   });
 }
 
-async function capture(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+async function capture(
+  page: Page,
+  testInfo: TestInfo,
+  name: string,
+  sensitiveTexts: string[] = [],
+  surface?: Locator,
+): Promise<void> {
   const path = testInfo.outputPath(`${name}.png`);
-  await page.screenshot({ path, fullPage: true, animations: "disabled" });
+  const masks = [
+    page.getByTestId("text-qc-run-id").filter({ visible: true }),
+    ...sensitiveTexts.filter(Boolean).map((value) =>
+      page.getByText(value, { exact: true }).filter({ visible: true })),
+  ];
+  await (surface ?? page.locator('[data-testid="qc-workflow-tab"]')).screenshot({
+    path,
+    animations: "disabled",
+    mask: masks,
+  });
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
@@ -97,11 +294,13 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
   const managerRole = uniqueTestId("qc-manager-role");
   const ingredientId = uniqueTestId("qc-ingredient");
   const ingredientName = uniqueTestId("QC Flour");
+  const longIngredientId = uniqueTestId("qc-long-ingredient");
+  const longIngredientName = `${uniqueTestId("Long QC Flour")} ${"extraordinarilylongblend".repeat(3)}`;
   const substitutedIngredientName = uniqueTestId("Rice Flour");
   const brand = uniqueTestId("QC Browser");
   const flavor = "Evidence Review";
   const profileKey = `${brand.toLowerCase()}__${flavor.toLowerCase()}`;
-  const runId = uniqueTestId("qc-run");
+  const runId = `${uniqueTestId("qc-run")}-long-reference-${"run-".repeat(8)}`;
   const date = localDate();
   const lotNumber = uniqueTestId("LOT");
   const decoyRunId = uniqueTestId("other-scope-run");
@@ -165,6 +364,12 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       [ingredientId, ingredientName],
     );
     await db.query(
+      `INSERT INTO ingredients
+         (id, scope, name, categories, allergens, allergens_reviewed)
+       VALUES ($1, 'live', $2, '["general"]'::jsonb, '["milk"]'::jsonb, true)`,
+      [longIngredientId, longIngredientName],
+    );
+    await db.query(
       `INSERT INTO brand_profiles
          (key, scope, brand, flavor, values, crust_values, updated_at_ms)
        VALUES ($1, 'live', $2, $3, $4::jsonb, '{}'::jsonb, $5)`,
@@ -203,13 +408,19 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
           [runId]: {
             casesNeeded: 1,
             casesPerSkid: 12,
-            doughRecipeName: "Browser Dough",
-            doughRecipe: [{ ingredient: ingredientName, ingredientId, lbs: 10 }],
+            doughRecipeName: uniqueTestId("QC Browser Dough"),
+            doughRecipe: [
+              { ingredient: ingredientName, ingredientId, lbs: 10 },
+              { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
+            ],
             frontlineRecipeName: "",
             frontlineRecipe: [],
             app1Type: "cheese",
             app1CheeseRecipeName: ingredientName,
-            app1CheeseRecipe: [{ ingredient: ingredientName, ingredientId, lbs: 2 }],
+            app1CheeseRecipe: [
+              { ingredient: ingredientName, ingredientId, lbs: 2 },
+              { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
+            ],
             app1OzPerPizza: 1.25,
             app2Type: "",
             app2CheeseRecipeName: "",
@@ -248,19 +459,38 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     attachBrowserDiagnostics(operatorPage.page, "operator", browserEvidence);
     attachBrowserDiagnostics(managerPage.page, "manager", browserEvidence);
 
+    await managerPage.page.setViewportSize({ width: 320, height: 740 });
     await openQc(managerPage.page);
     await expect(managerPage.page.getByTestId("text-qc-run-id")).toHaveText(runId);
     await expect(managerPage.page.getByText("Reviewed targets", { exact: true })).toBeVisible();
     const targetSection = managerPage.page.locator('section[aria-labelledby="qc-target-title"]');
-    await expect(targetSection.getByTestId("qc-weight-target-list").getByText(ingredientName, { exact: true })).toBeVisible();
+    await expect(targetSection.getByTestId("qc-weight-target-list").getByText(longIngredientName, { exact: true })).toBeVisible();
     await expect(targetSection.getByText(/1\.25 oz/)).toBeVisible();
-    await capture(managerPage.page, testInfo, "manager-reviewed-target-before-override");
-
-    await managerPage.page.getByTestId("select-target-ingredient").selectOption({ label: ingredientName });
+    const allergenFootprint = managerPage.page.getByTestId("qc-run-allergen-footprint");
+    await expect(
+      allergenFootprint.getByTestId("run-allergen-coverage-status"),
+      "Wait for the ingredient catalog before asserting its mapped allergen rows",
+    ).toBeVisible({ timeout: 25_000 });
+    const mappedMilk = allergenFootprint.getByTestId("run-allergen-milk");
+    await expect(mappedMilk).toContainText(longIngredientName);
+    const footprintNameGeometry = await mappedMilk.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(footprintNameGeometry.scrollWidth, "long allergen ingredient text should wrap")
+      .toBeLessThanOrEqual(footprintNameGeometry.clientWidth + 1);
+    expect(footprintNameGeometry.scrollHeight, "long allergen ingredient text should not be clipped vertically")
+      .toBeLessThanOrEqual(footprintNameGeometry.clientHeight + 1);
+    await managerPage.page.getByTestId("select-target-ingredient").selectOption({ label: longIngredientName });
     await managerPage.page.getByTestId("input-target-value").fill("1.3");
     await managerPage.page.getByTestId("input-tolerance").fill("0.2");
     await managerPage.page.getByTestId("textarea-reason-for-review").fill("Fixture reviewed target");
-    await managerPage.page.getByRole("button", { name: "Save reviewed target", exact: true }).click();
+    const saveTarget = targetSection.getByRole("button", { name: "Save reviewed target", exact: true });
+    await managerPage.page.setViewportSize(VIEWPORT);
+
+    await saveTarget.click();
     await expect(managerPage.page.getByText(/1\.3 oz ±0\.2 · QC override/)).toBeVisible();
 
     const referenceManager = managerPage.page.getByTestId("qc-label-reference-manager");
@@ -292,6 +522,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     expect((await approveReferencePromise).status()).toBe(201);
     await expect(draftReferenceCard).toContainText("approved");
 
+    await operatorPage.page.setViewportSize({ width: 568, height: 320 });
     await openQc(operatorPage.page);
     await expect(operatorPage.page.getByTestId("text-qc-run-id")).toHaveText(runId);
     const componentChecklist = operatorPage.page.getByTestId("qc-component-checklist");
@@ -299,28 +530,6 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await expect(componentChecklist.getByText(substitutedIngredientName, { exact: true })).toHaveCount(2);
     const labelPanel = operatorPage.page.getByTestId("qc-label-verification");
     await expect(labelPanel.getByText("Observation-only mode", { exact: true })).toBeVisible();
-    const responsiveViewports = [
-      { name: "desktop", width: 1440, height: 900 },
-      { name: "phone", width: 390, height: 844 },
-      { name: "tablet-portrait", width: 768, height: 1024 },
-      { name: "tablet-landscape", width: 1024, height: 768 },
-    ] as const;
-    for (const viewport of responsiveViewports) {
-      await operatorPage.page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await expect(componentChecklist).toBeVisible();
-      const sectionBounds = await componentChecklist.boundingBox();
-      expect(sectionBounds, `${viewport.name} checklist layout`).not.toBeNull();
-      expect(sectionBounds!.x).toBeGreaterThanOrEqual(0);
-      expect(sectionBounds!.x + sectionBounds!.width).toBeLessThanOrEqual(viewport.width + 1);
-      const documentWidth = await operatorPage.page.evaluate(() => document.documentElement.scrollWidth);
-      expect(documentWidth, `${viewport.name} page has no horizontal overflow`).toBeLessThanOrEqual(viewport.width);
-      const labelBounds = await labelPanel.boundingBox();
-      expect(labelBounds, `${viewport.name} label panel layout`).not.toBeNull();
-      expect(labelBounds!.x).toBeGreaterThanOrEqual(0);
-      expect(labelBounds!.x + labelBounds!.width).toBeLessThanOrEqual(viewport.width + 1);
-      await expect(labelPanel.getByLabel("Observed product name")).toBeVisible();
-      await capture(operatorPage.page, testInfo, `operator-component-check-${viewport.name}`);
-    }
     await operatorPage.page.setViewportSize(VIEWPORT);
     const doughObservation = componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Dough)`);
     await doughObservation.focus();
@@ -337,6 +546,8 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
 
     const labelRetryBodies: Array<{ operationId: string }> = [];
     let failLabelRequestOnce = true;
+    const longLabelValidationError =
+      `Synthetic retry fixture failure: ${"unbroken-validation-detail".repeat(12)}`;
     await operatorPage.page.route("**/api/qc/label-checks", async (route) => {
       if (route.request().method() === "POST") {
         labelRetryBodies.push(route.request().postDataJSON() as { operationId: string });
@@ -345,7 +556,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
           await route.fulfill({
             status: 503,
             contentType: "application/json",
-            body: JSON.stringify({ error: "Synthetic retry fixture failure" }),
+            body: JSON.stringify({ error: longLabelValidationError }),
           });
           return;
         }
@@ -361,9 +572,23 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     expect((await failedLabelResponse).status()).toBe(503);
     await expect(labelPanel.getByRole("alert")).toBeVisible();
     await expect(labelPanel.getByLabel("Observed product name")).toHaveValue("Observed synthetic cheese");
+    const errorViewport = { name: "phone-320-long-error", width: 320, height: 740 } as const;
+    await assertQcViewport(operatorPage.page, "operator QC validation error", errorViewport);
+    const labelError = labelPanel.getByRole("alert");
+    const errorGeometry = await labelError.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(errorGeometry.scrollWidth, "long QC validation error should wrap inside its alert")
+      .toBeLessThanOrEqual(errorGeometry.clientWidth + 1);
+    const retrySavedValues = labelPanel.getByRole("button", {
+      name: "Retry saved values",
+      exact: true,
+    });
+    await assertQcActionReachable(retrySavedValues, "Retry saved values", errorViewport);
     const retriedLabelResponse = operatorPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/label-checks") && response.request().method() === "POST");
-    await labelPanel.getByRole("button", { name: "Retry saved values", exact: true }).click();
+    await retrySavedValues.click();
     const savedObservationResponse = await retriedLabelResponse;
     expect(savedObservationResponse.status()).toBe(201);
     const savedObservation = await savedObservationResponse.json() as {
@@ -377,8 +602,11 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     expect(labelRetryBodies).toHaveLength(2);
     expect(labelRetryBodies[0]?.operationId).toBe(labelRetryBodies[1]?.operationId);
     await operatorPage.page.unroute("**/api/qc/label-checks");
-    await expect(operatorPage.page.getByTestId(`qc-history-event-${savedObservation.event.id}`)).toBeVisible();
-    await capture(operatorPage.page, testInfo, "operator-observation-only-label-saved");
+    await operatorPage.page.setViewportSize(VIEWPORT);
+    const savedLabelHistoryEvent = operatorPage.page.getByTestId(`qc-history-event-${savedObservation.event.id}`);
+    await expect(savedLabelHistoryEvent).toBeVisible();
+    await operatorPage.page.setViewportSize(VIEWPORT);
+    await capture(operatorPage.page, testInfo, "operator-observation-only-label-saved", [operator.userId]);
 
     const approvedReferenceOption = `${labelProductKey} · v1`;
     await labelPanel.getByLabel("Approved reference").selectOption({ label: approvedReferenceOption });
@@ -480,10 +708,12 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     const passingLabelEvent = operatorPage.page.getByTestId(`qc-history-event-${labelCheckEventId}`);
     await passingLabelEvent.locator("button").first().click();
     await expect(passingLabelEvent).toContainText("pass");
-    await capture(operatorPage.page, testInfo, "operator-approved-reference-label-comparison");
+    await capture(operatorPage.page, testInfo, "operator-approved-reference-label-comparison", [operator.userId]);
 
     await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Dough)`).selectOption("present-correct");
     await componentChecklist.getByLabel(`Observation for ${substitutedIngredientName} (Applicator 1)`).selectOption("present-correct");
+    await componentChecklist.getByLabel(`Observation for ${longIngredientName} (Dough)`).selectOption("present-correct");
+    await componentChecklist.getByLabel(`Observation for ${longIngredientName} (Applicator 1)`).selectOption("present-correct");
     const componentResponsePromise = operatorPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/component-checks")
       && response.request().method() === "POST");
@@ -500,7 +730,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await componentEvent.locator("button").first().click();
     await expect(componentEvent).toContainText("Component checklist result");
     await expect(componentEvent).toContainText("pass");
-    await capture(operatorPage.page, testInfo, "operator-component-check-saved");
+    await capture(operatorPage.page, testInfo, "operator-component-check-saved", [operator.userId]);
 
     const managerOnlyUiBefore = {
       targetEditor: await operatorPage.page.getByText("Set or clear an override", { exact: true }).count(),
@@ -517,7 +747,10 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       signoffButton: 0,
     });
 
-    await operatorPage.page.getByTestId("select-ingredient").selectOption({ label: ingredientName });
+    // The other ingredient is replaced by the synthetic substitution. Record
+    // against the still-present ingredient that owns the reviewed override.
+    await expect(operatorPage.page.getByTestId("select-ingredient").locator(`option[value="${longIngredientId}"]`)).toHaveCount(1);
+    await operatorPage.page.getByTestId("select-ingredient").selectOption(longIngredientId);
     await operatorPage.page.getByTestId("input-lot-number").fill(lotNumber);
     const lotResponsePromise = operatorPage.page.waitForResponse((response) =>
       response.url().endsWith("/api/qc/lots")
@@ -530,7 +763,8 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     await expect(lotEvent).toContainText(`lotNumber: ${lotNumber}`);
 
     await operatorPage.page.getByTestId("tab-qc-weights").click();
-    await operatorPage.page.getByTestId("select-ingredient").selectOption({ label: ingredientName });
+    await expect(operatorPage.page.getByTestId("select-ingredient").locator(`option[value="${longIngredientId}"]`)).toHaveCount(1);
+    await operatorPage.page.getByTestId("select-ingredient").selectOption(longIngredientId);
     await expect(operatorPage.page.getByText("Target 1.3 oz · tolerance ±0.2 oz")).toBeVisible();
     await operatorPage.page.getByTestId("input-actual-weight").fill("1.35");
     const weightResponsePromise = operatorPage.page.waitForResponse((response) =>
@@ -609,7 +843,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       operatorSignoffStatus = denied;
       expect(denied).toBe(403);
     }
-    await capture(operatorPage.page, testInfo, "operator-qc-records-and-role-boundary");
+    await capture(operatorPage.page, testInfo, "operator-qc-records-and-role-boundary", [operator.userId]);
     const signoffRowsAfterOperator = await db.query<{ count: string }>(
       `SELECT count(*)::text AS count
        FROM qc_workflow_events
@@ -682,7 +916,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       payload: { reviewedThroughId: expectedReviewedThroughId },
     });
     await expect(managerPage.page.getByText("Signed off", { exact: true })).toBeVisible();
-    await capture(managerPage.page, testInfo, "manager-signed-off-history");
+    await capture(managerPage.page, testInfo, "manager-signed-off-history", [manager.userId]);
 
     await managerPage.page.getByTestId("input-run-id-filter").fill("");
     const downloadPromise = managerPage.page.waitForEvent("download");
@@ -777,20 +1011,19 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       await expect(persistedComponentEvent).toContainText("Corrected");
     }
     await expect(managerPage.page.getByText(/1\.3 oz ±0\.2 · QC override/)).toBeVisible();
-    await capture(managerPage.page, testInfo, "manager-qc-state-after-reload");
+    await capture(managerPage.page, testInfo, "manager-qc-state-after-reload", [manager.userId]);
 
-    const facilityHistoryResponse = managerPage.page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === "/api/qc/history"
-        && response.request().method() === "GET"
-        && !url.searchParams.get("runId");
-    });
     await managerPage.page.getByTestId("input-run-id-filter").fill("");
-    const facilityHistory = await facilityHistoryResponse;
-    expect(facilityHistory.status()).toBe(200);
-    const facilityHistoryBody = await facilityHistory.json() as {
-      items?: Array<{ runId?: string | null }>;
-    };
+    // An already-empty filter can correctly reuse the client cache. Check the
+    // scoped server response explicitly instead of waiting for a new UI request.
+    const facilityHistory = await managerPage.page.evaluate(async () => {
+      const response = await fetch("/api/qc/history");
+      return { status: response.status, body: await response.json() as {
+        items?: Array<{ runId?: string | null }>;
+      } };
+    });
+    expect(facilityHistory.status).toBe(200);
+    const facilityHistoryBody = facilityHistory.body;
     expect(facilityHistoryBody.items?.some((item) => item.runId === runId)).toBe(true);
     expect(facilityHistoryBody.items?.some((item) => item.runId === decoyRunId)).toBe(false);
     scopedHistorySummary = `facility history returned ${facilityHistoryBody.items?.length ?? 0} events; sandbox decoy excluded`;
@@ -843,17 +1076,28 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
     // Unique IDs isolate engines; the isolated suite runner drops the entire
     // disposable database afterward. Never suppress a failed ledger deletion.
     await db.query(
-      "DELETE FROM ingredients WHERE scope = 'live' AND id = $1",
-      [ingredientId],
+      "DELETE FROM ingredients WHERE scope = 'live' AND id = ANY($1::text[])",
+      [[ingredientId, longIngredientId]],
     ).catch(() => {});
     await db.end().catch(() => {});
     await fixtures.cleanup({ profileKeys: [profileKey], syncDates: [date] });
+    const sanitizedBrowserEvidence = browserEvidence.map((entry) => {
+      for (const identifier of [runId, manager?.userId, operator?.userId]) {
+        if (identifier) entry = entry.replaceAll(identifier, "[masked-fixture-id]");
+      }
+      return entry;
+    });
     const backendEvidence = {
+      capturedAt: new Date().toISOString(),
       environment: "fresh local disposable browser_e2e PostgreSQL",
+      revision: "unknown in the local isolated browser harness",
+      browserProject: testInfo.project.name,
       data: "generated browser fixtures only; no production records",
       ledgerCleanup: "Append-only fixture rows remain between engines; the isolated runner destroys the disposable database.",
+      responsiveCoverage: "The separate QC phone/tablet layout scenario covers the full viewport and enlarged-text matrix.",
+      screenshotSanitization: "QC surfaces cropped; run and account identifiers masked",
       facilityScope: "live",
-      runId,
+      runId: "[masked-synthetic-fixture]",
       roleCapabilities: {
         operator: ["record-qc"],
         manager: ["record-qc", "manage-qc"],
@@ -870,7 +1114,7 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       scopedHistorySummary,
       persistedEvents: finalEventSummary,
       sandboxDecoyRows: crossScopeDecoyCount,
-      qcApiResponses: browserEvidence,
+      qcApiResponses: sanitizedBrowserEvidence,
       noCredentialsOrRequestBodies: true,
     };
     const evidencePath = testInfo.outputPath("qc-browser-backend-evidence.json");
@@ -881,9 +1125,252 @@ test("QC operator and manager complete scoped evidence workflows in authenticate
       contentType: "application/json",
     });
     await testInfo.attach("qc-browser-console-summary.txt", {
-      body: Buffer.from(browserEvidence.length ? browserEvidence.join("\n") : "No console errors or QC API responses captured."),
+      body: Buffer.from(sanitizedBrowserEvidence.length ? sanitizedBrowserEvidence.join("\n") : "No console errors or QC API responses captured."),
       contentType: "text/plain",
     });
   }
   expect(operatorSawSignoff, "QC operators must not be shown the manager-only sign-off control").toBe(false);
+});
+
+test("QC manager targets and operator checks fit phone and tablet layouts", async ({
+  browser,
+  playwright,
+  baseURL,
+}, testInfo) => {
+  test.skip(!baseURL, "The isolated browser runner must provide a local web origin.");
+  const webOrigin = baseURL!;
+  const apiBase = requireLocalFixtureApiOrigin("QC responsive layout browser test");
+  const fixtureDbUrl = requireDedicatedTestDatabase("QC responsive layout browser test");
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, apiBase, SIGNUP_CODE);
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
+  const managerUsername = uniqueTestId("qc-layout-manager");
+  const operatorUsername = uniqueTestId("qc-layout-operator");
+  const ingredientId = uniqueTestId("qc-layout-ingredient");
+  const longIngredientId = uniqueTestId("qc-layout-long-ingredient");
+  const ingredientName = uniqueTestId("QC Layout Flour");
+  const longIngredientName = `${uniqueTestId("QC Layout Ingredient")} ${"extraordinarilylongblend".repeat(3)}`;
+  const brand = uniqueTestId("QC Layout Brand");
+  const flavor = "Phone Tablet Review";
+  const runId = `${uniqueTestId("qc-layout-run")}-synthetic-long-run-reference`;
+  const db = new Client({ connectionString: fixtureDbUrl });
+  let managerPage: AuthenticatedPage | undefined;
+  let operatorPage: AuthenticatedPage | undefined;
+
+  async function selectFixtureRun(page: Page): Promise<void> {
+    await page.getByTestId("tab-run").click();
+    const runOwner = page.getByTestId("run-identity");
+    const firstRun = page.getByRole("button", { name: "Select run 1", exact: true });
+    // Canonical bootstrap can preserve a separate locally selected blank run.
+    // Select the seeded first run through the real UI, not by rewriting sync.
+    await expect.poll(async () =>
+      await runOwner.getAttribute("data-run-id") === runId || await firstRun.isVisible(),
+    { timeout: 25_000 }).toBe(true);
+    if (await runOwner.getAttribute("data-run-id") !== runId) await firstRun.click();
+    await expect(runOwner).toHaveAttribute("data-run-id", runId, { timeout: 25_000 });
+  }
+
+  try {
+    await db.connect();
+    const manager = await fixtures.createAccount({
+      username: managerUsername,
+      password: PASSWORD,
+      capabilities: ["record-qc", "manage-qc"],
+      onboardingSeen: true,
+    });
+    const operator = await fixtures.createAccount({
+      username: operatorUsername,
+      password: PASSWORD,
+      capabilities: ["record-qc"],
+      onboardingSeen: true,
+    });
+    await db.query(
+      `INSERT INTO ingredients (id, scope, name, categories, allergens, allergens_reviewed)
+       VALUES
+         ($1, 'live', $2, '["general"]'::jsonb, '["milk"]'::jsonb, true),
+         ($3, 'live', $4, '["general"]'::jsonb, '["milk"]'::jsonb, true)`,
+      [ingredientId, ingredientName, longIngredientId, longIngredientName],
+    );
+    await fixtures.seedTodaySync({
+      token: manager.token,
+      senderId: uniqueTestId("qc-layout-sync"),
+      date,
+      payload: {
+        dayState: {
+          date,
+          runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
+          currentIndex: 0,
+          resetAt: 0,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        },
+        runValues: {
+          [runId]: {
+            allergen: "none",
+            casesNeeded: 1,
+            casesPerSkid: 12,
+            doughRecipeName: uniqueTestId("QC Layout Dough"),
+            doughRecipe: [
+              { ingredient: ingredientName, ingredientId, lbs: 10 },
+              { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
+            ],
+            frontlineRecipeName: "",
+            frontlineRecipe: [],
+            app1Type: "cheese",
+            app1CheeseRecipeName: ingredientName,
+            app1CheeseRecipe: [
+              { ingredient: ingredientName, ingredientId, lbs: 2 },
+              { ingredient: longIngredientName, ingredientId: longIngredientId, lbs: 1 },
+            ],
+            app1OzPerPizza: 1.25,
+            app2Type: "",
+            app2CheeseRecipeName: "",
+            app2CheeseRecipe: [],
+            app3Type: "",
+            app3CheeseRecipeName: "",
+            app3CheeseRecipe: [],
+            app4Type: "",
+            app4CheeseRecipeName: "",
+            app4CheeseRecipe: [],
+            pep1Type: "",
+            pep1TypeB: "",
+            pep2Type: "",
+            pep2TypeB: "",
+          },
+        },
+        runValuesUpdatedAt: { [runId]: Date.now() },
+        packagingProgress: {},
+      },
+    });
+
+    managerPage = await openAuthenticatedPage(browser, manager, webOrigin);
+    await managerPage.page.setViewportSize({ width: 320, height: 740 });
+    await selectFixtureRun(managerPage.page);
+    await openQc(managerPage.page);
+    await expect(managerPage.page.getByTestId("text-qc-run-id")).toHaveText(runId, { timeout: 25_000 });
+    const targetSection = managerPage.page.locator('section[aria-labelledby="qc-target-title"]');
+    const targetName = targetSection.getByTestId("qc-weight-target-list")
+      .getByText(longIngredientName, { exact: true });
+    await expect(targetName).toBeVisible();
+    const footprint = managerPage.page.getByTestId("qc-run-allergen-footprint");
+    await expect(footprint.getByTestId("run-allergen-coverage-status")).toBeVisible({ timeout: 25_000 });
+    await expect(footprint.getByTestId("run-allergen-milk")).toContainText(longIngredientName);
+    await managerPage.page.getByTestId("select-target-ingredient").selectOption({ label: longIngredientName });
+    await managerPage.page.getByTestId("input-target-value").fill("1.3");
+    await managerPage.page.getByTestId("input-tolerance").fill("0.2");
+    await managerPage.page.getByTestId("textarea-reason-for-review").fill("Synthetic responsive layout review");
+    const saveTarget = targetSection.getByRole("button", { name: "Save reviewed target", exact: true });
+    const targetWidths: Record<string, number> = {};
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await assertQcViewport(managerPage.page, "manager QC settings", viewport);
+      await assertQcVerificationFields(managerPage.page, viewport);
+      const geometry = await targetSection.evaluate((section) => {
+        const panel = section.getBoundingClientRect();
+        const fields = Array.from(section.querySelectorAll<HTMLElement>("input, select, textarea"))
+          .filter((element) => !element.closest("[hidden], [aria-hidden='true']"))
+          .map((element) => {
+            const bounds = element.getBoundingClientRect();
+            return { left: bounds.left, right: bounds.right, width: bounds.width };
+          });
+        return { left: panel.left, right: panel.right, width: panel.width, fields };
+      });
+      targetWidths[viewport.name] = geometry.width;
+      expect(geometry.left, `${viewport.name} manager settings left edge`).toBeGreaterThanOrEqual(-1);
+      expect(geometry.right, `${viewport.name} manager settings right edge`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry.fields.length, `${viewport.name} target fields`).toBeGreaterThanOrEqual(5);
+      for (const field of geometry.fields) {
+        expect(field.left, `${viewport.name} target field left edge`).toBeGreaterThanOrEqual(-1);
+        expect(field.right, `${viewport.name} target field right edge`).toBeLessThanOrEqual(viewport.width + 1);
+        expect(field.width, `${viewport.name} target field usable width`).toBeGreaterThanOrEqual(170);
+      }
+      const nameGeometry = await targetName.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      }));
+      expect(nameGeometry.scrollWidth, `${viewport.name} ingredient name wraps horizontally`)
+        .toBeLessThanOrEqual(nameGeometry.clientWidth + 1);
+      expect(nameGeometry.scrollHeight, `${viewport.name} ingredient name is not clipped vertically`)
+        .toBeLessThanOrEqual(nameGeometry.clientHeight + 1);
+      if (["phone-320", "tablet-landscape", "phone-short-landscape"].includes(viewport.name)) {
+        await assertQcActionReachable(saveTarget, "Save reviewed target", viewport);
+      }
+      if (["phone-320", "tablet-landscape", "desktop"].includes(viewport.name)) {
+        await capture(managerPage.page, testInfo, `qc-manager-target-${viewport.name}`, [
+          longIngredientName,
+          runId,
+        ], targetSection);
+      }
+    }
+    expect(targetWidths["tablet-landscape"]).toBeGreaterThan(targetWidths["phone-320"]);
+
+    const largeTextStyle = await managerPage.page.addStyleTag({
+      content: "html { font-size: 200% !important; }",
+    });
+    const largeTextViewport = { name: "phone-320-large-text", width: 320, height: 740 } as const;
+    await assertQcViewport(managerPage.page, "manager QC settings with enlarged text", largeTextViewport);
+    await assertQcVerificationFields(managerPage.page, largeTextViewport);
+    const largeTextWidths = await targetSection.locator("input, select, textarea").evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(largeTextWidths.length).toBeGreaterThanOrEqual(5);
+    for (const width of largeTextWidths) {
+      expect(width, "200% text target fields remain usable").toBeGreaterThanOrEqual(150);
+    }
+    await assertQcActionReachable(saveTarget, "Save reviewed target with enlarged text", largeTextViewport);
+    await largeTextStyle.evaluate((element) => element.remove());
+
+    operatorPage = await openAuthenticatedPage(browser, operator, webOrigin);
+    await operatorPage.page.setViewportSize({ width: 320, height: 740 });
+    await selectFixtureRun(operatorPage.page);
+    await openQc(operatorPage.page);
+    await expect(operatorPage.page.getByTestId("text-qc-run-id")).toHaveText(runId, { timeout: 25_000 });
+    await expect(operatorPage.page.getByTestId("select-target-ingredient")).toHaveCount(0);
+    const componentChecklist = operatorPage.page.getByTestId("qc-component-checklist");
+    await expect(componentChecklist.getByText("Expected list complete", { exact: true })).toBeVisible();
+    const recordChecklist = componentChecklist.getByRole("button", {
+      name: "Record checklist",
+      exact: true,
+    });
+    const operatorWidths: Record<string, number> = {};
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await assertQcViewport(operatorPage.page, "operator QC form", viewport);
+      await assertQcVerificationFields(operatorPage.page, viewport);
+      const geometry = await componentChecklist.evaluate((section) => {
+        const panel = section.getBoundingClientRect();
+        const fields = Array.from(section.querySelectorAll<HTMLElement>("input, select, textarea"))
+          .filter((element) => !element.closest("[hidden], [aria-hidden='true']"))
+          .map((element) => {
+            const bounds = element.getBoundingClientRect();
+            return { left: bounds.left, right: bounds.right, width: bounds.width };
+          });
+        return { left: panel.left, right: panel.right, width: panel.width, fields };
+      });
+      operatorWidths[viewport.name] = geometry.width;
+      expect(geometry.left, `${viewport.name} operator checklist left edge`).toBeGreaterThanOrEqual(-1);
+      expect(geometry.right, `${viewport.name} operator checklist right edge`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry.fields.length, `${viewport.name} operator fields`).toBeGreaterThan(0);
+      for (const field of geometry.fields) {
+        expect(field.left, `${viewport.name} operator field left edge`).toBeGreaterThanOrEqual(-1);
+        expect(field.right, `${viewport.name} operator field right edge`).toBeLessThanOrEqual(viewport.width + 1);
+        expect(field.width, `${viewport.name} operator field usable width`).toBeGreaterThanOrEqual(110);
+      }
+      if (["phone-320", "tablet-landscape", "phone-short-landscape"].includes(viewport.name)) {
+        await assertQcActionReachable(recordChecklist, "Record checklist", viewport);
+      }
+      if (["phone-320", "tablet-landscape", "desktop"].includes(viewport.name)) {
+        await capture(operatorPage.page, testInfo, `qc-operator-checklist-${viewport.name}`, [
+          longIngredientName,
+          runId,
+        ], componentChecklist);
+      }
+    }
+    expect(operatorWidths["tablet-landscape"]).toBeGreaterThan(operatorWidths["phone-320"]);
+  } finally {
+    await managerPage?.context.close().catch(() => {});
+    await operatorPage?.context.close().catch(() => {});
+    await db.end().catch(() => {});
+    await fixtures.cleanup({ syncDates: [date] });
+  }
 });

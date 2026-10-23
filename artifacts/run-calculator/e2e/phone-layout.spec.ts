@@ -771,7 +771,9 @@ test.describe("phone layout smoke", () => {
         page.getByRole("dialog", { name: "Manage Lists & Settings" }),
         "Manage Lists & Settings",
       );
-      await assertPhoneLayout(page, "setup/manage surface");
+      // The dialog's own hit targets were checked above. Its intentional
+      // backdrop must not count as covering controls behind the modal.
+      await assertPhoneLayout(page, "setup/manage surface", { skipModalOverlayCoverage: true });
       await assertKeyboardReachable(page, "setup/manage surface", 12);
 
       // Exercise the manager's setup editor navigation without saving anything.
@@ -872,7 +874,7 @@ test.describe("phone layout smoke", () => {
         page.getByRole("dialog", { name: "Manage Lists & Settings" }),
         "Manage Lists & Settings",
       );
-      await assertPhoneLayout(page, "setup/manage surface");
+      await assertPhoneLayout(page, "setup/manage surface", { skipModalOverlayCoverage: true });
       await assertKeyboardReachable(page, "setup/manage surface", 12);
 
       // Exercise the manager's setup editor navigation without saving anything.
@@ -881,7 +883,7 @@ test.describe("phone layout smoke", () => {
       const setupProfilesTab = page.getByRole("button", { name: "Setup Profiles", exact: true });
       if (await visible(setupProfilesTab)) {
         await setupProfilesTab.click();
-        await assertPhoneLayout(page, "setup profiles editor");
+        await assertPhoneLayout(page, "setup profiles editor", { skipModalOverlayCoverage: true });
         await assertKeyboardReachable(page, "setup profiles editor", 8);
       }
 
@@ -889,7 +891,7 @@ test.describe("phone layout smoke", () => {
       const importTab = page.getByRole("button", { name: "Import", exact: true });
       await expect(importTab).toBeVisible();
       await importTab.click();
-      await assertPhoneLayout(page, "manager import controls");
+      await assertPhoneLayout(page, "manager import controls", { skipModalOverlayCoverage: true });
       await assertKeyboardReachable(page, "manager import controls", 8);
 
       // Close the manager surface, then open the real Guided Tour entry point

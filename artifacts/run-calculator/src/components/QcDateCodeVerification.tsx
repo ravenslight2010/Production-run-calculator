@@ -39,9 +39,9 @@ type Ctx = QcDateCodeCheckInput["context"];
 const labelClass = "mb-1.5 block text-xs font-semibold text-muted-foreground";
 const inputClass = "min-h-10 w-full min-w-0 appearance-none rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:border-primary focus:outline-none disabled:opacity-60";
 const monoInput = `${inputClass} font-mono tracking-wide`;
-const buttonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50";
-const quietButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50";
-const errorBox = "flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-300/70 bg-rose-50 p-3 text-xs text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200";
+const buttonClass = "inline-flex min-h-10 max-w-full flex-wrap items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50";
+const quietButtonClass = "inline-flex min-h-10 max-w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50";
+const errorBox = "flex min-w-0 flex-wrap items-start justify-between gap-2 rounded-lg border border-rose-300/70 bg-rose-50 p-[min(.75rem,3vw)] text-xs text-rose-900 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200";
 
 const uuid = () => crypto.randomUUID();
 const canon = (v: string) => v.normalize("NFC").trim().toLocaleLowerCase("en-US");
@@ -53,7 +53,10 @@ function errorText(error: unknown) {
 function ErrorRetry({ error, onRetry, pending, testId }: { error: unknown; onRetry: () => void; pending: boolean; testId: string }) {
   return (
     <div className={errorBox} role="alert" data-testid={testId}>
-      <span className="flex min-w-0 items-start gap-2"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{errorText(error)} Your entries were kept.</span>
+      <span className="flex min-w-0 items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{errorText(error)} Your entries were kept.</span>
+      </span>
       <button type="button" className={quietButtonClass} onClick={onRetry} disabled={pending} data-testid={`${testId}-retry`}>
         <RotateCcw className="h-3.5 w-3.5" /> Retry unchanged values
       </button>
@@ -279,7 +282,7 @@ export default function QcDateCodeVerification({
   const unknownFields = DATE_CODE_FIELDS.filter(({ key }) => readability[key] !== "readable");
 
   return (
-    <section className="space-y-4 rounded-xl border border-border/80 bg-card p-4 shadow-sm sm:p-5" data-testid="qc-date-code-verification">
+    <section className="min-w-0 space-y-4 rounded-xl border border-border/80 bg-card p-[min(1rem,4vw)] shadow-sm sm:p-5" data-testid="qc-date-code-verification">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-bold">Printed date code record</h2>
@@ -301,7 +304,7 @@ export default function QcDateCodeVerification({
         </div>
       )}
 
-      <div className="grid min-w-0 gap-3 md:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
         <label className="block min-w-0">
           <span className={labelClass}>Batch/pack context (required)</span>
           <input
@@ -344,9 +347,9 @@ export default function QcDateCodeVerification({
       </div>
 
       {selectedRef ? (
-        <div className="rounded-lg border border-emerald-700/20 bg-emerald-50/70 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/20" data-testid="panel-date-code-selected-reference">
+        <div className="rounded-lg border border-emerald-700/20 bg-emerald-50/70 p-[min(.75rem,3vw)] dark:border-emerald-900/50 dark:bg-emerald-950/20" data-testid="panel-date-code-selected-reference">
           <p className="text-xs font-semibold">Approved reference · config v{selectedRef.version} · {selectedRef.sourceIdentity} (source version {selectedRef.sourceVersion})</p>
-          <dl className="mt-2 grid min-w-0 gap-2 text-xs sm:grid-cols-3">
+          <dl className="mt-2 grid min-w-0 grid-cols-1 gap-2 text-xs sm:grid-cols-3">
             {DATE_CODE_FIELDS.map(({ key, label }) => (
               <div key={key} className="min-w-0">
                 <dt className="text-[10px] font-semibold uppercase text-muted-foreground">{label} · {selectedRef.requiredFields.includes(key) ? "required" : "not required"}</dt>
@@ -358,7 +361,7 @@ export default function QcDateCodeVerification({
           <p className="mt-1 text-[11px] text-muted-foreground">The server decides the outcome when you save. Nothing is pre-judged here.</p>
         </div>
       ) : (
-        <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs leading-5" data-testid="panel-date-code-observation-only">
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-[min(.75rem,3vw)] text-xs leading-5" data-testid="panel-date-code-observation-only">
           <p className="font-semibold">Observation only · will be recorded as not evaluated</p>
           <p className="text-muted-foreground">
             {!productKnown
@@ -372,9 +375,9 @@ export default function QcDateCodeVerification({
         </div>
       )}
 
-      <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         {DATE_CODE_FIELDS.map(({ key, label }) => (
-          <div key={key} className="min-w-0 rounded-lg border border-border/70 p-3">
+          <div key={key} className="min-w-0 rounded-lg border border-border/70 p-[min(.75rem,3vw)]">
             <label className="block min-w-0">
               <span className={labelClass}>Observed {label.toLowerCase()}</span>
               <input
@@ -391,7 +394,7 @@ export default function QcDateCodeVerification({
                   return (
                     <button key={r.value} type="button" aria-pressed={active} data-testid={`button-date-code-readability-${key}-${r.value}`}
                       onClick={() => { setReadability((c) => ({ ...c, [key]: r.value as Readability })); touchCheck(); }}
-                      className={`rounded-md border px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground"}`}>
+                      className={`min-h-10 rounded-md border px-3 py-2 text-[11px] font-semibold disabled:opacity-50 ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground"}`}>
                       {r.label}
                     </button>
                   );
@@ -458,9 +461,9 @@ export default function QcDateCodeVerification({
               {[0, 1].map((i) => <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />)}
             </div>
           ) : references.length ? (
-            <div className="grid min-w-0 gap-2 lg:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
               {references.map((r) => (
-                <article key={r.configurationEventId} className="min-w-0 rounded-lg border border-border/70 p-3" data-testid={`card-date-code-reference-${r.configurationEventId}`}>
+                <article key={r.configurationEventId} className="min-w-0 rounded-lg border border-border/70 p-[min(.75rem,3vw)]" data-testid={`card-date-code-reference-${r.configurationEventId}`}>
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="break-words text-xs font-bold">{r.sourceIdentity} · source {r.sourceVersion} · v{r.version}</p>
@@ -470,7 +473,7 @@ export default function QcDateCodeVerification({
                     </div>
                     <ResultTag value={r.state} />
                   </div>
-                  <dl className="mt-2 grid gap-1 text-[11px]">
+                  <dl className="mt-2 grid min-w-0 grid-cols-1 gap-1 text-[11px]">
                     {DATE_CODE_FIELDS.map(({ key, label }) => (
                       <div key={key} className="flex min-w-0 gap-2">
                         <dt className="shrink-0 text-muted-foreground">{label}{r.requiredFields.includes(key) ? " *" : ""}:</dt>
@@ -492,10 +495,10 @@ export default function QcDateCodeVerification({
               ))}
             </div>
           ) : !referenceQuery.isError ? (
-            <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">No date code references exist. Every observation is recorded as not evaluated until one is saved and approved.</p>
+            <p className="rounded-lg border border-dashed border-border p-[min(.75rem,3vw)] text-xs text-muted-foreground">No date code references exist. Every observation is recorded as not evaluated until one is saved and approved.</p>
           ) : null}
 
-          <div className="grid min-w-0 gap-3 rounded-lg border border-border/70 p-3 md:grid-cols-2" data-testid="form-date-code-reference">
+          <div className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-border/70 p-[min(.75rem,3vw)] md:grid-cols-2" data-testid="form-date-code-reference">
             <p className="text-xs font-bold md:col-span-2">{editing ? `New version of ${editing.sourceIdentity} (from v${editing.version})` : "New reference"} · applies to this run only</p>
             <label className="block min-w-0">
               <span className={labelClass}>Batch/pack context (required)</span>
