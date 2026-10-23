@@ -21,6 +21,7 @@ let seedRoles: () => Promise<void>;
 let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
 let setImportOperationFailureHookForTest: typeof import("./importOperations")["setImportOperationFailureHookForTest"];
+let setQcPlanningReadFailureHookForTest: typeof import("./qcWorkflows")["setQcPlanningReadFailureHookForTest"];
 const tokens = new Map<string, string>();
 
 beforeAll(async () => {
@@ -54,7 +55,7 @@ beforeAll(async () => {
     mixesRoute,
     importOperationsRoute,
     recipeQcReviewsRoute,
-    qcWorkflowsRoute,
+    qcWorkflowsModule,
   ] = await Promise.all([
     import("./doughRecipes"),
     import("./sauceRecipes"),
@@ -64,6 +65,7 @@ beforeAll(async () => {
     import("./recipeQcReviews"),
     import("./qcWorkflows"),
   ]);
+  ({ setQcPlanningReadFailureHookForTest } = qcWorkflowsModule);
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use((req, _res, next) => {
@@ -72,7 +74,7 @@ beforeAll(async () => {
   });
   app.use("/api", requireAuth, doughRoute.default, sauceRoute.default,
     cheeseRoute.default, mixesRoute.default, importOperationsRoute.default,
-    recipeQcReviewsRoute.default, qcWorkflowsRoute.default);
+    recipeQcReviewsRoute.default, qcWorkflowsModule.default);
   await new Promise<void>((resolve, reject) => {
     server = app.listen(0, () => resolve());
     server.once("error", reject);
@@ -82,6 +84,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setImportOperationFailureHookForTest?.();
+  setQcPlanningReadFailureHookForTest?.();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   await pool?.end();
   if (adminPool) await adminPool.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
@@ -95,7 +98,7 @@ beforeEach(async () => {
     TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.doughRecipesTable},
       ${tables.sauceRecipesTable}, ${tables.cheeseRecipesTable}, ${tables.mixesTable},
       ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.auditLogsTable},
-      ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable}
+        ${tables.dailySyncTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable}
     RESTART IDENTITY CASCADE
   `);
   await seedRoles();
@@ -204,6 +207,118 @@ function decisionFor(detail: any, decisionId: string, status = "verified") {
 }
 
 describe("shared recipe QC review", () => {
+  it("exposes only the bounded schedule projection to record-qc staff using client calendar dates", async () => {
+    const rows = [
+      {
+        date: "2030-12-30",
+        scope: "live" as const,
+        data: { dayState: {} },
+        updatedAt: new Date(),
+      },
+      {
+        date: "2030-12-31",
+        scope: "live" as const,
+        data: {
+          dayState: {
+            date: "2030-12-31",
+            runs: [
+              { id: "synthetic-run", brand: "Synthetic Brand", flavor: "Cheese" },
+              { brand: "", flavor: "Pepperoni" },
+            ],
+          },
+          runValues: { "synthetic-run": { casesNeeded: 24 } },
+          privateField: "must not be returned",
+        },
+        updatedAt: new Date(),
+      },
+      {
+        date: "2031-01-01",
+        scope: "live" as const,
+        data: { dayState: { runs: [] } },
+        updatedAt: new Date(),
+      },
+      {
+        date: "2031-01-02",
+        scope: "live" as const,
+        data: { dayState: { runs: [{ id: "outside-range", brand: "Outside", flavor: "Range" }] } },
+        updatedAt: new Date(),
+      },
+      {
+        date: "2030-12-31",
+        scope: "sandbox" as const,
+        data: { dayState: { runs: [{ id: "sandbox-run", brand: "Sandbox only", flavor: "Private" }] } },
+        updatedAt: new Date(),
+      },
+    ];
+    await db.insert(tables.dailySyncTable).values(rows);
+
+    const response = await request(
+      "/qc/planning?today=2030-12-30&days=3",
+      "qc-reader",
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json() as {
+      range: { from: string; through: string; days: number };
+      maxDays: number;
+      days: Array<{
+        date: string;
+        status: string;
+        runs: Array<Record<string, unknown>>;
+      }>;
+    };
+    expect(body.range).toEqual({ from: "2030-12-30", through: "2031-01-01", days: 3 });
+    expect(body.maxDays).toBe(90);
+    expect(body.days.map((day) => day.date)).toEqual(["2030-12-30", "2030-12-31", "2031-01-01"]);
+    expect(body.days[0]).toMatchObject({ status: "unknown", runs: [] });
+    expect(body.days[1]).toMatchObject({
+      status: "scheduled",
+      runs: [
+        { runId: "synthetic-run", brand: "Synthetic Brand", flavor: "Cheese", casesNeeded: 24 },
+        { runId: null, brand: null, flavor: "Pepperoni", casesNeeded: null },
+      ],
+    });
+    expect(body.days[2]).toMatchObject({ status: "empty", runs: [] });
+    expect(Object.keys(body.days[1]!.runs[0]!).sort()).toEqual([
+      "brand", "casesNeeded", "flavor", "runId",
+    ]);
+    expect(JSON.stringify(body)).not.toContain("must not be returned");
+    expect(JSON.stringify(body)).not.toContain("Sandbox only");
+    const sandboxResponse = await request(
+      "/qc/planning?today=2030-12-30&days=3",
+      "qc-sandbox",
+    );
+    expect(sandboxResponse.status).toBe(200);
+    const sandboxBody = await sandboxResponse.json() as {
+      days: Array<{ runs: Array<{ brand: string | null }> }>;
+    };
+    expect(sandboxBody.days).toHaveLength(1);
+    expect(sandboxBody.days[0]!.runs[0]!.brand).toBe("Sandbox only");
+    expect((await request("/qc/planning?today=2030-12-30&days=3", "plain-operator")).status).toBe(403);
+  });
+
+  it("returns a real empty result for no rows, rejects oversized ranges, and reports source failures", async () => {
+    const empty = await request("/qc/planning?today=2030-12-30&days=90", "qc-reader");
+    expect(empty.status).toBe(200);
+    expect((await empty.json() as { days: unknown[] }).days).toEqual([]);
+
+    expect((await request("/qc/planning?today=2030-02-30&days=30", "qc-reader")).status).toBe(400);
+    expect((await request("/qc/planning?today=2030-12-30&days=91", "qc-reader")).status).toBe(400);
+
+    setQcPlanningReadFailureHookForTest(() => {
+      throw new Error("synthetic database outage");
+    });
+    try {
+      const unavailable = await request("/qc/planning?today=2030-12-30&days=30", "qc-reader");
+      expect(unavailable.status).toBe(503);
+      expect(await unavailable.json()).toEqual({
+        error: "Upcoming production schedule is unavailable. Retry the request.",
+      });
+    } finally {
+      setQcPlanningReadFailureHookForTest();
+    }
+  });
+
   it("captures all four direct recipe saves and exposes only status to record-qc staff", async () => {
     const families = ["dough", "sauce", "cheese", "mix"] as const;
     for (const family of families) {

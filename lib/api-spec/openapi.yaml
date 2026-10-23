@@ -1664,6 +1664,40 @@ paths:
         "400": { description: Invalid run ID or page size }
         "403": { description: QC recording capability required }
 
+  /qc/planning:
+    get:
+      operationId: getQcPlanning
+      tags: [inventory]
+      summary: Read a bounded, scoped projection of upcoming production for QC
+      description: >-
+        Requires record-qc. Reads only date, run identity, brand, flavor, and
+        case demand from canonical daily_sync schedule rows. The client-local
+        production date is required; future bounds use that date, not server UTC.
+        This endpoint is read-only and does not expose general day-state or
+        schedule controls. Missing fields remain unknown. An empty days array
+        means no persisted schedule rows matched; source failures return 503.
+      parameters:
+        - name: today
+          in: query
+          required: true
+          description: Client-local production date used as the start of the range.
+          schema: { type: string, format: date }
+        - name: days
+          in: query
+          required: false
+          description: Inclusive number of client-calendar dates to inspect, capped at 90.
+          schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        "200":
+          description: Bounded schedule projection in the authenticated facility scope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcPlanningResponse" }
+        "400": { description: Invalid date or date range }
+        "401": { description: Authentication required }
+        "403": { description: record-qc required }
+        "503": { description: Canonical schedule source is unavailable }
+
   /qc/allergen-activity:
     get:
       operationId: getQcAllergenActivity
@@ -9712,6 +9746,37 @@ components:
                       type: array
                       description: Present only for live-scope QC managers; contains no replacement or redacted source values.
                       items: { $ref: "#/components/schemas/QcActivityAuditDetail" }
+    QcPlanningResponse:
+      type: object
+      required: [range, maxDays, days]
+      properties:
+        range:
+          type: object
+          required: [from, through, days]
+          properties:
+            from: { type: string, format: date }
+            through: { type: string, format: date }
+            days: { type: integer, minimum: 1, maximum: 90 }
+        maxDays: { type: integer, const: 90 }
+        days:
+          type: array
+          maxItems: 90
+          items:
+            type: object
+            required: [date, status, runs]
+            properties:
+              date: { type: string, format: date }
+              status: { type: string, enum: [scheduled, empty, unknown] }
+              runs:
+                type: array
+                items:
+                  type: object
+                  required: [runId, brand, flavor, casesNeeded]
+                  properties:
+                    runId: { type: [string, "null"] }
+                    brand: { type: [string, "null"] }
+                    flavor: { type: [string, "null"] }
+                    casesNeeded: { type: [number, "null"], minimum: 0 }
     QcActivitySourceStatus:
       type: object
       required: [status, reason, count]

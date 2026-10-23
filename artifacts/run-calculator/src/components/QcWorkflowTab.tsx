@@ -78,6 +78,7 @@ import QualityHistoryTab from "./QualityHistoryTab";
 import QcImportReview from "./QcImportReview";
 import QcRecipeReview from "./QcRecipeReview";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
+import QcPlanningView from "./QcPlanningView";
 
 export type QcWorkflowTabProps = {
   runId: string;
@@ -286,6 +287,7 @@ export default function QcWorkflowTab({
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewName>("lots");
   const [showDailyActivity, setShowDailyActivity] = useState(false);
+  const [showPlanning, setShowPlanning] = useState(false);
   const [showImportReview, setShowImportReview] = useState(false);
   const [showRecipeReview, setShowRecipeReview] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
@@ -903,10 +905,27 @@ export default function QcWorkflowTab({
               type="button"
               className={quietButtonClass}
               aria-pressed={showDailyActivity}
-              onClick={() => setShowDailyActivity((current) => !current)}
+              onClick={() => {
+                setShowDailyActivity((current) => !current);
+                setShowPlanning(false);
+              }}
               data-testid="button-toggle-allergen-activity"
             >
               {showDailyActivity ? "Back to run QC" : "Daily allergen activity"}
+            </button>
+          )}
+          {(canRecordQc || canManageQc) && (
+            <button
+              type="button"
+              className={quietButtonClass}
+              aria-pressed={showPlanning}
+              onClick={() => {
+                setShowPlanning((current) => !current);
+                setShowDailyActivity(false);
+              }}
+              data-testid="button-toggle-qc-planning"
+            >
+              {showPlanning ? "Hide upcoming production" : "Upcoming production"}
             </button>
           )}
         </div>
@@ -917,6 +936,8 @@ export default function QcWorkflowTab({
           canRead={canRecordQc || canManageQc}
           canManageQc={canManageQc}
         />
+      ) : showPlanning ? (
+        <QcPlanningView />
       ) : (
       <>
       {(canRecordQc || canManageQc) && (

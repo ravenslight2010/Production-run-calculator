@@ -32,6 +32,7 @@ describe("capability route registration", () => {
       "/inventory",
       "/brand-profiles",
       "/roles",
+      "/qc/planning",
     ]));
   });
 

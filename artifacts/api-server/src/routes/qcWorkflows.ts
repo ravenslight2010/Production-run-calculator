@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { and, desc, eq, gt, gte, inArray, lt, lte, max, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, max, notInArray, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import * as z from "zod";
 import {
@@ -83,6 +83,10 @@ const activityDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value
 }, "Invalid calendar date");
 const allergenActivityQuerySchema = z.object({
   date: activityDateSchema.optional(),
+}).strict();
+const qcPlanningQuerySchema = z.object({
+  today: activityDateSchema,
+  days: z.coerce.number().int().min(1).max(90).default(30),
 }).strict();
 const profileKeySchema = z.string().trim().min(1).max(MAX_PROFILE_KEY);
 const ingredientIdSchema = z.string().trim().min(1).max(200);
@@ -2021,6 +2025,91 @@ router.get("/qc/allergen-activity", requireCapability("record-qc"), async (req, 
     });
   } catch (error) {
     reportRouteError(req, res, "failed to load daily allergen activity", error);
+  }
+});
+
+const MAX_QC_PLANNING_DAYS = 90;
+let qcPlanningReadFailureHookForTest: (() => void) | undefined;
+
+/** Test-only seam for verifying the endpoint reports source failures distinctly. */
+export function setQcPlanningReadFailureHookForTest(hook?: () => void): void {
+  qcPlanningReadFailureHookForTest = hook;
+}
+
+function addCalendarDays(date: string, count: number): string {
+  // This is calendar arithmetic on the client-provided production date. UTC is
+  // only used to avoid process-timezone/DST effects while adding whole days.
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + count);
+  return value.toISOString().slice(0, 10);
+}
+
+function nullablePlanningText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function projectQcPlanningDay(row: { date: string; data: unknown }) {
+  const data = recordObject(row.data);
+  const dayState = recordObject(data?.dayState);
+  const runValues = recordObject(data?.runValues);
+  if (!dayState || !Array.isArray(dayState.runs)) {
+    return { date: row.date, status: "unknown" as const, runs: [] };
+  }
+
+  const runs = dayState.runs.map((rawRun) => {
+    const run = recordObject(rawRun);
+    const runId = nullablePlanningText(run?.id);
+    const values = runId ? recordObject(runValues?.[runId]) : null;
+    const casesNeeded = values?.casesNeeded;
+    return {
+      runId,
+      brand: nullablePlanningText(run?.brand),
+      flavor: nullablePlanningText(run?.flavor),
+      casesNeeded:
+        typeof casesNeeded === "number" && Number.isFinite(casesNeeded) && casesNeeded >= 0
+          ? casesNeeded
+          : null,
+    };
+  });
+
+  return {
+    date: row.date,
+    status: runs.length > 0 ? "scheduled" as const : "empty" as const,
+    runs,
+  };
+}
+
+router.get("/qc/planning", requireCapability("record-qc"), async (req, res) => {
+  const parsed = qcPlanningQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    safeError(res, 400, "A valid client production date and a range of 1 to 90 days are required");
+    return;
+  }
+
+  const { today, days } = parsed.data;
+  const through = addCalendarDays(today, days - 1);
+  try {
+    qcPlanningReadFailureHookForTest?.();
+    const rows = await db.select({
+      date: dailySyncTable.date,
+      data: dailySyncTable.data,
+    }).from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, currentScope()),
+      gte(dailySyncTable.date, today),
+      lte(dailySyncTable.date, through),
+    )).orderBy(asc(dailySyncTable.date)).limit(MAX_QC_PLANNING_DAYS);
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      range: { from: today, through, days },
+      maxDays: MAX_QC_PLANNING_DAYS,
+      days: rows.map(projectQcPlanningDay),
+    });
+  } catch (error) {
+    req.log.warn({ err: error, scope: currentScope(), from: today, through }, "failed to read QC planning schedule");
+    safeError(res, 503, "Upcoming production schedule is unavailable. Retry the request.");
   }
 });
 

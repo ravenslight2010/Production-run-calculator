@@ -156,6 +156,11 @@ export const getQcRunPathRunIdMax = 200;
 export const getQcRunResponseComponentChecklistIssuesItemSettingMax = 80;
 export const getQcRunResponseComponentChecklistIssuesItemMessageMax = 240;
 export const getQcRunResponseComponentChecklistIssuesMax = 12;
+export const getQcPlanningQueryDaysDefault = 30;
+export const getQcPlanningQueryDaysMax = 90;
+export const getQcPlanningResponseRangeDaysMax = 90;
+export const getQcPlanningResponseDaysItemRunsItemCasesNeededMin = 0;
+export const getQcPlanningResponseDaysMax = 90;
 export const recordQcAllergenReviewBodyRunIdMax = 200;
 export const recordQcAllergenReviewBodyFootprintAllergensMax = 9;
 export const recordQcAllergenReviewBodyFootprintUnknownIngredientsItemMax = 200;
@@ -2925,6 +2930,43 @@ export const GetQcRunResponse = zod.object({
   "signedOff": zod.boolean(),
   "reopened": zod.boolean()
 }),zod.null()])
+})
+
+
+/**
+ * Requires record-qc. Reads only date, run identity, brand, flavor, and case demand from canonical daily_sync schedule rows. The client-local production date is required; future bounds use that date, not server UTC. This endpoint is read-only and does not expose general day-state or schedule controls. Missing fields remain unknown. An empty days array means no persisted schedule rows matched; source failures return 503.
+ * @summary Read a bounded, scoped projection of upcoming production for QC
+ */
+
+
+
+export const GetQcPlanningQueryParams = zod.object({
+  "today": zod.date().describe('Client-local production date used as the start of the range.'),
+  "days": zod.coerce.number().int().min(1).max(getQcPlanningQueryDaysMax).default(getQcPlanningQueryDaysDefault).describe('Inclusive number of client-calendar dates to inspect, capped at 90.')
+})
+
+
+
+
+
+
+export const GetQcPlanningResponse = zod.object({
+  "range": zod.object({
+  "from": zod.coerce.date(),
+  "through": zod.coerce.date(),
+  "days": zod.int().min(1).max(getQcPlanningResponseRangeDaysMax)
+}),
+  "maxDays": zod.literal(90),
+  "days": zod.array(zod.object({
+  "date": zod.coerce.date(),
+  "status": zod.enum(['scheduled', 'empty', 'unknown']),
+  "runs": zod.array(zod.object({
+  "runId": zod.string().nullable(),
+  "brand": zod.string().nullable(),
+  "flavor": zod.string().nullable(),
+  "casesNeeded": zod.number().min(getQcPlanningResponseDaysItemRunsItemCasesNeededMin).nullable()
+}))
+})).max(getQcPlanningResponseDaysMax)
 })
 
 

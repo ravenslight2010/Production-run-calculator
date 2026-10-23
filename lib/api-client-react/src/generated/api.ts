@@ -112,6 +112,7 @@ import type {
   GetQcAllergenActivityParams,
   GetQcHistoryParams,
   GetQcImportReviewBadges200,
+  GetQcPlanningParams,
   GetQcTargetsParams,
   GetShiftHandoffDigestParams,
   GetSignupCodeStatus200,
@@ -235,6 +236,7 @@ import type {
   QcLabelReferencesResponse,
   QcLotInput,
   QcNoteInput,
+  QcPlanningResponse,
   QcRecipeReviewDecisionInput,
   QcRecipeReviewDecisionResult,
   QcRecipeReviewDetail,
@@ -6446,6 +6448,115 @@ export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetQcRunQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetQcPlanningUrl = (params: GetQcPlanningParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/planning?${stringifiedParams}` : `/api/qc/planning`
+}
+
+/**
+ * Requires record-qc. Reads only date, run identity, brand, flavor, and case demand from canonical daily_sync schedule rows. The client-local production date is required; future bounds use that date, not server UTC. This endpoint is read-only and does not expose general day-state or schedule controls. Missing fields remain unknown. An empty days array means no persisted schedule rows matched; source failures return 503.
+ * @summary Read a bounded, scoped projection of upcoming production for QC
+ */
+export const getQcPlanning = async (params: GetQcPlanningParams, options?: Parameters<typeof customFetch>[1]): Promise<QcPlanningResponse> => {
+
+  return customFetch<QcPlanningResponse>(getGetQcPlanningUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcPlanningQueryKey = (params?: GetQcPlanningParams,) => {
+    return [
+    `/api/qc/planning`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcPlanningQueryOptions = <TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcPlanningQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcPlanning>>> = ({ signal }) => getQcPlanning(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcPlanningQueryResult = NonNullable<Awaited<ReturnType<typeof getQcPlanning>>>
+export type GetQcPlanningQueryError = ErrorType<void>
+
+
+export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
+ params: GetQcPlanningParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcPlanning>>,
+          TError,
+          Awaited<ReturnType<typeof getQcPlanning>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
+ params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcPlanning>>,
+          TError,
+          Awaited<ReturnType<typeof getQcPlanning>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
+ params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read a bounded, scoped projection of upcoming production for QC
+ */
+
+export function useGetQcPlanning<TData = Awaited<ReturnType<typeof getQcPlanning>>, TError = ErrorType<void>>(
+ params: GetQcPlanningParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcPlanning>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcPlanningQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

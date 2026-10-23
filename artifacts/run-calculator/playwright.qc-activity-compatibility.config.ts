@@ -19,7 +19,7 @@ const viewports = [
 export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
-  testMatch: "qc-allergen-activity-responsive.spec.ts",
+  testMatch: ["qc-allergen-activity-responsive.spec.ts", "qc-planning-authenticated.spec.ts"],
   timeout: 120_000,
   globalTimeout: 15 * 60_000,
   retries: 0,
@@ -38,13 +38,20 @@ export default defineConfig({
   projects: [
     ...viewports.map(({ name, viewport }) => ({
       name: `${name}-chromium`,
-      use: { ...devices["Desktop Chrome"], viewport },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport,
+        locale: "en-GB",
+        timezoneId: "Pacific/Kiritimati",
+      },
     })),
     ...viewports.map(({ name, viewport }) => ({
       name: `${name}-webkit`,
       use: {
         ...devices["Desktop Safari"],
         viewport,
+        locale: "en-GB",
+        timezoneId: "Pacific/Kiritimati",
         launchOptions: webkitLaunchOptions(),
       },
     })),

@@ -127,11 +127,13 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/inventory/quality-checks",
   ]),
   ...reads(["record-qc"], "all", "scoped", [
-    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity", "/qc/label-references",
-    "/qc/recipe-review-statuses",
+    "/qc/targets", "/qc/runs/:runId", "/qc/history", "/qc/allergen-activity", "/qc/planning", "/qc/label-references",
+    "/qc/date-code-references",
   ]),
+  ...reads(["record-qc", "manage-qc"], "any", "scoped", ["/qc/recipe-review-statuses"]),
   ...reads(["manage-qc"], "all", "scoped", [
     "/qc/history.csv", "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
+    "/qc/import-reviews", "/qc/import-reviews/:operationId",
   ]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
     "/import-history", "/import-operations/:operationId",
@@ -238,6 +240,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /completed-history", "POST /field-checks/observations",
     "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
+    "POST /supervisor-pin/verify",
     "POST /run-suggestions/follow-up", "POST /sync/operational-intents", "POST /sync/manual-section",
     "POST /sync/station-activity",
     "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
@@ -285,11 +288,15 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
     "POST /qc/component-checks", "POST /qc/label-checks", "POST /qc/brix-checks",
     "POST /qc/cleaning-records", "POST /qc/cleaning-records/:eventId/verification",
+    "POST /qc/date-code-checks",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
     "POST /qc/targets", "POST /qc/run-signoffs", "POST /qc/brix-targets",
     "POST /qc/label-references", "POST /qc/label-references/:eventId/review",
     "POST /qc/events/:eventId/corrections", "POST /qc/events/:eventId/redactions",
+    "POST /qc/import-reviews/:operationId/decisions",
+    "POST /qc/date-code-references", "POST /qc/date-code-references/:eventId/review",
+    "POST /qc/recipe-reviews/:captureId/decisions",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",

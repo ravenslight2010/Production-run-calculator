@@ -1181,6 +1181,36 @@ describe("capability-based access control", () => {
     const scheduledRows = await scheduledList.json() as Array<{ date: string }>;
     expect(scheduledRows.some((row) => row.date === "2099-01-02")).toBe(true);
 
+    const qcPlanning = await req(
+      QC_OPERATOR,
+      "GET",
+      "/api/qc/planning?today=2099-01-02&days=1",
+    );
+    expect(qcPlanning.status).toBe(200);
+    const qcPlanningBody = await qcPlanning.json() as {
+      days: Array<{ date: string; runs: Array<Record<string, unknown>> }>;
+    };
+    expect(qcPlanningBody.days).toEqual([{
+      date: "2099-01-02",
+      status: "scheduled",
+      runs: [{
+        runId: "scheduled-run",
+        brand: "Acme",
+        flavor: "Future",
+        casesNeeded: null,
+      }],
+    }]);
+    expect(Object.keys(qcPlanningBody.days[0]!.runs[0]!).sort()).toEqual([
+      "brand", "casesNeeded", "flavor", "runId",
+    ]);
+    const qcScheduleWrite = await req(
+      QC_OPERATOR,
+      "PUT",
+      "/api/sync/2099-01-02?today=2099-01-02",
+      { senderId: "qc-read-only-check", payload: scheduledPayload },
+    );
+    expect(qcScheduleWrite.status).toBe(403);
+
     expect((await req(null, "GET", "/api/sync/2099-01-02")).status).toBe(401);
     expect((await req(null, "GET", "/api/sync/scheduled")).status).toBe(401);
   });

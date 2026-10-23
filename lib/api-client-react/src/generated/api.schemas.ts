@@ -4618,6 +4618,52 @@ export interface QcAllergenActivityResponse {
   runs: QcAllergenActivityResponseRunsItem[];
 }
 
+export type QcPlanningResponseRange = {
+  from: string;
+  through: string;
+  /**
+     * @minimum 1
+     * @maximum 90
+     */
+  days: number;
+};
+
+export type QcPlanningResponseDaysItemStatus = typeof QcPlanningResponseDaysItemStatus[keyof typeof QcPlanningResponseDaysItemStatus];
+
+
+export const QcPlanningResponseDaysItemStatus = {
+  scheduled: 'scheduled',
+  empty: 'empty',
+  unknown: 'unknown',
+} as const;
+
+export type QcPlanningResponseDaysItemRunsItem = {
+  /** @nullable */
+  runId: string | null;
+  /** @nullable */
+  brand: string | null;
+  /** @nullable */
+  flavor: string | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  casesNeeded: number | null;
+};
+
+export type QcPlanningResponseDaysItem = {
+  date: string;
+  status: QcPlanningResponseDaysItemStatus;
+  runs: QcPlanningResponseDaysItemRunsItem[];
+};
+
+export interface QcPlanningResponse {
+  range: QcPlanningResponseRange;
+  maxDays: 90;
+  /** @maxItems 90 */
+  days: QcPlanningResponseDaysItem[];
+}
+
 export type QcCorrectionInputReplacement = { [key: string]: unknown };
 
 export interface QcCorrectionInput {
@@ -9447,6 +9493,19 @@ export type GetQcTargetsParams = {
  * @maxLength 400
  */
 profileKey: string;
+};
+
+export type GetQcPlanningParams = {
+/**
+ * Client-local production date used as the start of the range.
+ */
+today: string;
+/**
+ * Inclusive number of client-calendar dates to inspect, capped at 90.
+ * @minimum 1
+ * @maximum 90
+ */
+days?: number;
 };
 
 export type GetQcAllergenActivityParams = {

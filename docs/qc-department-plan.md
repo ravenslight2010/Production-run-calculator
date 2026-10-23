@@ -1,6 +1,6 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Approved Phase 1 and advisory Slices 0–4 implemented; import-review functional and final-state checks demonstrated with synthetic committed operations. Earlier date-code WebKit background diagnostics remain unresolved. The API/web preview startup blocker was repaired without changing project dependencies. Real approved label/date-code references remain unavailable and later gates remain deferred
+**Status:** Approved Phase 1 and advisory Slices 0–6 implemented; Slice 6 is a read-only projection of persisted upcoming schedules. Import-review functional and final-state checks demonstrated with synthetic committed operations. Earlier date-code WebKit background diagnostics remain unresolved. The earlier API/web preview startup blocker was repaired without changing project dependencies. Slice 6 workflow restarts initially hit a pnpm bootstrap failure, then both started successfully after provisioning the exact pinned pnpm in an ignored local cache. Real approved label/date-code references remain unavailable and later gates remain deferred.
 **Updated:** 2026-10-23
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
@@ -237,6 +237,22 @@ those files. Physical devices were unavailable, and no production data or
 production migration was used. Slice 8 enforcement remains deferred pending
 explicit owner policy; it is neither shipped nor formally declined. Slice 9
 allergen expansion is not adopted.
+
+## Approved Master-Program Slice 6 — Upcoming QC Planning
+
+**Status:** Implemented and verified as an advisory, read-only projection of the canonical persisted schedule. Focused API/database, client, contract, typecheck, and authenticated browser checks passed. Initial API/web workflow restarts were blocked by the workspace pnpm bootstrap failure; after provisioning the exact pinned pnpm in an ignored local cache, both workflows restarted successfully. No production data or production migration was used.
+
+- QC staff with `record-qc` can open Upcoming production from the QC workflow. The dedicated read route returns only a bounded schedule projection from facility-scoped `daily_sync` rows; it does not grant general sync access or expose full day-state.
+- The client supplies its local production date. The API validates a 1–90 day range (the UI offers 7, 30, and 90 days), uses calendar-safe date bounds, and leaves missing schedule fields unknown rather than inventing run details.
+- The list groups scheduled brands/flavors by production date and shows run identity and case demand when present. Empty persisted days, days without scheduled runs, unknown fields, request errors, and source unavailability remain distinct states. Refresh reads current server data; the view has no scheduling controls.
+- The signed-in synthetic journey navigated to QC Planning, read the canonical scheduled brand/flavor, refreshed after a manager changed the fixture, and retained the selected range after reload. All eight Chromium/WebKit desktop, phone, and tablet-portrait/landscape projects passed, with no horizontal overflow or browser page errors; fixture accounts and schedule rows were cleaned up.
+- Focused API/database integration coverage passed **205/205** tests; the planning component passed **3/3**; generated API contract checks and the full workspace typecheck passed. The coverage map and full failure ledger are retained below.
+- Physical Android Chrome and iOS Safari/PWA were **NOT RUN**; responsive browser emulation is not device evidence, and this slice adds no native-mobile deliverable.
+
+See the [coverage/check map](../.local/tasks/evidence/qc-slice-6-planning/coverage-check-map.md)
+and [failure ledger](../.local/tasks/evidence/qc-slice-6-planning/failure-ledger.md).
+Sanitized synthetic per-engine results and screenshots are stored beside those
+files.
 
 ## QC Phase 1 — Approved and Implemented
 
