@@ -38,7 +38,11 @@ function Assert-Recoverable([string] $LockPath) {
     if ($legacy) {
         $ownerPid = [int]::Parse($text.Trim(), [System.Globalization.CultureInfo]::InvariantCulture)
     } else {
-        $record = ConvertFrom-Json -InputObject $text
+        try {
+            $record = ConvertFrom-Json -InputObject $text
+        } catch {
+            throw "metadata lock is malformed; leave it untouched"
+        }
         if ($null -eq $record -or
             @($record.PSObject.Properties).Count -ne 2 -or
             $null -eq $record.identity -or

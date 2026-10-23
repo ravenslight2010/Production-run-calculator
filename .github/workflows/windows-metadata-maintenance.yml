@@ -47,6 +47,7 @@ jobs:
           $version = & $powershell -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
           if ($version -notlike "5.1*") { throw "Windows PowerShell 5.1 is required" }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @workspace/scripts run test:distill-backfill
+      - run: pnpm --filter @workspace/scripts run test:metadata-maintenance
+      - run: pnpm --filter @workspace/distill-dataset run test
       - run: pnpm run typecheck:libs
       - run: pnpm --filter @workspace/scripts run typecheck

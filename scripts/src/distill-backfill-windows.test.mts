@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { replaceWindowsMetadataFile, runWindowsMetadataHelper } from "./metadata-maintenance-windows.mts";
 
 assert.equal(process.platform, "win32", "Windows lock cases must run on native Windows, not Linux emulation");
@@ -42,6 +43,68 @@ function owner(pid: number, creationTimeFileTime: string) {
 }
 function assertUnchanged(filePath: string, before: Buffer) {
   assert.deepEqual(fs.readFileSync(filePath), before, "rejected recovery must preserve the decision bytes");
+}
+
+async function holdWindowsHandle(target: ReturnType<typeof fixture>, kind: "gate" | "decision") {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$share = [IO.FileShare]::Read",
+    "$filePath = $env.METADATA_TEST_DECISION",
+    "if ($env.METADATA_TEST_KIND -eq 'gate') {",
+    "  $share = [IO.FileShare]::None",
+    "  $filePath = $env.METADATA_TEST_LOCK + '.recovery.gate'",
+    "}",
+    "$handle = [IO.File]::Open($filePath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, $share)",
+    "if ($env.METADATA_TEST_KIND -eq 'gate') {",
+    "  $time = (Get-Process -Id $PID).StartTime.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture)",
+    "  $owner = @{ pid=$PID; identity=@{ platform='win32'; creationTimeFileTime=$time } }",
+    "  [IO.File]::WriteAllText($env.METADATA_TEST_LOCK, ($owner | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))",
+    "}",
+    "[Console]::WriteLine('handle-ready')",
+    "[Console]::Out.Flush()",
+    "Start-Sleep -Seconds 60",
+  ].join("\n");
+  const child = spawn(
+    path.join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+    {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        METADATA_TEST_DECISION: target.decisionPath,
+        METADATA_TEST_LOCK: target.lockPath,
+        METADATA_TEST_KIND: kind,
+      },
+    },
+  );
+  let output = "";
+  let errors = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => { errors += chunk; });
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Windows fixture handle did not become ready: ${errors}`));
+    }, 10_000);
+    const fail = (error: Error) => { clearTimeout(timeout); reject(error); };
+    child.once("error", fail);
+    child.once("exit", (code) => fail(new Error(`Windows fixture holder exited (${code}): ${errors}`)));
+    child.stdout.on("data", (chunk: string) => {
+      output += chunk;
+      if (output.includes("handle-ready")) { clearTimeout(timeout); resolve(); }
+    });
+  });
+  return {
+    async stop() {
+      await new Promise<void>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", () => resolve());
+        child.kill();
+      });
+    },
+  };
 }
 
 try {
@@ -95,14 +158,29 @@ try {
   assertUnchanged(legacy.decisionPath, legacy.before);
   assert.equal(fs.readFileSync(legacy.lockPath, "utf8"), `${process.pid}\n`);
 
-  const malformed = fixture("malformed-lock");
-  fs.writeFileSync(malformed.lockPath, '{"pid":', { flag: "wx" });
-  assert.throws(
-    () => replaceWindowsMetadataFile(malformed.decisionPath, malformed.before, "must not replace"),
-    /malformed|invalid owner|leave it untouched/u,
-  );
-  assertUnchanged(malformed.decisionPath, malformed.before);
-  assert.equal(fs.readFileSync(malformed.lockPath, "utf8"), '{"pid":');
+  const deadLegacy = fixture("dead-legacy");
+  fs.writeFileSync(deadLegacy.lockPath, `${deadPid}\n`, { flag: "wx" });
+  replaceWindowsMetadataFile(deadLegacy.decisionPath, deadLegacy.before, deadLegacy.before.toString("utf8"));
+  assert.equal(fs.existsSync(deadLegacy.lockPath), false);
+
+  const malformedCases = [
+    '{"pid":',
+    "null",
+    JSON.stringify({ pid: process.pid, identity: { platform: "win32" } }),
+    JSON.stringify({ pid: process.pid, identity: { platform: "linux", creationTimeFileTime: "1" } }),
+    JSON.stringify({ pid: "123", identity: { platform: "win32", creationTimeFileTime: "1" } }),
+    "x".repeat(257),
+  ];
+  for (const [index, contents] of malformedCases.entries()) {
+    const malformed = fixture(`malformed-lock-${index}`);
+    fs.writeFileSync(malformed.lockPath, contents, { flag: "wx" });
+    assert.throws(
+      () => replaceWindowsMetadataFile(malformed.decisionPath, malformed.before, "must not replace"),
+      /malformed|invalid owner|leave it untouched/u,
+    );
+    assertUnchanged(malformed.decisionPath, malformed.before);
+    assert.equal(fs.readFileSync(malformed.lockPath, "utf8"), contents);
+  }
 
   const malformedRecovery = fixture("malformed-recovery-lock");
   fs.writeFileSync(`${malformedRecovery.lockPath}.recovery`, "not-json", { flag: "wx" });
@@ -112,6 +190,47 @@ try {
   );
   assertUnchanged(malformedRecovery.decisionPath, malformedRecovery.before);
   assert.equal(fs.readFileSync(`${malformedRecovery.lockPath}.recovery`, "utf8"), "not-json");
+
+  const staleRecovery = fixture("stale-recovery");
+  fs.writeFileSync(staleRecovery.lockPath, owner(deadPid, "1"), { flag: "wx" });
+  fs.writeFileSync(`${staleRecovery.lockPath}.recovery`, owner(deadPid, "1"), { flag: "wx" });
+  replaceWindowsMetadataFile(staleRecovery.decisionPath, staleRecovery.before, staleRecovery.before.toString("utf8"));
+  assert.equal(fs.existsSync(staleRecovery.lockPath), false);
+  assert.equal(fs.existsSync(`${staleRecovery.lockPath}.recovery`), false);
+  assert.equal(fs.existsSync(`${staleRecovery.lockPath}.recovery.gate`), true);
+
+  const interrupted = fixture("interrupted-writer");
+  const holder = await holdWindowsHandle(interrupted, "gate");
+  try {
+    assert.throws(
+      () => replaceWindowsMetadataFile(interrupted.decisionPath, interrupted.before, "must not replace"),
+      /already in progress|gate is unavailable/u,
+    );
+    assertUnchanged(interrupted.decisionPath, interrupted.before);
+  } finally {
+    await holder.stop();
+  }
+  replaceWindowsMetadataFile(interrupted.decisionPath, interrupted.before, interrupted.before.toString("utf8"));
+  assert.equal(fs.existsSync(interrupted.lockPath), false, "a terminated owner's lock is recoverable");
+
+  const denied = fixture("replacement-denied");
+  const destinationHolder = await holdWindowsHandle(denied, "decision");
+  try {
+    assert.throws(
+      () => replaceWindowsMetadataFile(denied.decisionPath, denied.before, "must not replace"),
+      /Windows metadata maintenance failed/u,
+    );
+    assertUnchanged(denied.decisionPath, denied.before);
+  } finally {
+    await destinationHolder.stop();
+  }
+  assert.equal(fs.existsSync(denied.lockPath), false);
+  assert.equal(fs.readdirSync(root).some((name) => name.endsWith(".tmp")), false);
+
+  const unicode = fixture("spaces caf\u00e9 \u4e2d\u6587");
+  const unicodeAfter = JSON.stringify({ ...makeDecision(), maintenanceHistory: [{ ...entry, note: "Caf\u00e9 \u4e2d\u6587" }] });
+  replaceWindowsMetadataFile(unicode.decisionPath, unicode.before, unicodeAfter);
+  assert.equal(fs.readFileSync(unicode.decisionPath, "utf8"), unicodeAfter);
 
   const raced = fixture("changed-during-validation");
   const changed = Buffer.from(`${JSON.stringify({ ...makeDecision(), externalChange: true })}\n`);

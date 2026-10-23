@@ -16,7 +16,8 @@ From a Windows x64 checkout, install the workspace dependencies with
 `pnpm install --frozen-lockfile`, then run:
 
 ```powershell
-pnpm --filter @workspace/scripts run test:distill-backfill
+pnpm --filter @workspace/scripts run test:metadata-maintenance
+pnpm --filter @workspace/distill-dataset run test
 pnpm run typecheck:libs
 pnpm --filter @workspace/scripts run typecheck
 ```
@@ -25,6 +26,10 @@ The Windows workflow runs the focused tests and both typechecks on a native
 `windows-2025` runner. Its synthetic lock tests cover a live owner, a reused
 PID, a dead owner, a live legacy PID-only lock, and malformed lock data. Linux
 continues to use `flock` and procfs; Windows does not use WSL or emulate Linux.
+
+The broader `test:distill-backfill` command remains a Linux check: it also runs
+private Apply-log export tests with POSIX file-permission requirements. Windows
+support for that exporter is not part of this metadata-only command's approval.
 
 Windows holds an exclusive OS file handle on a persistent recovery-gate file
 through validation and the entire atomic replacement. Windows releases the
