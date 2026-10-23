@@ -602,7 +602,7 @@ describe("LineMapDashboard station lifecycle statuses", () => {
   });
 
   it("previews the earliest named run in the upcoming schedule", () => {
-    renderLineMap("pending", {
+    const rendered = renderLineMap("pending", {
       currentRun: null,
       scheduledDays: [
         {
@@ -656,6 +656,42 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expect(preview.textContent).not.toContain("Later Brand");
     expect(preview.textContent).not.toContain("Same Day Later");
     expect(screen.getByText("Start a run to see the line map")).toBeTruthy();
+
+    const updatedScheduledDays: ScheduledDay[] = [
+      {
+        date: dateOffset(1),
+        runCount: 1,
+        runs: [{
+          id: "unnamed-updated-run",
+          brand: " ",
+          flavor: "",
+          casesNeeded: 100,
+          dieType: "",
+        }],
+      },
+      {
+        date: dateOffset(2),
+        runCount: 1,
+        runs: [{
+          id: "updated-next-run",
+          brand: "Updated Brand",
+          flavor: "Pepperoni",
+          casesNeeded: 100,
+          dieType: "",
+        }],
+      },
+    ];
+    mocks.useHomeTabCtx.mockReturnValue({
+      ...rendered.context,
+      scheduledDays: updatedScheduledDays,
+    });
+    rendered.rerender(<LineMapDashboard />);
+
+    const updatedPreview = screen.getByTestId("line-map-next-scheduled-run");
+    expect(updatedPreview.textContent).toContain(
+      "Next scheduled run: Updated Brand – Pepperoni",
+    );
+    expect(updatedPreview.textContent).not.toContain("Next Brand – Classic");
   });
 
   it("keeps the empty-state guidance when no schedule is available", () => {
