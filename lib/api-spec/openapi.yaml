@@ -2789,6 +2789,57 @@ paths:
         "403":
           description: Missing manage-inventory capability
 
+  /freezer-surplus/confirmations:
+    get:
+      operationId: listFreezerSurplusConfirmations
+      tags: [freezerSurplus]
+      summary: List confirmed completed-run surplus outcomes
+      description: >-
+        Returns up to 500 recent run-bound outcomes in the authenticated live
+        or sandbox scope. A zero-case outcome records that the run was checked
+        and created no freezer stock.
+      responses:
+        "200":
+          description: Scoped completed-run confirmation receipts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusConfirmationList"
+    post:
+      operationId: recordFreezerSurplusConfirmation
+      tags: [freezerSurplus]
+      summary: Confirm the finished-case surplus outcome for a completed run
+      description: >-
+        Requires manage-inventory. The server verifies the run is completed
+        and still within its configured Freeze tunnel window. One immutable
+        outcome is allowed per scoped run; exact retries return the saved
+        receipt and conflicting submissions do not change stock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmFreezerSurplusOutcomeInput"
+      responses:
+        "200":
+          description: Idempotent replay of the saved outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusConfirmationMutation"
+        "201":
+          description: The outcome was recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusConfirmationMutation"
+        "400":
+          description: Invalid input or the run is not eligible
+        "403":
+          description: Missing manage-inventory capability
+        "409":
+          description: A different outcome is already recorded for this run
+
   /freezer-surplus/allocations/{runId}:
     put:
       operationId: replaceFreezerSurplusAllocation
@@ -12533,6 +12584,83 @@ components:
           type: integer
           minimum: 1
           maximum: 1000000
+
+    ConfirmFreezerSurplusOutcomeInput:
+      type: object
+      required:
+        - runId
+        - cases
+      properties:
+        runId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        cases:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        productionDate:
+          type: string
+          format: date
+
+    FreezerSurplusConfirmation:
+      type: object
+      required:
+        - runId
+        - runDate
+        - brand
+        - flavor
+        - cases
+        - productionDate
+        - lotId
+        - createdAt
+      properties:
+        runId:
+          type: string
+        runDate:
+          type: string
+          format: date
+        brand:
+          type: string
+        flavor:
+          type: string
+        cases:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        productionDate:
+          type: string
+          format: date
+          nullable: true
+        lotId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    FreezerSurplusConfirmationList:
+      type: object
+      required:
+        - confirmations
+      properties:
+        confirmations:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/FreezerSurplusConfirmation"
+
+    FreezerSurplusConfirmationMutation:
+      type: object
+      required:
+        - confirmation
+      properties:
+        confirmation:
+          $ref: "#/components/schemas/FreezerSurplusConfirmation"
+        createdLot:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FreezerSurplusLot"
 
     FreezerSurplusAllocationSelection:
       type: object

@@ -55,6 +55,7 @@ import type {
   CompletedHistoryList,
   CompletedRunFinalization,
   ConfirmFreezerSurplusInput,
+  ConfirmFreezerSurplusOutcomeInput,
   ConfirmStationActivityParams,
   ConsumeInput,
   ConsumeInventoryDayStart200,
@@ -98,6 +99,8 @@ import type {
   ForgotPasswordRequest,
   FreezerPullItemList,
   FreezerSurplusAdjustmentList,
+  FreezerSurplusConfirmationList,
+  FreezerSurplusConfirmationMutation,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
   GetBuildInfo503,
@@ -10518,6 +10521,197 @@ export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<type
 
 
 
+
+export const getListFreezerSurplusConfirmationsUrl = () => {
+
+
+
+
+  return `/api/freezer-surplus/confirmations`
+}
+
+/**
+ * Returns up to 500 recent run-bound outcomes in the authenticated live or sandbox scope. A zero-case outcome records that the run was checked and created no freezer stock.
+ * @summary List confirmed completed-run surplus outcomes
+ */
+export const listFreezerSurplusConfirmations = async ( options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusConfirmationList> => {
+
+  return customFetch<FreezerSurplusConfirmationList>(getListFreezerSurplusConfirmationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFreezerSurplusConfirmationsQueryKey = () => {
+    return [
+    `/api/freezer-surplus/confirmations`
+    ] as const;
+    }
+
+
+export const getListFreezerSurplusConfirmationsQueryOptions = <TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFreezerSurplusConfirmationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>> = ({ signal }) => listFreezerSurplusConfirmations({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFreezerSurplusConfirmationsQueryResult = NonNullable<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>>
+export type ListFreezerSurplusConfirmationsQueryError = ErrorType<unknown>
+
+
+export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>,
+          TError,
+          Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>,
+          TError,
+          Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List confirmed completed-run surplus outcomes
+ */
+
+export function useListFreezerSurplusConfirmations<TData = Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusConfirmations>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFreezerSurplusConfirmationsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordFreezerSurplusConfirmationUrl = () => {
+
+
+
+
+  return `/api/freezer-surplus/confirmations`
+}
+
+/**
+ * Requires manage-inventory. The server verifies the run is completed and still within its configured Freeze tunnel window. One immutable outcome is allowed per scoped run; exact retries return the saved receipt and conflicting submissions do not change stock.
+ * @summary Confirm the finished-case surplus outcome for a completed run
+ */
+export const recordFreezerSurplusConfirmation = async (confirmFreezerSurplusOutcomeInput: ConfirmFreezerSurplusOutcomeInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusConfirmationMutation> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FreezerSurplusConfirmationMutation>(getRecordFreezerSurplusConfirmationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(confirmFreezerSurplusOutcomeInput)
+  }
+);}
+
+
+
+
+
+export const getRecordFreezerSurplusConfirmationMutationKey = () => ['recordFreezerSurplusConfirmation'] as const;
+
+export const getRecordFreezerSurplusConfirmationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusConfirmation>>, TError,RecordFreezerSurplusConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusConfirmation>>, TError,RecordFreezerSurplusConfirmationMutationVariables, TContext> => {
+
+const mutationKey = getRecordFreezerSurplusConfirmationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordFreezerSurplusConfirmation>>, RecordFreezerSurplusConfirmationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordFreezerSurplusConfirmation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordFreezerSurplusConfirmationMutationResult = NonNullable<Awaited<ReturnType<typeof recordFreezerSurplusConfirmation>>>
+    export type RecordFreezerSurplusConfirmationMutationBody = BodyType<ConfirmFreezerSurplusOutcomeInput>
+    export type RecordFreezerSurplusConfirmationMutationError = ErrorType<void>
+    export type RecordFreezerSurplusConfirmationMutationVariables = {data: BodyType<ConfirmFreezerSurplusOutcomeInput>}
+
+    /**
+ * @summary Confirm the finished-case surplus outcome for a completed run
+ */
+export const useRecordFreezerSurplusConfirmation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusConfirmation>>, TError,RecordFreezerSurplusConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordFreezerSurplusConfirmation>>,
+        TError,
+        RecordFreezerSurplusConfirmationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordFreezerSurplusConfirmationMutationOptions(options), queryClient);
+    }
 
 export const getReplaceFreezerSurplusAllocationUrl = (runId: string,) => {
 

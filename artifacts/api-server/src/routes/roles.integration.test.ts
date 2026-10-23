@@ -1043,6 +1043,15 @@ describe("capability-based access control", () => {
       scope: "per-user",
       sandbox: "allowed",
     });
+    expect(mutationAuthorizationInventory).toContainEqual({
+      method: "POST",
+      path: "/freezer-surplus/confirmations",
+      ownership: "capability-gated",
+      scope: "scoped",
+      sandbox: "allowed",
+      capabilities: ["manage-inventory"],
+      capabilityMatch: "all",
+    });
   });
 
   it("allows sandbox users to reach their own password-change validation", async () => {

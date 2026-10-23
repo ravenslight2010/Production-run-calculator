@@ -263,7 +263,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /die-line-defaults", "DELETE /die-line-defaults", "POST /die-types", "POST /die-types/delete",
     "POST /dough-recipes", "DELETE /dough-recipes", "POST /ingredients", "DELETE /ingredients", "POST /ingredients/merge",
     "POST /freezer-pull-items", "DELETE /freezer-pull-items", "POST /freezer-surplus", "PUT /freezer-surplus/allocations/:runId",
-    "POST /freezer-surplus/lots/:lotId/adjustments",
+    "POST /freezer-surplus/lots/:lotId/adjustments", "POST /freezer-surplus/confirmations",
     "POST /ingredient-batch-weights", "POST /mixes", "DELETE /mixes", "POST /photo-aliases",
     "POST /premix-sheets", "DELETE /premix-sheets/:id", "POST /cheese-sheets", "DELETE /cheese-sheets/:id",
     "POST /sauce-recipes", "DELETE /sauce-recipes", "PATCH /inventory/items/:id/production-link",

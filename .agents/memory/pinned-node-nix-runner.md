@@ -32,3 +32,9 @@ If a pinned Node command reports mutually exclusive CA modes, keep the mode sele
 **Why:** npm-provisioned Node builds can default to OpenSSL CA mode, while `NODE_USE_SYSTEM_CA=1` or a conflicting `NODE_OPTIONS` flag can request the opposite mode and fail even for `node --version`.
 
 **How to apply:** Inspect the selected Node build, `NODE_USE_SYSTEM_CA`, and inherited `NODE_OPTIONS`; align their CA modes across acquisition and child processes. For OpenSSL mode, set readable `SSL_CERT_FILE` and `SSL_CERT_DIR`. Keep HTTPS certificate verification enabled and verify both bootstrap and the selected runtime.
+
+Successful validation with an independently provisioned pinned package manager does not prove the ordinary workflow launcher can select it.
+
+**Why:** An older Nix pnpm launcher recursively attempted manager installation and exhausted threads while the independently provisioned exact manager ran the same checks successfully. These are different launcher paths, not evidence that the application or checks fail.
+
+**How to apply:** Verify pinned-manager selection and ordinary workflow resolution separately, preserving repository engine requirements and HTTPS verification. Do not change project dependencies to work around a local launcher failure.

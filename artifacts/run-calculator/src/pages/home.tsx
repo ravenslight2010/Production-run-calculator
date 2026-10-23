@@ -437,13 +437,15 @@ import {
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
 import {
-  confirmFreezerSurplus,
+  confirmFreezerSurplusOutcome,
+  fetchFreezerSurplusConfirmations,
   fetchFreezerSurplus,
   getFreezerSurplusRemainingMs,
   recordFreezerSurplusAdjustment,
   replaceFreezerSurplusAllocation,
   type FreezerSurplusAdjustment,
   type FreezerSurplusAdjustmentInput,
+  type FreezerSurplusConfirmation,
 } from "../freezerSurplus";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
@@ -2760,6 +2762,12 @@ export default function Home() {
   const [freezerSurplusLoaded, setFreezerSurplusLoaded] = useState(false);
   const [freezerSurplusBusy, setFreezerSurplusBusy] = useState(false);
   const [freezerSurplusError, setFreezerSurplusError] = useState<string | null>(null);
+  const [freezerSurplusConfirmations, setFreezerSurplusConfirmations] = useState<
+    FreezerSurplusConfirmation[]
+  >([]);
+  const [freezerSurplusConfirmationsLoaded, setFreezerSurplusConfirmationsLoaded] = useState(false);
+  const [freezerSurplusConfirmationsError, setFreezerSurplusConfirmationsError] =
+    useState<string | null>(null);
   const refreshFreezerSurplus = useCallback(async () => {
     try {
       const next = await fetchFreezerSurplus();
@@ -2774,21 +2782,72 @@ export default function Home() {
     void refreshFreezerSurplus();
   }, [refreshFreezerSurplus]);
 
-  async function confirmRunSurplus(run: RunMeta, cases: number, productionDate: string) {
+  useEffect(() => {
+    let active = true;
+    setFreezerSurplusConfirmations([]);
+    setFreezerSurplusConfirmationsLoaded(false);
+    setFreezerSurplusConfirmationsError(null);
+    if (!me) return () => { active = false; };
+
+    const refreshConfirmations = async () => {
+      try {
+        const next = await fetchFreezerSurplusConfirmations();
+        if (!active) return;
+        setFreezerSurplusConfirmations((current) => {
+          const byRun = new Map(current.map((confirmation) => [confirmation.runId, confirmation]));
+          for (const confirmation of next) byRun.set(confirmation.runId, confirmation);
+          return [...byRun.values()].slice(-500);
+        });
+        setFreezerSurplusConfirmationsError(null);
+      } catch (error) {
+        if (!active) return;
+        setFreezerSurplusConfirmationsError(
+          error instanceof Error
+            ? error.message
+            : "Couldn't load saved freezer surplus confirmations.",
+        );
+      } finally {
+        if (active) setFreezerSurplusConfirmationsLoaded(true);
+      }
+    };
+    const onOnline = () => { void refreshConfirmations(); };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshConfirmations();
+    };
+    void refreshConfirmations();
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [me?.userId, me?.sandbox]);
+
+  async function confirmRunSurplus(
+    run: RunMeta,
+    cases: number,
+    productionDate?: string,
+  ): Promise<FreezerSurplusConfirmation> {
     setFreezerSurplusBusy(true);
     setFreezerSurplusError(null);
     try {
-      const next = await confirmFreezerSurplus({
-        brand: run.brand,
-        flavor: run.flavor,
-        productionDate,
+      const confirmation = await confirmFreezerSurplusOutcome({
+        runId: run.id,
         cases,
+        ...(productionDate ? { productionDate } : {}),
       });
-      setFreezerSurplus(next);
+      setFreezerSurplusConfirmations((current) => [
+        confirmation,
+        ...current.filter((saved) => saved.runId !== confirmation.runId),
+      ].slice(-500));
+      // The receipt is the authoritative success. The ledger refresh is a
+      // separate best-effort read and must not delay or undo the confirmation.
+      void refreshFreezerSurplus();
+      return confirmation;
     } catch (error) {
-      setFreezerSurplusError(error instanceof Error ? error.message : "Couldn't confirm this surplus.");
       throw error;
-         } finally {
+    } finally {
       setFreezerSurplusBusy(false);
     }
   }
@@ -15538,6 +15597,7 @@ export default function Home() {
   const homeCtxValue = useMemo(() => ({
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, addBrand,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+    freezerSurplusConfirmations, freezerSurplusConfirmationsLoaded, freezerSurplusConfirmationsError,
     confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus, confirmStationActivity,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
@@ -15660,6 +15720,7 @@ export default function Home() {
     // contract or their correctness is guaranteed by the state deps below.
     activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+    freezerSurplusConfirmations, freezerSurplusConfirmationsLoaded, freezerSurplusConfirmationsError,
     batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
     canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
@@ -15752,6 +15813,7 @@ export default function Home() {
       // ── Production / run state ──
       activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
       freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
+      freezerSurplusConfirmations, freezerSurplusConfirmationsLoaded, freezerSurplusConfirmationsError,
       batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brands,
       canApproveResets, canEditRules, canManageInventory, canManageStaff,
       caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,

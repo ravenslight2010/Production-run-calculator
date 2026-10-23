@@ -6,6 +6,7 @@ import {
   dailySyncTable,
   freezerSurplusAdjustmentsTable,
   freezerSurplusAllocationsTable,
+  freezerSurplusConfirmationsTable,
   freezerSurplusLotsTable,
   inventoryItemsTable,
   inventoryLotsTable,
@@ -13,10 +14,12 @@ import {
   inventoryLocationsTable,
   type FreezerSurplusAdjustmentRow,
   type FreezerSurplusAllocationRow,
+  type FreezerSurplusConfirmationRow,
   type FreezerSurplusLotRow,
 } from "@workspace/db";
 import {
   ConfirmFreezerSurplusBody,
+  RecordFreezerSurplusConfirmationBody,
   RecordFreezerSurplusAdjustmentBody,
   RecordFreezerSurplusAdjustmentParams,
   ReplaceFreezerSurplusAllocationBody,
@@ -169,9 +172,12 @@ async function ensureFinishedInventoryItem(
       unit: "cases",
       reorderThreshold: 0,
     })
+    .onConflictDoNothing({ target: [inventoryItemsTable.key, inventoryItemsTable.scope] })
     .returning();
-  if (!created) throw new Error("Failed to create finished-case inventory item");
-  return { id: created.id };
+  if (created) return { id: created.id };
+  const concurrentItem = await findFinishedInventoryItem(tx, scope, brand, flavor, preferredItemId);
+  if (!concurrentItem) throw new Error("Failed to create finished-case inventory item");
+  return concurrentItem;
 }
 
 async function getFreezerLocationId(tx: DbExecutor, scope: string): Promise<number | null> {
@@ -201,7 +207,8 @@ async function upsertFinishedInventoryLot(
         eq(inventoryLotsTable.scope, scope),
       ),
     )
-    .limit(1);
+    .limit(1)
+    .for("update");
   if (lot) {
     const newQty = Math.max(0, lot.qtyRemaining - cases);
     await tx
@@ -239,11 +246,12 @@ async function addFinishedInventoryStock(
         eq(inventoryLotsTable.scope, scope),
       ),
     )
-    .limit(1);
+    .limit(1)
+    .for("update");
   if (existingLot) {
     await tx
       .update(inventoryLotsTable)
-      .set({ qtyRemaining: existingLot.qtyRemaining + cases })
+      .set({ qtyRemaining: sql`${inventoryLotsTable.qtyRemaining} + ${cases}` })
       .where(eq(inventoryLotsTable.id, existingLot.id));
   } else {
     await tx.insert(inventoryLotsTable).values({
@@ -359,6 +367,19 @@ function toApiAdjustment(
   };
 }
 
+function toApiConfirmation(row: FreezerSurplusConfirmationRow) {
+  return {
+    runId: row.runId,
+    runDate: row.runDate,
+    brand: row.brand,
+    flavor: row.flavor,
+    cases: row.cases,
+    productionDate: row.productionDate,
+    lotId: row.lotId,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 async function listLedger(executor: { select: typeof db.select } = db): Promise<FreezerSurplusLedger> {
   const scope = currentScope();
   const [lots, allocations] = await Promise.all([
@@ -403,6 +424,21 @@ router.get("/freezer-surplus", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/freezer-surplus/confirmations", async (req: Request, res: Response) => {
+  try {
+    const rows = await db
+      .select()
+      .from(freezerSurplusConfirmationsTable)
+      .where(eq(freezerSurplusConfirmationsTable.scope, currentScope()))
+      .orderBy(desc(freezerSurplusConfirmationsTable.createdAt))
+      .limit(500);
+    res.json({ confirmations: rows.reverse().map(toApiConfirmation) });
+  } catch (err) {
+    req.log.error({ err, scope: currentScope() }, "freezer_surplus_confirmations_list_failed");
+    res.status(500).json({ error: "Couldn't load saved freezer surplus confirmations." });
+  }
+});
+
 router.get(
   "/freezer-surplus/adjustments",
   requireCapability("manage-inventory"),
@@ -412,6 +448,207 @@ router.get(
     } catch (err) {
       req.log.error({ err }, "freezer_surplus_adjustment_history_failed");
       res.status(500).json({ error: "Couldn't load finished-case adjustment history" });
+    }
+  },
+);
+
+router.post(
+  "/freezer-surplus/confirmations",
+  requireCapability("manage-inventory"),
+  async (req: Request, res: Response) => {
+    const parsed = RecordFreezerSurplusConfirmationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Enter a completed run and a whole-case count from 0 to 1,000,000." });
+      return;
+    }
+    const rawDate =
+      req.body && typeof req.body === "object"
+        ? (req.body as { productionDate?: unknown }).productionDate
+        : undefined;
+    const cases = parsed.data.cases;
+    if (cases > 0 && !isValidSurplusDate(rawDate)) {
+      res.status(400).json({ error: "Choose a valid production date for positive freezer surplus." });
+      return;
+    }
+    const productionDate = cases > 0 && isValidSurplusDate(rawDate) ? rawDate : null;
+    const scope = currentScope();
+    const runId = parsed.data.runId.trim();
+    if (!runId) {
+      res.status(400).json({ error: "Choose the completed run being confirmed." });
+      return;
+    }
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        // Serialize same-run submissions before checking the immutable receipt.
+        // The unique scoped index remains the final guard if another writer
+        // reaches the transaction through a different database path.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            hashtext(${"freezer-surplus-confirmation:" + scope}),
+            hashtext(${runId})
+          )
+        `);
+        const [existing] = await tx
+          .select()
+          .from(freezerSurplusConfirmationsTable)
+          .where(and(
+            eq(freezerSurplusConfirmationsTable.scope, scope),
+            eq(freezerSurplusConfirmationsTable.runId, runId),
+          ))
+          .limit(1);
+        if (existing) {
+          if (
+            existing.cases !== cases ||
+            existing.productionDate !== productionDate
+          ) {
+            throw new SurplusRequestError(
+              "A different surplus outcome is already saved for this run. Refresh to see the recorded result.",
+              409,
+            );
+          }
+          const [lot] = existing.lotId
+            ? await tx
+                .select()
+                .from(freezerSurplusLotsTable)
+                .where(and(
+                  eq(freezerSurplusLotsTable.scope, scope),
+                  eq(freezerSurplusLotsTable.id, existing.lotId),
+                ))
+                .limit(1)
+            : [];
+          return {
+            status: 200 as const,
+            confirmation: toApiConfirmation(existing),
+            ...(lot ? { createdLot: toApiLot(lot) } : {}),
+          };
+        }
+
+        const matches = await tx
+          .select()
+          .from(dailySyncTable)
+          .where(and(
+            eq(dailySyncTable.scope, scope),
+            sql`${dailySyncTable.data}->'dayState'->'runs' @> ${JSON.stringify([{ id: runId }])}::jsonb`,
+          ))
+          .for("update")
+          .limit(2);
+        if (matches.length !== 1) {
+          throw new SurplusRequestError("This completed run is unavailable in the current account scope.", 404);
+        }
+        const runDay = matches[0];
+        const document = runDay.data as {
+          dayState?: { runs?: unknown[] };
+          runValues?: Record<string, unknown>;
+        };
+        const matchingRuns = document.dayState?.runs?.filter(
+          (candidate) =>
+            !!candidate &&
+            typeof candidate === "object" &&
+            (candidate as { id?: unknown }).id === runId,
+        );
+        const rawRun = matchingRuns?.length === 1 ? matchingRuns[0] : undefined;
+        if (!rawRun || typeof rawRun !== "object") {
+          throw new SurplusRequestError("This completed run is unavailable in the current account scope.", 404);
+        }
+        const run = rawRun as {
+          brand?: unknown;
+          flavor?: unknown;
+          endedAt?: unknown;
+          freezerTime?: unknown;
+        };
+        const product = normalizeSurplusProduct(run.brand, run.flavor);
+        const endedAt =
+          typeof run.endedAt === "number"
+            ? run.endedAt
+            : typeof run.endedAt === "string"
+              ? Date.parse(run.endedAt)
+              : Number.NaN;
+        const runValues = document.runValues?.[runId];
+        const runValuesRecord =
+          runValues && typeof runValues === "object"
+            ? (runValues as { freezerTime?: unknown })
+            : undefined;
+        const freezerTimeMin = Number(runValuesRecord?.freezerTime ?? run.freezerTime);
+        const tunnelExpiresAt = endedAt + freezerTimeMin * 60_000;
+        if (
+          !product ||
+          !Number.isFinite(endedAt) ||
+          endedAt <= 0 ||
+          endedAt > Date.now() ||
+          !Number.isFinite(freezerTimeMin) ||
+          freezerTimeMin <= 0 ||
+          !Number.isFinite(tunnelExpiresAt) ||
+          Date.now() >= tunnelExpiresAt
+        ) {
+          throw new SurplusRequestError(
+            "This run is no longer eligible for a freezer surplus confirmation.",
+            409,
+          );
+        }
+
+        let createdLot: FreezerSurplusLotRow | undefined;
+        if (cases > 0 && productionDate) {
+          const freezerLocationId = await getFreezerLocationId(tx, scope);
+          if (freezerLocationId === null) {
+            throw new SurplusRequestError(
+              "Set up a freezer storage location before recording extra cases, then retry this run.",
+              409,
+            );
+          }
+          const item = await ensureFinishedInventoryItem(tx, scope, product.brand, product.flavor);
+          const [lot] = await tx
+            .insert(freezerSurplusLotsTable)
+            .values({
+              id: randomUUID(),
+              scope,
+              brand: product.brand,
+              flavor: product.flavor,
+              productKey: product.productKey,
+              inventoryItemId: item.id,
+              productionDate,
+              totalCases: cases,
+              remainingCases: cases,
+            })
+            .returning();
+          if (!lot) throw new Error("Lot insert returned no row");
+          createdLot = lot;
+          await addFinishedInventoryStock(tx, scope, item.id, freezerLocationId, cases);
+        }
+        const [receipt] = await tx
+          .insert(freezerSurplusConfirmationsTable)
+          .values({
+            id: randomUUID(),
+            scope,
+            runId,
+            runDate: runDay.date,
+            brand: product.brand,
+            flavor: product.flavor,
+            cases,
+            productionDate,
+            lotId: createdLot?.id ?? null,
+            actorId: req.userId!,
+          })
+          .returning();
+        if (!receipt) throw new Error("Surplus confirmation insert returned no row");
+        return {
+          status: 201 as const,
+          confirmation: toApiConfirmation(receipt),
+          ...(createdLot ? { createdLot: toApiLot(createdLot) } : {}),
+        };
+      });
+      req.log.info(
+        { scope, runId, cases, outcome: cases === 0 ? "none" : "positive", status: result.status },
+        "freezer_surplus_confirmation_recorded",
+      );
+      res.status(result.status).json(result);
+    } catch (err) {
+      if (err instanceof SurplusRequestError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      req.log.error({ err, scope, runId }, "freezer_surplus_confirmation_failed");
+      res.status(500).json({ error: "Couldn't save this run's surplus outcome. Refresh and try again." });
     }
   },
 );

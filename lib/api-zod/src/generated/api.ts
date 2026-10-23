@@ -195,6 +195,15 @@ export const confirmFreezerSurplusResponseCreatedAdjustmentOneCasesMax = 1000000
 export const confirmFreezerSurplusResponseCreatedAdjustmentOneReasonMax = 300;
 export const listFreezerSurplusAdjustmentsResponseAdjustmentsItemCasesMax = 1000000;
 export const listFreezerSurplusAdjustmentsResponseAdjustmentsItemReasonMax = 300;
+export const listFreezerSurplusConfirmationsResponseConfirmationsItemCasesMin = 0;
+export const listFreezerSurplusConfirmationsResponseConfirmationsItemCasesMax = 1000000;
+export const listFreezerSurplusConfirmationsResponseConfirmationsMax = 500;
+export const recordFreezerSurplusConfirmationBodyRunIdMax = 120;
+export const recordFreezerSurplusConfirmationBodyCasesMin = 0;
+export const recordFreezerSurplusConfirmationBodyCasesMax = 1000000;
+export const recordFreezerSurplusConfirmationResponseConfirmationCasesMin = 0;
+export const recordFreezerSurplusConfirmationResponseConfirmationCasesMax = 1000000;
+export const recordFreezerSurplusConfirmationResponseCreatedLotOneRemainingCasesMin = 0;
 export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
 export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
 export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
@@ -4620,6 +4629,70 @@ export const ListFreezerSurplusAdjustmentsResponse = zod.object({
   "correctsEventId": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
+})
+
+
+/**
+ * Returns up to 500 recent run-bound outcomes in the authenticated live or sandbox scope. A zero-case outcome records that the run was checked and created no freezer stock.
+ * @summary List confirmed completed-run surplus outcomes
+ */
+
+
+
+
+export const ListFreezerSurplusConfirmationsResponse = zod.object({
+  "confirmations": zod.array(zod.object({
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "cases": zod.int().min(listFreezerSurplusConfirmationsResponseConfirmationsItemCasesMin).max(listFreezerSurplusConfirmationsResponseConfirmationsItemCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+})).max(listFreezerSurplusConfirmationsResponseConfirmationsMax)
+})
+
+
+/**
+ * Requires manage-inventory. The server verifies the run is completed and still within its configured Freeze tunnel window. One immutable outcome is allowed per scoped run; exact retries return the saved receipt and conflicting submissions do not change stock.
+ * @summary Confirm the finished-case surplus outcome for a completed run
+ */
+
+
+
+
+export const RecordFreezerSurplusConfirmationBody = zod.object({
+  "runId": zod.string().min(1).max(recordFreezerSurplusConfirmationBodyRunIdMax),
+  "cases": zod.int().min(recordFreezerSurplusConfirmationBodyCasesMin).max(recordFreezerSurplusConfirmationBodyCasesMax),
+  "productionDate": zod.coerce.date().optional()
+})
+
+
+
+
+
+
+export const RecordFreezerSurplusConfirmationResponse = zod.object({
+  "confirmation": zod.object({
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "cases": zod.int().min(recordFreezerSurplusConfirmationResponseConfirmationCasesMin).max(recordFreezerSurplusConfirmationResponseConfirmationCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+}),
+  "createdLot": zod.union([zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.int().min(1),
+  "remainingCases": zod.int().min(recordFreezerSurplusConfirmationResponseCreatedLotOneRemainingCasesMin)
+}),zod.null()]).optional()
 })
 
 

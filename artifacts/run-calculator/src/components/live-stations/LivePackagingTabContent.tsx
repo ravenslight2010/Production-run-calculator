@@ -14,6 +14,7 @@ import { AUTO_SUPPRESS_MS, TimelineNode, PkgMiniStepper, fmtMS } from "./station
 import { PackagingSpeedNudgeFeedback } from "../PackagingSpeedNudgeFeedback";
 import { runUnlockedManualSectionAction } from "../../packagingManager";
 import { isPackagingDrainComplete } from "../../linePhases";
+import { getFreezerSurplusRemainingMs } from "../../freezerSurplus";
 
 export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
@@ -33,6 +34,24 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
     acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
   } = useLiveRun();
+  const surplusPromptRun = (dayState.runs as RunMeta[])
+    .filter((run) =>
+      !!run.endedAt &&
+      !hx.freezerSurplusConfirmations?.some(
+        (confirmation: { runId: string }) => confirmation.runId === run.id,
+      ),
+    )
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+    .find((run) =>
+      getFreezerSurplusRemainingMs({
+        endedAt: run.endedAt,
+        freezerTimeMin: Number(withTempOverrides(loadRunValues(run.id)).freezerTime) || 0,
+        nowMs: nowTime.getTime(),
+      }) > 0,
+    );
+  const surplusPromptFreezerTimeMin = surplusPromptRun
+    ? Number(withTempOverrides(loadRunValues(surplusPromptRun.id)).freezerTime) || 0
+    : 0;
 
   const autoAdvancedRunRef = useRef<string | null>(null);
   useEffect(() => {
@@ -104,17 +123,14 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   ledger={freezerSurplus}
                   loaded={freezerSurplusLoaded}
                   busy={freezerSurplusBusy}
-                  error={freezerSurplusError}
-                  completedRun={lastEndedRun}
-                  freezerTimeMin={lastEndedRun
-                    ? Number(withTempOverrides(loadRunValues(lastEndedRun.id)).freezerTime) || 0
-                    : 0}
+                  error={freezerSurplusError ?? hx.freezerSurplusConfirmationsError}
+                  completedRun={surplusPromptRun}
+                  confirmations={hx.freezerSurplusConfirmations}
+                  confirmationsLoaded={hx.freezerSurplusConfirmationsLoaded}
+                  freezerTimeMin={surplusPromptFreezerTimeMin}
                   nowMs={nowTime.getTime()}
                   getOriginalTarget={(run) => run.id === currentRunId ? Number(v.casesNeeded) || 0 : Number(loadRunValues(run.id).casesNeeded) || 0}
-                  onConfirm={async (run, count, date) => {
-                    await confirmRunSurplus(run, count, date);
-                    await refreshFreezerSurplus();
-                  }}
+                  onConfirm={confirmRunSurplus}
                   onAllocate={async () => {}}
                 />
                 <div className="flex flex-col">

@@ -79,8 +79,33 @@ export const freezerSurplusAdjustmentsTable = pgTable(
   ],
 );
 
+// A completed run gets exactly one immutable surplus outcome. Zero-case
+// confirmations are receipts only; positive outcomes link to the dated lot
+// created in the same transaction.
+export const freezerSurplusConfirmationsTable = pgTable(
+  "freezer_surplus_confirmations",
+  {
+    id: text("id").notNull(),
+    scope: text("scope").notNull().default("live"),
+    runId: text("run_id").notNull(),
+    runDate: text("run_date").notNull(),
+    brand: text("brand").notNull(),
+    flavor: text("flavor").notNull().default(""),
+    cases: integer("cases").notNull(),
+    productionDate: text("production_date"),
+    lotId: text("lot_id"),
+    actorId: text("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("freezer_surplus_confirmations_scope_run_idx").on(t.scope, t.runId),
+  ],
+);
+
 export type FreezerSurplusLotRow = typeof freezerSurplusLotsTable.$inferSelect;
 export type FreezerSurplusAllocationRow =
   typeof freezerSurplusAllocationsTable.$inferSelect;
 export type FreezerSurplusAdjustmentRow =
   typeof freezerSurplusAdjustmentsTable.$inferSelect;
+export type FreezerSurplusConfirmationRow =
+  typeof freezerSurplusConfirmationsTable.$inferSelect;

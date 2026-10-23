@@ -10,6 +10,7 @@ import {
 import {
   fetchFreezerSurplusAdjustments,
   getFreezerSurplusRemainingMs,
+  type FreezerSurplusConfirmation,
   type FreezerSurplusAdjustment,
   type FreezerSurplusAdjustmentInput,
 } from "../freezerSurplus";
@@ -22,6 +23,8 @@ export function FreezerSurplusPanel({
   busy,
   error,
   completedRun,
+  confirmations = [],
+  confirmationsLoaded = true,
   freezerTimeMin,
   nowMs,
   pendingRuns,
@@ -36,11 +39,17 @@ export function FreezerSurplusPanel({
   busy: boolean;
   error: string | null;
   completedRun?: RunMeta | null;
+  confirmations?: FreezerSurplusConfirmation[];
+  confirmationsLoaded?: boolean;
   freezerTimeMin?: number;
   nowMs?: number;
   pendingRuns?: RunMeta[];
   getOriginalTarget: (run: RunMeta) => number;
-  onConfirm: (run: RunMeta, cases: number, date: string) => Promise<void>;
+  onConfirm: (
+    run: RunMeta,
+    cases: number,
+    date?: string,
+  ) => Promise<FreezerSurplusConfirmation | void>;
   onAllocate: (run: RunMeta, allocations: Array<{ lotId: string; cases: number }>) => Promise<void>;
   onAdjust?: (
     lotId: string,
@@ -49,12 +58,17 @@ export function FreezerSurplusPanel({
 }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
-  const [cases, setCases] = useState("");
-  const [productionDate, setProductionDate] = useState(todayStr());
+  const [confirmationDrafts, setConfirmationDrafts] = useState<
+    Record<string, { cases: string; productionDate: string }>
+  >({});
+  const [confirmationState, setConfirmationState] = useState<
+    Record<string, { message?: string; error?: string }>
+  >({});
+  const [locallyConfirmedRunIds, setLocallyConfirmedRunIds] = useState<string[]>([]);
+  const pendingConfirmation = useRef(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
   const [localMessage, setLocalMessage] = useState<string | null>(null);
-  const [confirmedRunId, setConfirmedRunId] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<FreezerSurplusAdjustment[]>([]);
   const [adjustmentsError, setAdjustmentsError] = useState<string | null>(null);
   const [adjustmentType, setAdjustmentType] =
@@ -95,24 +109,68 @@ export function FreezerSurplusPanel({
     }
   }, [adjustmentLotId, ledger.lots]);
 
-  async function confirmLot() {
+  function updateConfirmationDraft(
+    runId: string,
+    patch: Partial<{ cases: string; productionDate: string }>,
+  ) {
+    setConfirmationDrafts((current) => ({
+      ...current,
+      [runId]: {
+        cases: current[runId]?.cases ?? "",
+        productionDate: current[runId]?.productionDate ?? todayStr(),
+        ...patch,
+      },
+    }));
+    setConfirmationState((current) => ({ ...current, [runId]: {} }));
+  }
+
+  async function confirmOutcome(run: RunMeta, rawCases: string, date: string) {
     if (!canManageInventory) return;
-    const count = Number(cases);
-    if (!completedRun || !Number.isSafeInteger(count) || count <= 0) {
-      setLocalMessage("Enter a positive whole number of excess cases.");
+    const count = Number(rawCases);
+    if (rawCases.trim() === "" || !Number.isSafeInteger(count) || count < 0 || count > 1_000_000) {
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: { error: "Enter a whole number from 0 to 1,000,000 cases." },
+      }));
       return;
     }
-    if (!productionDate) {
-      setLocalMessage("Choose the production date for this freezer lot.");
+    if (count > 0 && !date) {
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: { error: "Choose the production date for this freezer lot." },
+      }));
       return;
     }
+    if (pendingConfirmation.current) return;
+    pendingConfirmation.current = true;
+    setConfirmationState((current) => ({ ...current, [run.id]: {} }));
     try {
-      await onConfirm(completedRun, count, productionDate);
-      setCases("");
-      setConfirmedRunId(completedRun.id);
-      setLocalMessage(`Added ${count} cases as a new freezer lot dated ${productionDate}.`);
-    } catch {
-      // The parent exposes the server's actionable error.
+      const confirmation = await onConfirm(run, count, count > 0 ? date : undefined);
+      if (!confirmation || confirmation.runId !== run.id || confirmation.cases !== count) {
+        throw new Error("The server response did not match this run. Refresh the page before retrying.");
+      }
+      setLocallyConfirmedRunIds((current) =>
+        current.includes(run.id) ? current : [...current, run.id],
+      );
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: {
+          message: count === 0
+            ? "No extra cases recorded for this completed run."
+            : `Added ${count} cases as a new freezer lot dated ${date}.`,
+        },
+      }));
+    } catch (cause) {
+      setConfirmationState((current) => ({
+        ...current,
+        [run.id]: {
+          error: cause instanceof Error
+            ? cause.message
+            : "Couldn't save this run's surplus outcome. Check your connection and try again.",
+        },
+      }));
+    } finally {
+      pendingConfirmation.current = false;
     }
   }
 
@@ -193,9 +251,22 @@ export function FreezerSurplusPanel({
       freezerTimeMin: freezerTimeMin ?? 0,
       nowMs: nowMs ?? 0,
     });
-    if (confirmedRunId === completedRun.id || remainingMs <= 0) return null;
+    if (!confirmationsLoaded || (
+      locallyConfirmedRunIds.includes(completedRun.id) ||
+      confirmations.some((confirmation) => confirmation.runId === completedRun.id) ||
+      remainingMs <= 0
+    )) return null;
+    const draft = confirmationDrafts[completedRun.id] ?? {
+      cases: "",
+      productionDate: todayStr(),
+    };
+    const runConfirmationState = confirmationState[completedRun.id];
     return (
-      <section className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="freezer-surplus-confirm">
+      <section
+        className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4"
+        data-testid="freezer-surplus-confirm"
+        data-run-id={completedRun.id}
+      >
         <div className="flex items-start gap-3">
           <Snowflake className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
@@ -212,11 +283,14 @@ export function FreezerSurplusPanel({
                 Excess cases
                 <input
                   type="number"
-                  min="1"
+                  min="0"
+                  max="1000000"
                   step="1"
                   inputMode="numeric"
-                  value={cases}
-                  onChange={(event) => setCases(event.target.value)}
+                  value={draft.cases}
+                  onChange={(event) =>
+                    updateConfirmationDraft(completedRun.id, { cases: event.target.value })
+                  }
                   className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                   aria-label="Excess finished cases"
                 />
@@ -225,19 +299,31 @@ export function FreezerSurplusPanel({
                 Production date
                 <input
                   type="date"
-                  value={productionDate}
-                  onChange={(event) => setProductionDate(event.target.value)}
+                  value={draft.productionDate}
+                  onChange={(event) =>
+                    updateConfirmationDraft(completedRun.id, { productionDate: event.target.value })
+                  }
                   className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                   aria-label="Freezer lot production date"
                 />
               </label>
               <button
                 type="button"
-                onClick={() => void confirmLot()}
+                onClick={() =>
+                  void confirmOutcome(completedRun, draft.cases, draft.productionDate)
+                }
                 disabled={busy}
                 className="self-end rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {busy ? "Saving…" : "Confirm surplus"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmOutcome(completedRun, "0", draft.productionDate)}
+                disabled={busy}
+                className="rounded-md border border-primary/40 px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-50"
+              >
+                No extra cases
               </button>
             </div>
             ) : (
@@ -251,8 +337,16 @@ export function FreezerSurplusPanel({
                 </p>
               </div>
             )}
-            {localMessage && <p className="mt-2 text-xs font-medium text-primary" role="status">{localMessage}</p>}
-            {error && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{error}</p>}
+            {runConfirmationState?.message && (
+              <p className="mt-2 text-xs font-medium text-primary" role="status">
+                {runConfirmationState.message}
+              </p>
+            )}
+            {(runConfirmationState?.error || error) && (
+              <p className="mt-2 text-xs font-semibold text-destructive" role="alert">
+                {runConfirmationState?.error || error}
+              </p>
+            )}
           </div>
         </div>
       </section>

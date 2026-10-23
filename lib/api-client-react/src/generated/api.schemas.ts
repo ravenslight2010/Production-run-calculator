@@ -6970,6 +6970,47 @@ export interface ConfirmFreezerSurplusInput {
   cases: number;
 }
 
+export interface ConfirmFreezerSurplusOutcomeInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  runId: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  cases: number;
+  productionDate?: string;
+}
+
+export interface FreezerSurplusConfirmation {
+  runId: string;
+  runDate: string;
+  brand: string;
+  flavor: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  cases: number;
+  /** @nullable */
+  productionDate: string | null;
+  /** @nullable */
+  lotId: string | null;
+  createdAt: string;
+}
+
+export interface FreezerSurplusConfirmationList {
+  /** @maxItems 500 */
+  confirmations: FreezerSurplusConfirmation[];
+}
+
+export interface FreezerSurplusConfirmationMutation {
+  confirmation: FreezerSurplusConfirmation;
+  createdLot?: FreezerSurplusLot | null;
+}
+
 export interface FreezerSurplusAllocationSelection {
   /**
      * @minLength 1

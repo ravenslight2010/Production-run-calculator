@@ -15,6 +15,17 @@ export type {
   FreezerSurplusLot,
 };
 
+export type FreezerSurplusConfirmation = {
+  runId: string;
+  runDate: string;
+  brand: string;
+  flavor: string;
+  cases: number;
+  productionDate: string | null;
+  lotId: string | null;
+  createdAt: string;
+};
+
 export type FreezerSurplusAdjustmentInput = {
   eventId: string;
   eventType: FreezerSurplusAdjustment["eventType"];
@@ -144,6 +155,86 @@ export function confirmFreezerSurplus(input: {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+function parseConfirmation(value: unknown): FreezerSurplusConfirmation {
+  if (!value || typeof value !== "object") {
+    throw new Error("The freezer surplus confirmation response was invalid. Refresh and try again.");
+  }
+  const receipt = value as Record<string, unknown>;
+  if (
+    typeof receipt.runId !== "string" ||
+    !receipt.runId ||
+    !isValidSurplusDate(receipt.runDate) ||
+    typeof receipt.brand !== "string" ||
+    typeof receipt.flavor !== "string" ||
+    typeof receipt.cases !== "number" ||
+    !Number.isSafeInteger(receipt.cases) ||
+    receipt.cases < 0 ||
+    receipt.cases > 1_000_000 ||
+    !(receipt.productionDate === null || isValidSurplusDate(receipt.productionDate)) ||
+    !(receipt.lotId === null || typeof receipt.lotId === "string") ||
+    typeof receipt.createdAt !== "string" ||
+    !Number.isFinite(Date.parse(receipt.createdAt)) ||
+    (receipt.cases === 0 && (receipt.productionDate !== null || receipt.lotId !== null)) ||
+    (receipt.cases > 0 && (!receipt.productionDate || !receipt.lotId))
+  ) {
+    throw new Error("The freezer surplus confirmation response was invalid. Refresh and try again.");
+  }
+  return receipt as unknown as FreezerSurplusConfirmation;
+}
+
+export async function fetchFreezerSurplusConfirmations(): Promise<FreezerSurplusConfirmation[]> {
+  const response = await fetch("/api/freezer-surplus/confirmations");
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    confirmations?: unknown;
+  } | null;
+  if (!response.ok) {
+    throw new Error(
+      typeof body?.error === "string"
+        ? body.error
+        : "Couldn't load saved freezer surplus confirmations.",
+    );
+  }
+  if (!Array.isArray(body?.confirmations) || body.confirmations.length > 500) {
+    throw new Error("The saved freezer surplus confirmations response was invalid.");
+  }
+  return body.confirmations.map(parseConfirmation);
+}
+
+export async function confirmFreezerSurplusOutcome(input: {
+  runId: string;
+  cases: number;
+  productionDate?: string;
+}): Promise<FreezerSurplusConfirmation> {
+  const response = await fetch("/api/freezer-surplus/confirmations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    confirmation?: unknown;
+  } | null;
+  if (!response.ok) {
+    throw new Error(
+      typeof body?.error === "string"
+        ? body.error
+        : "The freezer surplus outcome was not saved. Check your connection and try again.",
+    );
+  }
+  const confirmation = parseConfirmation(body?.confirmation);
+  if (
+    confirmation.runId !== input.runId ||
+    confirmation.cases !== input.cases ||
+    confirmation.productionDate !== (input.cases === 0 ? null : input.productionDate)
+  ) {
+    throw new Error(
+      "The saved freezer surplus outcome did not match this form. Refresh before retrying.",
+    );
+  }
+  return confirmation;
 }
 
 export function replaceFreezerSurplusAllocation(input: {
