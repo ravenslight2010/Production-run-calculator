@@ -2,8 +2,18 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import SyncStatusPopover from "./SyncStatusPopover";
+import {
+  flushOperationalIntentOutbox,
+  queueOperationalIntent,
+  setOperationalIntentIdentity,
+} from "../operationalIntentOutbox";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setOperationalIntentIdentity(null);
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 const baseProps: ComponentProps<typeof SyncStatusPopover> = {
   status: "connected",
@@ -24,6 +34,24 @@ function openPopover() {
 }
 
 describe("SyncStatusPopover wake-recovery activity", () => {
+  it("offers correction guidance, not unchanged retry, for a permanently rejected action", async () => {
+    setOperationalIntentIdentity({ scope: "live", userId: "rejection-fixture" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false, status: 400, json: async () => ({ error: "Invalid command" }),
+    }));
+    queueOperationalIntent({
+      runId: "run", observedGeneration: "run:1", effectiveAt: 1,
+      action: "lifecycle", lifecycle: "start",
+    });
+    await flushOperationalIntentOutbox();
+    render(<SyncStatusPopover {...baseProps} />);
+    openPopover();
+    expect(screen.getByText(/cannot be retried unchanged/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry", exact: true })).toBeNull();
+    expect(screen.getByRole("button", { name: "Discard", exact: true })).toBeTruthy();
+  });
+
   it("shows bounded timing details for a successful wake recovery", () => {
     render(
       <SyncStatusPopover

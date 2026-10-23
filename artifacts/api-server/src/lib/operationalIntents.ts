@@ -32,8 +32,20 @@ export type OperationalIntentOutcome =
   | "conflicted"
   | "review-required";
 
-export function parseOperationalIntent(input: unknown, now = Date.now()): OperationalIntent | null {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+export type OperationalIntentValidationIssue =
+  | "envelope" | "revision" | "lifecycle" | "inventory-shape"
+  | "inventory-line" | "inventory-order" | "correction";
+
+export function parseOperationalIntent(
+  input: unknown,
+  now = Date.now(),
+  onInvalid?: (issue: OperationalIntentValidationIssue) => void,
+): OperationalIntent | null {
+  const reject = (issue: OperationalIntentValidationIssue): null => {
+    onInvalid?.(issue);
+    return null;
+  };
+  if (!input || typeof input !== "object" || Array.isArray(input)) return reject("envelope");
   const x = input as Record<string, unknown>;
   if (x.version !== 1 || typeof x.id !== "string" || !ID.test(x.id)
     || typeof x.date !== "string" || !/^\d{4}-\d\d-\d\d$/.test(x.date)
@@ -42,29 +54,29 @@ export function parseOperationalIntent(input: unknown, now = Date.now()): Operat
     || !Number.isSafeInteger(x.resetEpoch) || (x.resetEpoch as number) < 0
     || typeof x.effectiveAt !== "number" || !Number.isFinite(x.effectiveAt)
     || Math.abs(now - (x.effectiveAt as number)) > 36 * 60 * 60_000
-    || !["pause", "resume", "lifecycle", "correction"].includes(String(x.action))) return null;
+    || !["pause", "resume", "lifecycle", "correction"].includes(String(x.action))) return reject("envelope");
   if (x.baseRevision !== undefined
-    && (!Number.isSafeInteger(x.baseRevision) || (x.baseRevision as number) < 0)) return null;
-  if (x.action === "lifecycle" && x.lifecycle !== "start" && x.lifecycle !== "end") return null;
+    && (!Number.isSafeInteger(x.baseRevision) || (x.baseRevision as number) < 0)) return reject("revision");
+  if (x.action === "lifecycle" && x.lifecycle !== "start" && x.lifecycle !== "end") return reject("lifecycle");
   if (x.action === "lifecycle" && x.lifecycle === "end") {
-    if (!Array.isArray(x.inventoryLines) || x.inventoryLines.length > 200) return null;
+    if (!Array.isArray(x.inventoryLines) || x.inventoryLines.length > 200) return reject("inventory-shape");
     let previousKey = "";
     for (const line of x.inventoryLines) {
-      if (!line || typeof line !== "object" || Array.isArray(line)) return null;
+      if (!line || typeof line !== "object" || Array.isArray(line)) return reject("inventory-line");
       const itemKey = (line as Record<string, unknown>).itemKey;
       const qty = (line as Record<string, unknown>).qty;
       if (typeof itemKey !== "string" || itemKey.length < 1 || itemKey.length > 300
-        || typeof qty !== "number" || !Number.isFinite(qty) || qty <= 0 || qty > 1_000_000) return null;
+        || typeof qty !== "number" || !Number.isFinite(qty) || qty <= 0 || qty > 1_000_000) return reject("inventory-line");
       // Canonical lines are unique and lexically ordered, making the durable
       // command byte-stable regardless of recipe row ordering.
-      if (itemKey <= previousKey) return null;
+      if (itemKey <= previousKey) return reject("inventory-order");
       previousKey = itemKey;
     }
-  } else if (x.inventoryLines !== undefined) return null;
+  } else if (x.inventoryLines !== undefined) return reject("inventory-shape");
   if (x.action === "correction") {
-    if (!x.values || typeof x.values !== "object" || Array.isArray(x.values) || !Object.keys(x.values as object).length) return null;
+    if (!x.values || typeof x.values !== "object" || Array.isArray(x.values) || !Object.keys(x.values as object).length) return reject("correction");
     for (const [key, value] of Object.entries(x.values as Record<string, unknown>)) {
-      if (!correctionFields.has(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000) return null;
+      if (!correctionFields.has(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000) return reject("correction");
     }
   }
   return x as OperationalIntent;

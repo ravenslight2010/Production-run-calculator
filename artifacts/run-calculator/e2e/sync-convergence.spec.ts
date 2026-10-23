@@ -325,6 +325,189 @@ function seededPayload(runId: string): SyncPayload {
   };
 }
 
+test("frontline supply recovers across runs and converges with a second tab", async ({ page, browser }, testInfo) => {
+  // The browser runner owns a disposable PostgreSQL cluster. Never run this
+  // canonical-stock fixture against development, production, or shared data.
+  const username = uid();
+  users.add(username);
+  await signUp(page, username);
+  await promoteToManager(page);
+
+  const runA = `frontline-a-${Date.now()}`;
+  const runB = `frontline-b-${Date.now()}`;
+  const plannedValues = {
+    casesNeeded: 120, pizzasPerCase: 12, casesPerSkid: 12,
+    crustsPerCycle: 12, cycleSpeed: 600, approxLineSpeed: 120,
+    app1Type: "Cheese", app1OzPerPizza: 4, app1BatchLbs: 25,
+    app1CheeseRecipe: [],
+    app2Type: "", app3Type: "", app4Type: "",
+    pep1Type: "Pepperoni", pep1OzPerPizza: 1,
+    pep1TypeB: "", pep2Type: "", pep2TypeB: "",
+  };
+  const seeded: SyncPayload = {
+    dayState: {
+      date: today(),
+      currentIndex: 0,
+      runs: [
+        { id: runA, brand: "Fixture", flavor: "First" },
+        { id: runB, brand: "Fixture", flavor: "Second" },
+      ],
+    },
+    runValues: { [runA]: plannedValues, [runB]: plannedValues },
+    runValuesUpdatedAt: { [runA]: 1, [runB]: 1 },
+    syncVersion: 1,
+    completeness: "complete",
+  };
+  expect((await putToday(page, seeded)).responseStatus).toBe(200);
+  const db = new Client({ connectionString: requireIsolatedTestDatabase("Frontline canonical supply fixture") });
+  try {
+    await db.connect();
+    const row = await db.query<{ data: SyncPayload }>(
+      "SELECT data FROM daily_sync WHERE scope = 'live' AND date = $1",
+      [today()],
+    );
+    expect(row.rows).toHaveLength(1);
+    const data = row.rows[0].data;
+    Object.assign(data.runValues[runA], {
+      app1StockLbs: 25,
+      app1StockConsumedLbs: 0,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      app1BatchesMade: 0,
+      app1BatchAnchorNetSec: 0,
+      app1BatchCorrectionGeneration: 0,
+      pep1StockLbs: 0,
+      pep1StockAnchorNetSec: 0,
+      pep1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    });
+    await db.query("UPDATE daily_sync SET data = $1::jsonb WHERE scope = 'live' AND date = $2",
+      [JSON.stringify(data), today()]);
+  } finally {
+    await db.end();
+  }
+
+  const canonical = async () => (await getToday(page)) as {
+    dayState: { runs: Array<{ id: string; startedAt?: number; pausedAt?: number; endedAt?: number }> };
+    runValues: Record<string, Record<string, number>>;
+  };
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").click();
+  await page.getByTestId("button-start-run").click();
+  await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].startedAt)).toBe(true);
+  await page.getByRole("button", { name: /^pause.?run$/i }).click();
+  await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].pausedAt)).toBe(true);
+
+  const peerContext = await browser.newContext({ storageState: await page.context().storageState() });
+  const peer = await peerContext.newPage();
+  try {
+    await peer.goto("/");
+    await Promise.all([page.getByTestId("tab-frontline").click(), peer.getByTestId("tab-frontline").click()]);
+    const supply = (p: Page) => p.getByTestId("frontline-supply-app1");
+    const batchesOnLine = async (p: Page) =>
+      Number.parseFloat((await supply(p).getByTestId("output-app1-batches-on-line").textContent()) ?? "");
+    const initialStock = (await canonical()).runValues[runA].app1StockLbs;
+    await expect.poll(() => batchesOnLine(page)).toBeCloseTo(initialStock / 25, 2);
+    await expect.poll(() => batchesOnLine(peer)).toBeCloseTo(initialStock / 25, 2);
+    await expect(supply(page)).toContainText("Automatic tracking paused with run");
+    await expect(page.getByText("Applicator Stock On Hand")).toHaveCount(0);
+    if (initialStock > 25) {
+      await supply(page).getByRole("button", { name: "Decrease app1 batches on line" }).click();
+      await expect.poll(async () => (await canonical()).runValues[runA].app1StockLbs)
+        .toBe(initialStock - 25);
+    }
+    const beforeLoad = (await canonical()).runValues[runA].app1StockLbs;
+    const beforeConsumed = (await canonical()).runValues[runA].app1StockConsumedLbs;
+    const beforeNeeded = Number.parseFloat(
+      (await page.getByTestId("output-app1-batches").textContent()) ?? "",
+    );
+    await supply(page).getByRole("button", { name: "Increase app1 batches on line" }).click();
+    await expect.poll(async () => (await canonical()).runValues[runA].app1StockLbs).toBe(beforeLoad + 25);
+    expect((await canonical()).runValues[runA].app1StockConsumedLbs).toBe(beforeConsumed);
+    await expect.poll(() => batchesOnLine(page)).toBeCloseTo((beforeLoad + 25) / 25, 2);
+    await expect.poll(() => batchesOnLine(peer)).toBeCloseTo((beforeLoad + 25) / 25, 2);
+    await expect.poll(async () => Number.parseFloat(
+      (await page.getByTestId("output-app1-batches").textContent()) ?? "",
+    )).toBeCloseTo(beforeNeeded - 1, 1);
+    const pepperoni = page.getByTestId("stock-pep1-lbs");
+    await pepperoni.fill("12.5");
+    await expect(peer.getByTestId("stock-pep1-lbs")).toHaveValue("0");
+    const refillResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/sync/manual-section")
+      && response.request().method() === "POST"
+      && response.request().postDataJSON()?.section === "pep1",
+    );
+    await pepperoni.locator("..").getByRole("button", { name: "Save", exact: true }).click();
+    const refill = await refillResponse;
+    const refillBody = await refill.json() as { code?: string };
+    expect(refill.status(), `Pepperoni refill rejection code: ${refillBody.code ?? "none"}`).toBe(200);
+    await expect.poll(async () => (await canonical()).runValues[runA].pep1StockLbs).toBe(12.5);
+    await expect(peer.getByTestId("stock-pep1-lbs")).toHaveValue("12.5");
+    const afterPepperoniLoad = (await canonical()).runValues[runA];
+    expect(afterPepperoniLoad.app1StockLbs).toBe(beforeLoad + 25);
+    expect(afterPepperoniLoad.app1StockConsumedLbs).toBe(beforeConsumed);
+    await expect(page.getByTestId("stock-app1-lbs")).toHaveCount(0);
+    await testInfo.attach("fixture-frontline-current-supply", {
+      body: await page.screenshot(), contentType: "image/png",
+    });
+
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1024, height: 768 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const row = supply(page);
+      await expect(row.getByRole("button", { name: "Decrease app1 batches on line" })).toBeVisible();
+      await expect(row.getByTestId("output-app1-batches-on-line")).toBeVisible();
+      const bounds = await row.boundingBox();
+      expect(bounds?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((bounds?.x ?? viewport.width) + (bounds?.width ?? 1)).toBeLessThanOrEqual(viewport.width + 1);
+      const pepperoniBounds = await pepperoni.boundingBox();
+      expect(pepperoniBounds?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((pepperoniBounds?.x ?? viewport.width) + (pepperoniBounds?.width ?? 1)).toBeLessThanOrEqual(viewport.width + 1);
+    }
+    if (process.env.FRONTLINE_PEPPERONI_ONLY === "1") {
+      testInfo.annotations.push({ type: "scope", description: "Review repair only: pepperoni refill and peer adoption; no new run-transition evidence." });
+      return;
+    }
+
+    await page.getByTestId("tab-run").click();
+    await page.getByTestId("resume-run").click();
+    await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].pausedAt)).toBe(false);
+    await page.getByTestId("tab-packaging").click();
+    const beforeCorrection = (await canonical()).runValues[runA].casesOnCurrentSkid || 0;
+    await page.getByTestId("btn-inc-casesOnCurrentSkid").click();
+    await expect.poll(async () => (await canonical()).runValues[runA].casesOnCurrentSkid)
+      .toBeGreaterThan(beforeCorrection);
+    const afterCorrection = (await canonical()).runValues[runA].casesOnCurrentSkid;
+    await expect.poll(async () => (await canonical()).runValues[runA].app1StockConsumedLbs, {
+      timeout: 70_000,
+    }).toBeGreaterThan(beforeConsumed);
+    expect((await canonical()).runValues[runA].casesOnCurrentSkid).toBe(afterCorrection);
+    await expect.poll(() => batchesOnLine(peer), { timeout: 15_000 })
+      .not.toBeCloseTo((beforeLoad + 25) / 25, 2);
+    await page.getByTestId("tab-run").click();
+    await page.getByRole("button", { name: /^stop.?run$/i }).first().click();
+    await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].endedAt)).toBe(true);
+    await page.getByRole("button", { name: "Select run 2" }).click();
+    await page.getByTestId("button-start-run").click();
+    await expect.poll(async () => Boolean((await canonical()).dayState.runs[1].startedAt)).toBe(true);
+    expect((await canonical()).dayState.runs[0].endedAt).toBeTruthy();
+    await page.getByTestId("tab-frontline").click();
+    await expect(supply(page)).toBeVisible();
+    await expect.poll(async () => (await canonical()).runValues[runB].app1StockLbs, {
+      timeout: 70_000,
+    }).toBeGreaterThan(0);
+    await testInfo.attach("fixture-new-run-rearmed", {
+      body: await page.screenshot(), contentType: "image/png",
+    });
+  } finally {
+    await peerContext.close();
+  }
+});
+
 test("measures canonical edit and foreground recovery latency", async ({ page, browser }, testInfo) => {
   const username = uid();
   users.add(username);

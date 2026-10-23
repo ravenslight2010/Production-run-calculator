@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeSauceRunRequirement, computeServerCalc } from "@workspace/live-calc";
 import { buildNetSecondServerClaims, buildWallClockServerClaims } from "./autoTrackServerTicks";
-import { applyAutoTrackClaim } from "./autoTrackCoordination";
+import { applyAutoTrackClaim, parseAutoTrackClaim } from "./autoTrackCoordination";
 
 const NOW = 1_800_000_000_000;
 const RUN = "server-tick-run";
@@ -20,6 +20,8 @@ function payload(overrides: Record<string, unknown> = {}) {
         sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
         app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50, app1CheeseRecipe: [],
         app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+        app1StockLbs: 0, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+        app1StockConsumedLbs: 0, applicatorStockInitialized: true,
         app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
         app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
         app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
@@ -31,6 +33,204 @@ function payload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("server auto-track claim builders", () => {
+  it("keeps Dough, Sauce, and Frontline canonical channels eligible during a Packaging-only manual hold", () => {
+    const source = payload({
+      freezerTime: 0.5, preTunnelMin: 0.5, postTunnelMin: 0.5,
+      casesOnCurrentSkid: 1,
+      sauceStockBarrels: 1, sauceStockInitialized: true,
+      sauceStockAnchorNetSec: 0, sauceStockCorrectionGeneration: 0,
+      app1StockLbs: 25,
+    }) as any;
+    source.packagingProgress = {
+      [RUN]: { casesOnCurrentSkid: 1, correctionGeneration: 1, manualOverrideUntil: NOW + 120_000 },
+    };
+    const net = buildNetSecondServerClaims(source, NOW);
+    const sauce = net.find(({ channel }) => channel === "sauce-stock")!;
+    expect(sauce).toBeDefined();
+    const sauceAccepted = applyAutoTrackClaim(source, sauce, NOW);
+    expect(sauceAccepted.outcome).toBe("accepted");
+    expect(sauceAccepted.values.sauceStockBarrels).toBeLessThan(1);
+    const app = buildNetSecondServerClaims(sauceAccepted.data, NOW)
+      .find(({ channel }) => channel === "app1-stock")!;
+    expect(app).toBeDefined();
+    const appAccepted = applyAutoTrackClaim(sauceAccepted.data, app, NOW);
+    expect(appAccepted.outcome).toBe("accepted");
+    expect(appAccepted.values.app1StockConsumedLbs).toBeGreaterThan(0);
+
+    const baseline = buildWallClockServerClaims(source, NOW)!;
+    source.autoTrackServerState = { wallClockBookkeeping: { [RUN]: baseline.bookkeeping } };
+    const nextDue = Math.max(
+      baseline.bookkeeping.caseNextDueMs,
+      baseline.bookkeeping.trayConsNextDueMs,
+      baseline.bookkeeping.batchConsNextDueMs,
+    );
+    const wall = buildWallClockServerClaims(source, nextDue)!;
+    const dough = wall.claims.find(({ channel }) => channel === "tray-consume" || channel === "batch-consume")!;
+    expect(dough).toBeDefined();
+    const doughAccepted = applyAutoTrackClaim(source, dough, nextDue);
+    expect(doughAccepted.outcome).toBe("accepted");
+    expect(doughAccepted.values.traysOnLine !== source.runValues[RUN].traysOnLine
+      || doughAccepted.values.batchesReady !== source.runValues[RUN].batchesReady).toBe(true);
+    const caseClaim = wall.claims.find(({ channel }) => channel === "case")!;
+    expect(caseClaim).toBeDefined();
+    expect(applyAutoTrackClaim(source, caseClaim, nextDue).outcome).toBe("conflict");
+    const acceptedValues = appAccepted.data.runValues as Record<string, Record<string, unknown>>;
+    expect(acceptedValues[RUN].traysOnLine).toBe(source.runValues[RUN].traysOnLine);
+  });
+
+  it("rejects a failed prior-run claim and rearms a new run without inheriting its stock or claims", () => {
+    const runA = payload();
+    const first = buildNetSecondServerClaims(runA, NOW).find(({ channel }) => channel === "app1-batch")!;
+    const trackedA = applyAutoTrackClaim(runA, first, NOW);
+    expect(trackedA.outcome).toBe("accepted");
+    const pendingA = buildNetSecondServerClaims(trackedA.data, NOW + 120_000)
+      .find(({ channel }) => channel === "app1-stock")!;
+    const failedA = {
+      ...pendingA,
+      mutations: pendingA.mutations.map((mutation) =>
+        mutation.field === "app1StockLbs" ? { ...mutation, from: mutation.from + 1 } : mutation),
+    };
+    expect(applyAutoTrackClaim(trackedA.data, failedA, NOW + 120_000).outcome).not.toBe("accepted");
+
+    const next = structuredClone(trackedA.data) as any;
+    next.dayState.runs[0].endedAt = NOW + 130_000;
+    next.dayState.runs.push({
+      id: "run-b", subTab: "crusts", startedAt: NOW + 140_000, metaUpdatedAt: NOW + 140_000,
+    });
+    next.dayState.currentIndex = 1;
+    next.runValues["run-b"] = {
+      ...next.runValues[RUN],
+      app1BatchesMade: 0, app1StockLbs: 0, app1StockConsumedLbs: 0,
+      app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+      app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+    };
+    next.runValuesUpdatedAt["run-b"] = NOW + 140_000;
+    const paused = structuredClone(next);
+    paused.dayState.runs[1].pausedAt = NOW + 210_000;
+    expect(buildNetSecondServerClaims(paused, NOW + 220_000)).toEqual([]);
+    const claims = buildNetSecondServerClaims(next, NOW + 220_000);
+    expect(claims.every(({ runId }) => runId === "run-b")).toBe(true);
+    const batchB = claims.find(({ channel }) => channel === "app1-batch")!;
+    expect(batchB).toBeDefined();
+    expect(applyAutoTrackClaim(next, pendingA, NOW + 220_000).outcome).not.toBe("accepted");
+    const resumed = applyAutoTrackClaim(next, batchB, NOW + 220_000);
+    expect(resumed.outcome).toBe("accepted");
+    expect(resumed.values.app1StockLbs).toBe(50);
+    expect((resumed.data.runValues as Record<string, unknown>)[RUN])
+      .toEqual((trackedA.data.runValues as Record<string, unknown>)[RUN]);
+    expect(applyAutoTrackClaim(resumed.data, pendingA, NOW + 220_000).outcome).not.toBe("accepted");
+  });
+
+  it("rebases both Frontline channels after a correction without inheriting their old due times", () => {
+    const source = payload({ app1BatchLbs: 25 });
+    const first = buildNetSecondServerClaims(source, NOW).find(({ channel }) => channel === "app1-batch")!;
+    const accepted = applyAutoTrackClaim(source, first, NOW);
+    expect(accepted.outcome).toBe("accepted");
+    const corrected = structuredClone(accepted.data) as any;
+    Object.assign(corrected.runValues[RUN], {
+      app1StockLbs: 12.5,
+      app1BatchAnchorNetSec: 210, app1BatchCorrectionGeneration: 1,
+      app1StockAnchorNetSec: 210, app1StockCorrectionGeneration: 1,
+    });
+    corrected.runValuesUpdatedAt[RUN] = NOW + 120_000;
+    expect(buildNetSecondServerClaims(corrected, NOW + 120_000)
+      .some(({ channel }) => channel.startsWith("app1"))).toBe(false);
+    const next = buildNetSecondServerClaims(corrected, NOW + 150_000)
+      .find(({ channel }) => channel === "app1-batch")!;
+    expect(next.dueAt).toBeGreaterThan(210);
+    expect(applyAutoTrackClaim(corrected, first, NOW + 150_000).outcome).not.toBe("accepted");
+    const resumed = applyAutoTrackClaim(corrected, next, NOW + 150_000);
+    expect(resumed.outcome).toBe("accepted");
+    expect(resumed.values.app1StockLbs).toBe(37.5);
+    expect(resumed.values.app1StockConsumedLbs).toBe(0);
+    expect(resumed.values.sauceBarrelsMade).toBe(0);
+  });
+
+  it("carries old cumulative consumption once without presenting it as current stock", () => {
+    const source = payload({
+      app1BatchesMade: 2, app1BatchLbs: 25, app1StockLbs: 12.5,
+      app1StockConsumedLbs: undefined,
+    });
+    const claims = buildNetSecondServerClaims(source, NOW);
+    const batch = claims.find((claim) => claim.channel === "app1-batch")!;
+    const loaded = applyAutoTrackClaim(source, batch, NOW);
+    expect(loaded.outcome).toBe("accepted");
+    expect(loaded.values).toMatchObject({
+      app1StockConsumedLbs: 50, app1StockLbs: 37.5, app1BatchesMade: 3,
+    });
+    const stock = claims.find((claim) => claim.channel === "app1-stock")!;
+    const legacyStock = { ...stock, mutations: stock.mutations.filter(({ field }) => field !== "app1StockConsumedLbs") };
+    expect(parseAutoTrackClaim(legacyStock, NOW)).not.toBeNull();
+    const consumed = applyAutoTrackClaim(source, legacyStock, NOW);
+    expect(consumed.outcome).toBe("accepted");
+    expect(consumed.values.app1StockConsumedLbs).toBeGreaterThan(50);
+    expect(consumed.values.app1BatchesMade).toBe(2);
+    const legacyBatch = { ...batch, mutations: batch.mutations.filter(({ field }) => field !== "app1StockLbs") };
+    expect(parseAutoTrackClaim(legacyBatch, NOW)).not.toBeNull();
+    expect(applyAutoTrackClaim(source, legacyBatch, NOW).outcome).toBe("conflict");
+  });
+
+  it("does not deplete an applicator when the case conversion is missing", () => {
+    const claims = buildNetSecondServerClaims(payload({ pizzasPerCase: 0, app1StockLbs: 25 }), NOW);
+    expect(claims.some(({ channel }) => channel.startsWith("app"))).toBe(false);
+  });
+
+  it("accounts through more than two lifetime batches in all four slots, including the fractional final load", () => {
+    const overrides: Record<string, unknown> = {
+      casesNeeded: 175, approxLineSpeed: 60,
+      sauceOzPerPizza: 0, frontlineRecipeName: "",
+    };
+    const weights = [25, 20, 30, 40];
+    for (let i = 1; i <= 4; i++) {
+      const prefix = `app${i}`;
+      Object.assign(overrides, {
+        [`${prefix}Type`]: "Cheese",
+        [`${prefix}OzPerPizza`]: weights[i - 1] * 0.08,
+        [`${prefix}BatchLbs`]: weights[i - 1],
+        [`${prefix}CheeseRecipe`]: [],
+        [`${prefix}BatchesMade`]: 20,
+        [`${prefix}BatchAnchorNetSec`]: 0,
+        [`${prefix}BatchCorrectionGeneration`]: 0,
+        [`${prefix}StockLbs`]: 2 * weights[i - 1],
+        [`${prefix}StockConsumedLbs`]: 0,
+        [`${prefix}StockAnchorNetSec`]: 0,
+        [`${prefix}StockCorrectionGeneration`]: 0,
+      });
+    }
+    let source: any = payload(overrides);
+    // Begin exactly at run start; advance canonical claims, not UI countdowns.
+    source.dayState.runs[0].startedAt = NOW;
+    const production = [0, 0, 0, 0];
+    for (let elapsed = 0; elapsed <= 2300; elapsed += 10) {
+      const now = NOW + elapsed * 1000;
+      for (const claim of buildNetSecondServerClaims(source, now)) {
+        if (!/^app[1-4]-(stock|batch)$/.test(claim.channel)) continue;
+        const result = applyAutoTrackClaim(source, claim, now);
+        expect(result.outcome).toBe("accepted");
+        source = result.data;
+        const slot = Number(claim.channel[3]) - 1;
+        if (claim.channel.endsWith("-batch")) {
+          const change = claim.mutations.find(({ field }) => field === `app${slot + 1}StockLbs`)!;
+          production[slot] += change.to - change.from;
+        }
+        const values = source.runValues[RUN];
+        const stock = values[`app${slot + 1}StockLbs`];
+        expect(stock).toBeGreaterThanOrEqual(0);
+        expect(stock).toBeLessThanOrEqual(weights[slot] * 2 + 0.0001);
+        expect(values[`app${slot + 1}StockConsumedLbs`] + stock)
+          .toBeLessThanOrEqual(weights[slot] * 10.5 + 20 + 0.0001);
+      }
+    }
+    for (let i = 1; i <= 4; i++) {
+      // Preserve the existing 20 lb run buffer, without rounding the final load.
+      expect(production[i - 1]).toBeCloseTo(weights[i - 1] * 8.5 + 20);
+      expect(source.runValues[RUN][`app${i}BatchesMade`])
+        .toBe(20 + Math.ceil(8.5 + 20 / weights[i - 1]));
+    }
+    expect(source.runValues[RUN].traysOnLine).toBe(2);
+    expect(source.runValues[RUN].sauceBarrelsMade).toBe(0);
+  });
+
   it("surfaces calculation failures so the server tick runner can record and retry them", () => {
     const failure = new Error("canonical calculation failed");
     const invalidPayload = new Proxy({}, {
@@ -131,7 +331,11 @@ describe("server auto-track claim builders", () => {
     const committed = applyAutoTrackClaim(source as never, first, tickNow);
     expect(committed.outcome).toBe("accepted");
 
-    const rebuilt = buildNetSecondServerClaims(committed.data, tickNow, namespace)
+    // A completed supply event rebases its anchor. It cannot be replayed at
+    // the same instant, even while a tick pass retains its idempotency key.
+    expect(buildNetSecondServerClaims(committed.data, tickNow, namespace)
+      .find((claim) => claim.channel === "app1-batch")).toBeUndefined();
+    const rebuilt = buildNetSecondServerClaims(committed.data, tickNow + 60_000, namespace)
       .find((claim) => claim.channel === "app1-batch");
     expect(rebuilt).toBeDefined();
     expect(rebuilt?.sequence).toBe(first.sequence + 1);
@@ -162,21 +366,16 @@ describe("server auto-track claim builders", () => {
       .filter((claim) => claim.channel === "sauce-barrel")).toHaveLength(1);
   });
 
-  it("uses the shared 50 lb Frontline fallback and continues one batch at a time", () => {
+  it("does not invent automatic Frontline batch quantities for unknown weights", () => {
     const source = payload({
       app1BatchLbs: 0,
       app1CheeseRecipe: [],
       app1BatchesMade: 0,
     });
-    const first = buildNetSecondServerClaims(source, NOW)
-      .find((claim) => claim.channel === "app1-batch");
-    expect(first?.mutations[0]).toMatchObject({
-      field: "app1BatchesMade",
-      from: 0,
-      to: 1,
-    });
-
-    expect(first?.mutations[1]?.field).toBe("app1BatchAnchorNetSec");
+    expect(buildNetSecondServerClaims(source, NOW)
+      .some((claim) => claim.channel === "app1-batch")).toBe(false);
+    expect(buildNetSecondServerClaims(payload({ app1BatchLbs: 75 }), NOW)
+      .some((claim) => claim.channel === "app1-batch")).toBe(false);
   });
 
   it("restarts net-second sequencing after a pause/resume lifecycle generation", () => {

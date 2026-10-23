@@ -22,6 +22,16 @@ export async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
+  return fetchAndConsumeWithTimeout(url, init, timeoutMs, async (response) => response);
+}
+
+/** Keep the same deadline and caller cancellation through response-body reads. */
+export async function fetchAndConsumeWithTimeout<T>(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  consume: (response: Response, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const timeoutController = new AbortController();
   const callerSignal = init.signal;
   let timedOut = false;
@@ -32,8 +42,21 @@ export async function fetchWithTimeout(
     timedOut = true;
     timeoutController.abort(new DOMException("Request timed out", "TimeoutError"));
   }, timeoutMs);
+  let removeAbortListener = () => {};
   try {
-    return await fetchWithDiagnostics(url, { ...init, signal: timeoutController.signal });
+    const aborted = new Promise<never>((_, reject) => {
+      const rejectAbort = () => reject(timeoutController.signal.reason ?? new DOMException("Request cancelled", "AbortError"));
+      removeAbortListener = () => timeoutController.signal.removeEventListener("abort", rejectAbort);
+      if (timeoutController.signal.aborted) rejectAbort();
+      else timeoutController.signal.addEventListener("abort", rejectAbort, { once: true });
+    });
+    const operation = (async () => {
+      if (timeoutController.signal.aborted) throw timeoutController.signal.reason;
+      const response = await fetchWithDiagnostics(url, { ...init, signal: timeoutController.signal });
+      if (timeoutController.signal.aborted) throw timeoutController.signal.reason;
+      return consume(response, timeoutController.signal);
+    })();
+    return await Promise.race([operation, aborted]);
   } catch (err) {
     // Match by name, not `instanceof DOMException` — abort reasons can come
     // from a different realm (worker, test env, some engines) where instanceof
@@ -46,6 +69,7 @@ export async function fetchWithTimeout(
     throw err;
   } finally {
     clearTimeout(timeout);
+    removeAbortListener();
     callerSignal?.removeEventListener("abort", abort);
   }
 }

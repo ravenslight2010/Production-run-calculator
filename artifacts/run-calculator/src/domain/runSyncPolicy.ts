@@ -297,6 +297,15 @@ export function serverOwnedApplicatorStockProgress(
     const localAnchor = Number(localValues[fields.anchor as keyof FormValues]);
     const remoteGeneration = Number(remoteValues[fields.correctionGeneration as keyof FormValues]);
     const localGeneration = Number(localValues[fields.correctionGeneration as keyof FormValues]);
+    const consumedField = register.startsWith("app")
+      ? `${register}StockConsumedLbs` as keyof FormValues
+      : null;
+    const remoteConsumed = consumedField
+      ? Number(remoteValues[consumedField] ?? 0)
+      : null;
+    const localConsumed = consumedField
+      ? Number(localValues[consumedField] ?? 0)
+      : null;
     if (
       cap <= 0
       || !Number.isFinite(remoteStock)
@@ -310,6 +319,13 @@ export function serverOwnedApplicatorStockProgress(
       || remoteGeneration < 0
       || !Number.isSafeInteger(localGeneration)
       || localGeneration < 0
+      || (remoteConsumed !== null && (
+        !Number.isFinite(remoteConsumed)
+        || remoteConsumed < 0
+        || !Number.isFinite(localConsumed)
+        || localConsumed! < 0
+        || remoteConsumed < localConsumed!
+      ))
       || remoteGeneration < localGeneration
       || (remoteGeneration === localGeneration && remoteStock > localStock)
       || (remoteGeneration === localGeneration && remoteAnchor < localAnchor)
@@ -317,6 +333,9 @@ export function serverOwnedApplicatorStockProgress(
     (result as Record<string, unknown>)[fields.stock] = remoteStock;
     (result as Record<string, unknown>)[fields.anchor] = remoteAnchor;
     (result as Record<string, unknown>)[fields.correctionGeneration] = remoteGeneration;
+    if (consumedField && remoteConsumed !== null) {
+      (result as Record<string, unknown>)[consumedField] = remoteConsumed;
+    }
     result.applicatorStockInitialized = true;
   }
   const sauceCoordination = payload.autoTrackCoordination?.runs?.[runId]?.["sauce-stock"];
@@ -389,10 +408,10 @@ const OPERATIONAL_CORRECTION_FIELDS = new Set<keyof FormValues>([
   "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
   "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
   "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
-  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
-  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
-  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
-  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration", "app1StockConsumedLbs",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration", "app2StockConsumedLbs",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration", "app3StockConsumedLbs",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration", "app4StockConsumedLbs",
   "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
   "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
   "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",

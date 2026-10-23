@@ -81,6 +81,7 @@ export function initializeApplicatorStockOnRunStart(
     initialized[fields.stock] = computeApplicatorStockCapacityLbs(values, register);
     initialized[fields.anchor] = 0;
     initialized[fields.correctionGeneration] = 0;
+    if (register.startsWith("app")) initialized[`${register}StockConsumedLbs`] = 0;
   }
   return initialized;
 }

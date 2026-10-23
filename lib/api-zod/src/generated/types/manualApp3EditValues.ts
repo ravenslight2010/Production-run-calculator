@@ -13,4 +13,5 @@ export type ManualApp3EditValues = {
   app3StockLbs?: number;
   app3StockAnchorNetSec?: number;
   app3StockCorrectionGeneration?: number;
+  app3StockConsumedLbs?: number;
 };

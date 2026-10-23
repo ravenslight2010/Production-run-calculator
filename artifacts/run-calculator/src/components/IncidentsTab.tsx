@@ -249,7 +249,15 @@ function IncidentRow({
             <p className="mt-1">
               {ctx.requestOutcome === "cancelled"
                 ? "Next step: this request ended before a response, so it does not show that the server rejected the session. If it happened during sign-in, sign-out, or an account switch, no action is needed. Otherwise, review the available diagnostics if it recurs; the cancellation source is unknown."
-                : "Next step: retry once; if it repeats, reload or update the app, then give this reference to a developer."}
+                : ctx.requestHttpStatus === 409
+                  ? "Next step: review the conflicting change against the current shared run. Keep the local draft and resolve the conflict; retrying unchanged or reloading does not save it."
+                  : ctx.requestHttpStatus === 400 || ctx.requestHttpStatus === 422
+                    ? "Next step: review the rejected action and correct its inputs or run state. Do not retry the unchanged action. Keep this reference for a developer if the reason is unclear."
+                    : ctx.requestHttpStatus === 401
+                      ? "Next step: sign in again, confirm the current shared run, then explicitly retry eligible retained work."
+                      : ctx.requestHttpStatus === 403
+                        ? "Next step: ask an authorized manager to review access before retrying eligible retained work."
+                        : "Next step: check connectivity and retry eligible retained work once. If it repeats, keep this reference for a developer; do not reload or update while work is active or unsaved."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">

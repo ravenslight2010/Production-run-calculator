@@ -39,3 +39,12 @@ If `run-release-node.sh` exits before a check starts with Node's conflicting `--
 **Why:** The release runner adds its own Node preload while inheriting shell options; a CA-option conflict can prevent validation from reaching the project scripts.
 
 **How to apply:** Preserve the original failure, remove only the conflicting inherited Node option for the retry (for example, `env -u NODE_OPTIONS`), and keep the release runner's own checks and HTTPS protections enabled.
+
+
+## Validation runner identity
+
+Verify that the repository's pinned package manager actually starts before interpreting a command failure as a code failure.
+
+**Why:** A workspace bootstrap loop once prevented checks from reaching project scripts; changing repository package policy to repair the environment would have introduced unrelated changes.
+
+**How to apply:** Keep approved toolchain and package policy unchanged during environment repairs. Record whether a failed check reached project code, and verify the pinned runner identity before retrying.

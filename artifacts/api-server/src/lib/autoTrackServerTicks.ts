@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  legacyFrontlineConsumption,
   computeAutoTrackElapsedMs,
   computeAutoTrackSchedule,
+  computeAppSlotInfo,
+  computeFrontlineSupplyFromStockLbs,
   applicatorStockFields,
   applicatorStockRegisterForChannel,
   capApplicatorStock,
@@ -121,7 +124,10 @@ function schedule(
   const startedAt = number(run.startedAt);
   const endedAt = number(run.endedAt);
   if (run.autoTrackDisabled === true) return null;
-  const values = payload.runValues?.[run.id];
+  const storedValues = payload.runValues?.[run.id];
+  const values = storedValues
+    ? { ...storedValues, ...legacyFrontlineConsumption(storedValues) }
+    : undefined;
   if (!values) return null;
   const endedDrainActive = options.allowEndedDrain === true
     && endedAt > 0
@@ -221,6 +227,10 @@ export function buildNetSecondServerClaims(
         onHand - cadence * computeApplicatorStockRateLbsPerSecond(values[ozField], ppm),
         capacity,
       );
+      const consumedField = register.startsWith("app")
+        ? `${register}StockConsumedLbs`
+        : null;
+      const consumed = consumedField ? number(values[consumedField]) : 0;
       const prior = coordination?.[entry.channel];
       return [{
         version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
@@ -235,6 +245,11 @@ export function buildNetSecondServerClaims(
           { field: fields.stock, from: onHand, to: nextOnHand },
           { field: fields.anchor, from: anchor, to: entry.dueAt },
           { field: fields.correctionGeneration, from: correctionGeneration, to: correctionGeneration },
+          ...(consumedField ? [{
+            field: consumedField as AutoTrackClaim["mutations"][number]["field"],
+            from: consumed,
+            to: consumed + Math.max(0, onHand - nextOnHand),
+          }] : []),
         ],
       } as AutoTrackClaim];
     }
@@ -244,6 +259,64 @@ export function buildNetSecondServerClaims(
     const correctionField = entry.channel === "sauce-barrel" ? "sauceBarrelCorrectionGeneration" : `${slot}BatchCorrectionGeneration`;
     const correctionGeneration = Math.max(0, number(values[correctionField]));
     const prefix = entry.channel === "sauce-barrel" ? "sauceBarrel" : `${slot}Batch`;
+    if (/^app[1-4]-batch$/.test(entry.channel)) {
+      const appSlot = slot as "app1" | "app2" | "app3" | "app4";
+      const info = computeAppSlotInfo({
+        type: String(values[`${appSlot}Type`] ?? ""),
+        recipe: values[`${appSlot}CheeseRecipe`] as Array<{ lbs: number }> | undefined,
+        batchLbs: number(values[`${appSlot}BatchLbs`]),
+        ozPerPizza: number(values[`${appSlot}OzPerPizza`]),
+        casesNeeded: number(values.casesNeeded),
+        pizzasPerCase: number(values.pizzasPerCase),
+        ppm,
+      });
+      const stockField = `${appSlot}StockLbs`;
+      const consumedField = `${appSlot}StockConsumedLbs`;
+      const stock = Math.max(0, number(values[stockField]));
+      const consumed = Math.max(0, number(values[consumedField]));
+      const capacity = Math.min(
+        computeApplicatorStockCapacityLbs(values, appSlot),
+        info.effectiveBatchLbs * 2,
+      );
+      const supply = computeFrontlineSupplyFromStockLbs({
+        demandLbs: info.required * info.effectiveBatchLbs,
+        consumedLbs: consumed,
+        onLineLbs: stock,
+        configuredEffectiveWeight: info.effectiveBatchLbs,
+      });
+      const producedLbs = Math.min(
+        info.effectiveBatchLbs,
+        (supply?.stillToMake ?? 0) * info.effectiveBatchLbs,
+      );
+      if (
+        !info.validForClaim
+        || values.applicatorStockInitialized !== true
+        || !supply?.stillToMake
+        || producedLbs <= 0
+        || capacity - stock + 0.0001 < producedLbs
+      ) return [];
+
+      const made = Math.max(0, number(values[madeField]));
+      const anchor = Math.max(0, number(values[anchorField]));
+      const mutations = buildNetMutations(prefix, made, made + 1, anchor, entry.dueAt, correctionGeneration);
+      mutations.push({
+        field: stockField as AutoTrackClaim["mutations"][number]["field"],
+        from: stock,
+        to: capApplicatorStock(stock + producedLbs, capacity),
+      });
+      const prior = coordination?.[entry.channel];
+      const cadence = Math.max(0, entry.dueAt - anchor);
+      return [{
+        version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
+        sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+        eventId: eventIdNamespace
+          ? `srv:${entry.channel}:${eventIdNamespace}`
+          : `srv:${entry.channel}:${randomUUID()}`,
+        dueAt: entry.dueAt,
+        nextDueAt: entry.nextDueAt > entry.dueAt ? entry.nextDueAt : entry.dueAt + cadence,
+        baseUpdatedAt, correctionGeneration, mutations,
+      } as AutoTrackClaim];
+    }
     const mutations = buildNetMutations(prefix, Math.max(0, number(values[madeField])), Math.max(0, number(values[madeField])) + 1, Math.max(0, number(values[anchorField])), entry.dueAt, correctionGeneration);
     const cadence = Math.max(0, entry.dueAt - Math.max(0, number(values[anchorField])));
     const claimNextDueAt = entry.nextDueAt > entry.dueAt

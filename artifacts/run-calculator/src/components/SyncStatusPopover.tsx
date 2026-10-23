@@ -203,8 +203,12 @@ export default function SyncStatusPopover(props: Props) {
                          <p className="mt-1 font-medium text-amber-500">Open the manager conflict monitor for review guidance.</p>
                         ) : !["accepted", "superseded", "rebased", "sending"].includes(intent.state) && (
                          <div className="mt-2 flex gap-2">
-                           <button type="button" onClick={() => { if (retryOperationalIntent(intent.id)) void flushOperationalIntentOutbox(); }}
-                              className="min-h-11 rounded border border-border px-3 font-semibold hover:bg-muted/50">Retry</button>
+                           {intent.state === "permanently-rejected" ? (
+                             <p className="text-amber-500">Review the current run before discarding this invalid action and creating a corrected action. It cannot be retried unchanged.</p>
+                           ) : (
+                             <button type="button" onClick={() => { if (retryOperationalIntent(intent.id)) void flushOperationalIntentOutbox(); }}
+                                className="min-h-11 rounded border border-border px-3 font-semibold hover:bg-muted/50">Retry</button>
+                           )}
                            <button type="button" onClick={() => discardOperationalIntent(intent.id)}
                               className="min-h-11 rounded border border-border px-3 text-muted-foreground hover:bg-muted/50">Discard</button>
                          </div>

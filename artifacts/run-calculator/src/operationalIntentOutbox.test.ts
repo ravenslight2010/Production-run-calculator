@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseOperationalIntent } from "../../api-server/src/lib/operationalIntents";
 import {
   flushOperationalIntentOutbox,
   fencePendingEndSnapshots,
@@ -24,6 +25,26 @@ describe("operational intent outbox", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("emits locale-independent completion lines accepted by the server contract", () => {
+    const intent = queueOperationalIntent({
+      runId: "run-1", observedGeneration: "run-1:100", effectiveAt: Date.now(),
+      action: "lifecycle", lifecycle: "end",
+      preEndLifecycle: capturePreEndLifecycle({ startedAt: 50, metaUpdatedAt: 100 }),
+      inventoryLines: [
+        { itemKey: "ingredient:é:lbs", qty: 1 },
+        { itemKey: "ingredient:a:lbs", qty: 2 },
+        { itemKey: "ingredient:Z:lbs", qty: 3 },
+        { itemKey: "ingredient:_:lbs", qty: 4 },
+        { itemKey: "ingredient:a:lbs", qty: 5 },
+      ],
+    });
+    expect(intent.inventoryLines?.map((line) => line.itemKey)).toEqual([
+      "ingredient:Z:lbs", "ingredient:_:lbs", "ingredient:a:lbs", "ingredient:é:lbs",
+    ]);
+    expect(intent.inventoryLines?.find((line) => line.itemKey === "ingredient:a:lbs")?.qty).toBe(7);
+    expect(parseOperationalIntent(intent)).not.toBeNull();
   });
 
   it("does not rebase queued same-section deltas from rejected conflict data", async () => {
@@ -362,9 +383,31 @@ describe("operational intent outbox", () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(adopt).not.toHaveBeenCalled();
     expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state, failure })]);
-    expect(retryOperationalIntent(intent.id)).toBe(true);
+    expect(retryOperationalIntent(intent.id)).toBe(state !== "permanently-rejected");
     expect(fetch).toHaveBeenCalledOnce();
   });
+  it.each([400, 422])("retains HTTP %s validation rejection through direct and bulk recovery", async (status) => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status, headers: { get: () => null },
+      json: async () => ({ error: "Invalid command" }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    const intent = queueOperationalIntent({
+      runId: "invalid-run", observedGeneration: "invalid-run:1",
+      effectiveAt: 1, action: "lifecycle", lifecycle: "start",
+    });
+    await flushOperationalIntentOutbox();
+    const rejected = readOperationalIntentOutbox();
+    expect(rejected).toEqual([expect.objectContaining({
+      id: intent.id, state: "permanently-rejected", failure: "validation",
+    })]);
+    expect(retryOperationalIntent(intent.id)).toBe(false);
+    await flushOperationalIntentOutbox();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(readOperationalIntentOutbox()).toEqual(rejected);
+  });
+
   it("keeps transient 5xx responses queued for backoff", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn().mockResolvedValue({

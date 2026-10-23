@@ -1,6 +1,7 @@
 import type { FormValues } from "./types";
 import {
   computeFrontlineRunRequirement,
+  knownFrontlineBatchWeight,
   type Calc,
 } from "@workspace/live-calc";
 
@@ -62,14 +63,21 @@ export function deriveLiveFrontlineQuantitySource(
       (sum, row) => sum + (Number(row.lbs) || 0),
       0,
     );
-    return computeFrontlineRunRequirement({
+    const configuredEffectiveWeight = recipeLbs > 0
+      ? recipeLbs
+      : v[`app${slot}BatchLbs`];
+    const requirement = computeFrontlineRunRequirement({
       casesNeeded: v.casesNeeded,
       pizzasPerCase: v.pizzasPerCase,
       ozPerPizza: v[`app${slot}OzPerPizza`],
-      configuredEffectiveWeight: recipeLbs > 0
-        ? recipeLbs
-        : v[`app${slot}BatchLbs`],
+      configuredEffectiveWeight,
     });
+    return {
+      ...requirement,
+      totalUnits: knownFrontlineBatchWeight(configuredEffectiveWeight) === null
+        ? 0
+        : requirement.totalLbs / knownFrontlineBatchWeight(configuredEffectiveWeight)!,
+    };
   };
 
   const app1 = appRequirement(1);

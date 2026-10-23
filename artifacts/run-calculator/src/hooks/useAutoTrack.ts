@@ -16,6 +16,7 @@ import {
   computeApplicatorStockCadenceSeconds,
   computeApplicatorStockCapacityLbs,
   depleteApplicatorStock,
+  computeFrontlineSupplyFromStockLbs,
   capSauceStock,
   computeSauceStockStepSeconds,
   depleteSauceStock,
@@ -98,10 +99,10 @@ interface AutoTrackValues {
   app3BatchesMade: number; app3BatchAnchorNetSec: number; app3BatchCorrectionGeneration: number;
   app4Type: string; app4OzPerPizza: number; app4BatchLbs: number; app4CheeseRecipe: Array<{ lbs: number }>;
   app4BatchesMade: number; app4BatchAnchorNetSec: number; app4BatchCorrectionGeneration: number;
-  app1StockLbs: number; app1StockAnchorNetSec: number; app1StockCorrectionGeneration: number;
-  app2StockLbs: number; app2StockAnchorNetSec: number; app2StockCorrectionGeneration: number;
-  app3StockLbs: number; app3StockAnchorNetSec: number; app3StockCorrectionGeneration: number;
-  app4StockLbs: number; app4StockAnchorNetSec: number; app4StockCorrectionGeneration: number;
+  app1StockLbs: number; app1StockAnchorNetSec: number; app1StockCorrectionGeneration: number; app1StockConsumedLbs: number;
+  app2StockLbs: number; app2StockAnchorNetSec: number; app2StockCorrectionGeneration: number; app2StockConsumedLbs: number;
+  app3StockLbs: number; app3StockAnchorNetSec: number; app3StockCorrectionGeneration: number; app3StockConsumedLbs: number;
+  app4StockLbs: number; app4StockAnchorNetSec: number; app4StockCorrectionGeneration: number; app4StockConsumedLbs: number;
   pep1Type: string; pep1OzPerPizza: number; pep1TypeB: string; pep1OzPerPizzaB: number;
   pep2Type: string; pep2OzPerPizza: number; pep2TypeB: string; pep2OzPerPizzaB: number;
   pep1Combined: boolean; applicatorStockInitialized: boolean;
@@ -135,10 +136,10 @@ export type AutoTrackMutation = {
     | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
     | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
     | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration"
-    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration"
-    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration"
-    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration"
-    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration"
+    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration" | "app1StockConsumedLbs"
+    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration" | "app2StockConsumedLbs"
+    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration" | "app3StockConsumedLbs"
+    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration" | "app4StockConsumedLbs"
     | "pep1StockLbs" | "pep1StockAnchorNetSec" | "pep1StockCorrectionGeneration"
     | "pep1bStockLbs" | "pep1bStockAnchorNetSec" | "pep1bStockCorrectionGeneration"
     | "pep2StockLbs" | "pep2StockAnchorNetSec" | "pep2StockCorrectionGeneration"
@@ -806,6 +807,10 @@ useEffect(() => {
         if (typeof made === "number") form.setValue(`${slot}BatchesMade` as keyof FormValues, made as never, { shouldDirty: true });
         if (typeof anchor === "number") form.setValue(`${slot}BatchAnchorNetSec` as keyof FormValues, anchor as never, { shouldDirty: true });
         if (typeof generation === "number") form.setValue(`${slot}BatchCorrectionGeneration` as keyof FormValues, generation as never, { shouldDirty: true });
+        const consumed = values[`${slot}StockConsumedLbs` as keyof FormValues];
+        if (typeof consumed === "number") {
+          form.setValue(`${slot}StockConsumedLbs` as keyof FormValues, consumed as never, { shouldDirty: true });
+        }
       });
       for (const register of APPLICATOR_STOCK_REGISTERS) {
         const fields = applicatorStockFields(register);
@@ -1466,7 +1471,6 @@ useEffect(() => {
       endedAt != null ||
       calc.pressDone ||
       nextRunPrepActive ||
-      Date.now() < autoSuppressUntilRef.current ||
       serverOwnsChannel("sauce-stock") ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
@@ -1542,10 +1546,13 @@ useEffect(() => {
       });
       const channel = `${slot}-batch` as AutoTrackChannel;
       dueRefForChannel(channel).current = info.validForClaim && info.cadence > 0
-        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + info.cadence
+        ? Math.max(
+          Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + info.cadence,
+          elapsedBatchSec,
+        )
         : 0;
     });
-  }, [calc.ppm, productionNeedsAvailable, v]);
+  }, [calc.ppm, elapsedBatchSec, productionNeedsAvailable, v]);
 
   useEffect(() => {
     if (
@@ -1557,7 +1564,6 @@ useEffect(() => {
       runStatus !== "running" ||
       endedAt != null ||
       calc.pressDone ||
-      Date.now() < autoSuppressUntilRef.current ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
     const values = v as FormValues;
@@ -1580,17 +1586,40 @@ useEffect(() => {
       const made = Math.max(0, Number(values[madeField]) || 0);
       const anchor = Math.max(0, Number(values[anchorField]) || 0);
       const correctionGeneration = Math.max(0, Number(values[correctionField]) || 0);
-      const dueAt = dueRefForChannel(channel).current || anchor + info.cadence;
+      const dueAt = Math.max(dueRefForChannel(channel).current || anchor + info.cadence, elapsedBatchSec);
       if (
         elapsedBatchSec < dueAt
-        || made >= Math.ceil(info.required)
         || serverOwnsChannel(channel)
+      ) continue;
+      if (values.applicatorStockInitialized !== true) continue;
+      const stockField = `${slot}StockLbs` as keyof FormValues;
+      const consumedField = `${slot}StockConsumedLbs` as keyof FormValues;
+      const onHand = Math.max(0, Number(values[stockField]) || 0);
+      const capacity = Math.min(
+        computeApplicatorStockCapacityLbs(values as unknown as Record<string, unknown>, slot),
+        info.effectiveBatchLbs * 2,
+      );
+      const supply = computeFrontlineSupplyFromStockLbs({
+        demandLbs: info.required * info.effectiveBatchLbs,
+        consumedLbs: Number(values[consumedField]) || 0,
+        onLineLbs: onHand,
+        configuredEffectiveWeight: info.effectiveBatchLbs,
+      });
+      const producedLbs = Math.min(
+        info.effectiveBatchLbs,
+        (supply?.stillToMake ?? 0) * info.effectiveBatchLbs,
+      );
+      if (
+        !supply?.stillToMake
+        || producedLbs <= 0
+        || capacity - onHand + 0.0001 < producedLbs
       ) continue;
       dueRefForChannel(channel).current = dueAt;
       commitAutomatic(channel, dueAt, dueAt + info.cadence, [
-        { field: madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(info.required), made + 1) },
+        { field: madeField as AutoTrackMutation["field"], from: made, to: made + 1 },
         { field: anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
         { field: correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+        { field: stockField as AutoTrackMutation["field"], from: onHand, to: capApplicatorStock(onHand + producedLbs, capacity) },
       ]);
     }
   }, [
@@ -1647,7 +1676,6 @@ useEffect(() => {
       runStatus !== "running" ||
       endedAt != null ||
       calc.pressDone ||
-      Date.now() < autoSuppressUntilRef.current ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
     const values = v as unknown as Record<string, unknown>;
@@ -1672,11 +1700,20 @@ useEffect(() => {
         ozPerPizza: Number(values[ozField]) || 0,
         ppm: calc.ppm,
       }), capacity);
+      const consumedField = register.startsWith("app")
+        ? `${register}StockConsumedLbs` as keyof FormValues
+        : null;
+      const consumed = consumedField ? Math.max(0, Number(values[consumedField]) || 0) : 0;
       dueRefForChannel(channel).current = dueAt;
       commitAutomatic(channel, dueAt, dueAt + cadence, [
         { field: fields.stock as AutoTrackMutation["field"], from: onHand, to: nextOnHand },
         { field: fields.anchor as AutoTrackMutation["field"], from: anchor, to: dueAt },
         { field: fields.correctionGeneration as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+        ...(consumedField ? [{
+          field: consumedField as AutoTrackMutation["field"],
+          from: consumed,
+          to: consumed + Math.max(0, onHand - nextOnHand),
+        }] : []),
       ]);
     }
   }, [
@@ -1718,11 +1755,9 @@ useEffect(() => {
     // advances so the window expiring never causes a catch-up jump that wipes
     // the operator's manual edit.
     const caseSuppressed = Date.now() < autoSuppressUntilRef.current;
-    // Keep legacy packaging/manual suppression behavior for Dough while
-    // allowing a Dough-only correction to leave case tracking untouched.
-    const doughSuppressed =
-      Date.now() < doughAutoSuppressUntilRef.current
-      || Date.now() < autoSuppressUntilRef.current;
+    // The shared legacy ref is Packaging's hold, not a factory-wide pause.
+    // Dough corrections have their own run-scoped suppression deadline.
+    const doughSuppressed = Date.now() < doughAutoSuppressUntilRef.current;
     // ── Cases (and skids, derived from the same total): tick once per case. ──
     if (
       caseTrackingActive

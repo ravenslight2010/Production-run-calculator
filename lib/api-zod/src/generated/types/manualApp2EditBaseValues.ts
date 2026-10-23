@@ -13,4 +13,5 @@ export type ManualApp2EditBaseValues = {
   app2StockLbs: number;
   app2StockAnchorNetSec: number;
   app2StockCorrectionGeneration: number;
+  app2StockConsumedLbs?: number;
 };

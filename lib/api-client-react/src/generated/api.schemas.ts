@@ -1373,6 +1373,7 @@ export type ManualApp1EditValues = {
   app1StockLbs?: number;
   app1StockAnchorNetSec?: number;
   app1StockCorrectionGeneration?: number;
+  app1StockConsumedLbs?: number;
 };
 
 export type ManualApp1EditBaseValues = {
@@ -1382,6 +1383,7 @@ export type ManualApp1EditBaseValues = {
   app1StockLbs: number;
   app1StockAnchorNetSec: number;
   app1StockCorrectionGeneration: number;
+  app1StockConsumedLbs?: number;
 };
 
 export type ManualApp1Edit = ManualSectionEditRequestBase & {
@@ -1397,6 +1399,7 @@ export type ManualApp2EditValues = {
   app2StockLbs?: number;
   app2StockAnchorNetSec?: number;
   app2StockCorrectionGeneration?: number;
+  app2StockConsumedLbs?: number;
 };
 
 export type ManualApp2EditBaseValues = {
@@ -1406,6 +1409,7 @@ export type ManualApp2EditBaseValues = {
   app2StockLbs: number;
   app2StockAnchorNetSec: number;
   app2StockCorrectionGeneration: number;
+  app2StockConsumedLbs?: number;
 };
 
 export type ManualApp2Edit = ManualSectionEditRequestBase & {
@@ -1421,6 +1425,7 @@ export type ManualApp3EditValues = {
   app3StockLbs?: number;
   app3StockAnchorNetSec?: number;
   app3StockCorrectionGeneration?: number;
+  app3StockConsumedLbs?: number;
 };
 
 export type ManualApp3EditBaseValues = {
@@ -1430,6 +1435,7 @@ export type ManualApp3EditBaseValues = {
   app3StockLbs: number;
   app3StockAnchorNetSec: number;
   app3StockCorrectionGeneration: number;
+  app3StockConsumedLbs?: number;
 };
 
 export type ManualApp3Edit = ManualSectionEditRequestBase & {
@@ -1445,6 +1451,7 @@ export type ManualApp4EditValues = {
   app4StockLbs?: number;
   app4StockAnchorNetSec?: number;
   app4StockCorrectionGeneration?: number;
+  app4StockConsumedLbs?: number;
 };
 
 export type ManualApp4EditBaseValues = {
@@ -1454,6 +1461,7 @@ export type ManualApp4EditBaseValues = {
   app4StockLbs: number;
   app4StockAnchorNetSec: number;
   app4StockCorrectionGeneration: number;
+  app4StockConsumedLbs?: number;
 };
 
 export type ManualApp4Edit = ManualSectionEditRequestBase & {

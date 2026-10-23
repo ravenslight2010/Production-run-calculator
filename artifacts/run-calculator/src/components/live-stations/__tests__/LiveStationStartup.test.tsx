@@ -29,7 +29,6 @@ import { LivePackagingTabContent } from "../LivePackagingTabContent";
 import { LiveSauceTabContent } from "../LiveSauceTabContent";
 import { HomeStationTabs } from "../../../components/HomeStationTabs";
 import { TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
-import { APPLICATOR_STOCK_REGISTERS, applicatorStockFields } from "@workspace/live-calc";
 import type { HomeTab } from "../../../hooks/useHomeNavigation";
 
 vi.mock("../../../useRole", () => ({
@@ -298,10 +297,11 @@ const FRONTLINE_APPLICATOR_LOCK_CASES = [
   { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
 
-function applicatorStockControls(slot: string) {
-  const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
-  const fillToCap = within(input.parentElement!).getByRole("button", { name: "Fill to cap" }) as HTMLButtonElement;
-  return [input, fillToCap];
+function applicatorSupplyControls(slot: string) {
+  return [
+    screen.getByRole("button", { name: `Decrease ${slot} batches on line` }) as HTMLButtonElement,
+    screen.getByRole("button", { name: `Increase ${slot} batches on line` }) as HTMLButtonElement,
+  ];
 }
 
 type CheeseApplicatorSlot = "app1" | "app2" | "app3" | "app4";
@@ -332,70 +332,18 @@ function ApplicatorRecipeEditor({ slot, recipeLbs }: { slot: CheeseApplicatorSlo
   );
 }
 
-function PepperoniSetupEditor() {
-  const { control, getValues, setValue } = useFormContext<FormValues>();
-  const stockFields = [
-    "pep1StockLbs",
-    "pep1bStockLbs",
-    "pep2StockLbs",
-    "pep2bStockLbs",
-  ] as const;
-  const stockValues = useWatch({ control, name: stockFields });
-  return (
-    <>
-      <button type="button" data-testid="change-pep1-type" onClick={() => setValue("pep1Type", "Turkey Pepperoni", { shouldDirty: true })}>
-        Change Pep 1 type
-      </button>
-      <button type="button" data-testid="change-pep1-additional-type" onClick={() => setValue("pep1TypeB", "Beef Pepperoni", { shouldDirty: true })}>
-        Change Pep 1 additional type
-      </button>
-      <button type="button" data-testid="clear-pep1-additional-type" onClick={() => setValue("pep1TypeB", "", { shouldDirty: true })}>
-        Clear Pep 1 additional type
-      </button>
-      <button type="button" data-testid="change-pep2-type" onClick={() => setValue("pep2Type", "Turkey Cup Pepperoni", { shouldDirty: true })}>
-        Change Pep 2 type
-      </button>
-      <button type="button" data-testid="change-pep2-additional-type" onClick={() => setValue("pep2TypeB", "Beef Cup Pepperoni", { shouldDirty: true })}>
-        Change Pep 2 additional type
-      </button>
-      <button
-        type="button"
-        data-testid="toggle-pep1-combined"
-        onClick={() => setValue("pep1Combined", !getValues("pep1Combined"), { shouldDirty: true })}
-      >
-        Toggle combined pepperoni
-      </button>
-      {stockFields.map((field, index) => (
-        <output key={field} data-testid={field}>{stockValues[index]}</output>
-      ))}
-    </>
-  );
-}
-
-const STOCK_DRAFT_VALUES: FormValues = {
-  ...FRONTLINE_APPLICATOR_VALUES,
-  pep1Type: "Pepperoni",
-  pep1TypeB: "Cup Pepperoni",
-  pep2Type: "Turkey Pepperoni",
-  pep2TypeB: "Mini Pepperoni",
-  pep1Combined: false,
-};
-
-function StockValuesObserver() {
-  const values = useWatch<FormValues>();
-  return <output data-testid="stock-form-values">{JSON.stringify(values)}</output>;
-}
-
 function FrontlineNavigationFixture({
   runId = RUN_ID,
   queueManualCorrection,
+  values = FRONTLINE_APPLICATOR_VALUES,
 }: {
   runId?: string;
   queueManualCorrection: (...args: unknown[]) => void;
+  values?: FormValues;
 }) {
   const [activeTab, setActiveTab] = useState("frontline");
   return (
-    <StationProviders status="running" runId={runId} values={STOCK_DRAFT_VALUES} queueManualCorrection={queueManualCorrection}>
+    <StationProviders status="running" runId={runId} values={values} queueManualCorrection={queueManualCorrection}>
       <HomeStationTabs activeTab={activeTab as HomeTab} onTabChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="frontline">Frontline</TabsTrigger>
@@ -404,94 +352,216 @@ function FrontlineNavigationFixture({
         <TabsContent value="frontline"><LiveFrontlineTabContent /></TabsContent>
         <TabsContent value="dough"><div>Dough station</div></TabsContent>
       </HomeStationTabs>
-      <StockValuesObserver />
       <PepperoniSetupEditor />
+      <StockValuesObserver />
     </StationProviders>
   );
 }
 
-describe("Frontline stock drafts across station navigation", () => {
-  beforeEach(() => { clearManualSectionLocks(); });
-  afterEach(() => { cleanup(); clearManualSectionLocks(); });
+const PEPPERONI_VALUES: FormValues = {
+  ...FRONTLINE_APPLICATOR_VALUES,
+  pep1Type: "Pepperoni", pep1TypeB: "Cup Pepperoni",
+  pep2Type: "Turkey Pepperoni", pep2TypeB: "Mini Pepperoni",
+  pep1OzPerPizza: 1, pep1OzPerPizzaB: 1, pep2OzPerPizza: 1, pep2OzPerPizzaB: 1,
+  pep1Combined: false,
+};
+const PEPPERONI_REGISTERS = ["pep1", "pep1b", "pep2", "pep2b"] as const;
 
+function StockValuesObserver() {
+  const values = useWatch<FormValues>();
+  return <output data-testid="stock-form-values">{JSON.stringify(values)}</output>;
+}
+
+function PepperoniSetupEditor() {
+  const { getValues, setValue } = useFormContext<FormValues>();
+  return <>
+    {([
+      ["change-pep1-type", "pep1Type", "Turkey Pepperoni"],
+      ["change-pep1-additional-type", "pep1TypeB", "Beef Pepperoni"],
+      ["change-pep2-type", "pep2Type", "Turkey Cup Pepperoni"],
+      ["change-pep2-additional-type", "pep2TypeB", "Beef Cup Pepperoni"],
+    ] as const).map(([id, field, value]) => (
+      <button key={id} type="button" data-testid={id} onClick={() => setValue(field, value, { shouldDirty: true })}>{id}</button>
+    ))}
+    <button type="button" data-testid="toggle-pep1-combined" onClick={() => setValue("pep1Combined", !getValues("pep1Combined"), { shouldDirty: true })}>Toggle combined pepperoni</button>
+  </>;
+}
+
+describe("Pepperoni supply controls retained alongside applicator batches", () => {
+  beforeEach(() => clearManualSectionLocks());
+  afterEach(() => { cleanup(); clearManualSectionLocks(); vi.useRealTimers(); });
+  const fixture = (queueManualCorrection = vi.fn(), runId = RUN_ID) =>
+    <FrontlineNavigationFixture values={PEPPERONI_VALUES} runId={runId} queueManualCorrection={queueManualCorrection} />;
+  const input = (register: string) => screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
+  const controls = (register: string) => [
+    input(register),
+    within(input(register).parentElement!).getByRole("button", { name: "Fill to cap" }) as HTMLButtonElement,
+  ];
   function navigateAwayAndBack() {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
-    expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
+    expect(screen.queryByTestId("stock-pep1-lbs")).toBeNull();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
   }
 
-  it.each(APPLICATOR_STOCK_REGISTERS)("retains %s without changing stock or queuing persistence before Save", (register) => {
+  it.each(PEPPERONI_REGISTERS)("retains %s drafts without mutating stock until Save", (register) => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    const before = screen.getByTestId("stock-form-values").textContent;
+    const persisted = loadRunValues(RUN_ID);
+    fireEvent.change(input(register), { target: { value: "12.25" } });
+    navigateAwayAndBack();
+    expect(input(register).value).toBe("12.25");
+    expect(screen.getByTestId("stock-form-values").textContent).toBe(before);
+    expect(loadRunValues(RUN_ID)).toEqual(persisted);
+    expect(queue).not.toHaveBeenCalled();
+    const other = register === "pep1" ? "pep2" : "pep1";
+    expect(input(other).value).not.toBe("12.25");
+    fireEvent.click(within(input(register).parentElement!).getByRole("button", { name: "Save" }));
+    expect(queue).toHaveBeenCalledTimes(1);
+    expect(queue.mock.calls[0][0]).toBe(RUN_ID);
+    expect(queue.mock.calls[0][1]).toMatchObject({ [`${register}StockLbs`]: 12.25 });
+    expect(Object.keys(queue.mock.calls[0][1]).some((field) => field.startsWith("app"))).toBe(false);
+    navigateAwayAndBack();
+    expect(input(register).value).toBe("12.25");
+    expect((within(input(register).parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("0");
+    expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
+  });
+
+  it.each(["", "0", "9999"])("retains a raw pepperoni draft %j across navigation without saving", (draft) => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    fireEvent.change(input("pep1"), { target: { value: "5" } });
+    fireEvent.change(input("pep1"), { target: { value: draft } });
+    navigateAwayAndBack();
+    expect(input("pep1").value).toBe(draft);
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("clears only the filled slot while preserving another unfinished draft", () => {
+    render(fixture());
+    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    navigateAwayAndBack();
+    fireEvent.click(within(input("pep1").parentElement!).getByRole("button", { name: "Fill to cap" }));
+    navigateAwayAndBack();
+    expect(input("pep1").value).toBe(input("pep1").max);
+    expect(input("pep2b").value).toBe("34.5");
+  });
+
+  it.each([
+    ["pep1", "change-pep1-type"], ["pep1b", "change-pep1-additional-type"],
+    ["pep2", "change-pep2-type"], ["pep2b", "change-pep2-additional-type"],
+  ])("does not transfer an unfinished %s draft to a different ingredient", (register, change) => {
+    render(fixture());
+    fireEvent.change(input(register), { target: { value: "12.25" } });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByTestId(change));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
+    expect(input(register).value).not.toBe("12.25");
+  });
+
+  it("preserves hidden Pep 2 drafts across combined mode, without exposing or persisting them", () => {
+    const queue = vi.fn();
+    render(fixture(queue));
+    fireEvent.change(input("pep2"), { target: { value: "12.25" } });
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
+    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    navigateAwayAndBack();
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2").value).toBe("12.25");
+    expect(input("pep2b").value).toBe("34.5");
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it("does not revive a hidden additional-Pep-2 draft after its ingredient changes", () => {
+    render(fixture());
+    fireEvent.change(input("pep2b"), { target: { value: "34.5" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    fireEvent.click(screen.getByTestId("change-pep2-additional-type"));
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    expect(input("pep2b").value).not.toBe("34.5");
+  });
+
+  it("discards a run's drafts when switching runs while Frontline is unmounted", () => {
+    const queue = vi.fn();
+    const view = render(fixture(queue));
+    fireEvent.change(input("pep1"), { target: { value: "12.25" } });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
+    view.rerender(fixture(queue, SWITCHED_RUN_ID));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
+    expect(input("pep1").value).not.toBe("12.25");
+    view.rerender(fixture(queue));
+    expect(input("pep1").value).not.toBe("12.25");
+    expect(queue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { section: "pep1", own: ["pep1", "pep1b"], other: ["pep2", "pep2b"] },
+    { section: "pep2", own: ["pep2", "pep2b"], other: ["pep1", "pep1b"] },
+  ])("fences only $section stock during peer ownership and releases it on expiry", ({ section, own, other }) => {
+    vi.useFakeTimers();
+    claimManualSectionLock(RUN_ID, section, "peer-device", 1_000, true);
+    render(fixture());
+    for (const register of own) expect(controls(register).every((control) => control.disabled)).toBe(true);
+    for (const register of other) expect(controls(register).every((control) => !control.disabled)).toBe(true);
+    expect((screen.getByRole("button", { name: "Increase app1 batches on line" }) as HTMLButtonElement).disabled).toBe(false);
+    act(() => { vi.advanceTimersByTime(1_100); });
+    for (const register of own) expect(controls(register).every((control) => !control.disabled)).toBe(true);
+  });
+
+  it.each(["pep1", "pep2"])("does not leak the %s peer lock across runs or release its original owner", (section) => {
+    claimManualSectionLock(RUN_ID, section, "peer-device", 30_000, true);
+    const view = render(fixture());
+    expect(input(section).disabled).toBe(true);
+    view.rerender(fixture(vi.fn(), SWITCHED_RUN_ID));
+    for (const register of PEPPERONI_REGISTERS) expect(input(register).disabled).toBe(false);
+    view.rerender(fixture());
+    expect(input(section).disabled).toBe(true);
+  });
+});
+
+describe("Frontline on-line applicator supply", () => {
+  beforeEach(() => { clearManualSectionLocks(); });
+  afterEach(() => { cleanup(); clearManualSectionLocks(); });
+
+  it("does not invent a batch quantity when a configured applicator has no known weight", () => {
+    render(<FrontlineNavigationFixture
+      queueManualCorrection={vi.fn()}
+      values={{ ...FRONTLINE_APPLICATOR_VALUES, app1BatchLbs: 0, app1CheeseRecipe: [] }}
+    />);
+    expect(screen.getByTestId("frontline-supply-app1").textContent).toContain("Batch supply unavailable");
+    expect(screen.queryByTestId("output-app1-batches-on-line")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Increase app1 batches on line" })).toBeNull();
+    expect(screen.getByTestId("output-app2-batches-on-line")).toBeTruthy();
+  });
+
+  it("shows batch-unit supply controls and persists a manual correction for the active run", () => {
     const queueManualCorrection = vi.fn();
     render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
-    const beforeForm = screen.getByTestId("stock-form-values").textContent;
-    const beforePersisted = loadRunValues(RUN_ID);
-    const fields = applicatorStockFields(register);
-    fireEvent.change(screen.getByTestId(`stock-${register}-lbs`), { target: { value: "12.25" } });
-    navigateAwayAndBack();
-    const input = screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
-    expect(input.value).toBe("12.25");
-    expect(screen.getByTestId("stock-form-values").textContent).toBe(beforeForm);
-    expect(loadRunValues(RUN_ID)).toEqual(beforePersisted);
-    expect(queueManualCorrection).not.toHaveBeenCalled();
-    const other = register === "app1" ? "app2" : "app1";
-    expect((screen.getByTestId(`stock-${other}-lbs`) as HTMLInputElement).value).not.toBe("12.25");
+    expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
+    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("batches");
 
-    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Increase app1 batches on line" }));
+    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("1");
     expect(queueManualCorrection).toHaveBeenCalledTimes(1);
     expect(queueManualCorrection.mock.calls[0][0]).toBe(RUN_ID);
-    expect(queueManualCorrection.mock.calls[0][1]).toMatchObject({ [fields.stock]: 12.25 });
-    navigateAwayAndBack();
-    const saved = screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
-    expect(saved.value).toBe("12.25");
-    expect((within(saved.parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
-  });
+    expect(queueManualCorrection.mock.calls[0][1]).toMatchObject({
+      app1StockLbs: 25,
+      app1StockAnchorNetSec: expect.any(Number),
+      app1StockCorrectionGeneration: expect.any(Number),
+      app1BatchAnchorNetSec: expect.any(Number),
+      app1BatchCorrectionGeneration: expect.any(Number),
+    });
+    expect(queueManualCorrection.mock.calls[0][2]).toEqual(expect.objectContaining({
+      app1StockLbs: expect.any(Number),
+    }));
 
-  it.each(["", "0", "9999"])("retains the raw draft %j without validating or saving during navigation", (draft) => {
-    const queueManualCorrection = vi.fn();
-    render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
-    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: "5" } });
-    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: draft } });
-    navigateAwayAndBack();
-    const input = screen.getByTestId("stock-app1-lbs") as HTMLInputElement;
-    expect(input.value).toBe(draft);
-    expect((within(input.parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(queueManualCorrection).not.toHaveBeenCalled();
-  });
-
-  it("retains simultaneous drafts separately and clears only the saved or filled slot", () => {
-    render(<FrontlineNavigationFixture queueManualCorrection={vi.fn()} />);
-    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: "12.25" } });
-    fireEvent.change(screen.getByTestId("stock-pep2b-lbs"), { target: { value: "34.5" } });
-    navigateAwayAndBack();
-    const input = screen.getByTestId("stock-app1-lbs") as HTMLInputElement;
-    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
-    navigateAwayAndBack();
-    const filled = screen.getByTestId("stock-app1-lbs") as HTMLInputElement;
-    expect(filled.value).toBe(filled.max);
-    expect((within(filled.parentElement!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId("stock-pep2b-lbs") as HTMLInputElement).value).toBe("34.5");
-  });
-
-  it("does not carry a draft to another ingredient in the same slot", () => {
-    render(<FrontlineNavigationFixture queueManualCorrection={vi.fn()} />);
-    fireEvent.change(screen.getByTestId("stock-pep1-lbs"), { target: { value: "12.25" } });
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByTestId("change-pep1-type"));
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
-    expect((screen.getByTestId("stock-pep1-lbs") as HTMLInputElement).value).not.toBe("12.25");
-  });
-
-  it("clears the bounded run cache even when the run changes while Frontline is unmounted", () => {
-    const queueManualCorrection = vi.fn();
-    const view = render(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
-    fireEvent.change(screen.getByTestId("stock-app1-lbs"), { target: { value: "12.25" } });
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
-    view.rerender(<FrontlineNavigationFixture runId={SWITCHED_RUN_ID} queueManualCorrection={queueManualCorrection} />);
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Frontline" }), { button: 0, ctrlKey: false });
-    expect((screen.getByTestId("stock-app1-lbs") as HTMLInputElement).value).not.toBe("12.25");
-    view.rerender(<FrontlineNavigationFixture queueManualCorrection={queueManualCorrection} />);
-    expect((screen.getByTestId("stock-app1-lbs") as HTMLInputElement).value).not.toBe("12.25");
-    expect(queueManualCorrection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Decrease app1 batches on line" }));
+    expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("0");
+    expect(queueManualCorrection).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -582,7 +652,7 @@ describe("live station startup", () => {
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES)(
-    "keeps $slot Frontline stock controls disabled while a peer owns the applicator section, then restores them",
+    "keeps $slot on-line supply controls disabled while a peer owns the applicator section, then restores them",
     ({ slot, label }) => {
       claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
       render(
@@ -592,7 +662,7 @@ describe("live station startup", () => {
       );
 
       expect(screen.getByText(label)).toBeTruthy();
-      const controls = applicatorStockControls(slot);
+      const controls = applicatorSupplyControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
       act(() => {
@@ -603,267 +673,27 @@ describe("live station startup", () => {
     },
   );
 
-  it.each([
-    {
-      slot: "pep1",
-      section: "pep1",
-      registers: ["pep1", "pep1b"],
-      otherRegisters: ["pep2", "pep2b"],
-    },
-    {
-      slot: "pep2",
-      section: "pep2",
-      registers: ["pep2", "pep2b"],
-      otherRegisters: ["pep1", "pep1b"],
-    },
-  ] as const)(
-    "keeps $slot primary and additional stock rows scoped to their peer lock",
-    ({ slot, section, registers, otherRegisters }) => {
-      const values: FormValues = {
-        ...STATION_VALUES,
-        pep1Type: "Pepperoni",
-        pep1TypeB: "Cup Pepperoni",
-        pep2Type: "Turkey Pepperoni",
-        pep2TypeB: "Mini Cup Pepperoni",
-        pep1Combined: false,
-      };
-      claimManualSectionLock(RUN_ID, section, `peer-${slot}`, 30_000, true);
-      render(
-        <StationProviders status="running" values={values}>
-          <LiveFrontlineTabContent />
-        </StationProviders>,
-      );
-
-      const lockedControls = registers.flatMap(applicatorStockControls);
-      const otherControls = otherRegisters.flatMap(applicatorStockControls);
-      expect(lockedControls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
-      expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
-
-      act(() => {
-        releaseManualSectionLock(RUN_ID, section, `peer-${slot}`);
-      });
-
-      expect(lockedControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
-      expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
-    },
-  );
-
-  it.each([
-    { section: "pep1", registers: ["pep1", "pep1b"], otherRegisters: ["pep2", "pep2b"] },
-    { section: "pep2", registers: ["pep2", "pep2b"], otherRegisters: ["pep1", "pep1b"] },
-  ] as const)(
-    "restores $section primary and additional stock rows when its peer lease expires without remounting",
-    ({ section, registers, otherRegisters }) => {
-      vi.useFakeTimers();
-      // Expire before the running station's 1-second clock tick: only the lock
-      // notification, not a live-clock rerender, should restore these controls.
-      const leaseMs = 250;
-      expect(claimManualSectionLock(RUN_ID, section, "peer-device", leaseMs, true)).toBe(true);
-      render(
-        <StationProviders status="running" values={{
-          ...STATION_VALUES,
-          pep1Type: "Pepperoni",
-          pep1TypeB: "Cup Pepperoni",
-          pep2Type: "Turkey Pepperoni",
-          pep2TypeB: "Mini Cup Pepperoni",
-          pep1Combined: false,
-        }}>
-          <LiveFrontlineTabContent />
-        </StationProviders>,
-      );
-
-      const lockedControls = registers.flatMap(applicatorStockControls);
-      const otherControls = otherRegisters.flatMap(applicatorStockControls);
-      for (const control of lockedControls) expect(control.disabled).toBe(true);
-      for (const control of otherControls) expect(control.disabled).toBe(false);
-
-      act(() => { vi.advanceTimersByTime(leaseMs - 1); });
-      for (const control of lockedControls) expect(control.disabled).toBe(true);
-      for (const control of otherControls) expect(control.disabled).toBe(false);
-
-      // The expiry notification runs one millisecond after the lease boundary.
-      act(() => { vi.advanceTimersByTime(2); });
-      for (const control of [...lockedControls, ...otherControls]) {
-        expect(control.isConnected).toBe(true);
-        expect(control.disabled).toBe(false);
-      }
-      expect(registers.flatMap(applicatorStockControls)).toEqual(lockedControls);
-      expect(otherRegisters.flatMap(applicatorStockControls)).toEqual(otherControls);
-    },
-  );
-
-  it("refreshes each applicator stock cap after recipe edits and uses batch weight for empty recipes", async () => {
+  it("shows on-line supply in batch units and enforces the two-batch stage cap", async () => {
     render(
       <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
         <>
           <LiveFrontlineTabContent />
-          {FRONTLINE_APPLICATOR_LOCK_CASES.map(({ slot }) => (
-            <ApplicatorRecipeEditor key={slot} slot={slot} recipeLbs={30 + Number(slot.slice(-1))} />
-          ))}
+          <ApplicatorRecipeEditor slot="app1" recipeLbs={30} />
         </>
       </StationProviders>,
     );
 
-    for (const { slot } of FRONTLINE_APPLICATOR_LOCK_CASES) {
-      const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
-      const stockRow = input.parentElement!.parentElement!;
-      const capacityLbs = (30 + Number(slot.slice(-1))) * 2;
-      expect(input.max).toBe("50");
-
-      fireEvent.click(screen.getByTestId(`edit-${slot}-recipe`));
-      await waitFor(() => expect(input.max).toBe(String(capacityLbs)));
-      expect(within(stockRow).getByText(`Capacity ${capacityLbs.toFixed(1)} lb`)).toBeTruthy();
-      fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
-      await waitFor(() => expect(screen.getByTestId(`${slot}-stock-value`).textContent).toBe(String(capacityLbs)));
-      expect(input.value).toBe(String(capacityLbs));
-
-      fireEvent.click(screen.getByTestId(`clear-${slot}-recipe`));
-      await waitFor(() => expect(input.max).toBe("50"));
-      expect(within(stockRow).getByText("Capacity 50.0 lb")).toBeTruthy();
-      fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
-      await waitFor(() => expect(screen.getByTestId(`${slot}-stock-value`).textContent).toBe("50"));
-      expect(input.value).toBe("50");
-    }
-  });
-
-  it("updates pepperoni stock rows after mounted type edits and combined-slot changes", async () => {
-    const values: FormValues = {
-      ...STATION_VALUES,
-      pep1Type: "Pepperoni",
-      pep1TypeB: "Cup Pepperoni",
-      pep2Type: "Cup Pepperoni",
-      pep2TypeB: "Mini Cup Pepperoni",
-      pep1Combined: false,
-      pep1StockLbs: 12.5,
-      pep1bStockLbs: 15.5,
-      pep2StockLbs: 22.5,
-      pep2bStockLbs: 25.5,
-    };
-    render(
-      <StationProviders status="running" values={values}>
-        <>
-          <LiveFrontlineTabContent />
-          <PepperoniSetupEditor />
-        </>
-      </StationProviders>,
-    );
-
-    expect(screen.getByText("Pep 1 · Pepperoni")).toBeTruthy();
-    expect(screen.getByText("Pep 1 additional · Cup Pepperoni")).toBeTruthy();
-    expect(screen.getByText("Pep 2 · Cup Pepperoni")).toBeTruthy();
-    expect(screen.getByText("Pep 2 additional · Mini Cup Pepperoni")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("change-pep1-type"));
-    fireEvent.click(screen.getByTestId("change-pep1-additional-type"));
-    fireEvent.click(screen.getByTestId("change-pep2-type"));
-    fireEvent.click(screen.getByTestId("change-pep2-additional-type"));
-    await waitFor(() => {
-      expect(screen.getByText("Pep 1 · Turkey Pepperoni")).toBeTruthy();
-      expect(screen.getByText("Pep 1 additional · Beef Pepperoni")).toBeTruthy();
-      expect(screen.getByText("Pep 2 · Turkey Cup Pepperoni")).toBeTruthy();
-      expect(screen.getByText("Pep 2 additional · Beef Cup Pepperoni")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByTestId("clear-pep1-additional-type"));
-    await waitFor(() => {
-      expect(screen.queryByTestId("stock-pep1b-lbs")).toBeNull();
-      expect(screen.getByText("Pep 1 · Turkey Pepperoni")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    await waitFor(() => {
-      expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
-      expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
-    });
-    expect(screen.getByTestId("stock-pep1-lbs")).toBeTruthy();
-    expect(screen.getByRole("spinbutton", { name: "Pep 1 · Turkey Pepperoni pounds on hand" })).toBeTruthy();
-    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
-    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
-    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
-
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    await waitFor(() => {
-      expect(screen.getByTestId("stock-pep2-lbs")).toBeTruthy();
-      expect(screen.getByTestId("stock-pep2b-lbs")).toBeTruthy();
-    });
-    expect(screen.getByRole("spinbutton", { name: "Pep 2 · Turkey Cup Pepperoni pounds on hand" })).toBeTruthy();
-    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
-    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
-  });
-
-  it("restores an unfinished Pep 2 stock draft after combined mode hides its rows", async () => {
-    const values: FormValues = {
-      ...STATION_VALUES,
-      pep1Type: "Pepperoni",
-      pep1TypeB: "Cup Pepperoni",
-      pep2Type: "Cup Pepperoni",
-      pep2TypeB: "Mini Cup Pepperoni",
-      pep1Combined: false,
-      pep1StockLbs: 12.5,
-      pep1bStockLbs: 15.5,
-      pep2StockLbs: 22.5,
-      pep2bStockLbs: 25.5,
-    };
-    render(
-      <StationProviders status="running" values={values}>
-        <>
-          <LiveFrontlineTabContent />
-          <PepperoniSetupEditor />
-        </>
-      </StationProviders>,
-    );
-
-    fireEvent.change(screen.getByTestId("stock-pep2-lbs"), { target: { value: "34.25" } });
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    await waitFor(() => expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull());
-    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
-    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
-    expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("15.5");
-    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
-    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
-
-    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
-    const restoredInput = await screen.findByTestId("stock-pep2-lbs") as HTMLInputElement;
-    expect(restoredInput.value).toBe("34.25");
-    expect(within(restoredInput.parentElement!).getByRole("button", { name: "Save" }).disabled).toBe(false);
-    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
-    expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("15.5");
-    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
-    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
-
-    fireEvent.click(within(restoredInput.parentElement!).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.getByTestId("pep2StockLbs").textContent).toBe("34.25"));
-  });
-
-  it("keeps the fixed pepperoni cap for manual adjustments on the current visible slot", async () => {
-    const values: FormValues = {
-      ...STATION_VALUES,
-      pep1Type: "Pepperoni",
-      pep1TypeB: "",
-      pep1Combined: false,
-      pep1bStockLbs: 10,
-    };
-    render(
-      <StationProviders status="running" values={values}>
-        <>
-          <LiveFrontlineTabContent />
-          <PepperoniSetupEditor />
-        </>
-      </StationProviders>,
-    );
-
-    fireEvent.click(screen.getByTestId("change-pep1-additional-type"));
-    await waitFor(() => expect(screen.getByText("Pep 1 additional · Beef Pepperoni")).toBeTruthy());
-    const input = screen.getByTestId("stock-pep1b-lbs") as HTMLInputElement;
-    expect(input.max).toBe("50");
-    expect(within(input.parentElement!.parentElement!).getByText("Capacity 50.0 lb")).toBeTruthy();
-
-    fireEvent.change(input, { target: { value: "42.75" } });
-    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("42.75"));
-
-    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
-    await waitFor(() => expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("50"));
-    expect(input.max).toBe("50");
+    const [decrease, increase] = applicatorSupplyControls("app1");
+    expect(screen.queryByTestId("stock-app1-lbs")).toBeNull();
+    fireEvent.click(increase);
+    fireEvent.click(increase);
+    await waitFor(() => expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("2"));
+    expect(increase.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("edit-app1-recipe"));
+    await waitFor(() => expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("1.67"));
+    fireEvent.click(screen.getByTestId("clear-app1-recipe"));
+    await waitFor(() => expect(screen.getByTestId("output-app1-batches-on-line").textContent).toContain("2"));
+    expect(decrease.disabled).toBe(false);
   });
 
   it("keeps simultaneous peer locks scoped to their matching Frontline correction rows", () => {
@@ -875,8 +705,8 @@ describe("live station startup", () => {
       </StationProviders>,
     );
 
-    const app1Controls = applicatorStockControls("app1");
-    const app2Controls = applicatorStockControls("app2");
+    const app1Controls = applicatorSupplyControls("app1");
+    const app2Controls = applicatorSupplyControls("app2");
     expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
     expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
@@ -1061,7 +891,7 @@ describe("live station startup", () => {
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
-    "keeps $slot Frontline stock controls usable after switching away from the peer-locked run",
+    "keeps $slot on-line supply controls usable after switching away from the peer-locked run",
     ({ slot, label }) => {
       claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
       render(
@@ -1075,61 +905,11 @@ describe("live station startup", () => {
       );
 
       expect(screen.getByText(label)).toBeTruthy();
-      const controls = applicatorStockControls(slot);
+      const controls = applicatorSupplyControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );
 
-  it.each([
-    { slot: "pep1", registers: ["pep1", "pep1b"], otherRegisters: ["pep2", "pep2b"] },
-    { slot: "pep2", registers: ["pep2", "pep2b"], otherRegisters: ["pep1", "pep1b"] },
-  ] as const)(
-    "keeps all pepperoni stock rows usable after switching away from a peer-locked $slot run",
-    ({ slot, registers, otherRegisters }) => {
-      const values: FormValues = {
-        ...STATION_VALUES,
-        pep1Type: "Pepperoni",
-        pep1TypeB: "Cup Pepperoni",
-        pep2Type: "Turkey Pepperoni",
-        pep2TypeB: "Mini Cup Pepperoni",
-        pep1Combined: false,
-      };
-      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
-      const station = (runId: string) => (
-        <StationProviders status="running" runId={runId} values={values}>
-          <LiveFrontlineTabContent />
-        </StationProviders>
-      );
-      const { rerender } = render(station(RUN_ID));
-
-      for (const register of registers) {
-        for (const control of applicatorStockControls(register)) {
-          expect(control.disabled).toBe(true);
-        }
-      }
-      for (const register of otherRegisters) {
-        for (const control of applicatorStockControls(register)) {
-          expect(control.disabled).toBe(false);
-        }
-      }
-
-      rerender(station(SWITCHED_RUN_ID));
-
-      for (const register of [...registers, ...otherRegisters]) {
-        for (const control of applicatorStockControls(register)) {
-          expect(control.disabled).toBe(false);
-        }
-      }
-
-      // The switch must not release the peer's lock on the original run.
-      rerender(station(RUN_ID));
-      for (const register of registers) {
-        for (const control of applicatorStockControls(register)) {
-          expect(control.disabled).toBe(true);
-        }
-      }
-    },
-  );
 });
 /**
  * These are intentionally component-level regressions rather than more

@@ -33,6 +33,7 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/MixedImportReviewQueue.tsx",
   "/src/components/ImportGoldLabCard.tsx",
   "/src/components/MixReconcilePanel.tsx",
+  "/src/components/MixedImportReviewQueue.tsx",
   "/src/components/GlanceOverlay.tsx",
 ];
 

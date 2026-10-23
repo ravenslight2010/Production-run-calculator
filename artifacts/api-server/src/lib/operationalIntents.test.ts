@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyOperationalIntent, parseOperationalIntent } from "./operationalIntents";
 
 const run = { id: "run-1", startedAt: 100, metaUpdatedAt: 100 };
@@ -6,6 +6,12 @@ const base = () => ({ dayState: { runs: [{ ...run }] }, runValues: { "run-1": { 
 const pause = { version: 1, id: "offline:one", date: "2026-01-01", runId: "run-1", observedGeneration: "run-1:100", resetEpoch: 0, effectiveAt: 200, action: "pause" } as const;
 
 describe("operational intents", () => {
+  it("reports only an allowlisted validation stage, never a rejected payload", () => {
+    const invalid = vi.fn();
+    expect(parseOperationalIntent({ privatePayload: "must-not-be-retained" }, 300, invalid)).toBeNull();
+    expect(invalid).toHaveBeenCalledWith("envelope");
+    expect(JSON.stringify(invalid.mock.calls)).not.toContain("must-not-be-retained");
+  });
   it("applies an offline pause once and retains its outcome for restart replay", () => {
     const first = applyOperationalIntent(base(), pause, 300);
     expect(first.outcome).toBe("accepted");

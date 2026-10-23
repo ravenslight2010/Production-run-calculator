@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   initialResetRequiresReload,
   useHomeSyncCoordination,
+  type ForegroundRecoveryAttemptContext,
 } from "./useHomeSyncCoordination";
 
 class MockEventSource {
@@ -312,12 +313,39 @@ describe("useHomeSyncCoordination", () => {
     registration.dispose();
     const permanent = vi.fn(async ({ classify }) => { classify("non-retryable-http"); return false; });
     const rejected = result.current.registerForegroundRecovery({ register }, permanent);
-    await rejected.reconcile();
+    await Promise.all([rejected.reconcile(), rejected.reconcile(), rejected.reconcile()]);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(permanent).toHaveBeenCalledTimes(1);
     rejected.dispose();
     unmount();
     vi.useRealTimers();
+  });
+
+  it("cancels an obsolete in-flight read on offline and permits one fresh reconnect read", async () => {
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const attempts: ForegroundRecoveryAttemptContext[] = [];
+    const recover = vi.fn(async (context: ForegroundRecoveryAttemptContext) => {
+      attempts.push(context);
+      if (attempts.length === 1) {
+        await new Promise<void>((resolve) => context.signal.addEventListener("abort", () => resolve(), { once: true }));
+        expect(context.isCurrent()).toBe(false);
+        context.classify("cancelled");
+        return false;
+      }
+      expect(context.signal.aborted).toBe(false);
+      return true;
+    });
+    const registration = result.current.registerForegroundRecovery({ register: () => () => {} }, recover);
+    const first = registration.reconcile();
+    window.dispatchEvent(new Event("offline"));
+    expect(attempts[0].signal.aborted).toBe(true);
+    const reconnect = registration.reconcile("online");
+    expect(await first).toBe(true);
+    expect(await reconnect).toBe(true);
+    expect(recover).toHaveBeenCalledTimes(2);
+    registration.dispose();
+    expect(attempts[1].signal.aborted).toBe(true);
+    unmount();
   });
 
   it("serializes today writes with epoch, snapshot, and queue age", async () => {

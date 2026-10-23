@@ -31,13 +31,17 @@ describe("shared live calculation boundary", () => {
     expect(getAutoTrackTiming(1000, 1, 1, 100).caseMs).toBe(1000);
   });
 
-  it("uses 50 lb operational Frontline batches for missing or oversized weights", () => {
+  it("does not create automatic batch claims without a valid configured weight", () => {
     const base = {
       type: "Cheese", recipe: [], ozPerPizza: 4, casesNeeded: 100,
       pizzasPerCase: 10, ppm: 100,
     };
-    expect(computeAppSlotInfo({ ...base, batchLbs: 0 }).effectiveBatchLbs).toBe(50);
-    expect(computeAppSlotInfo({ ...base, batchLbs: 70 }).effectiveBatchLbs).toBe(50);
+    expect(computeAppSlotInfo({ ...base, batchLbs: 0 })).toMatchObject({
+      effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
+    });
+    expect(computeAppSlotInfo({ ...base, batchLbs: 70 })).toMatchObject({
+      effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
+    });
     expect(computeAppSlotInfo({ ...base, batchLbs: 40 }).effectiveBatchLbs).toBe(40);
   });
 

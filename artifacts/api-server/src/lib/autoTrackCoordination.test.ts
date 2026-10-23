@@ -37,12 +37,20 @@ function sauceMutations(made: number, anchor: number, correctionGeneration: numb
   ];
 }
 
-function applicatorMutations(slot: 1 | 2 | 3 | 4, made: number, anchor: number, correctionGeneration: number) {
+function applicatorMutations(
+  slot: 1 | 2 | 3 | 4,
+  made: number,
+  anchor: number,
+  correctionGeneration: number,
+  stockFrom = 0,
+  stockTo = stockFrom + 50,
+) {
   const prefix = `app${slot}Batch` as const;
   return [
     { field: `${prefix}esMade` as const, from: made, to: made + 1 },
     { field: `${prefix}AnchorNetSec` as const, from: anchor, to: anchor + 60 },
     { field: `${prefix}CorrectionGeneration` as const, from: correctionGeneration, to: correctionGeneration },
+    { field: `app${slot}StockLbs` as const, from: stockFrom, to: stockTo },
   ];
 }
 
@@ -57,6 +65,7 @@ function stockClaim(overrides: Partial<AutoTrackClaim> = {}): AutoTrackClaim {
       { field: "app1StockLbs", from: 50, to: 49 },
       { field: "app1StockAnchorNetSec", from: 0, to: 16 },
       { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+      { field: "app1StockConsumedLbs", from: 0, to: 1 },
     ],
     ...overrides,
   });
@@ -89,6 +98,7 @@ describe("auto-track coordination", () => {
         { field: "app1BatchesMade", from: 0, to: 1 },
         { field: "app1BatchAnchorNetSec", from: 0, to: 60.25 },
         { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+        { field: "app1StockLbs", from: 0, to: 50 },
       ],
     }), NOW)).not.toBeNull();
     expect(parseAutoTrackClaim(claim({
@@ -515,9 +525,17 @@ describe("auto-track coordination", () => {
         dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2 }] },
         runValues: {
           "run-1": {
+            approxLineSpeed: 30, crustsPerCycle: 1, cycleSpeed: 30, casesNeeded: 200, pizzasPerCase: 10,
+            [`app${slot}Type`]: "Cheese",
+            [`app${slot}OzPerPizza`]: 2,
+            [`app${slot}BatchLbs`]: 50,
+            [`app${slot}CheeseRecipe`]: [],
             [`app${slot}BatchesMade`]: 0,
             [`app${slot}BatchAnchorNetSec`]: 0,
             [`app${slot}BatchCorrectionGeneration`]: 0,
+            [`app${slot}StockLbs`]: 0,
+            [`app${slot}StockConsumedLbs`]: 0,
+            applicatorStockInitialized: true,
           },
         },
         runValuesUpdatedAt: { "run-1": 10 },
@@ -547,6 +565,10 @@ describe("auto-track coordination", () => {
         app1BatchesMade: 0,
         app1BatchAnchorNetSec: 0,
         app1BatchCorrectionGeneration: 0,
+        approxLineSpeed: 30, crustsPerCycle: 1, cycleSpeed: 30, casesNeeded: 200, pizzasPerCase: 10,
+        app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+        app1CheeseRecipe: [], app1StockLbs: 0,
+        app1StockConsumedLbs: 0, applicatorStockInitialized: true,
       },
       mutations: applicatorMutations(1, 0, 0, 0),
     },
@@ -620,7 +642,13 @@ describe("auto-track coordination", () => {
         "run-1": {
           ...(channel === "sauce-barrel"
             ? { sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0 }
-            : { app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0 }),
+            : {
+                approxLineSpeed: 30, casesNeeded: 200, pizzasPerCase: 10,
+                app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+                app1CheeseRecipe: [], app1StockLbs: 0,
+                app1StockConsumedLbs: 0, applicatorStockInitialized: true,
+                app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+              }),
         },
         "run-2": { sentinel: 42 },
       },
@@ -706,6 +734,7 @@ describe("auto-track coordination", () => {
       dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2, subTab: "crusts" }] },
       runValues: {
         "run-1": {
+          casesNeeded: 200, pizzasPerCase: 12,
           approxLineSpeed: 30,
           app1Type: "Cheese",
           app1OzPerPizza: 2,
@@ -715,6 +744,7 @@ describe("auto-track coordination", () => {
           app1StockLbs: 50,
           app1StockAnchorNetSec: 0,
           app1StockCorrectionGeneration: 0,
+          app1StockConsumedLbs: 0,
           applicatorStockInitialized: true,
         },
       },
@@ -727,6 +757,7 @@ describe("auto-track coordination", () => {
         { field: "app1StockLbs", from: 50, to: expected },
         { field: "app1StockAnchorNetSec", from: 0, to: 16 },
         { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+        { field: "app1StockConsumedLbs", from: 0, to: 50 - expected },
       ],
     }), NOW);
 
@@ -740,6 +771,7 @@ describe("auto-track coordination", () => {
       dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2, subTab: "crusts" }] },
       runValues: {
         "run-1": {
+          casesNeeded: 200, pizzasPerCase: 12,
           approxLineSpeed: 30,
           app1Type: "Cheese",
           app1OzPerPizza: 2,
@@ -748,6 +780,7 @@ describe("auto-track coordination", () => {
           app1StockLbs: 50,
           app1StockAnchorNetSec: 0,
           app1StockCorrectionGeneration: 0,
+          app1StockConsumedLbs: 0,
           applicatorStockInitialized: true,
         },
       },

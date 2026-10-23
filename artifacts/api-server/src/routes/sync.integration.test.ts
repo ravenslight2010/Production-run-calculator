@@ -1168,6 +1168,46 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     });
   });
 
+  it.each(["pep1", "pep1b", "pep2", "pep2b"])("accepts a complete-section %s refill without treating its inactive companion as a correction", async (register) => {
+    const section = register.startsWith("pep1") ? "pep1" : "pep2";
+    const baseline = Object.fromEntries([section, `${section}b`].flatMap((slot) =>
+      ["StockLbs", "StockAnchorNetSec", "StockCorrectionGeneration"].map((suffix) => [`${slot}${suffix}`, 0]),
+    ));
+    const typeField = register.endsWith("b") ? `${section}TypeB` : `${section}Type`;
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, runs: [{ id: "pep-stock-run", startedAt: 1_000, pausedAt: 2_000, metaUpdatedAt: 3 }] },
+        runValues: {
+          "pep-stock-run": {
+            ...baseline, [typeField]: "Pepperoni", pep1Combined: false,
+            app1StockLbs: 18.75, app1StockConsumedLbs: 6.25, app1BatchesMade: 4,
+          },
+        },
+      },
+      canonicalRevision: 0,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const edit = {
+      id: `pep-refill-${register}`, date: DATE, runId: "pep-stock-run", section,
+      values: { ...baseline, [`${register}StockLbs`]: 12.5, [`${register}StockCorrectionGeneration`]: 1 },
+      baseValues: baseline, observedGeneration: "pep-stock-run:3",
+      baseRevision: 0, resetEpoch: 0, deviceId: "pep-device",
+    };
+    const response = await request(edit);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { runValues: Record<string, Record<string, unknown>> } };
+    expect(body.data.runValues["pep-stock-run"]).toMatchObject({
+      [`${register}StockLbs`]: 12.5, [`${register}StockCorrectionGeneration`]: 1,
+      app1StockLbs: 18.75, app1StockConsumedLbs: 6.25, app1BatchesMade: 4,
+    });
+    expect(await (await request(edit)).json()).toMatchObject({ duplicate: true });
+    const stale = await request({
+      ...edit, id: `pep-stale-${register}`,
+      values: { ...edit.values, [`${register}StockLbs`]: 20, [`${register}StockCorrectionGeneration`]: 2 },
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "section_changed" });
+  });
+
   it("rejects an operator stock adjustment above that slot's capacity", async () => {
     await seedStockRun();
     const response = await request(stockEdit("stock-over-cap", 100.01));
@@ -1838,6 +1878,8 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
             app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
             app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
             app1BatchCorrectionGeneration: 0,
+            app1StockLbs: 0, app1StockConsumedLbs: 0, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
             app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
             app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
             app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
@@ -1863,7 +1905,7 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
     // Hold the accepted claim's next due time in the future to replay the same
     // server tick boundary without manufacturing a new physical batch event.
     const heldData = afterFirst.data as any;
-    heldData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].nextDueAt = TICK_NOW + 60_000;
+    heldData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].nextDueAt = 180;
     await db.update(dailySyncTable).set({ data: heldData })
       .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
 
@@ -1969,6 +2011,8 @@ describe("server auto-track tick recovery under database pressure", () => {
             app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
             app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
             app1BatchCorrectionGeneration: 0,
+            app1StockLbs: 0, app1StockConsumedLbs: 0, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
             app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
             app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
             app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
@@ -3442,11 +3486,34 @@ describe("POST /sync/auto-track/claim", () => {
         senderId: "seed",
         payload: {
           dayState: { runs: [{ id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2 }] },
-          runValues: { [RUN]: { traysOnLine: 10 } },
+          runValues: { [RUN]: {
+            traysOnLine: 10,
+            casesNeeded: 200, pizzasPerCase: 12, crustsPerCycle: 1, cycleSpeed: 400,
+            app1Type: "Cheese", app1BatchLbs: 50, app1OzPerPizza: 2, app1CheeseRecipe: [],
+            app1StockLbs: 0, app1StockConsumedLbs: 0, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
+          } },
           runValuesUpdatedAt: { [RUN]: 1 },
         },
       }),
     });
+    // A client sync write cannot initialize server-owned stock for a running run.
+    // Seed only this disposable test database with the acknowledged canonical
+    // starting supply so the claim transaction reaches its intended guard.
+    const [row] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE),
+    ));
+    const data = structuredClone(row.data) as any;
+    Object.assign(data.runValues[RUN], {
+      app1StockLbs: 0,
+      app1StockConsumedLbs: 0,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    });
+    await db.update(dailySyncTable).set({ data }).where(and(
+      eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE),
+    ));
   });
 
   it("commits one of two competing tabs and converges both on one decrement", async () => {
@@ -3535,6 +3602,7 @@ describe("POST /sync/auto-track/claim", () => {
           { field: "app1BatchesMade", from: 0, to: 1 },
           { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
           { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+          { field: "app1StockLbs", from: 0, to: 50 },
         ],
       },
     };
@@ -3635,6 +3703,7 @@ describe("POST /sync/auto-track/claim", () => {
           { field: "app1BatchesMade", from: 0, to: 1 },
           { field: "app1BatchAnchorNetSec", from: 0, to: 60 },
           { field: "app1BatchCorrectionGeneration", from: 0, to: 0 },
+          { field: "app1StockLbs", from: 0, to: 50 },
         ],
       },
     });

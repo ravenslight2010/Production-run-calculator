@@ -9560,7 +9560,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app1BatchCorrectionGeneration": zod.number().optional(),
   "app1StockLbs": zod.number().optional(),
   "app1StockAnchorNetSec": zod.number().optional(),
-  "app1StockCorrectionGeneration": zod.number().optional()
+  "app1StockCorrectionGeneration": zod.number().optional(),
+  "app1StockConsumedLbs": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app1BatchesMade": zod.number(),
@@ -9568,7 +9569,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app1BatchCorrectionGeneration": zod.number(),
   "app1StockLbs": zod.number(),
   "app1StockAnchorNetSec": zod.number(),
-  "app1StockCorrectionGeneration": zod.number()
+  "app1StockCorrectionGeneration": zod.number(),
+  "app1StockConsumedLbs": zod.number().optional()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodySixOneIdRegExp),
@@ -9586,7 +9588,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app2BatchCorrectionGeneration": zod.number().optional(),
   "app2StockLbs": zod.number().optional(),
   "app2StockAnchorNetSec": zod.number().optional(),
-  "app2StockCorrectionGeneration": zod.number().optional()
+  "app2StockCorrectionGeneration": zod.number().optional(),
+  "app2StockConsumedLbs": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app2BatchesMade": zod.number(),
@@ -9594,7 +9597,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app2BatchCorrectionGeneration": zod.number(),
   "app2StockLbs": zod.number(),
   "app2StockAnchorNetSec": zod.number(),
-  "app2StockCorrectionGeneration": zod.number()
+  "app2StockCorrectionGeneration": zod.number(),
+  "app2StockConsumedLbs": zod.number().optional()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodySevenOneIdRegExp),
@@ -9612,7 +9616,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app3BatchCorrectionGeneration": zod.number().optional(),
   "app3StockLbs": zod.number().optional(),
   "app3StockAnchorNetSec": zod.number().optional(),
-  "app3StockCorrectionGeneration": zod.number().optional()
+  "app3StockCorrectionGeneration": zod.number().optional(),
+  "app3StockConsumedLbs": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app3BatchesMade": zod.number(),
@@ -9620,7 +9625,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app3BatchCorrectionGeneration": zod.number(),
   "app3StockLbs": zod.number(),
   "app3StockAnchorNetSec": zod.number(),
-  "app3StockCorrectionGeneration": zod.number()
+  "app3StockCorrectionGeneration": zod.number(),
+  "app3StockConsumedLbs": zod.number().optional()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodyEightOneIdRegExp),
@@ -9638,7 +9644,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app4BatchCorrectionGeneration": zod.number().optional(),
   "app4StockLbs": zod.number().optional(),
   "app4StockAnchorNetSec": zod.number().optional(),
-  "app4StockCorrectionGeneration": zod.number().optional()
+  "app4StockCorrectionGeneration": zod.number().optional(),
+  "app4StockConsumedLbs": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app4BatchesMade": zod.number(),
@@ -9646,7 +9653,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "app4BatchCorrectionGeneration": zod.number(),
   "app4StockLbs": zod.number(),
   "app4StockAnchorNetSec": zod.number(),
-  "app4StockCorrectionGeneration": zod.number()
+  "app4StockCorrectionGeneration": zod.number(),
+  "app4StockConsumedLbs": zod.number().optional()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodyNineOneIdRegExp),

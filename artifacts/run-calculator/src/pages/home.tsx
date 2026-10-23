@@ -169,7 +169,7 @@ import {
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { reconcileLiveScheduleSave } from "../scheduleLiveReconciliation";
-import { fetchWithTimeout } from "../fetchWithTimeout";
+import { fetchAndConsumeWithTimeout, fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
   buildMixRunSnapshotUpdates,
@@ -8911,7 +8911,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify, isCurrent }): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify, isCurrent, signal }): Promise<boolean> => {
       if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
@@ -8966,14 +8966,14 @@ export default function Home() {
           // plus its adoption guard must agree on the same day.
           const clientDate = todayStr();
           const syncTodayRequest = createForegroundSyncTodayRequest(snapshot, clientDate);
-          const res = await fetchWithTimeout(
+          const recovery = await fetchAndConsumeWithTimeout(
             syncTodayRequest.url,
-            syncTodayRequest.init,
+            { ...syncTodayRequest.init, signal },
             10_000,
-          );
+            async (res, requestSignal) => {
           permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
           if (permanentHttpFailure) classify("non-retryable-http");
-          const recovery = await consumeForegroundRecoveryResponse({
+          return consumeForegroundRecoveryResponse({
             response: res,
             expectedDate: clientDate,
             requestedSnapshotId: snapshot,
@@ -8990,7 +8990,7 @@ export default function Home() {
               synchronizationStateMachineRef.current.completeReset(generation);
               return false;
             },
-            isCurrent: isCurrentRecovery,
+            isCurrent: () => isCurrentRecovery() && !requestSignal.aborted,
             adoptUnchanged: (body) => {
               adoptOperationalRevision(body.canonicalRevision);
               if (body.operationalProjection) {
@@ -9014,6 +9014,8 @@ export default function Home() {
               }
             },
           });
+            },
+          );
           if (!recovery.accepted) {
             classify("cancelled");
             return false;
@@ -9157,7 +9159,7 @@ export default function Home() {
                    );
                  }
                } else {
-                  showForegroundRecoveryNotice("outcome", "Production state synchronized.");
+                  showForegroundRecoveryNotice("outcome", "Latest production snapshot received. Unsaved edits are not confirmed by this refresh; resolve any section warning before saving again.");
                }
              if (!cancelled) {
                 releaseForegroundRecovery({

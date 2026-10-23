@@ -2000,9 +2000,17 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     reject(400, "invalid_baseline"); return;
   }
   if (MANUAL_SECTION_FIELDS[section as ManualSection].some((field) =>
-    !Object.prototype.hasOwnProperty.call(baseValues, field)
-    || typeof (baseValues as Record<string, unknown>)[field] !== "number")) {
+    !field.endsWith("StockConsumedLbs") && (
+      !Object.prototype.hasOwnProperty.call(baseValues, field)
+      || typeof (baseValues as Record<string, unknown>)[field] !== "number"))) {
     reject(400, "invalid_baseline"); return;
+  }
+  // The additive consumption ledger may be absent in older clients' baselines.
+  // A physical load/correction must never change that ledger.
+  if (entries.some(([field, value]) => field.endsWith("StockConsumedLbs")
+    && (typeof (baseValues as Record<string, unknown>)[field] !== "number"
+      || value !== (baseValues as Record<string, unknown>)[field]))) {
+    reject(400, "invalid_values"); return;
   }
   const ownerId = String(deviceId ?? req.userId ?? "unknown");
   await recordSyncOutboxEvent({
@@ -2064,6 +2072,13 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
         .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
         return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime, rejectionCode: "invalid_values" };
       }
+      // The client expands a section edit to its complete baseline. An untouched
+      // companion (including an unconfigured pepperoni slot) is not a refill and
+      // must not require capacity or a new generation. The full baseline fence
+      // below still rejects concurrent changes to any field in this section.
+      if ([fields.stock, fields.anchor, fields.correctionGeneration].every(
+        (field) => (values as Record<string, unknown>)[field] === (baseValues as Record<string, unknown>)[field],
+      )) continue;
       const onHand = Number((values as Record<string, unknown>)[fields.stock]);
       const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
       const correctionGeneration = Number((values as Record<string, unknown>)[fields.correctionGeneration]);
@@ -2368,8 +2383,15 @@ router.post("/sync/station-activity", async (req: Request, res: Response): Promi
 // original answer instead of applying a second pause or correction.
 router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
   const now = Date.now();
-  const intent = parseOperationalIntent(req.body?.intent, now);
+  let validationStage = "envelope";
+  const intent = parseOperationalIntent(req.body?.intent, now, (issue) => { validationStage = issue; });
   if (!intent || intent.date !== clientToday(req)) {
+    // Allowlisted stage only. The request logger supplies correlation; never
+    // retain inventory keys, values, identities or the rejected payload.
+    req.log.warn({
+      event: "operational_intent_rejected",
+      stage: intent ? "production-date" : validationStage,
+    }, "Operational intent contract rejected");
     res.status(400).json({ error: "Invalid operational intent or production date" }); return;
   }
   const command = commandContext(req, {
@@ -2386,6 +2408,10 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
     inventoryLines: intent.inventoryLines,
   }, intent.baseRevision ?? 0);
   if (!command) {
+    req.log.warn({
+      event: "operational_intent_rejected",
+      stage: "command-context",
+    }, "Operational command rejected before application");
     res.status(400).json({ error: "Invalid or oversized operational command" });
     return;
   }

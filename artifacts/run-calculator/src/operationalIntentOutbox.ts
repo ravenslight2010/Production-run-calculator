@@ -351,7 +351,10 @@ function canonicalInventoryLines(lines: Array<{ itemKey: string; qty: number }> 
     totals.set(line.itemKey, (totals.get(line.itemKey) ?? 0) + line.qty);
   }
   if (totals.size > 200) throw new Error("Run completion has too many inventory lines");
-  const output = [...totals].map(([itemKey, qty]) => ({ itemKey, qty })).sort((a, b) => a.itemKey.localeCompare(b.itemKey));
+  // The server's durable command contract uses UTF-16 lexical ordering.
+  // Locale collation differs for case, punctuation and accented names.
+  const output = [...totals].map(([itemKey, qty]) => ({ itemKey, qty }))
+    .sort((a, b) => a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0);
   if (output.some((line) => line.qty > 1_000_000)) throw new Error("Run completion inventory quantity is out of range");
   return output;
 }
@@ -742,7 +745,7 @@ export function retryOperationalIntent(id: string): boolean {
   const terminalKey = `${TERMINAL_PREFIX}${id}`;
   try {
     const item = JSON.parse(localStorage.getItem(`${PENDING_PREFIX}${id}`) ?? localStorage.getItem(terminalKey) ?? "null");
-    if (!valid(item) || item.state === "sending" || ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(item.state)) return false;
+    if (!valid(item) || item.state === "sending" || ["accepted", "superseded", "rebased", "conflicted", "review-required", "permanently-rejected"].includes(item.state)) return false;
     if (item.owner && item.owner !== activeOwner) return false;
     if (item.failure === "rate-limited" && (item.nextRetryAt ?? 0) > Date.now()) return false;
     if (!persistPending({ ...item, owner: activeOwner, resetEpoch: getStoredResetEpoch(), state: "pending", deliveryToken: undefined, nextRetryAt: 0, failure: undefined, guidance: undefined })) return false;

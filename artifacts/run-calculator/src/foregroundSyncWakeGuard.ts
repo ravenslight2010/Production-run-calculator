@@ -5,6 +5,7 @@
  */
 export function createForegroundSyncWakeGuard(
   reconcile: () => Promise<boolean>,
+  shouldReplay: () => boolean = () => true,
 ): () => Promise<boolean> {
   let inFlight: Promise<boolean> | null = null;
   let queuedWake = false;
@@ -19,7 +20,7 @@ export function createForegroundSyncWakeGuard(
         } catch (error) {
           firstError = error;
         }
-        if (!succeeded && queuedWake) {
+        if (!succeeded && queuedWake && shouldReplay()) {
           // Keep the bounded retry inside this wake burst's shared promise. That
           // gives focus/visibility/online one completion owner instead of
           // detaching a second reconciliation that can release the barrier after
