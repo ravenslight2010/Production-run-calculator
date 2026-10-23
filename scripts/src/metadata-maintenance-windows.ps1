@@ -118,7 +118,10 @@ try {
     } finally { $output.Dispose() }
     # Same-volume ReplaceFile semantics; never delete the destination first,
     # and never fall back to a non-atomic copy when replacement is denied.
-    [System.IO.File]::Replace($temporaryPath, $decisionPath, $null)
+    # PowerShell 5.1 coerces $null to an empty string for a .NET string
+    # parameter. NullString preserves the actual null backup-path argument.
+    [System.IO.File]::Replace($temporaryPath, $decisionPath,
+        [System.Management.Automation.Language.NullString]::Value)
     $temporaryPath = $null
     if ([System.IO.File]::Exists($recoveryPath)) { [System.IO.File]::Delete($recoveryPath) }
 } catch {
