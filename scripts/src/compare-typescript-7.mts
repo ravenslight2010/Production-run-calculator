@@ -58,10 +58,13 @@ type EditorServiceEvidence = {
   sdkVersion: string | null;
   outcome: "PASS" | "FAIL";
   exitCode: number;
+  failureReason: "TIMEOUT" | null;
 };
 
 const RESOURCE_APPROVAL_EVIDENCE_PATH =
   "docs/typescript-7-resource-approval-evidence.json";
+/** Bound the optional editor check so a stalled service cannot block comparison evidence. */
+export const EDITOR_TYPESCRIPT_CHECK_TIMEOUT_MS = 5 * 60 * 1_000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const REVISION_PATTERN = /^[a-f0-9]{40}$/u;
 export const TYPESCRIPT_7_DECLARATION_EXTENSIONS = [
@@ -243,6 +246,7 @@ export function editorServiceEvidenceFromResult(result: {
   status: number | null;
   stdout?: string | Buffer | null;
   stderr?: string | Buffer | null;
+  error?: NodeJS.ErrnoException | null;
 }): EditorServiceEvidence {
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   return {
@@ -256,7 +260,19 @@ export function editorServiceEvidenceFromResult(result: {
       null,
     outcome: result.status === 0 ? "PASS" : "FAIL",
     exitCode: result.status ?? 1,
+    failureReason: result.error?.code === "ETIMEDOUT" ? "TIMEOUT" : null,
   };
+}
+
+export function typescript7PromotionGatesMet(
+  promotionAttempt: boolean,
+  editorService: Pick<EditorServiceEvidence, "outcome"> | null,
+  promotionAssessment: { eligible: boolean },
+): boolean {
+  return (
+    !promotionAttempt ||
+    (editorService?.outcome === "PASS" && promotionAssessment.eligible === true)
+  );
 }
 
 export type Typescript7RunnerFingerprint = {
@@ -1030,15 +1046,17 @@ async function main(): Promise<void> {
       const editorResult = spawnSync("pnpm", ["run", "check:editor-typescript"], {
         cwd: rootDir,
         encoding: "utf8",
+        timeout: EDITOR_TYPESCRIPT_CHECK_TIMEOUT_MS,
       });
       editorService = editorServiceEvidenceFromResult(editorResult);
       if (editorResult.stdout) process.stdout.write(editorResult.stdout);
       if (editorResult.stderr) process.stderr.write(editorResult.stderr);
     }
-    const promotionGatesMet =
-      !promotionAttempt ||
-      (editorService?.outcome === "PASS" &&
-        promotionAssessment.eligible === true);
+    const promotionGatesMet = typescript7PromotionGatesMet(
+      promotionAttempt,
+      editorService,
+      promotionAssessment,
+    );
 
     report = {
       schemaVersion: 3,
