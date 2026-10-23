@@ -11,6 +11,17 @@ Treat a successful rebase as history completion, not proof that the resulting tr
 
 After a conflict-heavy browser-test replay, also run the browser spec inventory/parse check. Package typecheck may exclude end-to-end specs, and a transpile-only check can miss syntax diagnostics; a malformed spec once survived both checks after a rebase.
 
+This also applies to unit-test files excluded from package typechecking, and to
+base updates performed during task completion.
+
+**Why:** Completion validation passed while a refreshed base contained a unit
+test with duplicated declarations, missing suite boundaries, and a truncated
+test body. The earlier test result belonged to the pre-refresh tree.
+
+**How to apply:** After completion refreshes a base, inspect the current test
+sources and run their owning suite when they changed; a passing root typecheck
+does not establish that excluded test files can parse or execute.
+
 Treat persisted browser pass summaries as evidence for the tree that produced them, not automatically for the post-sync tree.
 
 **Why:** A saved Playwright pass result remained present after a managed sync malformed the corresponding spec. The old result could not establish that the new source even parsed.

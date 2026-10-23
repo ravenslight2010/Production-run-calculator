@@ -57,18 +57,22 @@ runner, workspace lock, and validation commands intact.
 
 Some Replit images expose an older global pnpm than the repository pin. Its
 automatic version manager can recursively spawn installers for the pinned pnpm
-until the process limit is exhausted. Select the repository pin through Corepack
-instead, and ensure nested script invocations of `pnpm` resolve to that same
-selected version.
+until the process limit is exhausted. The Linux release runner now resolves
+`packageManager` via npm for top-level pnpm commands and keeps the resulting
+binary available to nested scripts.
 
 **Why:** Selecting pnpm only for the top-level command leaves child scripts free
 to invoke the older binary from `PATH`; the resulting bootstrap recursion can
 prevent even Git or unrelated checks from starting.
 
 **How to apply:** Compare the global binary with the repository's manager pin.
-Use Corepack and a matching child-command path for validation. If resource
-exhaustion already occurred, stop only processes positively identified as the
-recursive pinned-pnpm bootstrap, not arbitrary Node services or user installs.
+For Linux local validation, invoke commands through
+`bash scripts/src/run-release-node.sh pnpm ...`; it provisions the exact pin in
+a temporary cache, preserves the Node and HTTPS protections, and removes the
+cache afterward. If resource exhaustion already occurred, stop only processes
+positively identified as the recursive pinned-pnpm bootstrap, not arbitrary
+Node services or user installs. The macOS runner remains a separate path that
+requires its pinned pnpm to be installed already.
 
 Interactive and automated shells can resolve different package-manager paths.
 Check the selected pin in both environments, including nested commands; a

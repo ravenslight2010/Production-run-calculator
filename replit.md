@@ -12,6 +12,10 @@
   Confirm with `node --version` and `node -p process.execPath`. If selection
   fails, the shell exits with recovery guidance instead of using the module's
   older Node patch; the validation workflows and release runner remain separate.
+- On Linux/Replit, for local checks that need the workspace's exact pnpm pin, use
+  `bash scripts/src/run-release-node.sh pnpm ...`. This provisions the declared
+  version through npm with a private temporary cache, retains the Node and
+  HTTPS-only safeguards, and removes the cache after the command.
 - **Release evidence handoff:** start at [docs/release-evidence-handoff.md](docs/release-evidence-handoff.md) for the standard/full commands, selected-revision report/checkpoint status, CI artifacts, and production-proof boundary
 - `pnpm --filter @workspace/api-server run typecheck:routes` — focused API route check when a generated validator build blocks the full API check; it uses the last successful `@workspace/api-zod` declarations and does not replace the authoritative `typecheck` command
 - The Node-pinned release runner serializes validation commands per workspace. Waiting for that local filesystem lock is capped at two hours (the configured post-merge validation timeout); contention reports the owning process and start time, then exits with a retryable error at the limit. `RELEASE_RUNNER_LOCK_WAIT_SECONDS` may shorten, but cannot extend, that cap. Its private temporary lock directory keeps the newest 20 local wait events per workspace (UTC timestamp, elapsed seconds, outcome, owner PID, and owner start time) in a mode-`600` file; command arguments, environment values, and test output are never retained. This does not control Replit-managed task merge locks or interrupt an already-running validation command.

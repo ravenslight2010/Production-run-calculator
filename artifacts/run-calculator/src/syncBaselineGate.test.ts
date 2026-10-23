@@ -283,11 +283,11 @@ describe("SSE sync baseline gate", () => {
     );
     const factory = home.slice(
       home.indexOf("// ── Factory KV: startup fetch"),
-      home.indexOf("// ── Brand+flavor profile pool reconcile"),
+      home.indexOf("// Dough pause/resume is immediate"),
     );
     const profileReconcile = home.slice(
-      home.indexOf("// ── Brand+flavor profile pool reconcile"),
-      home.indexOf("// Dough pause/resume is immediate"),
+      home.indexOf("const reconcileConfigurationPass = async ("),
+      home.indexOf("const reconcileConfiguration = ("),
     );
     const canonicalPush = home.slice(
       home.indexOf("async function pushTodayCanonical("),
@@ -307,7 +307,8 @@ describe("SSE sync baseline gate", () => {
     expect(factory).toContain("if (screenMode !== null) return;");
     expect(factory).toContain("if (screenMode === null) void flushFactoryQueue();");
     expect(factory).toContain("if (screenMode === null) void runFactoryKvMigration(data);");
-    expect(profileReconcile).toContain("if (screenMode !== null) return;");
+    expect(profileReconcile).toMatch(/if \(families\.has\("profiles"\)\) \{\s*if \(screenMode === null\)/);
+    expect(profileReconcile).toContain("await reconcileProfilesFromServerDetailed()");
     expect(canonicalPush).toContain("if (screenMode !== null) throw new Error");
   });
 

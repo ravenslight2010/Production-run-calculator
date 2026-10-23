@@ -1,55 +1,18 @@
 ---
 name: Workspace-local pnpm tool bootstrap
-description: Distinguish package-manager bootstrap recursion from a project validation failure.
+description: Run local pnpm checks with the exact workspace pin without recursive Corepack installs.
 ---
 
-Selecting the pinned Node executable does not select the pinned pnpm executable.
-When pnpm's tool cache is nested inside the workspace, an older system pnpm can
-recursively try to install the workspace's pinned pnpm version: its temporary
-installer inherits the ancestor workspace's package-manager requirement.
+An older system pnpm can recursively provision the workspace's pinned manager
+when its temporary installer inherits the ancestor `packageManager` setting.
+This may exhaust workspace resources before the requested check starts.
 
-**Why:** Completion validation repeatedly attempted to provision pnpm without
-ever reaching TypeScript, while invoking the exact pinned pnpm directly reached
-the project scripts. A long-running validation entry is not proof the named
-check actually started.
+**Why:** The system pnpm in this workspace repeatedly attempted to install the
+workspace pin, while invoking that exact package through npm reached validation.
 
-The older system manager's version switcher also expects a legacy tool-cache
-bin directory. A newer manager can install successfully into its normal
-node_modules/.bin layout while leaving that legacy entry absent, so provisioning
-can continue to recurse even after a direct invocation works.
-
-**How to apply:** Inspect the retained command output and resolve both runtime
-versions before diagnosing project code. Use the existing verified Node/HTTPS
-runner and the exact package-manager pin to repair tool provisioning. Do not
-downgrade the pin, disable strict checks or TLS, or label an unstarted check
-passed. Verify the bare manager's version and expected cache-bin layout before
-retrying completion; installation success alone is insufficient.
-
-When the system pnpm repeatedly self-installs the workspace pin, invoke the
-exact package through `npm exec --yes --package=pnpm@<packageManager> -- pnpm`
-under `scripts/src/run-release-node.sh` for a single validation command. If a
-configured check itself invokes bare `pnpm`, cache the exact package outside
-the repository and link its executable into the ignored workspace
-`node_modules/.bin` directory, which is already ahead of the system pnpm on
-this workspace's PATH. Verify the selected version before running checks.
-
-**Why:** In this workspace, the system pnpm was older than the project pin and
-its self-install loop exhausted available threads before project scripts ran;
-the npm-provisioned exact pnpm reached checks without changing repository
-package policy.
-
-**How to apply:** Keep the tool cache and link outside tracked source. Do not
-change `packageManager`, the lockfile, or the runner solely to accommodate a
-local tool-cache problem.
-
-Recursive bootstrap can exhaust the container's process/thread limit before
-any project check starts, making unrelated shell commands and app workflows
-fail with resource errors.
-
-**Why:** Concurrent workflow launches amplified one recursive version switch
-into dozens of installer processes; the application code was not the cause.
-
-**How to apply:** Inspect process ancestry when resource errors accompany a
-version-switching install. Stop only the confirmed recursive installer tree,
-repair the exact pinned tool's cache entry, then restore affected app workflows.
-Do not respond by lowering test coverage or changing the repository's pin.
+**How to apply:** For deterministic local validation, invoke pnpm commands
+through `bash scripts/src/run-release-node.sh pnpm ...`. The runner reads the
+exact workspace pin and obtains it via npm in a private temporary cache; child
+commands inherit that selected pnpm, and the cache is removed afterward. Keep
+the existing pinned Node and HTTPS-only safeguards enabled. Do not change
+`packageManager` or the lockfile to work around local tool provisioning.
