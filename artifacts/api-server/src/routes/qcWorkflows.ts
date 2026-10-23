@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, gt, gte, inArray, lt, lte, max, notInArray, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import * as z from "zod";
@@ -2177,7 +2178,7 @@ router.post("/qc/label-references", requireCapability("manage-qc"), async (req, 
           && (!body.referenceId || value.data.referenceId === body.referenceId)
           && value.data.context === body.context
           && value.data.productKey === body.productKey
-          && JSON.stringify(value.data.expected) === JSON.stringify(body.expected)
+          && isDeepStrictEqual(value.data.expected, body.expected)
           && JSON.stringify(value.data.requiredFields) === JSON.stringify(body.requiredFields)
           && value.data.sourceIdentity === body.sourceIdentity
           && value.data.sourceDescription === body.sourceDescription;
@@ -2259,7 +2260,7 @@ router.post("/qc/label-references", requireCapability("manage-qc"), async (req, 
         && (!body.referenceId || value.data.referenceId === body.referenceId)
         && value.data.context === body.context
         && value.data.productKey === body.productKey
-        && JSON.stringify(value.data.expected) === JSON.stringify(body.expected)
+        && isDeepStrictEqual(value.data.expected, body.expected)
         && JSON.stringify(value.data.requiredFields) === JSON.stringify(body.requiredFields)
         && value.data.sourceIdentity === body.sourceIdentity
         && value.data.sourceDescription === body.sourceDescription;
@@ -2576,7 +2577,7 @@ router.post("/qc/component-checks", requireCapability("record-qc"), async (req, 
     return event.eventType === "component-check"
       && event.runId === body.runId
       && payload.note === body.note
-      && JSON.stringify(payload.requestedObservations) === JSON.stringify(normalizedObservations);
+      && isDeepStrictEqual(payload.requestedObservations, normalizedObservations);
   };
   try {
     const result = await db.transaction(async (tx) => {

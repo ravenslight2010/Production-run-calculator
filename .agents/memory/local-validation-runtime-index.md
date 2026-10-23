@@ -42,6 +42,29 @@ If `run-release-node.sh` exits before a check starts with Node's conflicting `--
 **How to apply:** Preserve the original failure, remove only the conflicting inherited Node option for the retry (for example, `env -u NODE_OPTIONS`), and keep the release runner's own checks and HTTPS protections enabled.
 
 
+## pnpm bootstrap recursion
+
+Some Replit images expose an older global pnpm than the repository pin. Its
+automatic version manager can recursively spawn installers for the pinned pnpm
+until the process limit is exhausted. Select the repository pin through Corepack
+instead, and ensure nested script invocations of `pnpm` resolve to that same
+selected version.
+
+**Why:** Selecting pnpm only for the top-level command leaves child scripts free
+to invoke the older binary from `PATH`; the resulting bootstrap recursion can
+prevent even Git or unrelated checks from starting.
+
+**How to apply:** Compare the global binary with the repository's manager pin.
+Use Corepack and a matching child-command path for validation. If resource
+exhaustion already occurred, stop only processes positively identified as the
+recursive pinned-pnpm bootstrap, not arbitrary Node services or user installs.
+
+Interactive and automated shells can resolve different package-manager paths.
+Check the selected pin in both environments, including nested commands; a
+successful manually prefixed command does not establish automated-shell parity.
+
+**Why:** A different manager selection can prevent an automated check from
+reaching TypeScript even when an equivalent manual check succeeds.
 ## Package-manager bootstrap and process exhaustion
 
 Thread-creation or shell-fork failures can come from a recursive package-manager bootstrap, not an application leak. Inspect the command ancestry before treating them as app failures.

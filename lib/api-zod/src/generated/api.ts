@@ -285,7 +285,6 @@ export const voidMixSurplusLotResponseBalancesItemLbsMin = 0;
 export const voidMixSurplusLotResponseCreatedLotOneAmountMadeMin = 0;
 export const voidMixSurplusLotResponseCreatedLotOneAmountUsedMin = 0;
 export const voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin = 0;
-
 export const listDieLineDefaultsResponseEntriesItemPressOvenMinMin = 0;
 export const listRunTemplatesResponseTemplatesItemRevisionMin = 0;
 export const listRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
@@ -10026,17 +10025,11 @@ export const UndoImportOperationResponse = zod.object({
 export const getQcTargetsResponseBrixTargetsItemSourceSectionMax = 200;
 
 export const saveDieLineDefaultsBodyEntriesItemPressOvenMinMin = 0;
-
 export const saveDieLineDefaultsBodyEntriesItemFrontlineMinMin = 0;
-
 export const saveDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
-
 export const deleteDieLineDefaultsResponseEntriesItemPressOvenMinMin = 0;
-
 export const deleteDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
-
 export const saveDieLineDefaultsResponseEntriesItemPressOvenMinMin = 0;
-
 export const listDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
 
 export const setQcBrixTargetBodySourceSectionMax = 200;

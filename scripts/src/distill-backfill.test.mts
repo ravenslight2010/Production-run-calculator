@@ -32,10 +32,11 @@ const digest = "a".repeat(64);
 
 assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("linux"));
 assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("darwin"));
-for (const unsupportedPlatform of ["win32"] as const) {
+assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("win32"));
+for (const unsupportedPlatform of ["freebsd", "openbsd"] as const) {
   assert.throws(
     () => assertMetadataMaintenancePlatformSupported(unsupportedPlatform),
-    /supported only on Linux and macOS.*supported Linux x64 or macOS environment.*leave existing metadata locks untouched/u,
+    /metadata updates require Linux x64, native macOS, or native Windows x64.*leave existing metadata locks untouched/u,
   );
 }
 
@@ -404,6 +405,9 @@ const redaction = {
 fs.writeFileSync(redactionPath, JSON.stringify(redaction), { mode: 0o600 });
 
 try {
+  // POSIX recovery fixtures use each host's native identity and kernel lock.
+  // Native Windows recovery and crash cases have their own focused suite.
+  if (process.platform === "linux" || process.platform === "darwin") {
   const syntheticLockEntry = {
     date: "2026-10-21",
     changeType: "metadata-only",
@@ -569,7 +573,7 @@ try {
       const foreignUpdatePath = `${foreignDecisionPath}.metadata-maintenance.lock`;
       const foreignLockPath = lockKind === "recovery"
         ? `${foreignUpdatePath}.recovery` : foreignUpdatePath;
-      const foreignContents = `${JSON.stringify({
+      const foreignContents: string = `${JSON.stringify({
         pid,
         identity: process.platform === "darwin"
           ? { platform: "linux", bootId: currentIdentity.bootId, startTimeTicks: "123" }
@@ -737,6 +741,10 @@ try {
   );
   assert.equal(fs.existsSync(racingLockPath), false);
   assert.equal(fs.existsSync(`${racingLockPath}.recovery`), false);
+  }
+  if (process.platform === "win32") {
+    await import("./distill-backfill-windows.test.mts");
+  }
 
   fs.writeFileSync(decisionPath, JSON.stringify({
     ...makeDecision("no-go"),

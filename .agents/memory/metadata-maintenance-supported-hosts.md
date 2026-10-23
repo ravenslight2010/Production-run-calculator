@@ -3,11 +3,11 @@ name: Metadata maintenance supported hosts
 description: Approved operating systems and safety requirements for distillation metadata append.
 ---
 
-Metadata-only append operations are approved on Linux and macOS development hosts. This approval does not extend to Windows or emulated macOS. Each operating system needs native owner-process identity and an OS kernel lock; if either cannot be established, recovery must leave existing locks untouched. macOS process-start identity uses Darwin's microsecond-resolution process start time together with the boot-session UUID.
+Metadata-only append operations are approved on Linux, native macOS, and native Windows x64 development hosts. Windows approval is limited to local fixed NTFS with Windows PowerShell 5.1. This approval does not extend to other maintenance commands or emulated-host validation. Each operating system needs native owner-process identity and an OS kernel lock; if either cannot be established, recovery must leave existing locks untouched. macOS process-start identity uses Darwin's microsecond-resolution process start time together with the boot-session UUID.
 
-**Why:** The owner explicitly approved macOS as an intended development runtime while keeping cross-platform stale-lock recovery fail-closed.
+**Why:** The owner independently approved macOS and Windows as metadata-command development runtimes while keeping cross-platform stale-lock recovery fail-closed and other commands outside that approval.
 
-**How to apply:** Keep runtime support and tests host-specific. Never count Linux emulation as macOS validation; run the focused recovery tests and scripts typecheck on an actual macOS host.
+**How to apply:** Keep runtime support and tests host-specific. Never count Linux emulation as macOS or Windows validation; run focused recovery tests and scripts typecheck on the actual supported host. Preserve all approved host branches when integrating parallel platform changes.
 
 Canonicalize temporary fixture roots when testing repository-boundary guards across operating systems. macOS may expose the same directory through `/var` and `/private/var`; do not weaken the application's boundary checks to accommodate a fixture alias.
 

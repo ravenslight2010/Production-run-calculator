@@ -3397,6 +3397,27 @@ describe("QC workflows", () => {
     const retryDraft = await req(QC_MANAGER, "POST", "/api/qc/label-references", draftInput);
     expect(retryDraft.status).toBe(200);
     expect((await retryDraft.json() as { duplicate: boolean }).duplicate).toBe(true);
+    const storedDrafts = await db.select().from(qcWorkflowEventsTable)
+      .where(eq(qcWorkflowEventsTable.operationId, draftInput.operationId));
+    expect(storedDrafts).toHaveLength(1);
+    expect(storedDrafts[0]!.payload.expected).toEqual(draftInput.expected);
+    const reorderedRetry = await req(QC_MANAGER, "POST", "/api/qc/label-references", {
+      ...draftInput,
+      expected: {
+        dateText: draftInput.expected.dateText,
+        lotText: draftInput.expected.lotText,
+        productName: draftInput.expected.productName,
+      },
+    });
+    expect(reorderedRetry.status).toBe(200);
+    expect((await reorderedRetry.json() as { duplicate: boolean; event: { id: number } }))
+      .toMatchObject({ duplicate: true, event: { id: draftEvent.id } });
+    expect((await req(QC_MANAGER, "POST", "/api/qc/label-references", {
+      ...draftInput,
+      expected: { ...draftInput.expected, lotText: "A DIFFERENT LOT" },
+    })).status).toBe(409);
+    expect(await db.select().from(qcWorkflowEventsTable)
+      .where(eq(qcWorkflowEventsTable.operationId, draftInput.operationId))).toHaveLength(1);
     expect((await req(QC_OPERATOR, "GET", "/api/qc/label-references").then((response) => response.json()) as {
       items: unknown[];
     }).items).toEqual([]);
