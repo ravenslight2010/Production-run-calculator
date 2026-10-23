@@ -46,8 +46,13 @@ jobs:
           $powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
           $version = & $powershell -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
           if ($version -notlike "5.1*") { throw "Windows PowerShell 5.1 is required" }
-      - run: pnpm install --frozen-lockfile
+      - id: dependencies
+        run: pnpm install --frozen-lockfile
       - run: pnpm --filter @workspace/scripts run test:metadata-maintenance
-      - run: pnpm --filter @workspace/distill-dataset run test
-      - run: pnpm run typecheck:libs
-      - run: pnpm --filter @workspace/scripts run typecheck
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: pnpm --filter @workspace/distill-dataset run test
+      - id: libraries
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: pnpm run typecheck:libs
+      - if: ${{ !cancelled() && steps.libraries.outcome == 'success' }}
+        run: pnpm --filter @workspace/scripts run typecheck
