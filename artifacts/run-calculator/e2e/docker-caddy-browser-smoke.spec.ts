@@ -1,5 +1,31 @@
 import { expect, test } from "@playwright/test";
 
+test.describe("saved calculator routes", () => {
+  // Exercise Caddy, not a previously installed PWA's offline fallback.
+  test.use({ serviceWorkers: "block" });
+
+  test("serves a saved sign-in link directly and after refresh", async ({ page }) => {
+    // No root visit or client-side navigation: Caddy must resolve the saved route.
+    const navigation = await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    expect(navigation?.status(), "Caddy should serve the saved route document").toBe(200);
+    expect(navigation?.headers()["content-type"]).toContain("text/html");
+    await expect(page).toHaveURL(/\/sign-in$/);
+    await expect(page).toHaveTitle("Production Run Calculator");
+    const heading = page.getByRole("heading", {
+      name: "Sign in to Run Calculator",
+      exact: true,
+    });
+    await expect(heading).toBeVisible();
+
+    const refresh = await page.reload({ waitUntil: "domcontentloaded" });
+    expect(refresh?.status(), "Caddy should serve the saved route on refresh").toBe(200);
+    expect(refresh?.headers()["content-type"]).toContain("text/html");
+    await expect(page).toHaveURL(/\/sign-in$/);
+    await expect(page).toHaveTitle("Production Run Calculator");
+    await expect(heading).toBeVisible();
+  });
+});
+
 test("serves and mounts the calculator and reaches the same-origin API", async ({
   page,
 }, testInfo) => {
