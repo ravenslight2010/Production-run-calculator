@@ -1,5 +1,7 @@
 import {
+  boolean,
   integer,
+  jsonb,
   serial,
   pgTable,
   text,
@@ -22,6 +24,9 @@ export const freezerSurplusLotsTable = pgTable(
     // Stable inventory identity survives inventory-item merges, unlike the
     // display/product key used by freezer allocations.
     inventoryItemId: integer("inventory_item_id"),
+    // Legacy allocation history cannot be inferred. New lots explicitly opt
+    // in; the first allocation permanently clears this date-change permission.
+    dateCorrectionSafe: boolean("date_correction_safe").notNull().default(false),
     productionDate: text("production_date").notNull(),
     totalCases: integer("total_cases").notNull(),
     remainingCases: integer("remaining_cases").notNull(),
@@ -109,3 +114,30 @@ export type FreezerSurplusAdjustmentRow =
   typeof freezerSurplusAdjustmentsTable.$inferSelect;
 export type FreezerSurplusConfirmationRow =
   typeof freezerSurplusConfirmationsTable.$inferSelect;
+
+// Decision evidence only: stock movements remain in inventory_ledger.
+// Originals and earlier corrections are never updated or deleted.
+export const freezerSurplusDecisionCorrectionsTable = pgTable(
+  "freezer_surplus_decision_corrections",
+  {
+    id: serial("id").primaryKey(),
+    scope: text("scope").notNull(),
+    eventId: text("event_id").notNull(),
+    confirmationId: text("confirmation_id").notNull(),
+    runId: text("run_id").notNull(),
+    previousRevision: text("previous_revision").notNull(),
+    cases: integer("cases").notNull(),
+    productionDate: text("production_date"),
+    lotId: text("lot_id"),
+    lotIds: jsonb("lot_ids").$type<string[]>().notNull().default([]),
+    reason: text("reason").notNull(),
+    actorId: text("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("freezer_surplus_decision_corrections_scope_event_idx").on(t.scope, t.eventId),
+    uniqueIndex("freezer_surplus_decision_corrections_scope_previous_idx").on(
+      t.scope, t.confirmationId, t.previousRevision,
+    ),
+  ],
+);

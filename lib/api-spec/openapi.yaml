@@ -2962,6 +2962,69 @@ paths:
         "409":
           description: A different outcome is already recorded for this run
 
+  /freezer-surplus/confirmations/{runId}/corrections:
+    parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 120
+    get:
+      operationId: getFreezerSurplusDecision
+      tags: [freezerSurplus]
+      summary: Read the original and current manager-corrected surplus decision
+      description: Requires manage-inventory. Returns append-only correction history in the current scope.
+      responses:
+        "200":
+          description: Original decision, current view and correction events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusDecision"
+        "403":
+          description: Missing manage-inventory capability
+        "404":
+          description: No decision exists for this run in the current scope
+    post:
+      operationId: correctFreezerSurplusDecision
+      tags: [freezerSurplus]
+      summary: Append a stock-safe correction to a saved surplus decision
+      description: >-
+        Requires manage-inventory and a reason. Preserves the original decision,
+        uses a revision fence and stable event ID, and applies stock changes
+        transactionally through inventory accounting. A reduction cannot remove
+        allocated or unavailable cases. A date change is rejected if the lot
+        has allocation or adjustment history, or its history is unknown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CorrectFreezerSurplusDecisionInput"
+      responses:
+        "200":
+          description: Exact idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusDecision"
+        "201":
+          description: Correction recorded and stock reconciled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusDecision"
+        "400":
+          description: Invalid correction
+        "403":
+          description: Missing manage-inventory capability
+        "404":
+          description: No decision exists for this run in the current scope
+        "409":
+          description: Stale revision, duplicate ID, or stock/allocation conflict
+
   /freezer-surplus/allocations/{runId}:
     put:
       operationId: replaceFreezerSurplusAllocation
@@ -12939,6 +13002,58 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/FreezerSurplusLot"
+
+    CorrectFreezerSurplusDecisionInput:
+      type: object
+      required: [eventId, previousRevision, cases, reason]
+      properties:
+        eventId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        previousRevision:
+          type: string
+          minLength: 1
+          maxLength: 120
+        cases:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        productionDate:
+          type: string
+          format: date
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+
+    FreezerSurplusDecisionCorrection:
+      type: object
+      required: [eventId, previousRevision, cases, productionDate, lotId, lotIds, reason, actorId, createdAt]
+      properties:
+        eventId: { type: string }
+        previousRevision: { type: string }
+        cases: { type: integer, minimum: 0, maximum: 1000000 }
+        productionDate: { type: string, format: date, nullable: true }
+        lotId: { type: string, nullable: true }
+        lotIds:
+          type: array
+          items: { type: string }
+        reason: { type: string }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    FreezerSurplusDecision:
+      type: object
+      required: [original, current, revision, corrections]
+      properties:
+        original: { $ref: "#/components/schemas/FreezerSurplusConfirmation" }
+        current: { $ref: "#/components/schemas/FreezerSurplusConfirmation" }
+        revision: { type: string }
+        corrections:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/FreezerSurplusDecisionCorrection" }
 
     FreezerSurplusAllocationSelection:
       type: object

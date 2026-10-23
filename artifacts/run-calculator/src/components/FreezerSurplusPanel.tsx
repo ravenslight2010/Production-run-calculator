@@ -8,11 +8,15 @@ import {
   type FreezerSurplusLedger,
 } from "@workspace/freezer-pull";
 import {
+  correctFreezerSurplusDecision,
+  fetchFreezerSurplusConfirmations,
+  fetchFreezerSurplusDecision,
   fetchFreezerSurplusAdjustments,
   getFreezerSurplusRemainingMs,
   type FreezerSurplusConfirmation,
   type FreezerSurplusAdjustment,
   type FreezerSurplusAdjustmentInput,
+  type FreezerSurplusDecision,
 } from "../freezerSurplus";
 import { useMe } from "../useRole";
 
@@ -32,6 +36,7 @@ export function FreezerSurplusPanel({
   onConfirm,
   onAllocate,
   onAdjust,
+  onDecisionCorrected,
 }: {
   mode: "packaging" | "warehouse";
   ledger: FreezerSurplusLedger;
@@ -55,6 +60,7 @@ export function FreezerSurplusPanel({
     lotId: string,
     input: FreezerSurplusAdjustmentInput,
   ) => Promise<FreezerSurplusAdjustment>;
+  onDecisionCorrected?: () => Promise<void>;
 }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
@@ -70,6 +76,13 @@ export function FreezerSurplusPanel({
   const [selections, setSelections] = useState<Record<string, Record<string, number>>>({});
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<FreezerSurplusAdjustment[]>([]);
+  const [savedConfirmations, setSavedConfirmations] = useState<FreezerSurplusConfirmation[]>([]);
+  const [decision, setDecision] = useState<FreezerSurplusDecision | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [decisionCases, setDecisionCases] = useState("");
+  const [decisionDate, setDecisionDate] = useState(todayStr());
+  const [decisionReason, setDecisionReason] = useState("");
+  const decisionEvent = useRef<{ fingerprint: string; eventId: string } | null>(null);
   const [adjustmentsError, setAdjustmentsError] = useState<string | null>(null);
   const [adjustmentType, setAdjustmentType] =
     useState<FreezerSurplusAdjustment["eventType"]>("damage");
@@ -82,8 +95,19 @@ export function FreezerSurplusPanel({
   const runs = pendingRuns ?? [];
 
   useEffect(() => {
-    if (mode !== "warehouse" || !canManageInventory) return;
+    if (mode !== "warehouse" || !canManageInventory) {
+      setSavedConfirmations([]);
+      setDecision(null);
+      return;
+    }
+    setSavedConfirmations([]);
+    setDecision(null);
     let active = true;
+    void fetchFreezerSurplusConfirmations().then((items) => {
+      if (active) setSavedConfirmations(items);
+    }).catch((cause: unknown) => {
+      if (active) setDecisionError(cause instanceof Error ? cause.message : "Couldn't load saved surplus decisions.");
+    });
     void fetchFreezerSurplusAdjustments()
       .then((events) => {
         if (active) {
@@ -102,6 +126,62 @@ export function FreezerSurplusPanel({
       active = false;
     };
   }, [canManageInventory, mode]);
+
+  async function openDecision(runId: string) {
+    setDecisionError(null);
+    try {
+      const loadedDecision = await fetchFreezerSurplusDecision(runId);
+      setDecision(loadedDecision);
+      setDecisionCases(String(loadedDecision.current.cases));
+      setDecisionDate(loadedDecision.current.productionDate ?? todayStr());
+      setDecisionReason("");
+      decisionEvent.current = null;
+    } catch (cause) {
+      setDecisionError(cause instanceof Error ? cause.message : "Couldn't load this saved surplus decision.");
+    }
+  }
+
+  async function saveDecisionCorrection() {
+    if (!decision || !canManageInventory) return;
+    const cases = Number(decisionCases);
+    const reason = decisionReason.trim();
+    if (!Number.isSafeInteger(cases) || cases < 0 || cases > 1_000_000 || !reason ||
+        (cases > 0 && !decisionDate)) {
+      setDecisionError("Enter a whole-case count, a date for positive stock, and a reason.");
+      return;
+    }
+    const input = {
+      runId: decision.current.runId,
+      previousRevision: decision.revision,
+      cases,
+      ...(cases > 0 ? { productionDate: decisionDate } : {}),
+      reason,
+    };
+    const fingerprint = JSON.stringify(input);
+    const eventId = decisionEvent.current?.fingerprint === fingerprint
+      ? decisionEvent.current.eventId
+      : crypto.randomUUID();
+    decisionEvent.current = { fingerprint, eventId };
+    setDecisionError(null);
+    try {
+      const saved = await correctFreezerSurplusDecision({ ...input, eventId });
+      setDecision(saved);
+      setDecisionCases(String(saved.current.cases));
+      setDecisionDate(saved.current.productionDate ?? todayStr());
+      setDecisionReason("");
+      decisionEvent.current = null;
+      setSavedConfirmations((items) => items.map((item) =>
+        item.runId === saved.current.runId ? saved.current : item,
+      ));
+      try {
+        await onDecisionCorrected?.();
+      } catch {
+        setDecisionError("Correction saved. Refresh the warehouse stock list to show the updated balance.");
+      }
+    } catch (cause) {
+      setDecisionError(cause instanceof Error ? cause.message : "The correction was not accepted. Retry the same request.");
+    }
+  }
 
   useEffect(() => {
     if (ledger.lots.length > 0 && !ledger.lots.some((lot) => lot.id === adjustmentLotId)) {
@@ -449,6 +529,80 @@ export function FreezerSurplusPanel({
               );
             })}
           </div>
+          {canManageInventory && (
+            <section className="mt-4 rounded-lg border border-primary/30 bg-background/60 p-3">
+              <h3 className="text-sm font-semibold">Correct a saved surplus decision</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Corrections require a reason. Allocated, used or unavailable stock cannot be removed, and dates cannot change after allocation or adjustment.
+              </p>
+              {savedConfirmations.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">No saved run decisions are available to correct.</p>
+              ) : (
+                <label className="mt-2 block text-xs font-semibold text-muted-foreground">
+                  Saved run decision
+                  <select
+                    value={decision?.current.runId ?? ""}
+                    onChange={(event) => event.target.value && void openDecision(event.target.value)}
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    aria-label="Saved surplus decision to correct"
+                  >
+                    <option value="">Choose a run…</option>
+                    {savedConfirmations.map((confirmation) => (
+                      <option key={confirmation.runId} value={confirmation.runId}>
+                        {confirmation.runDate} · {confirmation.brand}{confirmation.flavor ? ` — ${confirmation.flavor}` : ""} · {confirmation.cases} cases
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {decision && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Original: {decision.original.cases} cases{decision.original.productionDate ? ` dated ${decision.original.productionDate}` : ""}. Current: {decision.current.cases} cases{decision.current.productionDate ? ` dated ${decision.current.productionDate}` : ""}.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[8rem_10rem_1fr]">
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      Corrected cases
+                      <input type="number" min="0" max="1000000" step="1" inputMode="numeric"
+                        value={decisionCases} onChange={(event) => {
+                          setDecisionCases(event.target.value); decisionEvent.current = null;
+                        }}
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+                    </label>
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      Production date
+                      <input type="date" disabled={Number(decisionCases) === 0} value={decisionDate}
+                        onChange={(event) => {
+                          setDecisionDate(event.target.value); decisionEvent.current = null;
+                        }}
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground disabled:opacity-50" />
+                    </label>
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      Required reason
+                      <input maxLength={1000} value={decisionReason} onChange={(event) => {
+                        setDecisionReason(event.target.value); decisionEvent.current = null;
+                      }}
+                        placeholder="Explain the correction"
+                        className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" />
+                    </label>
+                  </div>
+                  <button type="button" disabled={busy || !decisionReason.trim()}
+                    onClick={() => void saveDecisionCorrection()}
+                    className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50">
+                    Save correction
+                  </button>
+                  {decision.corrections.length > 0 && (
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {decision.corrections.slice(0, 10).map((entry) => (
+                        <li key={entry.eventId}>{entry.cases} cases · {entry.reason} · {entry.actorId} · {new Date(entry.createdAt).toLocaleString()}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {decisionError && <p className="mt-2 text-xs font-semibold text-destructive" role="alert">{decisionError}</p>}
+            </section>
+          )}
           {canManageInventory && onAdjust && (
             <section
               className="mt-4 rounded-lg border border-amber-500/30 bg-background/70 p-3"

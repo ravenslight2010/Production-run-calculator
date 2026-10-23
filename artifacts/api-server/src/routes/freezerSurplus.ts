@@ -37,10 +37,11 @@ import {
 } from "@workspace/freezer-pull";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { registerSurplusDecisionCorrections } from "./freezerSurplusDecisionCorrections";
 
 const router: IRouter = Router();
 
-class SurplusRequestError extends Error {
+export class SurplusRequestError extends Error {
   constructor(
     message: string,
     readonly status = 400,
@@ -152,7 +153,7 @@ async function findFinishedInventoryItem(
   return null;
 }
 
-async function ensureFinishedInventoryItem(
+export async function ensureFinishedInventoryItem(
   tx: DbExecutor,
   scope: string,
   brand: string,
@@ -180,7 +181,7 @@ async function ensureFinishedInventoryItem(
   return concurrentItem;
 }
 
-async function getFreezerLocationId(tx: DbExecutor, scope: string): Promise<number | null> {
+export async function getFreezerLocationId(tx: DbExecutor, scope: string): Promise<number | null> {
   const [loc] = await tx
     .select({ id: inventoryLocationsTable.id })
     .from(inventoryLocationsTable)
@@ -227,7 +228,7 @@ async function upsertFinishedInventoryLot(
   });
 }
 
-async function addFinishedInventoryStock(
+export async function addFinishedInventoryStock(
   tx: DbExecutor,
   scope: string,
   itemId: number,
@@ -274,7 +275,7 @@ async function addFinishedInventoryStock(
   });
 }
 
-async function removeFinishedInventoryStock(
+export async function removeFinishedInventoryStock(
   tx: DbExecutor,
   scope: string,
   itemId: number,
@@ -367,7 +368,7 @@ function toApiAdjustment(
   };
 }
 
-function toApiConfirmation(row: FreezerSurplusConfirmationRow) {
+export function toApiConfirmation(row: FreezerSurplusConfirmationRow) {
   return {
     runId: row.runId,
     runDate: row.runDate,
@@ -422,6 +423,11 @@ router.get("/freezer-surplus", async (req: Request, res: Response) => {
     req.log.error({ err }, "freezer_surplus_list_failed");
     res.status(500).json({ error: "Couldn't load finished-case freezer surplus" });
   }
+});
+
+registerSurplusDecisionCorrections(router, {
+  SurplusRequestError, ensureFinishedInventoryItem, getFreezerLocationId,
+  addFinishedInventoryStock, removeFinishedInventoryStock, toApiConfirmation,
 });
 
 router.get("/freezer-surplus/confirmations", async (req: Request, res: Response) => {
@@ -606,6 +612,7 @@ router.post(
               flavor: product.flavor,
               productKey: product.productKey,
               inventoryItemId: item.id,
+              dateCorrectionSafe: true,
               productionDate,
               totalCases: cases,
               remainingCases: cases,
@@ -1171,7 +1178,11 @@ router.put(
           if (!lot) continue;
           await tx
             .update(freezerSurplusLotsTable)
-            .set({ remainingCases: lot.remainingCases - cases, updatedAt: new Date() })
+            .set({
+              remainingCases: lot.remainingCases - cases,
+              dateCorrectionSafe: false,
+              updatedAt: new Date(),
+            })
             .where(
               and(
                 eq(freezerSurplusLotsTable.id, lotId),

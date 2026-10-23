@@ -7,6 +7,10 @@ import type { RunMeta } from "../types";
 
 const mocks = vi.hoisted(() => ({
   hasCapability: vi.fn(),
+  fetchConfirmations: vi.fn().mockResolvedValue([]),
+  fetchDecision: vi.fn(),
+  correctDecision: vi.fn(),
+  fetchAdjustments: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../useRole", () => ({
@@ -15,7 +19,10 @@ vi.mock("../useRole", () => ({
 
 vi.mock("../freezerSurplus", () => ({
   getFreezerSurplusRemainingMs: () => 60_000,
-  fetchFreezerSurplusAdjustments: vi.fn().mockResolvedValue([]),
+  fetchFreezerSurplusConfirmations: mocks.fetchConfirmations,
+  fetchFreezerSurplusDecision: mocks.fetchDecision,
+  correctFreezerSurplusDecision: mocks.correctDecision,
+  fetchFreezerSurplusAdjustments: mocks.fetchAdjustments,
 }));
 
 import { FreezerSurplusPanel } from "./FreezerSurplusPanel";
@@ -101,6 +108,10 @@ function renderWarehouse(overrides: Partial<React.ComponentProps<typeof FreezerS
 afterEach(() => {
   cleanup();
   mocks.hasCapability.mockReset();
+  mocks.fetchConfirmations.mockReset().mockResolvedValue([]);
+  mocks.fetchDecision.mockReset();
+  mocks.correctDecision.mockReset();
+  mocks.fetchAdjustments.mockReset().mockResolvedValue([]);
 });
 
 describe("FreezerSurplusPanel capability gates", () => {
@@ -328,5 +339,56 @@ describe("FreezerSurplusPanel capability gates", () => {
     });
     expect(await screen.findByText(/damage · 2 cases/)).toBeTruthy();
     expect(screen.getByText(/manager-1/)).toBeTruthy();
+  });
+
+  it("lets inventory managers review and submit a reasoned surplus correction", async () => {
+    mocks.hasCapability.mockReturnValue(true);
+    const initial = receipt(pendingRun, 2, "2026-09-07");
+    const corrected = receipt(pendingRun, 3, "2026-09-07");
+    mocks.fetchConfirmations.mockResolvedValue([initial]);
+    mocks.fetchDecision.mockResolvedValue({
+      original: initial,
+      current: initial,
+      revision: "revision-original",
+      corrections: [],
+    });
+    mocks.correctDecision.mockResolvedValue({
+      original: initial,
+      current: corrected,
+      revision: "correction-event",
+      corrections: [{
+        eventId: "correction-event",
+        previousRevision: "revision-original",
+        cases: 3,
+        productionDate: "2026-09-07",
+        lotId: "lot-corrected",
+        reason: "Recounted the pallet",
+        actorId: "manager-1",
+        createdAt: "2026-09-07T12:00:00.000Z",
+      }],
+    });
+    const user = userEvent.setup();
+    renderWarehouse();
+
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Saved surplus decision to correct" }),
+      "run-2",
+    );
+    await screen.findByText(/Original: 2 cases/);
+    await user.clear(screen.getByRole("spinbutton", { name: "Corrected cases" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Corrected cases" }), "3");
+    await user.type(screen.getByPlaceholderText("Explain the correction"), "Recounted the pallet");
+    await user.click(screen.getByRole("button", { name: "Save correction" }));
+
+    await waitFor(() => expect(mocks.correctDecision).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-2",
+      previousRevision: "revision-original",
+      cases: 3,
+      productionDate: "2026-09-07",
+      reason: "Recounted the pallet",
+      eventId: expect.any(String),
+    })));
+    await screen.findByText(/Original: 2 cases.*Current: 3 cases/);
+    expect(screen.getByText(/Recounted the pallet/)).toBeTruthy();
   });
 });

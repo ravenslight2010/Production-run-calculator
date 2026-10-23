@@ -91,6 +91,7 @@ export default memo(function WarehouseTabContent() {
                     await refreshFreezerSurplus();
                   }}
                   onAdjust={adjustFinishedCaseStock}
+                  onDecisionCorrected={refreshFreezerSurplus}
                 />
                 {/* Pull Out Freezer: for each upcoming scheduled run within an
                     item's days-early window whose recipe uses a tagged

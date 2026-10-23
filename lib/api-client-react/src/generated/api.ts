@@ -62,6 +62,7 @@ import type {
   ConsumeInventoryDayStart409,
   ConsumeInventoryDayStartInput,
   ConsumeResult,
+  CorrectFreezerSurplusDecisionInput,
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
   CreateRole,
@@ -101,6 +102,7 @@ import type {
   FreezerSurplusAdjustmentList,
   FreezerSurplusConfirmationList,
   FreezerSurplusConfirmationMutation,
+  FreezerSurplusDecision,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
   GetBuildInfo503,
@@ -11238,6 +11240,198 @@ export const useRecordFreezerSurplusConfirmation = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRecordFreezerSurplusConfirmationMutationOptions(options), queryClient);
+    }
+
+export const getGetFreezerSurplusDecisionUrl = (runId: string,) => {
+
+
+
+
+  return `/api/freezer-surplus/confirmations/${runId}/corrections`
+}
+
+/**
+ * Requires manage-inventory. Returns append-only correction history in the current scope.
+ * @summary Read the original and current manager-corrected surplus decision
+ */
+export const getFreezerSurplusDecision = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusDecision> => {
+
+  return customFetch<FreezerSurplusDecision>(getGetFreezerSurplusDecisionUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFreezerSurplusDecisionQueryKey = (runId: string,) => {
+    return [
+    `/api/freezer-surplus/confirmations/${runId}/corrections`
+    ] as const;
+    }
+
+
+export const getGetFreezerSurplusDecisionQueryOptions = <TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFreezerSurplusDecisionQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFreezerSurplusDecision>>> = ({ signal }) => getFreezerSurplusDecision(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFreezerSurplusDecisionQueryResult = NonNullable<Awaited<ReturnType<typeof getFreezerSurplusDecision>>>
+export type GetFreezerSurplusDecisionQueryError = ErrorType<void>
+
+
+export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
+ runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFreezerSurplusDecision>>,
+          TError,
+          Awaited<ReturnType<typeof getFreezerSurplusDecision>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFreezerSurplusDecision>>,
+          TError,
+          Awaited<ReturnType<typeof getFreezerSurplusDecision>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read the original and current manager-corrected surplus decision
+ */
+
+export function useGetFreezerSurplusDecision<TData = Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFreezerSurplusDecision>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetFreezerSurplusDecisionQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCorrectFreezerSurplusDecisionUrl = (runId: string,) => {
+
+
+
+
+  return `/api/freezer-surplus/confirmations/${runId}/corrections`
+}
+
+/**
+ * Requires manage-inventory and a reason. Preserves the original decision, uses a revision fence and stable event ID, and applies stock changes transactionally through inventory accounting. A reduction cannot remove allocated or unavailable cases. A date change is rejected if the lot has allocation or adjustment history, or its history is unknown.
+ * @summary Append a stock-safe correction to a saved surplus decision
+ */
+export const correctFreezerSurplusDecision = async (runId: string,
+    correctFreezerSurplusDecisionInput: CorrectFreezerSurplusDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusDecision> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FreezerSurplusDecision>(getCorrectFreezerSurplusDecisionUrl(runId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(correctFreezerSurplusDecisionInput)
+  }
+);}
+
+
+
+
+
+export const getCorrectFreezerSurplusDecisionMutationKey = () => ['correctFreezerSurplusDecision'] as const;
+
+export const getCorrectFreezerSurplusDecisionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctFreezerSurplusDecision>>, TError,CorrectFreezerSurplusDecisionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof correctFreezerSurplusDecision>>, TError,CorrectFreezerSurplusDecisionMutationVariables, TContext> => {
+
+const mutationKey = getCorrectFreezerSurplusDecisionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof correctFreezerSurplusDecision>>, CorrectFreezerSurplusDecisionMutationVariables> = (props) => {
+          const {runId,data} = props ?? {};
+
+          return  correctFreezerSurplusDecision(runId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CorrectFreezerSurplusDecisionMutationResult = NonNullable<Awaited<ReturnType<typeof correctFreezerSurplusDecision>>>
+    export type CorrectFreezerSurplusDecisionMutationBody = BodyType<CorrectFreezerSurplusDecisionInput>
+    export type CorrectFreezerSurplusDecisionMutationError = ErrorType<void>
+    export type CorrectFreezerSurplusDecisionMutationVariables = {runId: string;data: BodyType<CorrectFreezerSurplusDecisionInput>}
+
+    /**
+ * @summary Append a stock-safe correction to a saved surplus decision
+ */
+export const useCorrectFreezerSurplusDecision = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctFreezerSurplusDecision>>, TError,CorrectFreezerSurplusDecisionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof correctFreezerSurplusDecision>>,
+        TError,
+        CorrectFreezerSurplusDecisionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCorrectFreezerSurplusDecisionMutationOptions(options), queryClient);
     }
 
 export const getReplaceFreezerSurplusAllocationUrl = (runId: string,) => {

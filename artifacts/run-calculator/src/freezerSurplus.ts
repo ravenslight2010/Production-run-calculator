@@ -26,6 +26,78 @@ export type FreezerSurplusConfirmation = {
   createdAt: string;
 };
 
+export type FreezerSurplusDecision = {
+  original: FreezerSurplusConfirmation;
+  current: FreezerSurplusConfirmation;
+  revision: string;
+  corrections: Array<{
+    eventId: string;
+    previousRevision: string;
+    cases: number;
+    productionDate: string | null;
+    lotId: string | null;
+    lotIds: string[];
+    reason: string;
+    actorId: string;
+    createdAt: string;
+  }>;
+};
+
+export async function fetchFreezerSurplusDecision(runId: string): Promise<FreezerSurplusDecision> {
+  const response = await fetch(`/api/freezer-surplus/confirmations/${encodeURIComponent(runId)}/corrections`);
+  const body = await response.json().catch(() => null) as {
+    error?: unknown; original?: unknown; current?: unknown; revision?: unknown; corrections?: unknown;
+  } | null;
+  if (!response.ok) {
+    throw new Error(typeof body?.error === "string" ? body.error : "Couldn't load this saved surplus decision.");
+  }
+  if (!body || typeof body.revision !== "string" || !Array.isArray(body.corrections)) {
+    throw new Error("The saved surplus decision response was invalid.");
+  }
+  return body as unknown as FreezerSurplusDecision;
+}
+
+export async function correctFreezerSurplusDecision(input: {
+  runId: string;
+  eventId: string;
+  previousRevision: string;
+  cases: number;
+  productionDate?: string;
+  reason: string;
+}): Promise<FreezerSurplusDecision> {
+  const response = await fetch(
+    `/api/freezer-surplus/confirmations/${encodeURIComponent(input.runId)}/corrections`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventId: input.eventId,
+        previousRevision: input.previousRevision,
+        cases: input.cases,
+        ...(input.cases > 0 ? { productionDate: input.productionDate } : {}),
+        reason: input.reason,
+      }),
+    },
+  );
+  const body = await response.json().catch(() => null) as {
+    error?: unknown; original?: unknown; current?: unknown; revision?: unknown; corrections?: unknown;
+  } | null;
+  if (!response.ok) {
+    throw new Error(typeof body?.error === "string" ? body.error : "The correction was not accepted.");
+  }
+  if (
+    !body || typeof body.revision !== "string" || !Array.isArray(body.corrections) ||
+    !body.current || typeof body.current !== "object" ||
+    (body.current as Record<string, unknown>).runId !== input.runId ||
+    (body.current as Record<string, unknown>).cases !== input.cases ||
+    (body.current as Record<string, unknown>).productionDate !==
+      (input.cases === 0 ? null : input.productionDate)
+  ) {
+    throw new Error("The correction acknowledgment was invalid. Reload the saved decision before retrying.");
+  }
+  return body as unknown as FreezerSurplusDecision;
+}
+
 export type FreezerSurplusAdjustmentInput = {
   eventId: string;
   eventType: FreezerSurplusAdjustment["eventType"];

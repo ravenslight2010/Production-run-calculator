@@ -20,6 +20,7 @@ let freezerSurplusLotsTable: DbModule["freezerSurplusLotsTable"];
 let freezerSurplusAllocationsTable: DbModule["freezerSurplusAllocationsTable"];
 let freezerSurplusAdjustmentsTable: DbModule["freezerSurplusAdjustmentsTable"];
 let freezerSurplusConfirmationsTable: DbModule["freezerSurplusConfirmationsTable"];
+let freezerSurplusDecisionCorrectionsTable: DbModule["freezerSurplusDecisionCorrectionsTable"];
 let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
@@ -78,6 +79,7 @@ beforeAll(async () => {
   freezerSurplusAllocationsTable = dbMod.freezerSurplusAllocationsTable;
   freezerSurplusAdjustmentsTable = dbMod.freezerSurplusAdjustmentsTable;
   freezerSurplusConfirmationsTable = dbMod.freezerSurplusConfirmationsTable;
+  freezerSurplusDecisionCorrectionsTable = dbMod.freezerSurplusDecisionCorrectionsTable;
   inventoryItemsTable = dbMod.inventoryItemsTable;
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
@@ -121,7 +123,8 @@ beforeEach(async () => {
   clearUserValidityCache();
   clearSandboxCache();
   await db.execute(sql`
-    TRUNCATE ${freezerSurplusConfirmationsTable}, ${freezerSurplusAdjustmentsTable},
+    TRUNCATE ${freezerSurplusConfirmationsTable}, ${freezerSurplusDecisionCorrectionsTable},
+      ${freezerSurplusAdjustmentsTable},
       ${freezerSurplusAllocationsTable}, ${freezerSurplusLotsTable},
       ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryItemsTable}, ${inventoryLocationsTable},
       ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
@@ -305,6 +308,20 @@ async function confirmOutcome(
     cases: 0,
     ...overrides,
   });
+}
+
+async function correctOutcome(
+  userId: string,
+  runId: string,
+  body: Record<string, unknown>,
+) {
+  return req(userId, "POST",
+    `/api/freezer-surplus/confirmations/${encodeURIComponent(runId)}/corrections`, body);
+}
+
+async function readOutcome(userId: string, runId: string) {
+  return req(userId, "GET",
+    `/api/freezer-surplus/confirmations/${encodeURIComponent(runId)}/corrections`);
 }
 
 async function allocate(
@@ -571,6 +588,185 @@ describe("dated freezer surplus API", () => {
       ALTER TABLE freezer_surplus_confirmations
       DROP CONSTRAINT freezer_surplus_confirmations_test_reject_42
     `);
+  });
+
+  it("corrects a saved decision with append-only, idempotent stock deltas", async () => {
+    await seedCompletedRun("correct-count-run");
+    expect((await confirmOutcome(MANAGER, "correct-count-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const original = await db.select().from(freezerSurplusConfirmationsTable);
+    const saved = await (await readOutcome(MANAGER, "correct-count-run")).json() as {
+      revision: string; original: { cases: number }; current: { cases: number };
+    };
+    expect(saved.original.cases).toBe(5);
+    const requestBody = {
+      eventId: "correct-count-event-001", previousRevision: saved.revision,
+      cases: 8, productionDate: "2026-08-28", reason: "Counted one case twice",
+    };
+    expect((await correctOutcome(OPERATOR, "correct-count-run", requestBody)).status).toBe(403);
+    const [first, retry] = await Promise.all([
+      correctOutcome(MANAGER, "correct-count-run", requestBody),
+      correctOutcome(MANAGER, "correct-count-run", requestBody),
+    ]);
+    expect([first.status, retry.status].sort()).toEqual([200, 201]);
+    expect((await correctOutcome(MANAGER, "correct-count-run", requestBody)).status).toBe(200);
+    expect((await correctOutcome(MANAGER, "correct-count-run", {
+      ...requestBody, cases: 9,
+    })).status).toBe(409);
+    expect(await db.select().from(freezerSurplusConfirmationsTable)).toEqual(original);
+    expect(await db.select().from(freezerSurplusDecisionCorrectionsTable)).toHaveLength(1);
+    expect((await (await readOutcome(MANAGER, "correct-count-run")).json() as {
+      current: { cases: number }; corrections: unknown[];
+    })).toMatchObject({ current: { cases: 8 }, corrections: [expect.any(Object)] });
+    await expectFreezerParity(8, 2);
+    const raised = await (await readOutcome(MANAGER, "correct-count-run")).json() as {
+      revision: string;
+    };
+    expect((await correctOutcome(MANAGER, "correct-count-run", {
+      eventId: "correct-count-reduce", previousRevision: raised.revision,
+      cases: 6, productionDate: "2026-08-28", reason: "Remove two cases from the recount",
+    })).status).toBe(201);
+    const preservedLots = await db.select().from(freezerSurplusLotsTable);
+    expect(preservedLots.map((lot) => lot.totalCases).sort((a, b) => a - b)).toEqual([3, 5]);
+    await expectFreezerParity(6, 3);
+    expect((await correctOutcome(MANAGER, "correct-count-run", {
+      ...requestBody, eventId: "correct-count-stale", cases: 4,
+    })).status).toBe(409);
+    const replayAfterNextCorrection = await correctOutcome(MANAGER, "correct-count-run", requestBody);
+    expect(replayAfterNextCorrection.status).toBe(200);
+    expect((await replayAfterNextCorrection.json() as { current: { cases: number } }).current.cases).toBe(6);
+  });
+
+  it("rejects a competing correction based on a stale revision", async () => {
+    await seedCompletedRun("competing-corrections-run");
+    expect((await confirmOutcome(MANAGER, "competing-corrections-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const saved = await (await readOutcome(MANAGER, "competing-corrections-run")).json() as {
+      revision: string;
+    };
+    const [left, right] = await Promise.all([
+      correctOutcome(MANAGER, "competing-corrections-run", {
+        eventId: "competing-correction-left", previousRevision: saved.revision,
+        cases: 6, productionDate: "2026-08-28", reason: "First corrected count",
+      }),
+      correctOutcome(MANAGER, "competing-corrections-run", {
+        eventId: "competing-correction-right", previousRevision: saved.revision,
+        cases: 7, productionDate: "2026-08-28", reason: "Second corrected count",
+      }),
+    ]);
+    expect([left.status, right.status].sort()).toEqual([201, 409]);
+    expect(await db.select().from(freezerSurplusDecisionCorrectionsTable)).toHaveLength(1);
+    const current = await (await readOutcome(MANAGER, "competing-corrections-run")).json() as {
+      current: { cases: number };
+    };
+    expect([6, 7]).toContain(current.current.cases);
+    await expectFreezerParity(current.current.cases, 2);
+  });
+
+  it("supports zero-to-positive and positive-to-zero without reusing the confirmation write", async () => {
+    await seedCompletedRun("zero-correction-run");
+    expect((await confirmOutcome(MANAGER, "zero-correction-run")).status).toBe(201);
+    const zero = await (await readOutcome(MANAGER, "zero-correction-run")).json() as {
+      revision: string; original: { cases: number };
+    };
+    expect(zero.original.cases).toBe(0);
+    expect((await correctOutcome(MANAGER, "zero-correction-run", {
+      eventId: "zero-to-positive", previousRevision: zero.revision, cases: 4,
+      productionDate: "2026-08-28", reason: "Found four cases from this run",
+    })).status).toBe(201);
+    const positive = await (await readOutcome(MANAGER, "zero-correction-run")).json() as {
+      revision: string; original: { cases: number }; corrections: Array<{ lotIds: string[] }>;
+    };
+    expect(positive.corrections[0]?.lotIds).toHaveLength(1);
+    const zeroing = await correctOutcome(MANAGER, "zero-correction-run", {
+      eventId: "positive-to-zero", previousRevision: positive.revision, cases: 0,
+      reason: "These cases belonged to another run",
+    });
+    expect(zeroing.status, await zeroing.clone().text()).toBe(201);
+    const final = await (await readOutcome(MANAGER, "zero-correction-run")).json() as {
+      original: { cases: number }; current: { cases: number; lotId: string | null }; corrections: unknown[];
+    };
+    expect(final).toMatchObject({ original: { cases: 0 }, current: { cases: 0, lotId: null }, corrections: [{}, {}] });
+    const stockLots = await db.select().from(freezerSurplusLotsTable);
+    expect(stockLots).toHaveLength(1);
+    expect(stockLots[0]).toMatchObject({ totalCases: 4, remainingCases: 0 });
+    await expectFreezerParity(0, 2);
+  });
+
+  it("allows an unused date change but rejects allocated stock reductions and date changes", async () => {
+    await seedCompletedRun("date-correction-run");
+    expect((await confirmOutcome(MANAGER, "date-correction-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const saved = await (await readOutcome(MANAGER, "date-correction-run")).json() as {
+      revision: string;
+    };
+    expect((await correctOutcome(MANAGER, "date-correction-run", {
+      eventId: "change-date-unused", previousRevision: saved.revision, cases: 5,
+      productionDate: "2026-08-29", reason: "Correct production date",
+    })).status).toBe(201);
+    const changed = await (await readOutcome(MANAGER, "date-correction-run")).json() as {
+      revision: string; current: { lotId: string };
+    };
+    await seedRun("allocated-correction-target", {}, "2026-08-29");
+    expect((await allocate(MANAGER, "allocated-correction-target", [
+      { lotId: changed.current.lotId, cases: 3 },
+    ])).status).toBe(200);
+    expect((await correctOutcome(MANAGER, "date-correction-run", {
+      eventId: "reject-allocated-reduction", previousRevision: changed.revision,
+      cases: 2, productionDate: "2026-08-29", reason: "Reduce beyond available cases",
+    })).status).toBe(409);
+    expect((await correctOutcome(MANAGER, "date-correction-run", {
+      eventId: "reject-allocated-date", previousRevision: changed.revision,
+      cases: 5, productionDate: "2026-08-30", reason: "Try to move allocated stock",
+    })).status).toBe(409);
+    await expectFreezerParity(2, 4);
+    expect((await readOutcome(SANDBOX_MANAGER, "date-correction-run")).status).toBe(404);
+  });
+
+  it("blocks date changes when a legacy lot's allocation history is unknown", async () => {
+    await seedCompletedRun("legacy-date-correction-run");
+    expect((await confirmOutcome(MANAGER, "legacy-date-correction-run", {
+      cases: 2, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    await db.update(freezerSurplusLotsTable).set({ dateCorrectionSafe: false });
+    const saved = await (await readOutcome(MANAGER, "legacy-date-correction-run")).json() as {
+      revision: string;
+    };
+    expect((await correctOutcome(MANAGER, "legacy-date-correction-run", {
+      eventId: "legacy-date-correction-event", previousRevision: saved.revision,
+      cases: 2, productionDate: "2026-08-29", reason: "Correct the recorded date",
+    })).status).toBe(409);
+    await expectFreezerParity(2, 1);
+  });
+
+  it("rolls back stock movement when correction evidence cannot be committed", async () => {
+    await seedCompletedRun("correction-rollback-run");
+    expect((await confirmOutcome(MANAGER, "correction-rollback-run", {
+      cases: 5, productionDate: "2026-08-28",
+    })).status).toBe(201);
+    const saved = await (await readOutcome(MANAGER, "correction-rollback-run")).json() as {
+      revision: string;
+    };
+    await db.execute(sql`
+      ALTER TABLE freezer_surplus_decision_corrections
+      ADD CONSTRAINT surplus_correction_test_reject_42 CHECK (cases <> 42)
+    `);
+    try {
+      expect((await correctOutcome(MANAGER, "correction-rollback-run", {
+        eventId: "correction-rollback-event", previousRevision: saved.revision,
+        cases: 42, productionDate: "2026-08-28", reason: "Test transaction rollback",
+      })).status).toBe(500);
+      expect(await db.select().from(freezerSurplusDecisionCorrectionsTable)).toHaveLength(0);
+      await expectFreezerParity(5, 1);
+    } finally {
+      await db.execute(sql`
+        ALTER TABLE freezer_surplus_decision_corrections
+        DROP CONSTRAINT surplus_correction_test_reject_42
+      `);
+    }
   });
 
   it("requires authentication and preserves separate dated lots on reload", async () => {

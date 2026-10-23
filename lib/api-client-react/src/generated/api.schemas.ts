@@ -7399,6 +7399,56 @@ export interface FreezerSurplusConfirmationMutation {
   createdLot?: FreezerSurplusLot | null;
 }
 
+export interface CorrectFreezerSurplusDecisionInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  eventId: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  previousRevision: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  cases: number;
+  productionDate?: string;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  reason: string;
+}
+
+export interface FreezerSurplusDecisionCorrection {
+  eventId: string;
+  previousRevision: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  cases: number;
+  /** @nullable */
+  productionDate: string | null;
+  /** @nullable */
+  lotId: string | null;
+  lotIds: string[];
+  reason: string;
+  actorId: string;
+  createdAt: string;
+}
+
+export interface FreezerSurplusDecision {
+  original: FreezerSurplusConfirmation;
+  current: FreezerSurplusConfirmation;
+  revision: string;
+  /** @maxItems 500 */
+  corrections: FreezerSurplusDecisionCorrection[];
+}
+
 export interface FreezerSurplusAllocationSelection {
   /**
      * @minLength 1

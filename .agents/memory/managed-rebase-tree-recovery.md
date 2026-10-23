@@ -25,6 +25,12 @@ In managed rebases, an `INDEX_LOCKED` response can occur while the operation is 
 
 A task rebase also requires a clean worktree before it can start. Preserve intentional untracked workspace files; do not delete or locally ignore them just to satisfy the precondition. If they are not part of the task, ask before committing them or changing their visibility to Git. A GitHub backup operation is not a substitute for the managed rebase source.
 
+After resuming a paused task, a clean shell worktree does not prove that a managed conflict-resolution session is finished.
+
+**Why:** A resumed workspace showed a clean task branch while the managed continuation still held an unresolved generated-file conflict; continuing through the managed callback restored the active conflict state.
+
+**How to apply:** Use the managed continuation to synchronize its state, inspect any returned conflicts again, and resolve those before finalizing. Do not force or manually restart the rebase based only on shell status.
+
 **Why:** The managed rebase rejected a worktree containing workspace custom-skill files, and the repository intentionally leaves those files visible to Git.
 
 **How to apply:** Inspect the exact untracked paths, confirm their contents and ignore rules, and resolve them with the owner before retrying the managed continuation callback.

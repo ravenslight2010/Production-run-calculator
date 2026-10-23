@@ -234,6 +234,27 @@ export const recordFreezerSurplusConfirmationBodyCasesMax = 1000000;
 export const recordFreezerSurplusConfirmationResponseConfirmationCasesMin = 0;
 export const recordFreezerSurplusConfirmationResponseConfirmationCasesMax = 1000000;
 export const recordFreezerSurplusConfirmationResponseCreatedLotOneRemainingCasesMin = 0;
+export const getFreezerSurplusDecisionPathRunIdMax = 120;
+export const getFreezerSurplusDecisionResponseOriginalCasesMin = 0;
+export const getFreezerSurplusDecisionResponseOriginalCasesMax = 1000000;
+export const getFreezerSurplusDecisionResponseCurrentCasesMin = 0;
+export const getFreezerSurplusDecisionResponseCurrentCasesMax = 1000000;
+export const getFreezerSurplusDecisionResponseCorrectionsItemCasesMin = 0;
+export const getFreezerSurplusDecisionResponseCorrectionsItemCasesMax = 1000000;
+export const getFreezerSurplusDecisionResponseCorrectionsMax = 500;
+export const correctFreezerSurplusDecisionPathRunIdMax = 120;
+export const correctFreezerSurplusDecisionBodyEventIdMax = 120;
+export const correctFreezerSurplusDecisionBodyPreviousRevisionMax = 120;
+export const correctFreezerSurplusDecisionBodyCasesMin = 0;
+export const correctFreezerSurplusDecisionBodyCasesMax = 1000000;
+export const correctFreezerSurplusDecisionBodyReasonMax = 1000;
+export const correctFreezerSurplusDecisionResponseOriginalCasesMin = 0;
+export const correctFreezerSurplusDecisionResponseOriginalCasesMax = 1000000;
+export const correctFreezerSurplusDecisionResponseCurrentCasesMin = 0;
+export const correctFreezerSurplusDecisionResponseCurrentCasesMax = 1000000;
+export const correctFreezerSurplusDecisionResponseCorrectionsItemCasesMin = 0;
+export const correctFreezerSurplusDecisionResponseCorrectionsItemCasesMax = 1000000;
+export const correctFreezerSurplusDecisionResponseCorrectionsMax = 500;
 export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
 export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
 export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
@@ -4957,6 +4978,126 @@ export const RecordFreezerSurplusConfirmationResponse = zod.object({
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(recordFreezerSurplusConfirmationResponseCreatedLotOneRemainingCasesMin)
 }),zod.null()]).optional()
+})
+
+
+/**
+ * Requires manage-inventory. Returns append-only correction history in the current scope.
+ * @summary Read the original and current manager-corrected surplus decision
+ */
+
+
+
+export const GetFreezerSurplusDecisionParams = zod.object({
+  "runId": zod.coerce.string().min(1).max(getFreezerSurplusDecisionPathRunIdMax)
+})
+
+
+
+
+
+
+
+export const GetFreezerSurplusDecisionResponse = zod.object({
+  "original": zod.object({
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "cases": zod.int().min(getFreezerSurplusDecisionResponseOriginalCasesMin).max(getFreezerSurplusDecisionResponseOriginalCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+}),
+  "current": zod.object({
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "cases": zod.int().min(getFreezerSurplusDecisionResponseCurrentCasesMin).max(getFreezerSurplusDecisionResponseCurrentCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+}),
+  "revision": zod.string(),
+  "corrections": zod.array(zod.object({
+  "eventId": zod.string(),
+  "previousRevision": zod.string(),
+  "cases": zod.int().min(getFreezerSurplusDecisionResponseCorrectionsItemCasesMin).max(getFreezerSurplusDecisionResponseCorrectionsItemCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "lotIds": zod.array(zod.string()),
+  "reason": zod.string(),
+  "actorId": zod.string(),
+  "createdAt": zod.coerce.date()
+})).max(getFreezerSurplusDecisionResponseCorrectionsMax)
+})
+
+
+/**
+ * Requires manage-inventory and a reason. Preserves the original decision, uses a revision fence and stable event ID, and applies stock changes transactionally through inventory accounting. A reduction cannot remove allocated or unavailable cases. A date change is rejected if the lot has allocation or adjustment history, or its history is unknown.
+ * @summary Append a stock-safe correction to a saved surplus decision
+ */
+
+
+
+export const CorrectFreezerSurplusDecisionParams = zod.object({
+  "runId": zod.coerce.string().min(1).max(correctFreezerSurplusDecisionPathRunIdMax)
+})
+
+
+
+
+
+
+
+export const CorrectFreezerSurplusDecisionBody = zod.object({
+  "eventId": zod.string().min(1).max(correctFreezerSurplusDecisionBodyEventIdMax),
+  "previousRevision": zod.string().min(1).max(correctFreezerSurplusDecisionBodyPreviousRevisionMax),
+  "cases": zod.int().min(correctFreezerSurplusDecisionBodyCasesMin).max(correctFreezerSurplusDecisionBodyCasesMax),
+  "productionDate": zod.coerce.date().optional(),
+  "reason": zod.string().min(1).max(correctFreezerSurplusDecisionBodyReasonMax)
+})
+
+
+
+
+
+
+
+export const CorrectFreezerSurplusDecisionResponse = zod.object({
+  "original": zod.object({
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "cases": zod.int().min(correctFreezerSurplusDecisionResponseOriginalCasesMin).max(correctFreezerSurplusDecisionResponseOriginalCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+}),
+  "current": zod.object({
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "cases": zod.int().min(correctFreezerSurplusDecisionResponseCurrentCasesMin).max(correctFreezerSurplusDecisionResponseCurrentCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+}),
+  "revision": zod.string(),
+  "corrections": zod.array(zod.object({
+  "eventId": zod.string(),
+  "previousRevision": zod.string(),
+  "cases": zod.int().min(correctFreezerSurplusDecisionResponseCorrectionsItemCasesMin).max(correctFreezerSurplusDecisionResponseCorrectionsItemCasesMax),
+  "productionDate": zod.coerce.date().nullable(),
+  "lotId": zod.string().nullable(),
+  "lotIds": zod.array(zod.string()),
+  "reason": zod.string(),
+  "actorId": zod.string(),
+  "createdAt": zod.coerce.date()
+})).max(correctFreezerSurplusDecisionResponseCorrectionsMax)
 })
 
 
