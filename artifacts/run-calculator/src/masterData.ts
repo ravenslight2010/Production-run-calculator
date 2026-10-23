@@ -1,3 +1,4 @@
+import { resetMasterDataEpochs } from "./masterDataEpoch";
 import {
   createElement,
   createContext,
@@ -58,6 +59,7 @@ export function adoptMasterDataConflict<K extends MasterDataSlice>(
 }
 
 export function resetMasterDataTransportCache(): void {
+  resetMasterDataEpochs();
   masterDataTransportGeneration += 1;
   inFlight = null;
   masterDataEtag = null;

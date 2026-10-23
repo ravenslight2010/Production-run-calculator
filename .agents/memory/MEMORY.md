@@ -19,7 +19,7 @@
 - [Surplus decisions](surplus-confirmation-receipts.md) — explicit none and positive outcomes belong to completed runs; product/date or UI dismissal cannot establish acknowledgment.
 - [Database test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, and isolated writes.
 - [Browser test evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
-- [Browser compatibility](browser-compatibility-index.md) — auth timing, isolated matrices, active touch pickers, unavailable storage, phone forms and query coercion.
+- [Browser compatibility](browser-compatibility-index.md) + [native selects](webkit-native-select-color-scheme.md) — auth/offline fixtures, touch pickers and phone forms; set dark select color-scheme.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.
 - [Spec export integrity](spec-export.md) — fresh server snapshots; keep per-pizza oz and batch lbs separate; blanks are unknown, and conflicts remain visible.
@@ -29,7 +29,7 @@
 - [Schedule import](multi-sheet-schedule-import.md) + [checks](scheduled-recipe-check.md) + [moves](schedule-move-canonical-writes.md) — preserve imported days, canonical moves, and non-pizza markers.
 - [Schedule dates](scheduled-day-client-date.md) + [today edits](today-schedule-edit-live-path.md) + [401s](schedule-import-401.md) — use client dates, stop 401s, and preserve edits on Start Run.
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
-- [Merge denials and tombstones](merge-deny-and-change-history.md) + [tombstones](merge-tombstones.md) — denials, undo, and un-delete stamps protect cross-device merges.
+- [Merge fences](merge-deny-and-change-history.md) + [tombstones](merge-tombstones.md) + [Undo dependencies](guarded-undo-dependency-membership.md) — fence later references before compensation.
 - [Shared AI memory](shared-ai-memory.md) + [proactive alerts](proactive-alerts.md) — keyed nudges dedupe; staff Q&A stays separate from manager-only optimization.
 - [AI forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — forecasts seed editable schedules; scoring is pure and truncation-tolerant.
 - [Stale workspace links](isolated-env-stale-workspace-links.md) — isolated installs may miss workspace links; run pnpm install and typecheck:libs before changing code.
@@ -107,12 +107,10 @@
 - [Case-based input validity](case-based-production-input-validity.md) — without positive pizzas-per-case, suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
-- [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
-- [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — refresh pending runs from accepted saves; wait for initial canonical bootstrap before enabling recipe edits.
+- [Stale-client fences](source-heal-stale-client-fence.md) + [save propagation](acknowledged-master-data-propagation.md) — protect repairs; bootstrap and refresh pending runs from accepted writes.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
-- [PWA cache](pwa-offline-eventsource-fixtures.md) + [deferred cache](pwa-deferred-cache-policy.md) — close owned SSE on outages; lazy loading alone does not warrant excluding precache.
-- [PWA update prompts](pwa-update-prompts.md) — worker updates and stale-client recovery remain opt-in or gated by explicit safe-state proof.
+- [PWA sync](pwa-offline-eventsource-fixtures.md), [cache](pwa-deferred-cache-policy.md), [updates](pwa-update-prompts.md) — close SSE offline; lazy is not a cache exclusion; prove safe or opt in.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64](local-arm64-toolchain.md) + [disposable DB](disposable-database-test-startup.md) — use private sockets; wait for test schemas.
 - [Section-scoped edits](section-scoped-online-edits.md) + [automatic staged supply](automatic-staged-supply.md) — use durable row fencing; derive stages from cumulative progress.
@@ -155,5 +153,4 @@
 - [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.
 - [Deployment log fallback](deployment-log-fallback.md) — if revision-scoped runtime logs are unavailable, verify the live build first and use only a time-bounded current-serving log query.
 - [Workflow configuration side effects](workflow-configuration-side-effects.md) — after updating an individual workflow, inspect whether the aggregate Project workflow picked it up.
-- [WebKit native selects](webkit-native-select-color-scheme.md) — dark app themes may leave native selects light; set color-scheme on the control and verify visually.
 - [Metadata maintenance hosts](metadata-maintenance-supported-hosts.md) — metadata append is approved on Linux, macOS, and bounded Windows x64; require native identity and kernel locking.

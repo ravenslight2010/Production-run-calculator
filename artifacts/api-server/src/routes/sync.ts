@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { computeSummaryStats, type SummaryStats, type SummaryStatsInput } from "@workspace/inventory-math";
 import {
   db,
+  deferUntilDatabaseCommit,
   dailySyncTable,
   dataResetTable,
   brandProfilesTable,
@@ -871,6 +872,7 @@ export function broadcastMasterDataChanged(
   family: ConfigurationInvalidationFamily = "master-data",
   outboxAlreadyPersisted = false,
 ): void {
+  if (deferUntilDatabaseCommit(() => broadcastMasterDataChanged(senderId, scope, family, outboxAlreadyPersisted))) return;
   if (!outboxAlreadyPersisted) {
     void recordSyncOutboxEvent({
       kind: "configuration",

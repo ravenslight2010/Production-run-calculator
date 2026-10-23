@@ -1,3 +1,9 @@
+/** Only setup references are eligible for generic master-data compensation. */
+export const MASTER_DATA_REFERENCE_VALUE_FIELDS: readonly string[] = [
+  "doughRecipeName", "frontlineRecipeName", "app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName",
+  "doughRecipe", "frontlineRecipe", "app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe",
+  "app1Type", "app2Type", "app3Type", "app4Type", "pep1Type", "pep1TypeB", "pep2Type", "pep2TypeB", "dieType",
+];
 export {
   OPERATIONAL_DIRECTORY_KEYS, OPERATIONAL_FACTORY_SETTING_KEYS, OPERATIONAL_FACTORY_READ_KEYS,
 } from "./operationalDirectory";

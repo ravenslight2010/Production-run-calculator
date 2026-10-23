@@ -4,6 +4,14 @@ import { browserStorage as localStorage } from "../adapters/browserRecordStore";
 import { subscribeFactoryDirectory, factoryDirectoryState } from "../factoryDirectory";
 import { FactoryDirectoryStatus } from "../components/FactoryDirectoryStatus";
 import { SharedRecordsStatus } from "../components/SharedRecordsStatus";
+import { readLegacyMasterDataHistory, resolveLegacyMasterDataHistory } from "../legacyMasterDataHistory";
+import { SharedMasterDataHistory } from "../components/SharedMasterDataHistory";
+import { useGuardedChangeConfirmation } from "../hooks/useGuardedChangeConfirmation";
+import { adoptGuardedPendingReferences } from "../guardedMasterDataAdoption";
+import { prepareSharedMasterDataChange, commitSharedMasterDataChange, fetchSharedMasterDataHistory, type SharedMasterDataCommand, type SharedMasterDataCategory, type SharedMasterDataOperation } from "../sharedMasterDataUndo";
+import { pendingProfileWriteCount } from "../profileServerSync";
+import { pendingRunTemplateCount } from "../runTemplatesRepository";
+import { pendingFactoryDataWriteCount } from "../factoryDataSync";
 import { omitArchivedSyncHistory } from "../sharedRecordMigration";
 import { currentRunCsvRows, historyRunCsvRows } from "../runCsvRows";
 import { reconcileRunTemplates } from "../runTemplatesRepository";
@@ -271,7 +279,6 @@ import {
   captureMasterDataSnapshot,
   recordMasterDataChange,
   loadChangeHistory,
-  undoChange,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
   migrateIngredientListsToCatalogIfNeeded,
@@ -1546,7 +1553,7 @@ const ListPanel = ({
                       <ConfirmDeleteButton
                         onConfirm={() => { onRemove(item); setExpandedItem(null); }}
                         title={`Remove "${item}"?`}
-                        description="This removes it from your saved list. You can undo master-data changes from Change History."
+                        description="This removes it from the saved list. Device-only notices cannot undo shared changes."
                         confirmLabel="Remove"
                       >
                         <button type="button"
@@ -2697,6 +2704,10 @@ export default function Home() {
     dough: "Dough", sauce: "Sauce", cheese: "Cheese", mix: "Mix",
   };
   function moveRecipeName(name: string, from: RecipeNameCategory, to: RecipeNameCategory) {
+    if (from !== to) void runGuardedMasterDataCommand({ action: "move", category: from, sources: [name], destination: to });
+  }
+  /** Retained only as a reference while canonical command coverage is verified; not a UI callback. */
+  function deprecatedLocalMoveRecipeName(name: string, from: RecipeNameCategory, to: RecipeNameCategory) {
     if (from === to) return;
     const before = captureMasterDataSnapshot();
     // Which physical preset map a category stores its rows in.
@@ -2760,7 +2771,7 @@ export default function Home() {
     noteChange("move", `Moved "${name}" from ${RECIPE_CATEGORY_LABELS[from]} to ${RECIPE_CATEGORY_LABELS[to]}`, before);
     toast({
       title: "Recipe moved",
-      description: `"${name}" is now under ${RECIPE_CATEGORY_LABELS[to]}. Undo from Change History if needed.`,
+      description: `"${name}" is now under ${RECIPE_CATEGORY_LABELS[to]}. Device-only change notices cannot undo this move.`,
     });
   }
 
@@ -4735,10 +4746,37 @@ export default function Home() {
     setManageCategory("merge");
   }, []);
 
-  // Local (per-device) master-data change history for the undo trail.
+  // Legacy evidence and metadata-only session notices are not Undo receipts.
   const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
   const [undoBusy, setUndoBusy] = useState(false);
-  // Record a change (snapshot already taken before the edit) and refresh the list.
+  const [sharedHistoryRevision, setSharedHistoryRevision] = useState(0);
+  const { uiConfirm, confirmationDialog } = useGuardedChangeConfirmation(`${me?.userId}:${me?.sandbox}`, serverRole === "manager" && showManageDialog);
+  const legacyHistoryProblem = useMemo(() => showManageDialog && serverRole === "manager"
+    ? readLegacyMasterDataHistory().problem : null, [showManageDialog, serverRole, me?.userId, me?.sandbox, changeHistory]);
+  const sharedMutationBusyRef = useRef(false);
+  async function resolveLegacyHistoryAfterReview() {
+    if (undoBusy || serverRole !== "manager" || !canManageFactorySettings) return;
+    setUndoBusy(true);
+    const generation = getProfileCacheGeneration();
+    try {
+      if (!await uiConfirm({ title: "Discard device-only legacy snapshots?",
+        description: "This permanently removes all old Undo snapshots from this browser's legacy history only, including unreadable entries. Close older tabs first. It does not undo shared changes, clear pending edits, remove session notices or erase server history. Discard only after deciding this legacy evidence is no longer needed.",
+        confirmLabel: "Discard legacy snapshots" })) return;
+      // No snapshot or arbitrary browser key is sent. The scoped online read
+      // rechecks the manager's current session and administrative access.
+      await fetchSharedMasterDataHistory();
+      if (generation !== getProfileCacheGeneration()) throw new Error("The signed-in identity changed. Legacy evidence was retained.");
+      resolveLegacyMasterDataHistory();
+      setChangeHistory(loadChangeHistory());
+      toast({ title: "Legacy snapshots discarded", description: "Only this browser's old Undo history was removed. Pending work and server history were not changed." });
+    } catch (error) {
+      toast({ title: "Legacy resolution was not confirmed", description: error instanceof Error ? error.message : "Retry online after reviewing this device's evidence.", variant: "destructive" });
+    } finally { setUndoBusy(false); }
+  }
+  useEffect(() => {
+    setChangeHistory(loadChangeHistory());
+  }, [me?.userId, me?.sandbox]);
+  // No browser before-snapshots are captured or persisted by this compatibility path.
   const noteChange = useCallback(
     (type: MasterDataChangeType, description: string, before: Record<string, string>) => {
       recordMasterDataChange(type, description, before);
@@ -4746,6 +4784,79 @@ export default function Home() {
     },
     [],
   );
+
+  async function refreshGuardedMasterData(operation: SharedMasterDataOperation): Promise<void> {
+    const generation = getProfileCacheGeneration();
+    const originRunId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+    const originalFormValues = form.getValues();
+    const [, , , canonicalDay] = await Promise.all([
+      fetchFactoryData().then((data) => { if (generation === getProfileCacheGeneration()) hydrateFromServer(data); }),
+      reconcileProfilesFromServer(),
+      reconcileRunTemplates(),
+      fetchSchedulePayload(todayStr()),
+      invalidateMasterDataBootstrap(cycleCountQc),
+    ]);
+    if (generation !== getProfileCacheGeneration()) return;
+    reloadMasterData();
+    setMergedAwayTomb(loadMergedAway());
+    if (!canonicalDay.available) throw new Error("Canonical run references could not be refreshed.");
+    if (canonicalDay.payload) {
+      applySyncCallbackRef.current(canonicalDay.payload);
+      const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      const remoteRun = canonicalDay.payload.dayState.runs.find((run) => run.id === currentId);
+      if (currentId && currentId === originRunId && remoteRun && !remoteRun.startedAt && !remoteRun.endedAt) {
+        // Adopt only the setup references named by the receipt. Keep every
+        // unrelated local form value and all live counters/timers unchanged.
+        const values = adoptGuardedPendingReferences({ date: todayStr(), originRunId, run: remoteRun, original: originalFormValues,
+          current: form.getValues(), canonical: canonicalDay.payload.runValues[currentId] ?? {}, operation });
+        if (values) {
+          lastFormRunIdRef.current = currentId;
+          form.reset(values, { keepDirty: true, keepTouched: true, keepErrors: true });
+          resetFieldArrays(values);
+        }
+      }
+    }
+    await refreshScheduledDays();
+    if (pendingProfileWriteCount() || pendingRunTemplateCount() || pendingFactoryDataWriteCount()) {
+      throw new Error("The server confirmed the change, but this device still has retained shared-record drafts. Those drafts were not rebased or discarded. Review pending edits before treating every local display as canonical.");
+    }
+  }
+
+  async function runGuardedMasterDataCommand(command: SharedMasterDataCommand): Promise<boolean> {
+    if (sharedMutationBusyRef.current || undoBusy) return false;
+    sharedMutationBusyRef.current = true; setUndoBusy(true);
+    const generation = getProfileCacheGeneration();
+    try {
+      if (serverRole !== "manager") throw new Error("A manager account is required for shared master-data changes.");
+      if (!canManageFactorySettings || !canManageInventory || !canManageProfiles) {
+        throw new Error("Shared master-data changes require factory-settings, inventory and profile permissions.");
+      }
+      if (pendingProfileWriteCount() || pendingRunTemplateCount() || pendingFactoryDataWriteCount()) {
+        throw new Error("This device has pending shared-record edits. Reconnect and resolve or finish those edits before starting a guarded change; pending work has not been discarded.");
+      }
+      const operation = await prepareSharedMasterDataChange(command);
+      if (operation.eligible === false && !await uiConfirm({
+        title: "This change cannot be undone here",
+        description: operation.unavailableReason ?? "Protected downstream records prevent guarded compensation.",
+        confirmLabel: "Apply without Undo",
+      })) return false;
+      if (generation !== getProfileCacheGeneration()) return false;
+      const receipt = await commitSharedMasterDataChange(operation);
+      if (generation !== getProfileCacheGeneration()) return false;
+      setSharedHistoryRevision((value) => value + 1);
+      try { await refreshGuardedMasterData(receipt); }
+      catch {
+        toast({ title: "Change committed; refresh incomplete", description: "The server recorded the change, but this device has not refreshed every canonical record. Reconnect and refresh before another edit.", variant: "destructive" });
+        return true;
+      }
+      toast({ title: receipt.status === "undone" ? "Already undone on the server" : "Shared change recorded",
+        description: receipt.status === "unavailable" ? "Protected dependencies make this change unavailable for Undo." : "The result is recorded in Shared change history." });
+      return true;
+    } catch (error) {
+      if (generation === getProfileCacheGeneration()) toast({ title: "Shared change not confirmed", description: error instanceof Error ? error.message : "Reconnect and review shared history before retrying.", variant: "destructive" });
+      return false;
+    } finally { sharedMutationBusyRef.current = false; setUndoBusy(false); }
+  }
 
   // ── One-time recipe-name consolidation into the server master-data pools ──
   // The run-form pickers union server pool names with legacy LOCAL name lists,
@@ -5693,6 +5804,18 @@ export default function Home() {
   }
 
   async function handleApplyMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
+    const target = (targetArg ?? mergeTarget).trim();
+    const sources = (sourcesArg ?? mergeSources).filter((name) => name.trim() && name.trim().toLowerCase() !== target.toLowerCase());
+    if (!sources.length || !target) { setMergeError("Choose source ingredients and a target."); return false; }
+    setMergeBusy(true); setMergeError("");
+    try {
+      const accepted = await runGuardedMasterDataCommand({ action: "merge", category: "ingredient", sources, target });
+      if (accepted) resetMergeForm();
+      return accepted;
+    } finally { setMergeBusy(false); }
+  }
+  /** Not a maintained UI callback. No new browser rollback evidence is captured. */
+  async function deprecatedLocalIngredientMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
     const srcs = sourcesArg ?? mergeSources;
     const tgt = targetArg ?? mergeTarget;
     const map = buildMergeMap(srcs, tgt);
@@ -5804,8 +5927,8 @@ export default function Home() {
       // Clear the merge form. The panel stays open so the user can apply more
       // suggestions.
       resetMergeForm();
-      // Record the merge in the local undo trail (no-op-safe: skipped if nothing
-      // actually changed). Recorded last so a failed merge above never logs.
+      // Record a metadata-only session notice, not a reversible Undo receipt.
+      // Recorded last so a failed merge above never logs.
       noteChange(
         "merge",
         `Merged ${srcs.filter((s) => s.trim()).map((s) => `"${s}"`).join(", ")} into "${tgt}"`,
@@ -5897,7 +6020,19 @@ export default function Home() {
   // Apply a brand or flavor merge from the manual picker, then push the merged
   // payload (with its tombstones) immediately so an incoming sync-pull can't
   // re-add the merged-away names via the additive union — mirrors handleApplyMerge.
-  async function handleApplyBrandFlavorMerge(
+  async function handleApplyBrandFlavorMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
+    const target = (targetArg ?? mergeTarget).trim();
+    const sources = (sourcesArg ?? mergeSources).filter((name) => name.trim() && name.trim().toLowerCase() !== target.toLowerCase());
+    if (!sources.length || !target) { setMergeError("Choose source names and a target."); return false; }
+    setMergeBusy(true); setMergeError("");
+    try {
+      const accepted = await runGuardedMasterDataCommand({ action: "merge", category: mergeBfMode === "brands" ? "brand" : "flavor",
+        sources, target, ...(mergeBfMode === "flavors" ? { brand: mergeBfBrand } : {}) });
+      if (accepted) resetMergeForm();
+      return accepted;
+    } finally { setMergeBusy(false); }
+  }
+  async function deprecatedLocalBrandFlavorMerge(
     sourcesArg?: string[],
     targetArg?: string,
   ): Promise<boolean> {
@@ -6011,7 +6146,18 @@ export default function Home() {
   // inventory — it only re-points recipe-name selection fields, folds the name
   // list + recipe presets, and tombstones the merged-away names. Mirrors
   // handleApplyMerge's snapshot → rewrite → refresh → push → note flow.
-  async function handleApplyRecipeNameMerge(
+  async function handleApplyRecipeNameMerge(category: RecipeNameMergeCategory, sourcesArg?: string[], targetArg?: string): Promise<boolean> {
+    const target = (targetArg ?? mergeTarget).trim();
+    const sources = (sourcesArg ?? mergeSources).filter((name) => name.trim() && name.trim().toLowerCase() !== target.toLowerCase());
+    if (!sources.length || !target) { setMergeError("Choose source recipes and a target."); return false; }
+    setMergeBusy(true); setMergeError("");
+    try {
+      const accepted = await runGuardedMasterDataCommand({ action: "merge", category: category === "mixes" ? "mix" : category, sources, target });
+      if (accepted) resetMergeForm();
+      return accepted;
+    } finally { setMergeBusy(false); }
+  }
+  async function deprecatedLocalRecipeNameMerge(
     category: RecipeNameMergeCategory,
     sourcesArg?: string[],
     targetArg?: string,
@@ -6260,6 +6406,16 @@ export default function Home() {
   // local references, since those were cleared and tombstoned above.
   async function handleRemoveStaleReference(name: string): Promise<void> {
     if (!isRecipeNameCategory) return;
+    if ([...serverDoughNames, ...serverSauceNames, ...serverCheeseNames, ...serverMixNames]
+      .some((candidate) => candidate.trim().toLowerCase() === name.trim().toLowerCase())) {
+      toast({ title: "Review this recipe in its own section", description: "This is a real shared recipe, not a stale name reference.", variant: "destructive" });
+      return;
+    }
+    const category = mergeCategory as RecipeNameMergeCategory;
+    await runGuardedMasterDataCommand({ action: "remove", category: category === "mixes" ? "mix" : category, sources: [name] });
+  }
+  async function deprecatedLocalRemoveStaleReference(name: string): Promise<void> {
+    if (!isRecipeNameCategory) return;
     const category = mergeCategory as RecipeNameMergeCategory;
     const nameCi = name.trim().toLowerCase();
     const poolCi = new Set(
@@ -6333,38 +6489,16 @@ export default function Home() {
     if (cat === "brandflavor" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0]);
   }
 
-  // Undo a master-data change (and every change made after it). Restores the
-  // entry's before-snapshot, refreshes every React surface, and re-pushes the
-  // restored master data to the server so the rollback propagates (and merged-
-  // away names don't get resurrected by the additive sync union).
+  // Keep compatibility consumers fail-closed. Device-only evidence cannot
+  // authorize any local restore, live-state push, or server compensation.
   async function handleUndoChange(entry: MasterDataChange) {
-    const list = loadChangeHistory();
-    const idx = list.findIndex((e) => e.id === entry.id);
-    const discarded = idx === -1 ? [] : list.slice(0, idx + 1);
-    const hasMerge = discarded.some((e) => e.type === "merge");
-    const warn = hasMerge
-      ? "\n\nNote: this reverses the ingredient names and lists, but does NOT un-fold any inventory stock that was combined by a merge. Re-check stock in Inventory."
-      : "";
-    const extra = discarded.length - 1;
-    const tail = extra > 0 ? ` and ${extra} later change${extra === 1 ? "" : "s"}` : "";
-    if (!window.confirm(`Undo "${entry.description}"${tail}?${warn}`)) return;
-    setUndoBusy(true);
-    try {
-      const ok = undoChange(entry.id);
-      if (!ok) {
-        setChangeHistory(loadChangeHistory());
-        return;
-      }
-      refreshAfterMerge();
-      setChangeHistory(loadChangeHistory());
-      try {
-        await pushTodayCanonical(buildSyncPayload(loadDayState()));
-      } catch {
-        // Non-fatal: the local restore already happened; tombstones back it up.
-      }
-    } finally {
-      setUndoBusy(false);
-    }
+    toast({
+      title: "Undo unavailable",
+      description: entry.evidence === "session-only"
+        ? "This notice is not a server-confirmed Undo receipt. Imports and profile repairs use their own guarded history."
+        : "This is non-portable legacy evidence, not shared Undo. Its original data remains on this device; no changes were restored.",
+      variant: "destructive",
+    });
   }
 
   // ── Schedule future days ────────────────────────────────────────────────────
@@ -13220,8 +13354,8 @@ export default function Home() {
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
-    // Capture the pre-import local state so the existing undo trail can restore
-    // a workbook replacement when a manager decides it was not intended.
+    // Legacy compatibility argument only: capture returns no browser data.
+    // Import Undo remains owned by the committed server import operation.
     const importRollbackBefore = captureMasterDataSnapshot();
     const operationId = specImportOperationRef.current ?? createImportOperationId();
     specImportOperationRef.current = operationId;
@@ -15654,7 +15788,7 @@ export default function Home() {
     setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice, setupEditorBrand,
+    setWriteError, dismissSauceAutoTrackFailure, clearSauceAutoTrackFailureNotice, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
@@ -16171,31 +16305,20 @@ export default function Home() {
         // on every per-second Home re-render and lose their local state.
 
         // Standalone tabs: still use a single input
-        // History instrumentation wrappers: snapshot before the edit, run it, then
-        // record (recordMasterDataChange skips no-ops). This is the single point
-        // where every manageable list add/remove/rename gets an undo entry — the
-        // merge and PIN tabs are intentionally not wrapped (merge records itself;
-        // PIN isn't master data).
-        const histAdd = (label: string, fn: (v: string) => void) => (v: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(v);
-          noteChange("add", `Added "${v}" to ${label}`, before);
+        const guardedCategories: Record<string, SharedMasterDataCategory> = {
+          Brands: "brand", Flavors: "flavor", "Applicator Types": "applicator", "Pep Types": "pep", "Die Types": "die",
+          "Dough Recipe Names": "dough", "Sauce Recipe Names": "sauce", "Dough Ingredients": "doughIngredient", "Sauce Ingredients": "sauceIngredient",
         };
-        const histRemove = (label: string, fn: (v: string) => void) => (v: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(v);
-          noteChange("remove", `Removed "${v}" from ${label}`, before);
+        const guardedListAction = (label: string, action: SharedMasterDataCommand["action"], source: string, target?: string) => {
+          const category = guardedCategories[label];
+          if (!category) { toast({ title: "Unsupported shared action", description: "No records were changed. Review this list's canonical editor.", variant: "destructive" }); return; }
+          void runGuardedMasterDataCommand({ action, category, sources: [source], ...(target ? { target } : {}),
+            ...(category === "flavor" ? { brand: manageBrandFilter } : {}) });
         };
-        const histRename = (label: string, fn: (o: string, n: string) => void) => (o: string, n: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(o, n);
-          noteChange("rename", `Renamed "${o}" to "${n}" in ${label}`, before);
-        };
-        const histMerge = (label: string, fn: (from: string, into: string) => void) => (from: string, into: string) => {
-          const before = captureMasterDataSnapshot();
-          fn(from, into);
-          noteChange("rename", `Merged "${from}" into "${into}" in ${label}`, before);
-        };
+        const histAdd = (label: string, _fn: (v: string) => void) => (v: string) => guardedListAction(label, "add", v);
+        const histRemove = (label: string, _fn: (v: string) => void) => (v: string) => guardedListAction(label, "remove", v);
+        const histRename = (label: string, _fn: (o: string, n: string) => void) => (o: string, n: string) => guardedListAction(label, "rename", o, n);
+        const histMerge = (label: string, _fn: (from: string, into: string) => void) => (from: string, into: string) => guardedListAction(label, "merge", from, into);
         type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; onMerge?: (from: string, into: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: histAdd("Brands", addBrand), onRemove: histRemove("Brands", removeBrand), onRename: histRename("Brands", renameBrand) },
@@ -16412,7 +16535,7 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <fieldset disabled={!directoryReady && !["pin", "staff", "audit", "rules", "runs", "ai-corrections", "cycleCount", "freezer"].includes(manageCategory)}
+              <fieldset aria-busy={undoBusy} disabled={undoBusy || (!directoryReady && !["pin", "staff", "audit", "rules", "runs", "ai-corrections", "cycleCount", "freezer"].includes(manageCategory))}
                 className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                 {!directoryReady && <p role="status" className="mb-3 text-sm text-amber-500">Operational lists unavailable. Connect online and use Retry operational lists above.</p>}
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
@@ -17498,13 +17621,32 @@ export default function Home() {
                 {/* Manage runs — supervisor-only panel to remove individual or blank runs */}
                 {manageCategory === "runs" && isSupervisor && <ManageRunsPanel />}
 
-                {/* Recent changes: local per-device undo trail for master-data edits */}
-                {!["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
+                {confirmationDialog}
+                {serverRole === "manager" && canManageFactorySettings && !["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
+                  <SharedMasterDataHistory identity={`${me?.userId}:${me?.sandbox ? "sandbox" : "live"}`}
+                    canUndo={canManageInventory && canManageProfiles}
+                    revision={sharedHistoryRevision} onRefresh={refreshGuardedMasterData} onBusyChange={setUndoBusy} mutationBusy={undoBusy}
+                    onOpenImports={() => setManageCategory("import")} onOpenDataHealth={canManageStaff ? () => setManageCategory("audit") : undefined}
+                    confirm={(operation) => uiConfirm({ title: "Undo this shared change?",
+                      description: `${operation.description}. The server will check ${operation.affectedRecords} records and ${operation.affectedReferences} pending-run references. A changed dependency blocks the entire Undo.`,
+                      confirmLabel: "Undo" })} />
+                )}
+                {/* Device-only evidence is not an administrative server history. */}
+                {serverRole === "manager" && canManageFactorySettings && !["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
                   <div className="mt-6 pt-4 border-t border-border">
-                    <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
+                    <h3 className="text-sm font-semibold mb-1">Device-only change notices</h3>
+                    {(legacyHistoryProblem || changeHistory.some((item) => item.evidence === "legacy-only")) && (
+                      <Button type="button" size="sm" variant="outline" disabled={undoBusy}
+                        onClick={() => { void resolveLegacyHistoryAfterReview(); }}>Resolve legacy snapshots</Button>
+                    )}
                     <p className="text-[11px] text-muted-foreground mb-3">
-                      Edits to lists, recipes, and merges on this device. Undo also reverts any changes made after it. (Stored locally, not synced.)
+                      These notices are not server-confirmed Undo receipts. Legacy evidence is non-portable and retained on this device, but cannot restore shared records. Use Import history or Data Health for their supported guarded Undo actions.
                     </p>
+                    {legacyHistoryProblem && (
+                      <p role="status" className="text-xs text-amber-600 dark:text-amber-300 mb-3">
+                        {legacyHistoryProblem}
+                      </p>
+                    )}
                     {changeHistory.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">No recent changes.</p>
                     ) : (
@@ -17521,12 +17663,9 @@ export default function Home() {
                               <p className="text-xs truncate" title={entry.description}>{entry.description}</p>
                               <p className="text-[10px] text-muted-foreground">{new Date(entry.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}</p>
                             </div>
-                            <button
-                              type="button"
-                              disabled={undoBusy}
-                              onClick={() => handleUndoChange(entry)}
-                              className="shrink-0 px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50"
-                            >Undo</button>
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {entry.evidence === "session-only" ? "Session notice" : "Legacy only"} · Undo unavailable
+                            </span>
                           </div>
                         ))}
                       </div>

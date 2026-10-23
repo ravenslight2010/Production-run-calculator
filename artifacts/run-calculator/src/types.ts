@@ -672,11 +672,9 @@ export const HISTORY_KEY = "run-calc-history";
 export const TEMPLATES_KEY = "run-calc-templates";
 export const MAX_HISTORY_DAYS = 14;
 
-// ── Master-data change history (local-only, NOT synced) ─────────────────────
-// A capped log of recent edits to the manageable lists (merges, adds, removes,
-// renames). Each entry snapshots the full local master-data state BEFORE the
-// edit so it can be rolled back. Deliberately excluded from the sync payload —
-// it's a per-device undo trail, and snapshots would blow the sync size limit.
+// ── Legacy master-data evidence (local-only, NOT synced) ────────────────────
+// Existing snapshot bytes are retained for review, never executed or uploaded.
+// New compatibility notices contain metadata only and live in session memory.
 export const CHANGE_HISTORY_KEY = "run-calc-change-history";
 export const MAX_CHANGE_HISTORY = 20;
 
@@ -687,8 +685,9 @@ export type MasterDataChange = {
   ts: number;
   type: MasterDataChangeType;
   description: string;
-  /** Full local master-data snapshot taken BEFORE the edit (key → JSON value). */
+  /** Legacy format only. New history projections never contain snapshot facts. */
   before: Record<string, string>;
+  evidence?: "legacy-only" | "session-only";
 };
 export const MAX_TEMPLATES = 20;
 export const MAX_RUNS = 30;

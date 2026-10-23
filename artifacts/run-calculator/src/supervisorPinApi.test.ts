@@ -56,12 +56,13 @@ describe("targeted PIN cleanup and historical undo", () => {
     expect(localStorage.getItem("run-calc-change-history")).toContain("preserved");
     expect(localStorage.getItem("run-calc-day")).toBe("production");
   });
-  it("routes undo through the directory without recreating a PIN or a live cache", () => {
+  it("refuses legacy rollback without changing the canonical directory or recreating a PIN/cache", () => {
     saveList(BRANDS_KEY, ["Original"]);
     const snapshot = captureMasterDataSnapshot();
     saveList(BRANDS_KEY, ["Changed"]);
-    restoreMasterDataSnapshot({ ...snapshot, "run-calc-supervisor-pin": "4826" });
-    expect(loadList(BRANDS_KEY, [])).toEqual(["Original"]);
+    expect(() => restoreMasterDataSnapshot({ ...snapshot, "run-calc-supervisor-pin": "4826" }))
+      .toThrow(/Browser rollback is disabled/);
+    expect(loadList(BRANDS_KEY, [])).toEqual(["Changed"]);
     expect(localStorage.getItem(BRANDS_KEY)).toBeNull();
     expect(localStorage.getItem("run-calc-supervisor-pin")).toBeNull();
   });

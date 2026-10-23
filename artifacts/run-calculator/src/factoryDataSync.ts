@@ -4,6 +4,7 @@
 import { OPERATIONAL_DIRECTORY_KEYS, OPERATIONAL_FACTORY_SETTING_KEYS } from "@workspace/factory-constants";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithDiagnostics } from "./performanceDiagnostics";
+import { masterDataEpochHeaders } from "./masterDataEpoch";
 import {
   MEMORY_DIRECTORY_KEYS, directoryRaw, setDirectoryRaw, factoryDirectoryState,
   setFactoryDirectoryIdentity, setFactoryDirectoryStatus, resetFactoryDirectoryForTests, batchDirectoryUpdates,
@@ -34,17 +35,18 @@ let scopeEpoch = 0;
 let generation = 0;
 let readOrder = 0;
 let appliedReadOrder = 0;
-const readReceipts = new WeakMap<object, { epoch: number; order: number }>();
+const readReceipts = new WeakMap<object, { epoch: number; order: number; writeEpoch: string }>();
+let adoptedWriteEpoch = "unbound";
 let memoryQueue: FactoryQueueOp[] | null = null;
 let flushInFlight: Promise<void> | null = null;
 const settings = new Map<string, unknown>();
-type FactoryQueueOp = { key: string; value: unknown; updatedAt: number; g: number };
+type FactoryQueueOp = { key: string; value: unknown; updatedAt: number; g: number; undoEpoch?: string };
 export type FactoryDataEntry = { value: unknown; updatedAt: string };
 export type FactoryDataMap = Record<string, FactoryDataEntry>;
 
 export function setFactoryDataIdentity(identity: string | null, writable: boolean): void {
   if (identity === scopeIdentity && writable === canWrite) return;
-  scopeIdentity = identity; canWrite = writable; scopeEpoch++;
+  scopeIdentity = identity; canWrite = writable; scopeEpoch++; adoptedWriteEpoch = "unbound";
   memoryQueue = null; flushInFlight = null; settings.clear();
   setFactoryDirectoryIdentity(identity);
 }
@@ -88,7 +90,9 @@ function writeQueue(queue: FactoryQueueOp[]): void {
 }
 function enqueue(key: string, value: unknown, updatedAt: number): void {
   generation = Math.max(generation + 1, Date.now());
-  writeQueue([...readQueue().filter((op) => op.key !== key), { key, value, updatedAt, g: generation }]);
+  const previous = readQueue().find((op) => op.key === key);
+  writeQueue([...readQueue().filter((op) => op.key !== key), { key, value, updatedAt, g: generation,
+    undoEpoch: previous ? previous.undoEpoch ?? "unbound" : adoptedWriteEpoch }]);
 }
 function validValue(key: string, value: unknown): boolean {
   if (key === SHIFT_START_TIME_KEY || key === PRODUCTION_START_TIME_KEY) return typeof value === "string";
@@ -162,7 +166,7 @@ export async function fetchFactoryData(): Promise<FactoryDataMap> {
     if (!res.ok) throw new Error(res.status === 401 ? "Session expired. Sign in again." : `Directory unavailable (${res.status}). Retry online.`);
     const data = validateMap(await res.json());
     if (epoch !== scopeEpoch) throw new Error("Directory request superseded by account change");
-    readReceipts.set(data, { epoch, order });
+    readReceipts.set(data, { epoch, order, writeEpoch: res.headers.get("x-master-data-epoch") ?? "unbound" });
     return data;
   } catch (error) {
     if (epoch === scopeEpoch) setFactoryDirectoryStatus("unavailable", error instanceof Error ? error.message : "Directory unavailable. Retry online.");
@@ -178,6 +182,7 @@ export function putFactoryKey(key: string, value: unknown): void {
   enqueue(key, value, stampLocalWrite(key));
   void flushFactoryQueue();
 }
+export const pendingFactoryDataWriteCount = () => readQueue().length;
 export function flushFactoryQueue(): Promise<void> {
   if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return Promise.resolve();
   if (flushInFlight) return flushInFlight;
@@ -193,7 +198,7 @@ export function flushFactoryQueue(): Promise<void> {
         try { res = await fetchWithDiagnostics("/api/factory-data", {
           method: "PUT",
           signal: controller.signal,
-          headers: { "Content-Type": "application/json", "x-client-id": inventoryClientId() },
+          headers: { "Content-Type": "application/json", "x-client-id": inventoryClientId(), ...masterDataEpochHeaders("factory-data", op.undoEpoch ?? "unbound") },
           body: JSON.stringify({ key: op.key, value: op.value, updatedAt: op.updatedAt }),
         }); } finally { clearTimeout(timeout); }
         if (!res.ok || epoch !== scopeEpoch) return;
@@ -253,6 +258,7 @@ export function hydrateFromServer(data: FactoryDataMap): void {
       setDirectoryRaw(key, key.includes("presets") || key.includes("brand-flavors") ? "{}" : "[]");
     }
   }
+  if (receipt) adoptedWriteEpoch = receipt.writeEpoch;
   setFactoryDirectoryStatus("ready");
   if (receipt) appliedReadOrder = receipt.order;
   });
@@ -341,5 +347,6 @@ export async function runFactoryKvMigration(serverData: FactoryDataMap): Promise
 }
 export function resetFactoryDataSyncForTests(): void {
   scopeIdentity = null; canWrite = false; scopeEpoch++; generation = 0;
+  adoptedWriteEpoch = "unbound";
   memoryQueue = null; flushInFlight = null; settings.clear(); resetFactoryDirectoryForTests();
 }

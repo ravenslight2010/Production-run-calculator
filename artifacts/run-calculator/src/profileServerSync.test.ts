@@ -150,6 +150,7 @@ beforeEach(() => {
       return {
         ok: true,
         status: 200,
+        headers: new Headers({ "x-master-data-epoch": "0" }),
         // Saves acknowledge each submitted profile by default. Tests that need
         // a server-advanced stamp provide listItems explicitly.
         json: async () => ({ items: listItems.length > 0 ? listItems : postedItems }),

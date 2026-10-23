@@ -15,6 +15,7 @@
 
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { masterDataEpoch, masterDataEpochHeaders } from "./masterDataEpoch";
 import {
   activeProfileCacheOwnsLegacyData,
   cachedProfileKeys,
@@ -68,6 +69,7 @@ type QueueOp = {
   t: "up" | "del"; key: string; force?: boolean; g?: number;
   blobs?: { dough: string | null; crust: string | null };
   updatedAt?: number;
+  undoEpoch?: string;
 };
 
 let genCounter = Date.now();
@@ -182,7 +184,8 @@ function enqueue(op: QueueOp): void {
   const prev = readQueue().find((o) => o.key === op.key);
   const ops = readQueue().filter((o) => o.key !== op.key);
   const stamped = {
-    ...op, g: nextGen(),
+    ...op, g: nextGen(), undoEpoch: op.undoEpoch ?? (prev ? prev.undoEpoch ?? "unbound"
+      : adoptedProfileEpochGeneration === getProfileCacheGeneration() ? adoptedProfileWriteEpoch : "unbound"),
     ...(op.t === "up" ? {
       blobs: op.blobs ?? readProfileBlobs(op.key),
       updatedAt: op.updatedAt ?? (getProfileStamp(op.key) || 1),
@@ -314,6 +317,7 @@ async function apiList(): Promise<ApiProfile[]> {
       || !item.values || typeof item.values !== "object" || Array.isArray(item.values)
       || !item.crustValues || typeof item.crustValues !== "object" || Array.isArray(item.crustValues)
     )) throw new Error("Invalid profile directory response");
+    profileReadEpochs.set(data.items, { generation: cacheGeneration, epoch: res.headers.get("x-master-data-epoch") ?? "unbound" });
     return data.items;
   })();
   apiListInFlight = { generation: cacheGeneration, promise };
@@ -325,6 +329,9 @@ async function apiList(): Promise<ApiProfile[]> {
 }
 
 let apiListInFlight: { generation: number; promise: Promise<ApiProfile[]> } | null = null;
+const profileReadEpochs = new WeakMap<ApiProfile[], { generation: number; epoch: string }>();
+let adoptedProfileWriteEpoch = "unbound";
+let adoptedProfileEpochGeneration = -1;
 
 /**
  * Read a fresh profile snapshot for exports. Unlike reconciliation this does
@@ -392,7 +399,7 @@ class ProfileWriteForbiddenError extends Error {
   }
 }
 
-async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
+async function apiSave(items: ApiProfile[], undoEpoch: string): Promise<Map<string, number>> {
   const generation = getProfileCacheGeneration();
   const serverStamps = new Map<string, number>();
   for (const part of chunk(items, SERVER_MAX_BATCH)) {
@@ -404,6 +411,7 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
         headers: {
           "Content-Type": "application/json",
           "x-client-id": inventoryClientId(),
+          ...masterDataEpochHeaders("brand-profiles", undoEpoch),
         },
         body: JSON.stringify({ items: part }),
       },
@@ -446,7 +454,7 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
   return serverStamps;
 }
 
-async function apiDelete(keys: string[]): Promise<void> {
+async function apiDelete(keys: string[], undoEpoch: string): Promise<void> {
   const generation = getProfileCacheGeneration();
   for (const part of chunk(keys, SERVER_MAX_BATCH)) {
     if (generation !== getProfileCacheGeneration()) throw new Error("Profile identity changed");
@@ -457,6 +465,7 @@ async function apiDelete(keys: string[]): Promise<void> {
         headers: {
           "Content-Type": "application/json",
           "x-client-id": inventoryClientId(),
+          ...masterDataEpochHeaders("brand-profiles", undoEpoch),
         },
         body: JSON.stringify({ keys: part }),
       },
@@ -586,7 +595,9 @@ async function flushOnce(): Promise<void> {
   if (upserts.length > 0) {
     let serverStamps: Map<string, number> | null = null;
     try {
-      serverStamps = await apiSave(upserts);
+      const epochs = new Set(ops.map((op) => op.undoEpoch ?? "unbound"));
+      if (epochs.size !== 1) throw new Error("Pending profiles cross a shared Undo boundary. Review the pending edits; none were sent.");
+      serverStamps = await apiSave(upserts, ops[0]!.undoEpoch ?? "unbound");
       if (cacheGeneration !== getProfileCacheGeneration()) return;
     } catch (err) {
       // Includes 403: keeping the operation is the only safe outcome. A
@@ -644,7 +655,9 @@ async function flushOnce(): Promise<void> {
   if (deleteKeys.length > 0) {
     let deleted = true;
     try {
-      await apiDelete(deleteKeys);
+      const epochs = new Set(ops.map((op) => op.undoEpoch ?? "unbound"));
+      if (epochs.size !== 1) throw new Error("Pending profiles cross a shared Undo boundary. Review the pending edits; none were sent.");
+      await apiDelete(deleteKeys, ops[0]!.undoEpoch ?? "unbound");
       if (cacheGeneration !== getProfileCacheGeneration()) return;
     } catch (err) {
       throw err;
@@ -849,6 +862,10 @@ export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReco
   // against a newer server _subTab value.
   if (!profileCacheIsActive()) injectSubTabIntoProfileBlobsIfNeeded(stamps);
 
+  const epochReceipt = profileReadEpochs.get(serverItems);
+  if (epochReceipt?.generation === getProfileCacheGeneration()) {
+    adoptedProfileWriteEpoch = epochReceipt.epoch; adoptedProfileEpochGeneration = epochReceipt.generation;
+  }
   void flushProfileQueue();
   return { changed, adoptedKeys, deletedKeys, deletedSnapshots };
 }

@@ -63,10 +63,10 @@ describe("shared record migration and recovery", () => {
     for (const key of retained) localStorage.setItem(key, '{"synthetic":"retain exact bytes"}');
     const before = captureMasterDataSnapshot();
     applyResetWipe();
-    restoreMasterDataSnapshot({
+    expect(() => restoreMasterDataSnapshot({
       ...before, "run-calc-profile-acme__cheese": '{"stale":true}',
       "run-calc-templates:live": "[]", "run-calc-completed-history-cache.live": "[]",
-    });
+    })).toThrow(/Browser rollback is disabled/);
     for (const key of retained) expect(localStorage.getItem(key), key).toBe('{"synthetic":"retain exact bytes"}');
     expect(localStorage.getItem("run-calc-profile-acme__cheese")).toBeNull();
     expect(localStorage.getItem("run-calc-templates:live")).toBeNull();

@@ -2,12 +2,13 @@
 import type { RunTemplate } from "./types";
 import { browserRecordStore } from "./adapters/browserRecordStore";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import { masterDataEpoch, masterDataEpochHeaders } from "./masterDataEpoch";
 import { retireMatchingLegacyArray, stableRecordJson } from "./sharedRecordMigration";
 
 export type RunTemplateRecord = RunTemplate & { revision: number; deleted: boolean };
 type OutboxOp =
-  | { type: "save"; id: string; revision: number; record: RunTemplateRecord }
-  | { type: "delete"; id: string; revision: number };
+  | { type: "save"; id: string; revision: number; record: RunTemplateRecord; undoEpoch?: string }
+  | { type: "delete"; id: string; revision: number; undoEpoch?: string };
 
 const OUTBOX_KEY = "run-calc-templates-outbox-v1";
 const RUN_TEMPLATE_WRITE_TIMEOUT_MS = 30_000;
@@ -93,7 +94,10 @@ function operationAcknowledged(op: OutboxOp, record: RunTemplateRecord): boolean
 function enqueue(op: OutboxOp): void {
   // Last intent for an id wins. This is both smaller during an offline edit
   // burst and prevents an old in-flight intent being retried after a delete.
-  putOutbox([...outbox().filter((old) => old.id !== op.id), op]);
+  const previous = outbox().find((old) => old.id === op.id);
+  putOutbox([...outbox().filter((old) => old.id !== op.id), {
+    ...op, undoEpoch: previous ? previous.undoEpoch ?? "unbound" : op.undoEpoch,
+  }]);
 }
 function visible(list: RunTemplateRecord[]): RunTemplate[] {
   return list.filter((record) => !record.deleted).map(({ revision: _revision, deleted: _deleted, ...template }) => template);
@@ -119,7 +123,7 @@ export function saveRunTemplate(template: RunTemplate): RunTemplate[] {
   migrateLegacyRunTemplates();
   const revision = nextRevision();
   const record: RunTemplateRecord = { ...template, revision, deleted: false };
-  enqueue({ type: "save", id: record.id, revision, record });
+  enqueue({ type: "save", id: record.id, revision, record, undoEpoch: masterDataEpoch("run-templates") });
   putRecords([...records().filter((item) => item.id !== record.id), record]);
   void flushRunTemplates();
   return localRunTemplates();
@@ -135,7 +139,7 @@ export function deleteRunTemplate(id: string): RunTemplate[] {
     revision,
     deleted: true,
   };
-  enqueue({ type: "delete", id, revision });
+  enqueue({ type: "delete", id, revision, undoEpoch: masterDataEpoch("run-templates") });
   putRecords([...records().filter((item) => item.id !== id), tombstone]);
   void flushRunTemplates();
   return localRunTemplates();
@@ -242,13 +246,16 @@ export async function flushRunTemplates(): Promise<RunTemplate[]> {
     const sent = outbox();
     if (!sent.length) return localRunTemplates();
     try {
+      const originalEpochs = new Set(sent.map((op) => op.undoEpoch ?? "unbound"));
+      if (originalEpochs.size !== 1) throw new Error("Pending templates cross a shared Undo boundary. Review the pending edits; none were sent.");
+      const undoHeaders = masterDataEpochHeaders("run-templates", sent[0]!.undoEpoch ?? "unbound");
       const saves = sent.filter((op): op is Extract<OutboxOp, { type: "save" }> => op.type === "save").map((op) => op.record);
       const deletes = sent.filter((op): op is Extract<OutboxOp, { type: "delete" }> => op.type === "delete").map((op) => ({ id: op.id, revision: op.revision }));
       let response: RunTemplateRecord[] | undefined;
       if (saves.length) {
         const res = await fetchWithTimeout(
           "/api/run-templates",
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templates: saves }) },
+          { method: "POST", headers: { "Content-Type": "application/json", ...undoHeaders }, body: JSON.stringify({ templates: saves }) },
           writeTimeoutMs,
         );
         if (!res.ok) throw new Error(`saveRunTemplate failed (${res.status})`);
@@ -260,7 +267,7 @@ export async function flushRunTemplates(): Promise<RunTemplate[]> {
         if (generation !== epoch) return localRunTemplates();
         const res = await fetchWithTimeout(
           "/api/run-templates",
-          { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: deletes }) },
+          { method: "DELETE", headers: { "Content-Type": "application/json", ...undoHeaders }, body: JSON.stringify({ items: deletes }) },
           writeTimeoutMs,
         );
         if (!res.ok) throw new Error(`deleteRunTemplates failed (${res.status})`);

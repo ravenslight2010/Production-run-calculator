@@ -3,6 +3,8 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import runsRouter from "./runs";
 import profileDataHealthRouter from "./profileDataHealth";
+import masterDataOperationsRouter from "./masterDataOperations";
+import { masterDataMutationFence, masterDataReadEpoch } from "../lib/masterDataWriteFence";
 import sourceLibraryReconciliationCaptureRouter, {
   publicSourceLibraryReconciliationCaptureRouter,
 } from "./sourceLibraryReconciliationCapture";
@@ -54,6 +56,7 @@ export const directAuthorizationCoverageRouters = [
     authOnlyRoutes: ["GET /runs"],
   },
   { name: "profile data health", router: profileDataHealthRouter },
+  { name: "guarded master-data history", router: masterDataOperationsRouter },
   {
     name: "source-library reconciliation capture",
     router: sourceLibraryReconciliationCaptureRouter,
@@ -142,6 +145,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/import-operations/distillation-evidence",
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
+  ...reads(["manage-factory-settings"], "all", "scoped", ["/master-data-operations"]),
   ...reads(["review-incidents"], "all", "scoped", [
     "/incidents", "/incidents/unreviewed-count", "/incidents/actionable-count",
     "/incidents/assignees", "/incidents/:id", "/field-checks",
@@ -191,6 +195,8 @@ router.use(authRouter);
 // All capability families are authenticated. Family-owned capability checks
 // continue to run inside their existing route modules.
 router.use(requireAuth);
+router.use(masterDataReadEpoch);
+router.use(masterDataMutationFence);
 for (const family of authenticatedCapabilityFamilies) {
   router.use(family.router);
 }
@@ -221,6 +227,11 @@ const writes = (
 });
 
 export const mutationAuthorizationInventory: readonly MutationAuthorization[] = [
+  ...["preview", "apply", "undo"].map((action): MutationAuthorization => ({
+    method: "POST", path: `/master-data-operations/:operationId/${action}`,
+    ownership: "manager-only", scope: "scoped", sandbox: "allowed", managerRole: true,
+    capabilities: ["manage-factory-settings", "manage-inventory", "manage-profiles"], capabilityMatch: "all",
+  })),
   ...writes("public", "live-only", "denied", undefined, [
     "POST /auth/sign-up", "POST /auth/sign-in", "POST /auth/sign-out",
     "POST /auth/forgot-password", "POST /auth/reset-password",

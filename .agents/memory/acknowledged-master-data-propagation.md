@@ -57,3 +57,14 @@ visible list.
 **How to apply:** Treat `isPending` as loading for named-recipe managers and
 disable Add until the canonical pool query resolves. Keep a regression check for
 the pre-bootstrap empty state and the acknowledged-save path.
+
+Keep repeated master-data editing disabled through canonical adoption, not just
+until the write's HTTP response arrives.
+
+**Why:** The response can arrive while dependent canonical reads still hold the
+mutation guard. An enabled Add control then accepts input that the guard silently
+ignores, especially on a fast touch interaction.
+
+**How to apply:** Match control availability to the complete mutation-and-refresh
+lifecycle. Browser helpers should wait for enabled editing and the acknowledged
+canonical row before beginning another command.

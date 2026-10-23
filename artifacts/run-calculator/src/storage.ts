@@ -45,7 +45,6 @@ import {
   DIE_TYPES_KEY,
   DEFAULT_DIE_TYPES,
   MAX_HISTORY_DAYS,
-  CHANGE_HISTORY_KEY,
   MAX_CHANGE_HISTORY,
   type MasterDataChange,
   type MasterDataChangeType,
@@ -59,7 +58,7 @@ import {
   type CrustField,
 } from "./types";
 import { normalizeDayBreaks } from "./dayTimeline";
-import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun, loadCompletedHistoryForActiveScope } from "./completedHistorySync";
+import { queueCompletedRun, loadCompletedHistoryForActiveScope } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
 import {
@@ -164,8 +163,9 @@ import {
   withProfileCacheProjection,
   writeCachedProfileBlobs,
 } from "./profileCache";
-import { MEMORY_DIRECTORY_KEYS, DIRECTORY_METADATA_KEYS, directoryEntries } from "./factoryDirectory";
-import { purgeLegacyPinCopies } from "./purgeLegacyPinCopies";
+import { MEMORY_DIRECTORY_KEYS } from "./factoryDirectory";
+import { getProfileCacheGeneration } from "./profileCache";
+import { readLegacyMasterDataHistory } from "./legacyMasterDataHistory";
 
 type ProfileBlobEntry = {
   key: string;
@@ -2120,152 +2120,63 @@ export function removeStaleRecipeReference(
   return clearRecipeNameSelections(category, trimmed);
 }
 
-// ── Master-data change history (local-only undo trail) ──────────────────────
-// A snapshot is every "run-calc-*" localStorage key EXCEPT the change-history
-// key itself (which would nest snapshots and blow up exponentially). This is the
-// maximal blast radius of any master-data edit — a merge rewrites lists, recipe
-// presets, profiles, runs, templates and history; a brand/flavor rename rewrites
-// profiles + day-state; an ingredient rename rewrites per-run values. Snapshot-
-// everything is the only universally-correct undo, so we accept the size cost
-// (bounded by MAX_CHANGE_HISTORY + quota-safe trimming on write).
-const APP_KEY_PREFIX = "run-calc-";
-function excludedFromMasterUndo(key: string): boolean {
-  if (key.startsWith("run-calc-shared-history-review-v1:")) return true;
-  return key === "run-calc-supervisor-pin" || key.startsWith("run-calc-fkv-")
-    || key.startsWith("run-calc-profile-cache-")
-    || key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")
-    || key.startsWith("run-calc-templates")
-    || key.startsWith("run-calc-completed-history-")
-    || /(?:outbox|queue|operational-intent)/i.test(key);
-}
-
+// ── Retired browser rollback compatibility ─────────────────────────────────
+// The maintained callsites are being moved to typed canonical commands. These
+// compatibility entry points must not capture or restore a browser database,
+// even if called directly by an old consumer. Import/profile-repair compensation
+// remains owned by its existing server protocol.
+/** @deprecated Browser snapshots are not valid shared Undo evidence. */
 export function captureMasterDataSnapshot(): Record<string, string> {
-  purgeLegacyPinCopies();
-  const snap: Record<string, string> = {};
-  if (typeof localStorage === "undefined") return snap;
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (
-      !k || k === CHANGE_HISTORY_KEY || k === HISTORY_KEY
-      || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
-      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
-    ) continue;
-    if (!k.startsWith(APP_KEY_PREFIX) || excludedFromMasterUndo(k)) continue;
-    const v = localStorage.getItem(k);
-    if (v !== null) snap[k] = v;
-  }
-  for (const [key, raw] of directoryEntries()) snap[key] = raw;
-  for (const key of DIRECTORY_METADATA_KEYS) {
-    const raw = localStorage.getItem(key);
-    if (raw !== null) snap[key] = raw;
-  }
-  return snap;
+  return {};
 }
 
-// Restore a snapshot: rewrite every captured key, and delete any current
-// "run-calc-*" key (except the change-history key) that wasn't in the snapshot —
-// so additions made after the snapshot are truly reverted, not just overwritten.
-export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
-  if (typeof localStorage === "undefined") return;
-  const present = new Set<string>();
-  for (const [key] of directoryEntries()) present.add(key);
-  for (const key of DIRECTORY_METADATA_KEYS) present.add(key);
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    // Master-data undo/reset must never discard append-only completed history or
-    // its upload queue. Explicit purge-all is server-administered, not an
-    // incidental local rollback side effect.
-    if (
-      k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY && k !== HISTORY_KEY
-      && !k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
-      && !k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
-      && !excludedFromMasterUndo(k)
-    ) present.add(k);
+/** @deprecated Use the owning server compensation protocol, never this API. */
+export function restoreMasterDataSnapshot(_snap: Record<string, string>): never {
+  throw new Error("Browser rollback is disabled. Shared changes require guarded server Undo; legacy evidence is retained on this device.");
+}
+
+let sessionChangeGeneration = -1;
+let sessionChanges: MasterDataChange[] = [];
+
+function currentSessionChanges(): MasterDataChange[] {
+  const generation = getProfileCacheGeneration();
+  if (generation !== sessionChangeGeneration) {
+    sessionChangeGeneration = generation;
+    sessionChanges = [];
   }
-  for (const k of present) {
-    if (!(k in snap)) {
-      try {
-        if (MEMORY_DIRECTORY_KEYS.has(k) || DIRECTORY_METADATA_KEYS.has(k)) {
-          const empty = k.includes("presets") || k.includes("brand-flavors") || DIRECTORY_METADATA_KEYS.has(k) ? {} : [];
-          localStorage.setItem(k, JSON.stringify(empty));
-          notifyKv(k, empty);
-        } else localStorage.removeItem(k);
-      } catch {}
-    }
-  }
-  for (const [k, v] of Object.entries(snap)) {
-    if (
-      k === HISTORY_KEY || k.startsWith(COMPLETED_HISTORY_OUTBOX_KEY)
-      || k.startsWith(COMPLETED_HISTORY_CACHE_KEY)
-      || excludedFromMasterUndo(k)
-    ) continue;
-    try {
-      localStorage.setItem(k, v);
-      if (MEMORY_DIRECTORY_KEYS.has(k) || DIRECTORY_METADATA_KEYS.has(k)) notifyKv(k, JSON.parse(v));
-    } catch {}
-  }
-  purgeLegacyPinCopies();
+  return sessionChanges;
 }
 
 export function loadChangeHistory(): MasterDataChange[] {
-  try {
-    const raw = localStorage.getItem(CHANGE_HISTORY_KEY);
-    if (raw) return JSON.parse(raw) as MasterDataChange[];
-  } catch {}
-  return [];
+  return [...currentSessionChanges(), ...readLegacyMasterDataHistory().items].slice(0, MAX_CHANGE_HISTORY);
 }
 
-// Persist the change-history list, trimming oldest entries until it fits the
-// localStorage quota. A snapshot can be large, so a write may overflow; rather
-// than throw (and break the edit that triggered it) we drop the oldest entries
-// and retry, keeping whatever recent history fits.
-export function saveChangeHistory(list: MasterDataChange[]): void {
-  if (typeof localStorage === "undefined") return;
-  let trimmed = list.slice(0, MAX_CHANGE_HISTORY);
-  while (trimmed.length > 0) {
-    try {
-      localStorage.setItem(CHANGE_HISTORY_KEY, JSON.stringify(trimmed));
-      return;
-    } catch {
-      trimmed = trimmed.slice(0, -1); // drop the oldest and retry
-    }
-  }
-  try { localStorage.removeItem(CHANGE_HISTORY_KEY); } catch {}
+/** @deprecated Legacy evidence is read-only; do not replace or trim its bytes. */
+export function saveChangeHistory(_list: MasterDataChange[]): never {
+  throw new Error("Legacy change history is read-only. Its original evidence is retained on this device.");
 }
 
-// Record a change. `before` must be a snapshot captured BEFORE the edit. If the
-// edit turned out to be a no-op (the post-edit state equals `before`), nothing
-// is recorded — list mutations bail silently on duplicates/invalid input, and a
-// useless undo entry would just clutter the history.
+// Transitional notices are metadata-only and session-only, not Undo receipts.
+// Do not compare snapshots or persist client-provided before facts.
 export function recordMasterDataChange(
   type: MasterDataChangeType,
   description: string,
-  before: Record<string, string>,
+  _before: Record<string, string>,
 ): void {
-  const after = captureMasterDataSnapshot();
-  if (JSON.stringify(before) === JSON.stringify(after)) return;
   const entry: MasterDataChange = {
     id: genId(),
     ts: Date.now(),
     type,
-    description,
-    before,
+    description: description.slice(0, 500),
+    before: {},
+    evidence: "session-only",
   };
-  saveChangeHistory([entry, ...loadChangeHistory()]);
+  sessionChanges = [entry, ...currentSessionChanges()].slice(0, MAX_CHANGE_HISTORY);
 }
 
-// Roll back to the point just before the given entry: restore that entry's
-// before-snapshot and discard it plus every newer entry (the list is newest-
-// first, so we keep only entries older than the undone one). Returns false when
-// the entry no longer exists. Callers reload/refresh React state and re-push to
-// the server after a successful undo.
-export function undoChange(id: string): boolean {
-  const list = loadChangeHistory();
-  const idx = list.findIndex((e) => e.id === id);
-  if (idx === -1) return false;
-  restoreMasterDataSnapshot(list[idx].before);
-  saveChangeHistory(list.slice(idx + 1));
-  return true;
+/** @deprecated A local entry can never authorize a shared compensation. */
+export function undoChange(_id: string): false {
+  return false;
 }
 
 /** Case-insensitive merge that keeps the existing label when a duplicate appears. */
