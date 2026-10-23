@@ -129,6 +129,8 @@ const brixTargetBodySchema = z.object({
   targetBrix: z.number().finite().min(0).max(100).nullable(),
   toleranceBrix: z.number().finite().min(0).max(100).nullable(),
   reason: z.string().trim().min(1).max(500),
+  sourceDocument: z.string().trim().max(300).optional(),
+  sourceSection: z.string().trim().max(200).optional(),
 }).strict().superRefine((body, ctx) => {
   if ((body.targetBrix === null) !== (body.toleranceBrix === null)) {
     ctx.addIssue({
@@ -317,6 +319,8 @@ const redactionBodySchema = z.object({
     "payload.referenceSnapshot.expected.otherCode",
     "payload.referenceSnapshot.batchContext",
     "payload.referenceSnapshot.sourceVersion",
+    "payload.sourceDocument",
+    "payload.sourceSection",
   ]))
     .min(1)
     .max(24)
@@ -356,6 +360,8 @@ type QcBrixTarget = {
   reason?: string;
   overrideEventId?: number;
   targetRecordedAt?: string;
+  sourceDocument?: string;
+  sourceSection?: string;
 };
 
 function safeError(res: Response, status: number, message: string): void {
@@ -915,11 +921,16 @@ async function resolveBrixTargets(profileKey: string): Promise<QcBrixTarget[]> {
       latestByIngredient.set(row.ingredientId, row);
     }
   }
+  const projectedTargetRows = await hydrateEvents([...latestByIngredient.values()]);
+  const projectedByIngredient = new Map<string, (typeof projectedTargetRows)[number]>();
+  for (const row of projectedTargetRows) {
+    if (row.ingredientId) projectedByIngredient.set(row.ingredientId, row);
+  }
   return ingredientRows
     .filter((ingredient) => ingredient.enabled && !ingredient.mergedInto)
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((ingredient): QcBrixTarget => {
-      const override = latestByIngredient.get(ingredient.id);
+      const override = projectedByIngredient.get(ingredient.id);
       const targetBrix = override?.payload.active === true
         ? numericBrix(override.payload.targetBrix)
         : null;
@@ -944,7 +955,15 @@ async function resolveBrixTargets(profileKey: string): Promise<QcBrixTarget[]> {
           }
           : {}),
         ...(override ? { overrideEventId: override.id } : {}),
-        ...(override ? { targetRecordedAt: override.createdAt.toISOString() } : {}),
+        ...(override ? { targetRecordedAt: override.createdAt } : {}),
+        ...(typeof override?.payload.sourceDocument === "string"
+          && !override.redactedFields?.includes("payload.sourceDocument")
+          ? { sourceDocument: override.payload.sourceDocument }
+          : {}),
+        ...(typeof override?.payload.sourceSection === "string"
+          && !override.redactedFields?.includes("payload.sourceSection")
+          ? { sourceSection: override.payload.sourceSection }
+          : {}),
       };
     });
 }
@@ -996,6 +1015,8 @@ async function resolveBrixTarget(
       : {}),
     ...(override ? { overrideEventId: override.id } : {}),
     ...(override ? { targetRecordedAt: override.createdAt.toISOString() } : {}),
+    ...(typeof override?.payload.sourceDocument === "string" ? { sourceDocument: override.payload.sourceDocument } : {}),
+    ...(typeof override?.payload.sourceSection === "string" ? { sourceSection: override.payload.sourceSection } : {}),
   };
 }
 
@@ -1051,11 +1072,12 @@ function parseHistoryFilters(req: Request, limitOverride?: number) {
 }
 
 function csvCell(value: unknown): string {
-  const text = value === null || value === undefined
+  const rawText = value === null || value === undefined
     ? ""
     : typeof value === "string"
       ? value
       : JSON.stringify(value);
+  const text = /^[\s]*[=+\-@]/.test(rawText) ? `'${rawText}` : rawText;
   return `"${text.replaceAll('"', '""')}"`;
 }
 
@@ -1452,7 +1474,9 @@ router.post("/qc/brix-targets", requireCapability("manage-qc"), async (req, res)
           && existing.payload.active === (body.targetBrix !== null)
           && existing.payload.targetBrix === body.targetBrix
           && existing.payload.toleranceBrix === body.toleranceBrix
-          && existing.payload.reason === body.reason;
+          && existing.payload.reason === body.reason
+          && (existing.payload.sourceDocument ?? "") === (body.sourceDocument ?? "")
+          && (existing.payload.sourceSection ?? "") === (body.sourceSection ?? "");
         return sameRequest ? { event: existing, replayed: true } : { conflict: true as const };
       }
       const event = await appendRunEvent(tx, scope, actorId, {
@@ -1470,6 +1494,8 @@ router.post("/qc/brix-targets", requireCapability("manage-qc"), async (req, res)
           unit: "brix",
           source: "qc-override",
           reason: body.reason,
+          ...(body.sourceDocument ? { sourceDocument: body.sourceDocument } : {}),
+          ...(body.sourceSection ? { sourceSection: body.sourceSection } : {}),
         },
       });
       return { event, replayed: false };
@@ -2904,6 +2930,8 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
       "actorId",
       "createdAt",
       "payload",
+      "sourceDocument",
+      "sourceSection",
     ].join(",") + "\r\n");
     let cursor: number | undefined;
     const includeAuditDetails =
@@ -2936,6 +2964,16 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
           event.actorId,
           event.createdAt,
           event.payload,
+          event.eventType === "target-setting"
+            && event.payload.measurementKind === "brix"
+            && !event.redactedFields?.includes("payload.sourceDocument")
+            ? event.payload.sourceDocument
+            : "",
+          event.eventType === "target-setting"
+            && event.payload.measurementKind === "brix"
+            && !event.redactedFields?.includes("payload.sourceSection")
+            ? event.payload.sourceSection
+            : "",
         ].map(csvCell).join(",") + "\r\n");
       }
       cursor = rows[rows.length - 1]!.id;

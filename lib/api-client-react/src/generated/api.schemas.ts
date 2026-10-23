@@ -3630,6 +3630,16 @@ export interface QcBrixTarget {
   reason?: string;
   overrideEventId?: number;
   targetRecordedAt?: string;
+  /**
+     * Manager-cited approved document name or identifier; not fetched or inferred.
+     * @maxLength 300
+     */
+  sourceDocument?: string;
+  /**
+     * Manager-cited section or page reference.
+     * @maxLength 200
+     */
+  sourceSection?: string;
 }
 
 export interface QcTargetsResponse {
@@ -3711,6 +3721,16 @@ export interface QcBrixTargetInput {
      * @maxLength 500
      */
   reason: string;
+  /**
+     * Optional approved document name or identifier. Trimmed; blank means no reference for this revision.
+     * @maxLength 300
+     */
+  sourceDocument?: string;
+  /**
+     * Optional section or page reference. Trimmed; blank means no reference for this revision.
+     * @maxLength 200
+     */
+  sourceSection?: string;
 }
 
 export type QcBrixCheckInputStation = typeof QcBrixCheckInputStation[keyof typeof QcBrixCheckInputStation];
@@ -4719,6 +4739,8 @@ export const QcRedactionInputFieldsItem = {
   payloadreferenceSnapshotexpectedotherCode: 'payload.referenceSnapshot.expected.otherCode',
   payloadreferenceSnapshotbatchContext: 'payload.referenceSnapshot.batchContext',
   payloadreferenceSnapshotsourceVersion: 'payload.referenceSnapshot.sourceVersion',
+  payloadsourceDocument: 'payload.sourceDocument',
+  payloadsourceSection: 'payload.sourceSection',
 } as const;
 
 export interface QcRedactionInput {

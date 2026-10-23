@@ -47,4 +47,6 @@ export const QcRedactionInputFieldsItem = {
   payloadreferenceSnapshotexpectedotherCode: 'payload.referenceSnapshot.expected.otherCode',
   payloadreferenceSnapshotbatchContext: 'payload.referenceSnapshot.batchContext',
   payloadreferenceSnapshotsourceVersion: 'payload.referenceSnapshot.sourceVersion',
+  payloadsourceDocument: 'payload.sourceDocument',
+  payloadsourceSection: 'payload.sourceSection',
 } as const;

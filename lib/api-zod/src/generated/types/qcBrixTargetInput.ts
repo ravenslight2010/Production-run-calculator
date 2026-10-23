@@ -35,4 +35,14 @@ export interface QcBrixTargetInput {
      * @maxLength 500
      */
   reason: string;
+  /**
+     * Optional approved document name or identifier. Trimmed; blank means no reference for this revision.
+     * @maxLength 300
+     */
+  sourceDocument?: string;
+  /**
+     * Optional section or page reference. Trimmed; blank means no reference for this revision.
+     * @maxLength 200
+     */
+  sourceSection?: string;
 }

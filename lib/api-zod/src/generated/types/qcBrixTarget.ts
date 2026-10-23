@@ -28,4 +28,14 @@ export interface QcBrixTarget {
   reason?: string;
   overrideEventId?: number;
   targetRecordedAt?: Date;
+  /**
+     * Manager-cited approved document name or identifier; not fetched or inferred.
+     * @maxLength 300
+     */
+  sourceDocument?: string;
+  /**
+     * Manager-cited section or page reference.
+     * @maxLength 200
+     */
+  sourceSection?: string;
 }

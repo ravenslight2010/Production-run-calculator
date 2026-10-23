@@ -4248,6 +4248,8 @@ describe("QC workflows", () => {
       targetBrix: 12.5,
       toleranceBrix: 0.5,
       reason: "Approved synthetic Brix reference",
+      sourceDocument: '  =SYNTHETIC "Brix" — 文書  ',
+      sourceSection: "  § 4.2, p. 12\nAppendix A  ",
     };
     expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-targets", config)).status).toBe(403);
     const savedTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", config);
@@ -4264,11 +4266,72 @@ describe("QC workflows", () => {
         toleranceBrix: 0.5,
         unit: "brix",
         active: true,
+        sourceDocument: '=SYNTHETIC "Brix" — 文書',
+        sourceSection: "§ 4.2, p. 12\nAppendix A",
       },
     });
     const replayedTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", config);
     expect(replayedTarget.status).toBe(200);
     expect((await replayedTarget.json() as { event: { id: number } }).event.id).toBe(savedTargetEvent.id);
+    const configuredTargets = await req(QC_OPERATOR, "GET", targetsUrl);
+    expect(((await configuredTargets.json()) as { brixTargets: Array<Record<string, unknown>> })
+      .brixTargets.find((target) => target.ingredientId === config.ingredientId)).toMatchObject({
+        sourceDocument: config.sourceDocument.trim(),
+        sourceSection: config.sourceSection.trim(),
+        overrideEventId: savedTargetEvent.id,
+      });
+    for (const referenceChange of [
+      { sourceDocument: "Different approved document" },
+      { sourceSection: "Page 99" },
+      { sourceDocument: "", sourceSection: "" },
+    ]) {
+      expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+        ...config, ...referenceChange,
+      })).status).toBe(409);
+    }
+    for (const invalidReference of [
+      { sourceDocument: "x".repeat(301) },
+      { sourceSection: "x".repeat(201) },
+      { sourceDocument: 123 },
+      { sourceSection: null },
+    ]) {
+      expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+        ...config, operationId: randomUUID(), ...invalidReference,
+      })).status).toBe(400);
+    }
+    const referenceHistory = await req(QC_MANAGER, "GET", "/api/qc/history?ingredientId=qc-mozzarella");
+    expect(((await referenceHistory.json()) as { items: Array<{ id: number; payload: Record<string, unknown> }> })
+      .items.find((event) => event.id === savedTargetEvent.id)?.payload).toMatchObject({
+        reason: config.reason,
+        sourceDocument: config.sourceDocument.trim(),
+        sourceSection: config.sourceSection.trim(),
+      });
+    const referenceCsv = await req(QC_MANAGER, "GET", "/api/qc/history.csv?ingredientId=qc-mozzarella");
+    const referenceCsvText = await referenceCsv.text();
+    expect(referenceCsv.status).toBe(200);
+    expect(referenceCsvText.split("\r\n")[0]).toContain("payload,sourceDocument,sourceSection");
+    // Dedicated columns preserve Unicode, quote/newline escaping, and the existing formula-injection guard.
+    expect(referenceCsvText).toContain(`,"'=SYNTHETIC ""Brix"" — 文書","§ 4.2, p. 12\nAppendix A"\r\n`);
+    const citationRedaction = await req(QC_MANAGER, "POST", `/api/qc/events/${savedTargetEvent.id}/redactions`, {
+      operationId: randomUUID(),
+      reason: "Synthetic citation privacy request",
+      fields: ["payload.sourceDocument"],
+    });
+    expect(citationRedaction.status).toBe(201);
+    const redactedHistory = await req(QC_MANAGER, "GET", `/api/qc/history?ingredientId=${config.ingredientId}`);
+    const redactedTargetEvent = ((await redactedHistory.json()) as {
+      items: Array<{ id: number; payload: Record<string, unknown>; redactedFields?: string[] }>;
+    }).items.find((event) => event.id === savedTargetEvent.id)!;
+    expect(redactedTargetEvent.payload.sourceDocument).toBe("[redacted]");
+    expect(redactedTargetEvent.redactedFields).toContain("payload.sourceDocument");
+    const redactedTargetsResponse = await req(QC_OPERATOR, "GET", targetsUrl);
+    const redactedTarget = ((await redactedTargetsResponse.json()) as {
+      brixTargets: Array<Record<string, unknown>>;
+    }).brixTargets.find((target) => target.ingredientId === config.ingredientId)!;
+    expect(redactedTarget).not.toHaveProperty("sourceDocument");
+    expect(redactedTarget.sourceSection).toBe(config.sourceSection.trim());
+    const redactedCsv = await req(QC_MANAGER, "GET", `/api/qc/history.csv?ingredientId=${config.ingredientId}`);
+    expect(await redactedCsv.text()).not.toContain(`,"'=SYNTHETIC ""Brix"" — 文書","§ 4.2, p. 12`);
     expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
       ...config,
       toleranceBrix: 0.25,
@@ -4511,6 +4574,45 @@ describe("QC workflows", () => {
     expect(scopeRows.filter((event) => event.eventType === "brix-check").length).toBeGreaterThanOrEqual(5);
     expect(scopeRows.some((event) => event.eventType === "correction" && event.relatedEventId === String(outsideEvent.id))).toBe(true);
     expect(scopeRows.some((event) => event.eventType === "redaction" && event.relatedEventId === String(outsideEvent.id))).toBe(true);
+
+    // Every revision owns its own citation; missing/blank fields never inherit an older source.
+    for (const citation of [
+      {},
+      { sourceDocument: "   ", sourceSection: " \n " },
+      { sourceDocument: "x".repeat(300) },
+      { sourceSection: "p".repeat(200) },
+    ]) {
+      const revisionBody = {
+        operationId: randomUUID(),
+        profileKey: brixProfileKey,
+        ingredientId: config.ingredientId,
+        targetBrix: 0,
+        toleranceBrix: 0,
+        reason: "Synthetic independent citation revision",
+        ...citation,
+      };
+      const revision = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", revisionBody);
+      expect(revision.status).toBe(201);
+      const revisionEvent = ((await revision.json()) as { event: { id: number; payload: Record<string, unknown> } }).event;
+      const expectedDocument = citation.sourceDocument?.trim() || undefined;
+      const expectedSection = citation.sourceSection?.trim() || undefined;
+      expect(revisionEvent.payload.sourceDocument).toBe(expectedDocument);
+      expect(revisionEvent.payload.sourceSection).toBe(expectedSection);
+      const latestTargets = await req(QC_OPERATOR, "GET", targetsUrl);
+      const latest = ((await latestTargets.json()) as { brixTargets: Array<Record<string, unknown>> })
+        .brixTargets.find((target) => target.ingredientId === config.ingredientId)!;
+      expect(latest.overrideEventId).toBe(revisionEvent.id);
+      expect(latest.sourceDocument).toBe(expectedDocument);
+      expect(latest.sourceSection).toBe(expectedSection);
+      expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", revisionBody)).status).toBe(200);
+    }
+    const originalRevision = await db.select().from(qcWorkflowEventsTable)
+      .where(eq(qcWorkflowEventsTable.id, savedTargetEvent.id));
+    expect(originalRevision[0]!.payload).toMatchObject({
+      reason: config.reason,
+      sourceDocument: config.sourceDocument.trim(),
+      sourceSection: config.sourceSection.trim(),
+    });
   });
 
   it("reopens run sign-off after new evidence and requires independent cleaning verification", async () => {

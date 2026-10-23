@@ -320,6 +320,8 @@ export default function QcWorkflowTab({
   const [brixTargetValue, setBrixTargetValue] = useState("");
   const [brixTargetTolerance, setBrixTargetTolerance] = useState("");
   const [brixTargetReason, setBrixTargetReason] = useState("");
+  const [brixSourceDocument, setBrixSourceDocument] = useState("");
+  const [brixSourceSection, setBrixSourceSection] = useState("");
   const [brixTargetOperationKey, setBrixTargetOperationKey] = useState(() => operationId());
   const [brixTargetSaveAcknowledged, setBrixTargetSaveAcknowledged] = useState(false);
   useEffect(() => {
@@ -426,6 +428,8 @@ export default function QcWorkflowTab({
         setBrixTargetValue("");
         setBrixTargetTolerance("");
         setBrixTargetReason("");
+        setBrixSourceDocument("");
+        setBrixSourceSection("");
         await refreshAfterWrite();
       },
     },
@@ -601,6 +605,8 @@ export default function QcWorkflowTab({
       targetBrix: hasTarget ? target : null,
       toleranceBrix: hasTolerance ? tolerance : null,
       reason: brixTargetReason.trim(),
+      ...(brixSourceDocument.trim() ? { sourceDocument: brixSourceDocument.trim() } : {}),
+      ...(brixSourceSection.trim() ? { sourceSection: brixSourceSection.trim() } : {}),
     };
     setBrixTargetSaveAcknowledged(false);
     brixTargetMutation.mutate({ data });
@@ -1416,6 +1422,11 @@ export default function QcWorkflowTab({
                                 ? target.reason || "Not evaluated · no reviewed Brix target"
                                 : `${target.targetBrix} °Bx ±${target.toleranceBrix} °Bx · manager reviewed`}
                             </p>
+                            {(target.sourceDocument || target.sourceSection) && (
+                              <p className="mt-1 break-words text-[10px] text-muted-foreground">
+                                Approved source: {[target.sourceDocument, target.sourceSection].filter(Boolean).join(" · ")}
+                              </p>
+                            )}
                           </div>
                           <StatusPill tone={target.state === "configured" ? "green" : "amber"}>{target.state === "configured" ? "Set" : "Not evaluated"}</StatusPill>
                         </div>
@@ -1447,7 +1458,15 @@ export default function QcWorkflowTab({
                         }}>
                           <Trash2 className="h-3.5 w-3.5" /> Clear Brix target and tolerance
                         </button>
-                        <Textarea label="Brix target review reason" value={brixTargetReason} onChange={setBrixTargetReason} placeholder="Approved source or reason for this target" rows={2} />
+                        <Input label="Brix approved document name or ID (optional)" value={brixSourceDocument} onChange={(value) => {
+                          setBrixSourceDocument(value);
+                          setBrixTargetSaveAcknowledged(false);
+                        }} maxLength={300} placeholder="Document name or identifier" />
+                        <Input label="Brix source section or page (optional)" value={brixSourceSection} onChange={(value) => {
+                          setBrixSourceSection(value);
+                          setBrixTargetSaveAcknowledged(false);
+                        }} maxLength={200} placeholder="Section, page, or clause" />
+                        <Textarea label="Brix target review reason" value={brixTargetReason} onChange={setBrixTargetReason} placeholder="Why this target was reviewed or changed" rows={2} />
                         <MutationAlert error={brixTargetMutation.error} onRetry={submitBrixTarget} />
                         {brixTargetSaveAcknowledged && (
                           <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300" role="status">Brix target change saved and acknowledged by the server.</p>
@@ -1663,7 +1682,8 @@ export default function QcWorkflowTab({
                           <div className="rounded-lg border border-border/70 bg-background p-2.5"><p className={labelClass}>Actor</p><p className="break-all font-mono text-[10px]">{event.redactedFields?.includes("actorId") ? "Redacted" : event.actorId || "Not provided"}</p></div>
                           <div className="rounded-lg border border-border/70 bg-background p-2.5"><p className={labelClass}>Payload</p><p className="text-xs">{Object.keys(event.payload ?? {}).length ? Object.entries(event.payload).map(([key, value]) => {
                             const hidden = event.redactedFields?.includes(`payload.${key}`);
-                            return <span key={key} className="mr-2 inline-block"><span className="font-semibold">{key}:</span> {hidden ? "Redacted" : typeof value === "object" ? JSON.stringify(value) : String(value)}</span>;
+                            const fieldLabel = key === "sourceDocument" ? "Approved document" : key === "sourceSection" ? "Section/page" : key;
+                            return <span key={key} className="mr-2 inline-block max-w-full break-words"><span className="font-semibold">{fieldLabel}:</span> {hidden ? "Redacted" : typeof value === "object" ? JSON.stringify(value) : String(value)}</span>;
                           }) : "No payload fields"}</p></div>
                         </div>
                         {event.eventType === "brix-check" && (
@@ -1802,6 +1822,8 @@ export default function QcWorkflowTab({
                                   ["payload.instrument", "Instrument"],
                                   ["payload.lotNumber", "Lot number"],
                                   ["payload.expectedComponents", "Expected component identities"],
+                                  ["payload.sourceDocument", "Brix source document"],
+                                  ["payload.sourceSection", "Brix source section/page"],
                                 ]).map(([field, text]) => (
                                   <label key={field} className="flex items-center gap-2 text-xs">
                                     <input type="checkbox" className="h-4 w-4 accent-[#548f80]" checked={redactionFields.includes(field)} onChange={(event) => {

@@ -85,6 +85,7 @@ export const getQcTargetsResponseBrixTargetsItemTargetBrixMin = 0;
 export const getQcTargetsResponseBrixTargetsItemTargetBrixMax = 100;
 export const getQcTargetsResponseBrixTargetsItemToleranceBrixMin = 0;
 export const getQcTargetsResponseBrixTargetsItemToleranceBrixMax = 100;
+export const getQcTargetsResponseBrixTargetsItemSourceDocumentMax = 300;
 export const setQcTargetBodyProfileKeyMax = 400;
 export const setQcTargetBodyIngredientIdMax = 200;
 export const setQcTargetBodyTargetValueExclusiveMin = 0;
@@ -97,6 +98,7 @@ export const setQcBrixTargetBodyTargetBrixMax = 100;
 export const setQcBrixTargetBodyToleranceBrixMin = 0;
 export const setQcBrixTargetBodyToleranceBrixMax = 100;
 export const setQcBrixTargetBodyReasonMax = 500;
+export const setQcBrixTargetBodySourceDocumentMax = 300;
 export const recordQcLotBodyRunIdMax = 200;
 export const recordQcLotBodyIngredientIdMax = 200;
 export const recordQcLotBodyLotNumberMax = 200;
@@ -2194,7 +2196,9 @@ export const GetQcTargetsResponse = zod.object({
   "state": zod.enum(['configured', 'not-evaluated']),
   "reason": zod.string().optional(),
   "overrideEventId": zod.int().optional(),
-  "targetRecordedAt": zod.coerce.date().optional()
+  "targetRecordedAt": zod.coerce.date().optional(),
+  "sourceDocument": zod.string().max(getQcTargetsResponseBrixTargetsItemSourceDocumentMax).optional().describe('Manager-cited approved document name or identifier; not fetched or inferred.'),
+  "sourceSection": zod.string().max(getQcTargetsResponseBrixTargetsItemSourceSectionMax).optional().describe('Manager-cited section or page reference.')
 })).optional()
 })
 
@@ -2248,7 +2252,9 @@ export const SetQcBrixTargetBody = zod.object({
   "ingredientId": zod.string().min(1).max(setQcBrixTargetBodyIngredientIdMax),
   "targetBrix": zod.number().min(setQcBrixTargetBodyTargetBrixMin).max(setQcBrixTargetBodyTargetBrixMax).nullable(),
   "toleranceBrix": zod.number().min(setQcBrixTargetBodyToleranceBrixMin).max(setQcBrixTargetBodyToleranceBrixMax).nullable(),
-  "reason": zod.string().min(1).max(setQcBrixTargetBodyReasonMax)
+  "reason": zod.string().min(1).max(setQcBrixTargetBodyReasonMax),
+  "sourceDocument": zod.string().max(setQcBrixTargetBodySourceDocumentMax).optional().describe('Optional approved document name or identifier. Trimmed; blank means no reference for this revision.'),
+  "sourceSection": zod.string().max(setQcBrixTargetBodySourceSectionMax).optional().describe('Optional section or page reference. Trimmed; blank means no reference for this revision.')
 })
 
 export const SetQcBrixTargetResponse = zod.object({
@@ -3177,7 +3183,7 @@ export const RedactQcEventParams = zod.object({
 export const RedactQcEventBody = zod.object({
   "operationId": zod.uuid(),
   "reason": zod.string().min(1).max(redactQcEventBodyReasonMax),
-  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.reason', 'payload.summary', 'payload.instrument', 'payload.lotNumber', 'payload.expectedComponents', 'payload.observed.productName', 'payload.observed.lotText', 'payload.observed.dateText', 'payload.fieldResults.productName.observed', 'payload.fieldResults.productName.expected', 'payload.fieldResults.lotText.observed', 'payload.fieldResults.lotText.expected', 'payload.fieldResults.dateText.observed', 'payload.fieldResults.dateText.expected', 'payload.referenceSnapshot.expected.productName', 'payload.referenceSnapshot.expected.lotText', 'payload.referenceSnapshot.expected.dateText', 'payload.referenceSnapshot.sourceIdentity', 'payload.referenceSnapshot.sourceDescription', 'payload.batchContext', 'payload.observed.productionCode', 'payload.observed.bestByCode', 'payload.observed.otherCode', 'payload.fieldResults.productionCode.observed', 'payload.fieldResults.productionCode.expected', 'payload.fieldResults.bestByCode.observed', 'payload.fieldResults.bestByCode.expected', 'payload.fieldResults.otherCode.observed', 'payload.fieldResults.otherCode.expected', 'payload.referenceSnapshot.expected.productionCode', 'payload.referenceSnapshot.expected.bestByCode', 'payload.referenceSnapshot.expected.otherCode', 'payload.referenceSnapshot.batchContext', 'payload.referenceSnapshot.sourceVersion'])).min(1).max(redactQcEventBodyFieldsMax)
+  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.reason', 'payload.summary', 'payload.instrument', 'payload.lotNumber', 'payload.expectedComponents', 'payload.observed.productName', 'payload.observed.lotText', 'payload.observed.dateText', 'payload.fieldResults.productName.observed', 'payload.fieldResults.productName.expected', 'payload.fieldResults.lotText.observed', 'payload.fieldResults.lotText.expected', 'payload.fieldResults.dateText.observed', 'payload.fieldResults.dateText.expected', 'payload.referenceSnapshot.expected.productName', 'payload.referenceSnapshot.expected.lotText', 'payload.referenceSnapshot.expected.dateText', 'payload.referenceSnapshot.sourceIdentity', 'payload.referenceSnapshot.sourceDescription', 'payload.batchContext', 'payload.observed.productionCode', 'payload.observed.bestByCode', 'payload.observed.otherCode', 'payload.fieldResults.productionCode.observed', 'payload.fieldResults.productionCode.expected', 'payload.fieldResults.bestByCode.observed', 'payload.fieldResults.bestByCode.expected', 'payload.fieldResults.otherCode.observed', 'payload.fieldResults.otherCode.expected', 'payload.referenceSnapshot.expected.productionCode', 'payload.referenceSnapshot.expected.bestByCode', 'payload.referenceSnapshot.expected.otherCode', 'payload.referenceSnapshot.batchContext', 'payload.referenceSnapshot.sourceVersion', 'payload.sourceDocument', 'payload.sourceSection'])).min(1).max(redactQcEventBodyFieldsMax)
 })
 
 export const RedactQcEventResponse = zod.object({
@@ -10017,6 +10023,7 @@ export const UndoImportOperationResponse = zod.object({
   "undoneAt": zod.int().nullish()
 })
 })
+export const getQcTargetsResponseBrixTargetsItemSourceSectionMax = 200;
 
 export const saveDieLineDefaultsBodyEntriesItemPressOvenMinMin = 0;
 
@@ -10031,3 +10038,5 @@ export const deleteDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
 export const saveDieLineDefaultsResponseEntriesItemPressOvenMinMin = 0;
 
 export const listDieLineDefaultsResponseEntriesItemFrontlineMinMin = 0;
+
+export const setQcBrixTargetBodySourceSectionMax = 200;

@@ -300,12 +300,12 @@ const stagedIngredients: QcAllergenReviewInput["stagedIngredients"] = [
 it("keeps a late label-save acknowledgement attached to its originating run", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const invalidate = vi.spyOn(client, "invalidateQueries").mockResolvedValue(undefined);
-  const view = (runId: string) => (
+  const view = (profileKey: string) => (
     <QueryClientProvider client={client}>
-      <QcLabelVerification runId={runId} profileKey="brand__flavor" canRecordQc canManageQc={false} />
+      <QcLabelVerification runId="test-run" profileKey={profileKey} canRecordQc canManageQc={false} />
     </QueryClientProvider>
   );
-  const { rerender } = render(view("origin-run"));
+  const { rerender } = render(view("brand__flavor"));
   expect(screen.getByLabelText("Packaging context").className).toContain("appearance-none");
   const acknowledgeOrigin = qcMocks.labelCheckOptions!.mutation.onSuccess;
   rerender(view("next-run"));
@@ -331,7 +331,10 @@ it("offers only approved references bound to the current product and packaging c
     </QueryClientProvider>
   );
   const { rerender } = render(view("brand__flavor"));
-  const values = () => Array.from((screen.getByLabelText("Approved reference") as HTMLSelectElement).options).map((option) => option.value);
+  const values = () => Array.from(
+    (screen.getByLabelText("Approved reference") as HTMLSelectElement).options,
+    (option) => option.value,
+  );
   expect(values()).toEqual(["", "matching"]);
   rerender(view("__flavor"));
   expect(values()).toEqual([""]);
@@ -393,9 +396,7 @@ describe("QC workflow UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save observation" }));
 
     expect(qcMocks.labelCheckMutation.mutate).toHaveBeenCalledTimes(1);
-    const request = qcMocks.labelCheckMutation.mutate.mock.calls[0]?.[0] as {
-      data: Record<string, unknown>;
-    };
+    const request = qcMocks.labelCheckMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
     expect(request.data).toMatchObject({
       runId: "run-1",
       context: "shipper-case",
@@ -756,42 +757,22 @@ describe("QC workflow UI", () => {
       source: "spec-import",
       state: "configured",
     }];
-    qcMocks.runs["run-1"] = {
-      ...qcMocks.run,
-      data: {
-        runId: "run-1",
-        items: [],
-        hasMore: true,
-        weightCheckEvents: [{
-          ingredientId: "flour",
-          checkType: "30-minute",
-          createdAt: new Date(start + 30 * 60_000).toISOString(),
-        }],
-        weightCheckEventsComplete: true,
-        componentChecklist: {
-          status: "complete",
-          issues: [],
-          expectedComponents: [],
-          source: null,
-        },
+    qcMocks.run.data = {
+      runId: "run-1",
+      items: [{
+        id: 1,
+        eventType: "weight",
+        ingredientId: "flour",
+        payload: { checkType: "30-minute" },
+        createdAt: new Date(start + 30 * 60_000).toISOString(),
+      }],
+      componentChecklist: {
+        status: "complete",
+        issues: [],
+        expectedComponents: [],
+        source: null,
       },
-    };
-    qcMocks.runs["run-2"] = {
-      ...qcMocks.run,
-      data: {
-        runId: "run-2",
-        items: [],
-        hasMore: false,
-        weightCheckEvents: [],
-        weightCheckEventsComplete: true,
-        componentChecklist: {
-          status: "complete",
-          issues: [],
-          expectedComponents: [],
-          source: null,
-        },
-        signoff: null,
-      },
+      signoff: null,
     };
     const rendered = renderTab({
       runIsActive: false,
@@ -919,7 +900,6 @@ describe("QC workflow UI", () => {
     expect(first.data).not.toHaveProperty("targetBrix");
     expect(first.data).not.toHaveProperty("toleranceBrix");
     expect(first.data).not.toHaveProperty("outcome");
-
     qcMocks.brixMutation.error = new Error("Temporary network failure");
     fireEvent.change(screen.getByLabelText("Brix note (optional)"), { target: { value: "Retry context" } });
     fireEvent.click(screen.getByRole("button", { name: "Retry or correct the input" }));
@@ -939,6 +919,7 @@ describe("QC workflow UI", () => {
 
     expect(qcMocks.brixTargetMutation.mutate).toHaveBeenCalledTimes(1);
     const request = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+
     expect(request.data).toMatchObject({
       profileKey: "brand::flavor",
       ingredientId: "flour",
@@ -946,6 +927,51 @@ describe("QC workflow UI", () => {
       toleranceBrix: 0,
       reason: "Reviewed reference",
     });
+    expect(request.data).not.toHaveProperty("sourceDocument");
+    expect(request.data).not.toHaveProperty("sourceSection");
     expect(request.data).not.toHaveProperty("unit");
+  });
+
+  it("sends structured Brix citations separately from the reason and retains them after a failed save", () => {
+    renderTab({ canManageQc: true });
+    fireEvent.change(screen.getByLabelText("Brix target ingredient"), { target: { value: "flour" } });
+    fireEvent.change(screen.getByLabelText("Target Brix (°Bx)"), { target: { value: "12.5" } });
+    fireEvent.change(screen.getByLabelText("Brix tolerance (°Bx)"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Annual review" } });
+    const document = screen.getByLabelText("Brix approved document name or ID (optional)");
+    const section = screen.getByLabelText("Brix source section or page (optional)");
+    expect(document.getAttribute("maxlength")).toBe("300");
+    expect(section.getAttribute("maxlength")).toBe("200");
+    fireEvent.change(document, { target: { value: "  Approved 文書 — SOP-1  " } });
+    fireEvent.change(section, { target: { value: "  § 4, page 12  " } });
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+    const first = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(first.data).toMatchObject({
+      sourceDocument: "Approved 文書 — SOP-1",
+      sourceSection: "§ 4, page 12",
+      reason: "Annual review",
+    });
+    qcMocks.brixTargetMutation.error = new Error("Temporary network failure");
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Annual review " } });
+    expect((document as HTMLInputElement).value).toBe("  Approved 文書 — SOP-1  ");
+    expect((section as HTMLInputElement).value).toBe("  § 4, page 12  ");
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+    const retry = qcMocks.brixTargetMutation.mutate.mock.calls[1]?.[0] as { data: Record<string, unknown> };
+    expect(retry.data).toEqual(first.data);
+  });
+
+  it("omits blank Brix citations when clearing and keeps citation controls manager-only", () => {
+    const { rerenderTab } = renderTab({ canManageQc: true });
+    fireEvent.change(screen.getByLabelText("Brix target ingredient"), { target: { value: "flour" } });
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Clear after review" } });
+    fireEvent.change(screen.getByLabelText("Brix approved document name or ID (optional)"), { target: { value: "   " } });
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+    const request = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(request.data).toMatchObject({ targetBrix: null, toleranceBrix: null, reason: "Clear after review" });
+    expect(request.data).not.toHaveProperty("sourceDocument");
+    expect(request.data).not.toHaveProperty("sourceSection");
+    rerenderTab({ canManageQc: false });
+    expect(screen.queryByLabelText("Brix approved document name or ID (optional)")).toBeNull();
+    expect(screen.queryByLabelText("Brix source section or page (optional)")).toBeNull();
   });
 });
