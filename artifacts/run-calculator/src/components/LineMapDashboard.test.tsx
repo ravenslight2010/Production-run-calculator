@@ -31,6 +31,7 @@ function renderLineMap(
     configuredApplicator?: 3 | 4;
     configuredPepperoni?: boolean;
     pepperoniBatchQuantity?: number;
+    configuredSecondaryPepperoni?: boolean;
     applicatorBatchesAvailable?: boolean;
     mixedFrontline?: boolean;
     applicatorRecipes?: Partial<Record<1 | 2 | 3 | 4, RecipeRow[]>>;
@@ -46,6 +47,7 @@ function renderLineMap(
   const active = options.active ?? false;
   const configuredApplicator = options.configuredApplicator;
   const configuredPepperoni = options.configuredPepperoni ?? false;
+  const configuredSecondaryPepperoni = options.configuredSecondaryPepperoni ?? false;
   const applicatorBatchesAvailable = options.applicatorBatchesAvailable ?? true;
   const mixedFrontline = options.mixedFrontline ?? false;
   const sauceNeedsWithoutBatches = options.sauceNeedsWithoutBatches ?? false;
@@ -71,7 +73,7 @@ function renderLineMap(
       app3CheeseRecipe: options.applicatorRecipes?.[3] ?? [],
       app4CheeseRecipe: options.applicatorRecipes?.[4] ?? [],
       pep1Type: mixedFrontline || configuredPepperoni ? "Pepperoni" : "",
-      pep1TypeB: mixedFrontline ? "Sausage" : "",
+      pep1TypeB: mixedFrontline || configuredSecondaryPepperoni ? "Sausage" : "",
       pep2Type: "",
       pep2TypeB: "",
       pep1Combined: false,
@@ -114,7 +116,7 @@ function renderLineMap(
         : configuredApplicator === 4 && applicatorBatchesAvailable ? 2 : 0,
       pep1Lbs: mixedFrontline || configuredPepperoni ? 12 : 0,
       pep1Batches: options.pepperoniBatchQuantity ?? (mixedFrontline ? 1 : 0),
-      pep1LbsB: mixedFrontline ? 8 : 0,
+      pep1LbsB: mixedFrontline || configuredSecondaryPepperoni ? 8 : 0,
       pep1BatchesB: 0,
       pep2Lbs: 0,
       pep2Batches: 0,
@@ -255,33 +257,15 @@ describe("LineMapDashboard station lifecycle statuses", () => {
       .toContain("150.00 lbs");
   });
 
-  it.each([3, 4] as const)(
-    "shows the need for applicator %i when it is the only configured Frontline item",
-    (slot) => {
-      renderLineMap("running", { configuredApplicator: slot });
+  it("shows the secondary Pep product in pounds when its batch quantity is unavailable", () => {
+    renderLineMap("running", { configuredSecondaryPepperoni: true });
 
-      const frontline = screen.getByRole("button", { name: /Frontline/ });
-      const appRow = within(frontline).getByText(`App ${slot} — Cheese`).parentElement;
-      expect(appRow?.textContent)
-        .toContain("2.00 batches");
-      expect(within(frontline).queryByText("App 1 — Mozzarella")).toBeNull();
-      expect(within(frontline).queryByText("App 2 — Cheddar")).toBeNull();
-    },
-  );
+    const frontline = screen.getByRole("button", { name: /Frontline/ });
+    const secondaryPepRow = within(frontline).getByText("Pep 1 — Sausage").parentElement;
 
-  it.each([3, 4] as const)(
-    "shows the need for applicator %i in pounds when batch quantity is unavailable",
-    (slot) => {
-      renderLineMap("running", {
-        configuredApplicator: slot,
-        applicatorBatchesAvailable: false,
-      });
-
-      const frontline = screen.getByRole("button", { name: /Frontline/ });
-      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
-      expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
-    },
-  );
+    expect(secondaryPepRow?.textContent).toContain("8.00 lbs");
+    expect(secondaryPepRow?.textContent).not.toContain("batches");
+  });
 
   it("shows a Pepperoni need in pounds when no batch quantity is available", () => {
     renderLineMap("running", { configuredPepperoni: true });
@@ -312,6 +296,20 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expect(within(frontline).getByText("50.00 lbs")).toBeTruthy();
     expect(within(frontline).queryByText(/batches/)).toBeNull();
   });
+
+  it.each([3, 4] as const)(
+    "shows the need for applicator %i in pounds when batch quantity is unavailable",
+    (slot) => {
+      renderLineMap("running", {
+        configuredApplicator: slot,
+        applicatorBatchesAvailable: false,
+      });
+
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(within(frontline).getByText(`App ${slot} — Cheese`)).toBeTruthy();
+      expect(within(frontline).getByText("40.00 lbs")).toBeTruthy();
+    },
+  );
 
   it("shows later applicator needs after Sauce, earlier applicators, and Pepperoni rows", () => {
     renderLineMap("running", { mixedFrontline: true });
@@ -384,6 +382,18 @@ describe("LineMapDashboard station lifecycle statuses", () => {
     expect(app3Row?.textContent).toContain("2.00 batches");
     expect(within(frontline).queryByTestId("frontline-components-3")).toBeNull();
   });
+
+  it.each([3, 4] as const)(
+    "shows the need for applicator %i when it is the only configured Frontline item",
+    (slot) => {
+      renderLineMap("running", { configuredApplicator: slot });
+
+      const frontline = screen.getByRole("button", { name: /Frontline/ });
+      expect(
+        within(frontline).getByText(`App ${slot} — Cheese`).parentElement?.textContent,
+      ).toContain("2.00 batches");
+    },
+  );
 
   it("keeps the aggregate applicator need when recipe components are not usable", () => {
     renderLineMap("running", {
