@@ -366,6 +366,7 @@ export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePoli
 export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy = {
   'production-source-v2': 'production-source-v2',
   'production-source-v3': 'production-source-v3',
+  'production-source-v4': 'production-source-v4',
 } as const;
 
 export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority];
@@ -2323,6 +2324,7 @@ export type BuildInfoSourcePolicy = typeof BuildInfoSourcePolicy[keyof typeof Bu
 export const BuildInfoSourcePolicy = {
   'production-source-v2': 'production-source-v2',
   'production-source-v3': 'production-source-v3',
+  'production-source-v4': 'production-source-v4',
 } as const;
 
 export type BuildInfoGitBinding = typeof BuildInfoGitBinding[keyof typeof BuildInfoGitBinding];

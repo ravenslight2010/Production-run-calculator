@@ -12,4 +12,5 @@ export type BuildInfoSourcePolicy = typeof BuildInfoSourcePolicy[keyof typeof Bu
 export const BuildInfoSourcePolicy = {
   'production-source-v2': 'production-source-v2',
   'production-source-v3': 'production-source-v3',
+  'production-source-v4': 'production-source-v4',
 } as const;

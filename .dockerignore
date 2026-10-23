@@ -20,6 +20,8 @@ tmp/
 Dockerfile
 docker-compose.yml
 docker-compose.local-ai.yml
+# The smoke runner executes on the host and is not an application build input.
+scripts/src/run-docker-caddy-browser-smoke.mjs
 # Uploaded workbooks, archives, screenshots, and unrelated retained evidence
 # are not Docker build inputs. Keep the reviewed audit bundle required by the
 # source-identity and API build checks.

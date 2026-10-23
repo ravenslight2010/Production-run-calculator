@@ -9,6 +9,12 @@ The browser smoke should use a test-only image containing the deployed database 
 
 **How to apply:** When changing Docker/Caddy smoke construction, preserve the test-only image boundary and verify actual migration completion, HTTPS/API readiness, the full browser matrix, and resource cleanup.
 
+Host-only smoke runners must be excluded by exact path from both the Docker build context and the versioned production-source fingerprint. Do not broadly exclude scripts. Verify cache behavior through the same isolated Compose build path used by the smoke; standalone Docker builds can have different context/network cache keys, and plain BuildKit output may print a step and its `CACHED` status on separate lines.
+
+**Why:** A context/fingerprint mismatch can either rebuild production bundles for a host-only edit or let the source identity describe different inputs from the image. A cache probe that changes the build path can report a false miss.
+
+**How to apply:** When excluding a test-only file, test that changing only that file leaves the production fingerprint unchanged and that API/web application build layers are cached through the smoke's Compose configuration.
+
 The owner authorized supplying the exact reviewed reconciliation report to CI
 through a protected input channel on 2026-10-22. That is not approval to publish
 its contents in Git, logs, artifacts, shared image caches, or untrusted PR jobs.

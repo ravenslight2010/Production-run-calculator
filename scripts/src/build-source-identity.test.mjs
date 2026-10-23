@@ -46,6 +46,22 @@ test("mutation property across each included source category and varied bytes", 
   }
 });
 
+test("host-only Docker/Caddy smoke runner is excluded without excluding production scripts", (t) => {
+  const root = sourceFixture(t);
+  const smokeRunner = "scripts/src/run-docker-caddy-browser-smoke.mjs";
+  put(root, smokeRunner, "initial smoke runner");
+  const baseline = fingerprintSource(root);
+  assert(!baseline.files.includes(smokeRunner));
+
+  for (const content of ["changed smoke runner", "another runner revision"]) {
+    put(root, smokeRunner, content);
+    assert.equal(hash(root), baseline.sourceFingerprintSha256);
+  }
+
+  put(root, "scripts/src/production-build-step.mjs", "changed production build step");
+  assert.notEqual(hash(root), baseline.sourceFingerprintSha256);
+});
+
 test("secrets, evidence, fixtures and generated output are excluded and not exposed", (t) => {
   const root = sourceFixture(t);
   const before = hash(root);
@@ -85,7 +101,9 @@ test("Git binding is verified only for clean tracked build inputs; backup is nev
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000,
   });
   git(["init"]);
-  git(["add", "."]);
+  // The fixture's complete source set must be tracked even when host-level
+  // ignore rules match the synthetic approval-evidence paths.
+  git(["add", "--force", "."]);
   git(["-c", "user.name=Identity Fixture", "-c", "user.email=identity@invalid.example",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "Fixture"]);
   const initialRevision = git(["rev-parse", "HEAD"]).trim();
@@ -167,7 +185,7 @@ test("a stale build stage from an older source policy cannot block a fresh stage
 
   assert.equal(completeBuildStage(root, record, "api"), false);
   const sealed = completeBuildStage(root, record, "web");
-  assert.equal(sealed.sourcePolicy, "production-source-v3");
+  assert.equal(sealed.sourcePolicy, "production-source-v4");
 });
 
 test("development metadata is explicit and cannot serve as a complete release", (t) => {

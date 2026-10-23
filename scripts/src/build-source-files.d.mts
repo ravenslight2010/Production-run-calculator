@@ -1,4 +1,4 @@
-export const SOURCE_POLICY: "production-source-v3";
+export const SOURCE_POLICY: "production-source-v4";
 
 export function isSourceInput(relative: string): boolean;
 

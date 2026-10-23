@@ -4,7 +4,10 @@ import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "./source-library-pool-approval-assets.mjs";
 
-export const SOURCE_POLICY = "production-source-v3";
+export const SOURCE_POLICY = "production-source-v4";
+const NON_PRODUCTION_SOURCE_FILES = new Set([
+  "scripts/src/run-docker-caddy-browser-smoke.mjs",
+]);
 const SOURCE_LIBRARY_RECONCILIATION_ASSETS = new Set([
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
@@ -22,6 +25,7 @@ const SKIP_FILES = new Set(["publish-source-record.json", "build-info.json",
   "build-source-part.json"]);
 
 export function isSourceInput(relative) {
+  if (NON_PRODUCTION_SOURCE_FILES.has(relative)) return false;
   if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return true;
   const parts = relative.split("/");
   if (parts.some((p) => SKIP_DIRS.has(p) || p.startsWith(".env")) ||

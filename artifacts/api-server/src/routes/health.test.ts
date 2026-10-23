@@ -148,7 +148,7 @@ describe("public GET /build-info", () => {
     const info = {
       schemaVersion: 1, kind: "app-build-info",
       appBuildId: "app-build:00000000-0000-0000-0000-000000000000",
-      sourcePolicy: "production-source-v3", sourceFingerprintSha256: "a".repeat(64),
+      sourcePolicy: "production-source-v4", sourceFingerprintSha256: "a".repeat(64),
       gitRevision: null, gitBinding: "unavailable", buildMode: "release",
       completedAt: new Date().toISOString(), platformDeploymentId: null,
       platformBuildId: null, platformIdentitySource: "unavailable",
