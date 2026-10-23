@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+# macOS uses its bundled Bash without GNU stat/date/sha256sum or flock.
+# Require the pinned Node/pnpm already installed; preserve the Linux path below.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  exec python3 "$(dirname "${BASH_SOURCE[0]}")/run-release-darwin.py" "$@"
+fi
+
 # The pinned Node build selects OpenSSL's CA store; enabling Node's separate
 # system-CA mode conflicts with it and exits with code 9. Keep OpenSSL's verified
 # trust enabled, using the readable host bundle selected below.

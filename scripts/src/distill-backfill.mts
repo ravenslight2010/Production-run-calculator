@@ -3,6 +3,15 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import {
+  darwinMetadataHelper,
+  isProcessIdentity,
+  readProcessIdentity,
+  sameProcessIdentity,
+  type ProcessIdentity,
+  type LinuxIdentityFileReader,
+  type ProcessIdentityReader,
+} from "./metadata-process-identity.mts";
+import {
   NEAR_DUPLICATE_POLICY,
   assertBrandPartitionIntegrity,
   assertNoCrossPartitionContentDuplicates,
@@ -255,62 +264,19 @@ function resolveMetadataDecisionPath(repoRoot: string, decisionPath: string): st
   return resolvedPath;
 }
 
-type LinuxProcessIdentity = {
-  platform: "linux";
-  bootId: string;
-  startTimeTicks: string;
-};
-
-type LinuxIdentityFileReader = (filePath: string) => string;
-
 type MetadataLockOwner = {
   pid: number;
-  identity?: LinuxProcessIdentity;
+  identity?: ProcessIdentity;
 };
 
 export function assertMetadataMaintenancePlatformSupported(
   platform: NodeJS.Platform = process.platform,
 ): void {
-  if (platform !== "linux") {
+  if (platform !== "linux" && platform !== "darwin") {
     throw new Error(
-      "metadata updates are supported only on Linux by this repository; macOS and Windows do not have the verified flock and process-identity contract. Run this command in a supported Linux x64 environment and leave existing metadata locks untouched.",
+      "metadata updates are supported only on Linux and macOS by this repository; run in a supported Linux x64 or macOS environment and leave existing metadata locks untouched.",
     );
   }
-}
-
-function readLinuxProcessIdentity(
-  pid: number,
-  readIdentityFile: LinuxIdentityFileReader = (filePath) => fs.readFileSync(filePath, "utf8"),
-): LinuxProcessIdentity {
-  if (process.platform !== "linux") {
-    assertMetadataMaintenancePlatformSupported();
-  }
-
-  let statContents: string;
-  let bootId: string;
-  try {
-    statContents = readIdentityFile(`/proc/${pid}/stat`);
-    bootId = readIdentityFile("/proc/sys/kernel/random/boot_id").trim();
-  } catch {
-    throw new Error(`cannot establish the Linux process identity for metadata lock owner ${pid}`);
-  }
-
-  // The command name is parenthesized and may itself contain spaces or
-  // parentheses. Fields after its final ')' start at proc stat field 3.
-  const commandEnd = statContents.lastIndexOf(")");
-  const fields = commandEnd < 0 ? [] : statContents.slice(commandEnd + 1).trim().split(/\s+/u);
-  const startTimeTicks = fields[19];
-  if (!/^[a-f0-9-]{36}$/u.test(bootId) || !startTimeTicks || !/^\d+$/u.test(startTimeTicks)) {
-    throw new Error(`cannot validate the Linux process identity for metadata lock owner ${pid}`);
-  }
-  return { platform: "linux", bootId, startTimeTicks };
-}
-
-function serializeMetadataLockOwner(): string {
-  return `${JSON.stringify({
-    pid: process.pid,
-    identity: readLinuxProcessIdentity(process.pid),
-  })}\n`;
 }
 
 function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"): MetadataLockOwner {
@@ -345,19 +311,13 @@ function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"
     || Object.keys(value).length !== 2
     || !Number.isSafeInteger(value.pid)
     || (value.pid as number) <= 0
-    || !isRecord(value.identity)
-    || Object.keys(value.identity).length !== 3
-    || value.identity.platform !== "linux"
-    || typeof value.identity.bootId !== "string"
-    || !/^[a-f0-9-]{36}$/u.test(value.identity.bootId)
-    || typeof value.identity.startTimeTicks !== "string"
-    || !/^\d+$/u.test(value.identity.startTimeTicks)
+    || !isProcessIdentity(value.identity)
   ) {
     throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
   }
   return {
     pid: value.pid as number,
-    identity: value.identity as unknown as LinuxProcessIdentity,
+    identity: value.identity,
   };
 }
 
@@ -365,6 +325,7 @@ function isMetadataLockOwnerActive(
   owner: MetadataLockOwner,
   lockPath: string,
   readIdentityFile?: LinuxIdentityFileReader,
+  readIdentity: ProcessIdentityReader = readProcessIdentity,
 ): boolean {
   const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
   try {
@@ -384,21 +345,25 @@ function isMetadataLockOwnerActive(
     throw new Error(`metadata lock owner PID ${owner.pid} is a live legacy PID-only lock; PID reuse cannot be distinguished, so leave it untouched. ${guidance}`);
   }
 
-  let currentIdentity: LinuxProcessIdentity;
+  let currentIdentity: ProcessIdentity;
   try {
-    currentIdentity = readLinuxProcessIdentity(owner.pid, readIdentityFile);
+    if (owner.identity.platform !== process.platform) throw new Error("foreign-platform owner");
+    currentIdentity = readIdentity(owner.pid, readIdentityFile);
   } catch {
     throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
   }
-  return currentIdentity.bootId === owner.identity.bootId
-    && currentIdentity.startTimeTicks === owner.identity.startTimeTicks;
+  return sameProcessIdentity(currentIdentity, owner.identity);
 }
 
 function acquireMetadataMaintenanceLock(
   lockPath: string,
   readIdentityFile?: LinuxIdentityFileReader,
+  readIdentity: ProcessIdentityReader = readProcessIdentity,
 ): number {
-  const lockContents = serializeMetadataLockOwner();
+  const lockContents = `${JSON.stringify({
+    pid: process.pid,
+    identity: readProcessIdentity(process.pid),
+  })}\n`;
   let initialFd: number | undefined;
   try {
     initialFd = fs.openSync(lockPath, "wx", 0o600);
@@ -432,7 +397,7 @@ function acquireMetadataMaintenanceLock(
     fs.writeFileSync(recoveryFd, lockContents, "utf8");
 
     const owner = readMetadataLockOwner(lockPath, "update");
-    if (isMetadataLockOwnerActive(owner, lockPath, readIdentityFile)) {
+    if (isMetadataLockOwnerActive(owner, lockPath, readIdentityFile, readIdentity)) {
       throw new Error(`another metadata update is active (lock owner PID ${owner.pid}); retry after it finishes`);
     }
 
@@ -485,6 +450,7 @@ export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   decisionPath: string,
   entry: unknown,
   readIdentityFile?: LinuxIdentityFileReader,
+  readIdentity?: ProcessIdentityReader,
 ): DecisionFile {
   assertMetadataMaintenancePlatformSupported();
   const resolvedPath = fs.realpathSync(decisionPath);
@@ -496,7 +462,7 @@ export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   let temporaryDirectory: string | undefined;
   try {
     clearAbandonedMetadataRecoveryGuard(lockPath);
-    lockFd = acquireMetadataMaintenanceLock(lockPath, readIdentityFile);
+    lockFd = acquireMetadataMaintenanceLock(lockPath, readIdentityFile, readIdentity);
 
     const decision = appendMetadataMaintenanceEntry(
       readJson(resolvedPath, "decision file"),
@@ -577,12 +543,13 @@ export function appendMetadataMaintenanceEntryFile(
     "  process.exitCode = 1;",
     "}",
   ].join("\n");
+  const gateCommand = process.platform === "darwin"
+    ? ["python3", darwinMetadataHelper, "gate", recoveryGatePath]
+    : ["flock", "--exclusive", "--nonblock", recoveryGatePath];
   const result = spawnSync(
-    "flock",
+    gateCommand[0]!,
     [
-      "--exclusive",
-      "--nonblock",
-      recoveryGatePath,
+      ...gateCommand.slice(1),
       process.execPath,
       ...metadataWorkerNodeArgs(),
       "--input-type=module",
@@ -599,7 +566,7 @@ export function appendMetadataMaintenanceEntryFile(
 
   if (result.error) {
     throw new Error(
-      `metadata recovery gate could not start (${result.error.message}); leave existing locks untouched and retry after checking the local flock utility`,
+      `metadata recovery gate could not start (${result.error.message}); leave existing locks untouched and retry after checking ${process.platform === "darwin" ? "Python 3" : "the local flock utility"}`,
     );
   }
   if (result.status !== 0) {
