@@ -20,6 +20,8 @@ export const QcEventEventType = {
   'date-code-check': 'date-code-check',
   'date-code-reference': 'date-code-reference',
   'date-code-reference-review': 'date-code-reference-review',
+  'import-committed': 'import-committed',
+  'import-review': 'import-review',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
   'cleaning-verification': 'cleaning-verification',

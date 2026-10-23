@@ -1,7 +1,7 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Approved Phase 1 and advisory Slices 0–3 implemented; date-code functional checks verified with synthetic references; WebKit background network diagnostics remain unresolved. The API/web preview startup blocker was repaired without changing project dependencies. Real approved label/date-code references remain unavailable and later gates remain deferred
-**Updated:** 2026-10-22
+**Status:** Approved Phase 1 and advisory Slices 0–4 implemented; import-review functional and final-state checks demonstrated with synthetic committed operations. Earlier date-code WebKit background diagnostics remain unresolved. The API/web preview startup blocker was repaired without changing project dependencies. Real approved label/date-code references remain unavailable and later gates remain deferred
+**Updated:** 2026-10-23
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 QC is a durable follow-on product track, not a sync-protocol prerequisite. New QC actions require explicit capabilities, server-generated audit identity, reset/purge survival, and stable ingredient identity for lot and allergen rollups.
@@ -122,6 +122,61 @@ and [failure ledger](../.local/tasks/evidence/qc-slice-3-date-code-verification/
 Physical Android Chrome and iOS Safari/PWA are not run; browser emulation is not
 physical-device evidence. Slice 8 remains deferred pending explicit owner policy,
 not shipped or formally declined. Slice 9 is not adopted.
+
+## Approved Master-Program Slice 4 — Advisory Import QC Review
+
+**Status:** Implemented; focused PostgreSQL/API/UI checks and signed-in browser
+evidence cover the advisory outcome. This does not certify real source accuracy
+or production readiness.
+
+- Each newly committed spec, premix or cheese operation captures a versioned,
+  bounded normalized before/after summary and its exact canonical result hash
+  inside the existing atomic Apply transaction. The existing append-only QC
+  ledger is the retained source of truth; no new database table/column or
+  production migration is required. Raw workbooks, source text, notes and
+  unbounded snapshots are not copied into QC evidence.
+- Managers with `manage-qc` can browse a bounded queue, inspect the committed
+  summary and its explicit omissions, and Verify or Reject with rationale.
+  Server actor/time, operation ID, result hash and prior review revision bind
+  each decision. Concurrent/stale decisions conflict. A dropped-response retry
+  uses the original decision identity and returns its original acknowledged
+  receipt, not a second decision. Later manager decisions append revisions.
+- Pending/verified/rejected is independent of Apply/Undo and Gold Lab evaluation.
+  Failed/applying operations cannot be verified. Legacy operations lacking
+  retained review evidence remain visibly unreviewed; missing or redacted
+  summaries cannot support new decisions. Authorized users see only scoped
+  pending/rejected badge counts without gaining review-detail, import or Undo
+  rights. Queue/detail/decision access and ordinary QC history remain fenced.
+- Rejection shows guarded existing Undo availability and guidance. It never
+  executes Undo, replays Apply or changes production/shipping eligibility.
+  Notes/reasons and summary redactions append overlays; original evidence
+  remains immutable. These non-run events do not reopen unrelated run sign-offs.
+- Review evidence survives both live/sandbox reset and factory purge, actual
+  90-day source-text cleanup, and removal of the import operation. Historical
+  QC status remains attributable to the retained operation ID and hash.
+- Verification: 38 selected API/summary/purge tests passed; two strengthened
+  source-expiry/pagination/immutability cases then passed. All 18 focused client
+  tests, root typecheck, codegen and generated-contract checks passed.
+  Chromium and WebKit demonstrated safe summary, rationale, Verify/Reject,
+  stale-manager conflict and committed-response-loss retry. The first browser
+  execution exited unsuccessfully on two fixture/assertion mistakes; its
+  functional observations are preserved, not relabeled as a clean run.
+  A narrow final-state follow-up passed 2/2 tests for cross-context badge deltas,
+  reload persistence and four post-decision viewport checks per engine.
+  Before/after desktop, phone, tablet portrait and tablet landscape evidence is
+  retained. Physical Android Chrome and iOS Safari/PWA: **NOT RUN**.
+- The final-state pass had no QC HTTP errors or unexpected JavaScript errors.
+  Unrelated background 403 responses from factory-data/day-start consumption,
+  deliberate navigation request cancellations and performance-budget warnings
+  are recorded separately; no global clean-browser or release claim is made.
+
+See the [coverage/check map](../.local/tasks/evidence/qc-slice-4-import-review/coverage-check-map.md),
+[failure ledger](../.local/tasks/evidence/qc-slice-4-import-review/failure-ledger.md)
+and [combined browser evidence](../.local/tasks/evidence/qc-slice-4-import-review/browser-evidence.md).
+Gold Lab scoring/capture, raw-source retention and customer evaluation-use
+authorization are unchanged. Slice 8 enforcement remains deferred pending
+explicit owner policy, neither shipped nor formally declined. Slice 9 allergen
+expansion is not adopted.
 
 ## QC Phase 1 — Approved and Implemented
 

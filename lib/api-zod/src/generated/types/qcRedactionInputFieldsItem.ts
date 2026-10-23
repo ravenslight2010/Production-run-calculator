@@ -13,6 +13,8 @@ export const QcRedactionInputFieldsItem = {
   actorId: 'actorId',
   ingredientName: 'ingredientName',
   payloadnote: 'payload.note',
+  payloadreason: 'payload.reason',
+  payloadsummary: 'payload.summary',
   payloadinstrument: 'payload.instrument',
   payloadlotNumber: 'payload.lotNumber',
   payloadexpectedComponents: 'payload.expectedComponents',

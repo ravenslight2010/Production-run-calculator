@@ -44,6 +44,99 @@ tags:
   - name: sync
     description: Client-date-scoped live day-state synchronization
 paths:
+  /qc/import-review-badges:
+    get:
+      operationId: getQcImportReviewBadges
+      tags: [qc]
+      summary: Minimal unverified and rejected counts within the authenticated scope
+      responses:
+        "200":
+          description: Counts only; no review detail access is granted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending, rejected]
+                properties:
+                  pending: { type: integer, minimum: 0 }
+                  rejected: { type: integer, minimum: 0 }
+        "401": { description: Authentication required }
+  /qc/import-reviews:
+    get:
+      operationId: listQcImportReviews
+      tags: [qc]
+      summary: Bounded manage-qc import review queue
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, verified, rejected, all], default: pending } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: Scoped review projections independent of Apply status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/QcImportReviewItem" } }
+                  nextCursor: { type: [string, "null"] }
+        "400": { description: Invalid filters }
+        "401": { description: Authentication required }
+        "403": { description: manage-qc required }
+  /qc/import-reviews/{operationId}:
+    get:
+      operationId: getQcImportReview
+      tags: [qc]
+      summary: Bounded retained committed-result summary and decision history
+      parameters:
+        - { name: operationId, in: path, required: true, schema: { type: string, minLength: 16, maxLength: 120 } }
+      responses:
+        "200":
+          description: Manager-only evidence without raw workbook or source snapshots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcImportReviewDetail" }
+        "400": { description: Invalid identity }
+        "401": { description: Authentication required }
+        "403": { description: manage-qc required }
+        "404": { description: Review unavailable in this scope }
+  /qc/import-reviews/{operationId}/decisions:
+    post:
+      operationId: decideQcImportReview
+      tags: [qc]
+      summary: Append an advisory decision for the exact committed result
+      description: Requires manage-qc. Never applies, replays or undoes an import. Exact retries return the original receipt; stale result or revision conflicts.
+      parameters:
+        - { name: operationId, in: path, required: true, schema: { type: string, minLength: 16, maxLength: 120 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcImportReviewDecisionInput" }
+      responses:
+        "201":
+          description: Decision committed atomically
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcImportReviewDecisionResult" }
+        "200":
+          description: Exact idempotent retry receipt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcImportReviewDecisionResult" }
+        "400": { description: Invalid decision or missing rationale }
+        "401": { description: Authentication required }
+        "403": { description: manage-qc required }
+        "409":
+          description: Stale result/revision, changed retry or non-reviewable Apply
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
   /build-info:
     get:
       operationId: getBuildInfo
@@ -6330,6 +6423,97 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    QcImportReviewItem:
+      type: object
+      required: [operationId, resultHash, importType, createdAt, applyStatus, qcStatus, revision, evidenceAvailable]
+      properties:
+        operationId: { type: string }
+        resultHash: { type: [string, "null"] }
+        importType: { type: string }
+        createdAt: { type: string, format: date-time }
+        applyStatus: { type: string }
+        qcStatus: { type: string, enum: [pending, verified, rejected] }
+        revision: { type: integer }
+        evidenceAvailable: { type: boolean }
+    QcImportReviewSummary:
+      type: object
+      required: [entities, changes, omittedChanges]
+      properties:
+        entities:
+          type: array
+          items:
+            type: object
+            required: [entity, before, after, created, updated, deleted]
+            properties:
+              entity: { type: string }
+              before: { type: integer }
+              after: { type: integer }
+              created: { type: integer }
+              updated: { type: integer }
+              deleted: { type: integer }
+        changes:
+          type: array
+          maxItems: 30
+          items:
+            type: object
+            required: [entity, row, action, fields, before, after]
+            properties:
+              entity: { type: string }
+              row: { type: string }
+              action: { type: string }
+              fields: { type: array, items: { type: string } }
+              before: { type: object, additionalProperties: {} }
+              after: { type: object, additionalProperties: {} }
+        omittedChanges: { type: integer }
+    QcImportReviewDetail:
+      allOf:
+        - $ref: "#/components/schemas/QcImportReviewItem"
+        - type: object
+          required: [summary, summaryLimitation, decisions, undo]
+          properties:
+            summary:
+              anyOf:
+                - $ref: "#/components/schemas/QcImportReviewSummary"
+                - { type: "null" }
+            summaryLimitation: { type: string }
+            decisions:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [id, status, resultHash, reason, actorId, createdAt]
+                properties:
+                  id: { type: integer }
+                  status: { type: string, enum: [verified, rejected] }
+                  resultHash: { type: string }
+                  reason: { type: string }
+                  actorId: { type: string }
+                  createdAt: { type: string, format: date-time }
+            undo:
+              type: object
+              required: [available, guidance]
+              properties:
+                available: { type: boolean }
+                guidance: { type: string }
+    QcImportReviewDecisionInput:
+      type: object
+      additionalProperties: false
+      required: [decisionId, expectedResultHash, expectedRevision, status, reason]
+      properties:
+        decisionId: { type: string, pattern: "^[A-Za-z0-9_-]{16,120}$" }
+        expectedResultHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        expectedRevision: { type: integer, minimum: 0 }
+        status: { type: string, enum: [verified, rejected] }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    QcImportReviewDecisionResult:
+      type: object
+      required: [operationId, resultHash, qcStatus, revision, replayed]
+      properties:
+        operationId: { type: string }
+        resultHash: { type: string }
+        qcStatus: { type: string, enum: [verified, rejected] }
+        revision: { type: integer }
+        replayed: { type: boolean }
     SourceLibraryReconciliationCaptureRequest:
       type: object
       required: [deploymentHandoff, expectedDatabaseOwner]
@@ -8666,7 +8850,7 @@ components:
         recordId: { type: string, format: uuid }
         eventType:
           type: string
-          enum: [lot, weight, brix-check, component-check, label-check, label-reference, label-reference-review, date-code-check, date-code-reference, date-code-reference-review, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+          enum: [lot, weight, brix-check, component-check, label-check, label-reference, label-reference-review, date-code-check, date-code-reference, date-code-reference-review, import-committed, import-review, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
         runId: { type: string, nullable: true }
         profileKey: { type: string, nullable: true }
         ingredientId: { type: string, nullable: true }
@@ -9275,6 +9459,8 @@ components:
               - actorId
               - ingredientName
               - payload.note
+              - payload.reason
+              - payload.summary
               - payload.instrument
               - payload.lotNumber
               - payload.expectedComponents

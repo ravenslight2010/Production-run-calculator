@@ -75,6 +75,7 @@ import QcAllergenActivityReport from "./QcAllergenActivityReport";
 import QcLabelVerification, { QcLabelComparison } from "./QcLabelVerification";
 import QcDateCodeVerification, { QcDateCodeComparison } from "./QcDateCodeVerification";
 import QualityHistoryTab from "./QualityHistoryTab";
+import QcImportReview from "./QcImportReview";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
 
 export type QcWorkflowTabProps = {
@@ -284,6 +285,7 @@ export default function QcWorkflowTab({
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewName>("lots");
   const [showDailyActivity, setShowDailyActivity] = useState(false);
+  const [showImportReview, setShowImportReview] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [selectedIngredient, setSelectedIngredient] = useState("");
   const [lotNumber, setLotNumber] = useState("");
@@ -915,6 +917,20 @@ export default function QcWorkflowTab({
         />
       ) : (
       <>
+      {canManageQc && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            className={quietButtonClass}
+            aria-expanded={showImportReview}
+            onClick={() => setShowImportReview((value) => !value)}
+            data-testid="button-toggle-qc-import-review"
+          >
+            <FileClock className="h-4 w-4" /> {showImportReview ? "Hide import review" : "Import review"}
+          </button>
+          {showImportReview && <QcImportReview canManageQc={canManageQc} />}
+        </div>
+      )}
       {!canRecordQc && !canManageQc ? (
         <div className={`${panelClass} flex items-start gap-3 p-5`}>
           <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />

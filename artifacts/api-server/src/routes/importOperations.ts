@@ -15,7 +15,9 @@ import {
   brandProfilesTable,
   freezerPullItemsTable,
   specImportAliasesTable,
+  qcWorkflowEventsTable,
 } from "@workspace/db";
+import { buildImportQcSummary } from "../lib/importQcSummary";
 import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { currentScope } from "../lib/requestScope";
 import { requireAnyCapability, requireCapability, requireLiveScope } from "../middlewares/requireCapability";
@@ -873,6 +875,11 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
         distillEvidence: sourceEvidence.evidence ?? {},
         affectedEntities: result.affectedEntities, result,
       }).returning();
+      await tx.insert(qcWorkflowEventsTable).values({
+        scope, operationId: `import-commit:${operationId}`, recordId: operationId,
+        eventType: "import-committed", actorId: req.userId!,
+        payload: { operationId, resultHash, importType, summaryVersion: 1, summary: buildImportQcSummary(before, after) },
+      });
       await tx.insert(importHistoryTable).values({
         scope, importType, sourceKey: body.sourceKey ? String(body.sourceKey).slice(0, 300) : null,
         sourceLabel: String(body.sourceLabel ?? "Import").slice(0, 300),
@@ -1178,6 +1185,22 @@ router.get("/import-operations/:operationId", requireAnyCapability(["manage-prof
   if (!requireOperationCapability(req, res, row[0].importType)) return;
   res.json({ operation: operationApi(row[0]) });
 });
+
+/** Read-only advisory check; Undo always rechecks under its transaction lock. */
+export async function inspectImportUndo(id: string, capabilities: readonly string[]): Promise<boolean> {
+  const [op] = await db.select().from(importOperationsTable).where(and(
+    eq(importOperationsTable.id, id), eq(importOperationsTable.scope, currentScope()),
+  )).limit(1);
+  if (!op || op.status !== "applied" || !op.resultHash) return false;
+  const before = op.beforeSnapshot as Record<string, unknown[]>;
+  const after = op.afterSnapshot as Record<string, unknown[]>;
+  const needed = new Set([...snapshotCapabilities(before), ...snapshotCapabilities(after)]);
+  if (![...needed].every((entry) => capabilities.includes(entry))) return false;
+  // Same top-level gate as the existing Undo route, even for alias-only changes.
+  if (!capabilities.some((entry) => entry === "manage-profiles" || entry === "manage-inventory")) return false;
+  const current = await captureSnapshotRows(db, after, currentScope(), before);
+  return hash(current) === op.resultHash;
+}
 
 router.post("/import-operations/:operationId/undo", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req, res) => {
   const id = String(req.params.operationId);

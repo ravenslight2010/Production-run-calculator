@@ -27,6 +27,7 @@ import dieTypesRouter from "../dieTypes";
 import dieLineDefaultsRouter from "../dieLineDefaults";
 import factoryDataRouter from "../factoryData";
 import importOperationsRouter from "../importOperations";
+import importQcReviewsRouter from "../importQcReviews";
 
 /** Factory setup, recipe libraries, source imports, and merge/reconciliation data. */
 const router: IRouter = Router();
@@ -43,6 +44,7 @@ router.use(savedPremixSheetsRouter);
 router.use(savedCheeseSheetsRouter);
 router.use(importHistoryRouter);
 router.use(importOperationsRouter);
+router.use(importQcReviewsRouter);
 router.use(masterDataBootstrapRouter);
 router.use(mergeAliasesRouter);
 router.use(deniedMergesRouter);

@@ -276,6 +276,8 @@ const redactionBodySchema = z.object({
     "actorId",
     "ingredientName",
     "payload.note",
+    "payload.reason",
+    "payload.summary",
     "payload.instrument",
     "payload.lotNumber",
     "payload.expectedComponents",
@@ -2757,6 +2759,7 @@ router.get("/qc/history", requireCapability("record-qc"), async (req, res) => {
     if (req.capabilities?.includes("manage-qc") !== true) {
       conditions.push(notInArray(qcWorkflowEventsTable.eventType, [
         "date-code-reference", "date-code-reference-review",
+        "import-committed", "import-review",
       ]));
     }
     if (filters.runId) conditions.push(eq(qcWorkflowEventsTable.runId, filters.runId));
@@ -2963,6 +2966,9 @@ router.post("/qc/events/:eventId/redactions", requireCapability("manage-qc"), as
     }
     const event = await db.transaction(async (tx) => {
       if (target.runId) await tx.execute(lockRun(currentScope(), target.runId));
+      if (target.eventType === "import-committed" || target.eventType === "import-review") {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"import-operation:" + currentScope()}, 0))`);
+      }
       return appendRunEvent(tx, currentScope(), actorId, {
         operationId: body.operationId,
         recordId: target.recordId,

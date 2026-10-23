@@ -66,6 +66,7 @@ import type {
   CreateRole,
   CreateServerJobInput,
   CycleCountScheduleList,
+  DecideQcImportReview409,
   DeleteBrandProfilesInput,
   DeleteCheeseRecipesInput,
   DeleteCycleCountSchedulesInput,
@@ -106,6 +107,7 @@ import type {
   GetProfileNameLinkCleanupAudit200,
   GetQcAllergenActivityParams,
   GetQcHistoryParams,
+  GetQcImportReviewBadges200,
   GetQcTargetsParams,
   GetShiftHandoffDigestParams,
   GetSignupCodeStatus200,
@@ -158,6 +160,8 @@ import type {
   ListMergeAliasesParams,
   ListOperationalIntentReceipts200,
   ListOperationalIntentReceiptsParams,
+  ListQcImportReviews200,
+  ListQcImportReviewsParams,
   ListQualityChecksParams,
   ManagerActionItemUpdate,
   ManagerActionQueue,
@@ -216,6 +220,9 @@ import type {
   QcDateCodeReferencesResponse,
   QcEventResponse,
   QcHistoryResponse,
+  QcImportReviewDecisionInput,
+  QcImportReviewDecisionResult,
+  QcImportReviewDetail,
   QcLabelCheckInput,
   QcLabelReferenceInput,
   QcLabelReferenceReviewInput,
@@ -347,6 +354,406 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetQcImportReviewBadgesUrl = () => {
+
+
+
+
+  return `/api/qc/import-review-badges`
+}
+
+/**
+ * @summary Minimal unverified and rejected counts within the authenticated scope
+ */
+export const getQcImportReviewBadges = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetQcImportReviewBadges200> => {
+
+  return customFetch<GetQcImportReviewBadges200>(getGetQcImportReviewBadgesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcImportReviewBadgesQueryKey = () => {
+    return [
+    `/api/qc/import-review-badges`
+    ] as const;
+    }
+
+
+export const getGetQcImportReviewBadgesQueryOptions = <TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcImportReviewBadgesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcImportReviewBadges>>> = ({ signal }) => getQcImportReviewBadges({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcImportReviewBadgesQueryResult = NonNullable<Awaited<ReturnType<typeof getQcImportReviewBadges>>>
+export type GetQcImportReviewBadgesQueryError = ErrorType<void>
+
+
+export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcImportReviewBadges>>,
+          TError,
+          Awaited<ReturnType<typeof getQcImportReviewBadges>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcImportReviewBadges>>,
+          TError,
+          Awaited<ReturnType<typeof getQcImportReviewBadges>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Minimal unverified and rejected counts within the authenticated scope
+ */
+
+export function useGetQcImportReviewBadges<TData = Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReviewBadges>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcImportReviewBadgesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListQcImportReviewsUrl = (params?: ListQcImportReviewsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/import-reviews?${stringifiedParams}` : `/api/qc/import-reviews`
+}
+
+/**
+ * @summary Bounded manage-qc import review queue
+ */
+export const listQcImportReviews = async (params?: ListQcImportReviewsParams, options?: Parameters<typeof customFetch>[1]): Promise<ListQcImportReviews200> => {
+
+  return customFetch<ListQcImportReviews200>(getListQcImportReviewsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListQcImportReviewsQueryKey = (params?: ListQcImportReviewsParams,) => {
+    return [
+    `/api/qc/import-reviews`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListQcImportReviewsQueryOptions = <TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListQcImportReviewsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listQcImportReviews>>> = ({ signal }) => listQcImportReviews(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListQcImportReviewsQueryResult = NonNullable<Awaited<ReturnType<typeof listQcImportReviews>>>
+export type ListQcImportReviewsQueryError = ErrorType<void>
+
+
+export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
+ params: undefined |  ListQcImportReviewsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQcImportReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listQcImportReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
+ params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQcImportReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listQcImportReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
+ params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Bounded manage-qc import review queue
+ */
+
+export function useListQcImportReviews<TData = Awaited<ReturnType<typeof listQcImportReviews>>, TError = ErrorType<void>>(
+ params?: ListQcImportReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcImportReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListQcImportReviewsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetQcImportReviewUrl = (operationId: string,) => {
+
+
+
+
+  return `/api/qc/import-reviews/${operationId}`
+}
+
+/**
+ * @summary Bounded retained committed-result summary and decision history
+ */
+export const getQcImportReview = async (operationId: string, options?: Parameters<typeof customFetch>[1]): Promise<QcImportReviewDetail> => {
+
+  return customFetch<QcImportReviewDetail>(getGetQcImportReviewUrl(operationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcImportReviewQueryKey = (operationId: string,) => {
+    return [
+    `/api/qc/import-reviews/${operationId}`
+    ] as const;
+    }
+
+
+export const getGetQcImportReviewQueryOptions = <TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcImportReviewQueryKey(operationId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcImportReview>>> = ({ signal }) => getQcImportReview(operationId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: operationId !== null && operationId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcImportReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getQcImportReview>>>
+export type GetQcImportReviewQueryError = ErrorType<void>
+
+
+export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
+ operationId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcImportReview>>,
+          TError,
+          Awaited<ReturnType<typeof getQcImportReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
+ operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcImportReview>>,
+          TError,
+          Awaited<ReturnType<typeof getQcImportReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
+ operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Bounded retained committed-result summary and decision history
+ */
+
+export function useGetQcImportReview<TData = Awaited<ReturnType<typeof getQcImportReview>>, TError = ErrorType<void>>(
+ operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcImportReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcImportReviewQueryOptions(operationId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDecideQcImportReviewUrl = (operationId: string,) => {
+
+
+
+
+  return `/api/qc/import-reviews/${operationId}/decisions`
+}
+
+/**
+ * Requires manage-qc. Never applies, replays or undoes an import. Exact retries return the original receipt; stale result or revision conflicts.
+ * @summary Append an advisory decision for the exact committed result
+ */
+export const decideQcImportReview = async (operationId: string,
+    qcImportReviewDecisionInput: QcImportReviewDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcImportReviewDecisionResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcImportReviewDecisionResult>(getDecideQcImportReviewUrl(operationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcImportReviewDecisionInput)
+  }
+);}
+
+
+
+
+
+export const getDecideQcImportReviewMutationKey = () => ['decideQcImportReview'] as const;
+
+export const getDecideQcImportReviewMutationOptions = <TError = ErrorType<void | DecideQcImportReview409>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideQcImportReview>>, TError,DecideQcImportReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof decideQcImportReview>>, TError,DecideQcImportReviewMutationVariables, TContext> => {
+
+const mutationKey = getDecideQcImportReviewMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof decideQcImportReview>>, DecideQcImportReviewMutationVariables> = (props) => {
+          const {operationId,data} = props ?? {};
+
+          return  decideQcImportReview(operationId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DecideQcImportReviewMutationResult = NonNullable<Awaited<ReturnType<typeof decideQcImportReview>>>
+    export type DecideQcImportReviewMutationBody = BodyType<QcImportReviewDecisionInput>
+    export type DecideQcImportReviewMutationError = ErrorType<void | DecideQcImportReview409>
+    export type DecideQcImportReviewMutationVariables = {operationId: string;data: BodyType<QcImportReviewDecisionInput>}
+
+    /**
+ * @summary Append an advisory decision for the exact committed result
+ */
+export const useDecideQcImportReview = <TError = ErrorType<void | DecideQcImportReview409>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideQcImportReview>>, TError,DecideQcImportReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof decideQcImportReview>>,
+        TError,
+        DecideQcImportReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDecideQcImportReviewMutationOptions(options), queryClient);
+    }
 
 export const getGetBuildInfoUrl = () => {
 

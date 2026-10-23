@@ -62,13 +62,15 @@ beforeAll(async () => {
   db = tables.db; pool = tables.pool;
   route = await import("./importOperations");
   importHistoryRoute = await import("./importHistory");
+  const importQcRoute = await import("./importQcReviews");
+  const qcWorkflowRoute = await import("./qcWorkflows");
   seedRoles = (await import("../lib/roles")).seedRoles;
   const { requireAuth } = await import("../middlewares/requireAuth");
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
   app.use(observabilityMiddleware);
-  app.use("/api", requireAuth, route.default, importHistoryRoute.default);
+  app.use("/api", requireAuth, route.default, importHistoryRoute.default, importQcRoute.default, qcWorkflowRoute.default);
   await new Promise<void>((resolve, reject) => {
     server = app.listen(0, () => resolve());
     server.once("error", reject);
@@ -101,6 +103,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
+  route?.setImportOperationFailureHookForTest();
   process.env.IMPORT_GOLD_ENABLED = "true";
   process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
   process.env.IMPORT_GOLD_RETENTION_APPROVED = "true";
@@ -109,20 +112,24 @@ beforeEach(async () => {
   delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
   delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
   route?.setImportGoldProviderForTest();
-  await db.execute(sql`TRUNCATE ${tables.importGoldScoresTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.cheeseRecipesTable}, ${tables.importGoldScoresTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
     { id: "profiles", username: "profiles", passwordHash: "x" },
     { id: "sandbox", username: "sandbox", passwordHash: "x", sandbox: true },
+    { id: "qc-reviewer", username: "qc-reviewer", passwordHash: "x" },
+    { id: "qc-peer", username: "qc-peer", passwordHash: "x" },
   ]);
   await db.insert(tables.userRolesTable).values([
     { userId: "inventory", role: "manager" },
     { userId: "profiles", role: "operator" },
     { userId: "sandbox", role: "manager" },
+    { userId: "qc-reviewer", role: "qc-manager" },
+    { userId: "qc-peer", role: "qc-manager" },
   ]);
   sessionTokens.clear();
-  for (const user of ["inventory", "profiles", "sandbox"]) {
+  for (const user of ["inventory", "profiles", "sandbox", "qc-reviewer", "qc-peer"]) {
     const token = signLegacyTokenForTests(user);
     sessionTokens.set(user, token);
     await recordSession(user, token);
@@ -140,6 +147,219 @@ function change(id = "mix-atomic") {
     changes: { mixes: { upsert: [{ id, name: "Atomic Mix", brand: "", flavor: "", batchSize: 1, daysEarly: 0, notes: "", amountAlreadyMade: 0, components: [], isPrep: false, enabled: true }] } },
   };
 }
+
+type QcDetail = {
+  operationId: string; resultHash: string; qcStatus: string; revision: number;
+  applyStatus: string; evidenceAvailable: boolean; summary: unknown;
+  decisions: Array<{ id: number; reason: string; actorId: string; status: string }>;
+  undo: { available: boolean; guidance: string };
+};
+async function qcDetail(operationId: string, user = "qc-reviewer") {
+  const response = await fetch(`${baseUrl}/api/qc/import-reviews/${operationId}`, { headers: headers(user) });
+  expect(response.status).toBe(200);
+  return response.json() as Promise<QcDetail>;
+}
+function qcDecision(operationId: string, body: Record<string, unknown>, user = "qc-reviewer") {
+  return fetch(`${baseUrl}/api/qc/import-reviews/${operationId}/decisions`, {
+    method: "POST", headers: headers(user), body: JSON.stringify(body),
+  });
+}
+function decisionFor(detail: QcDetail, decisionId: string, status = "verified") {
+  return { decisionId, expectedResultHash: detail.resultHash, expectedRevision: detail.revision, status, reason: "Synthetic committed-result review" };
+}
+
+describe("import QC review", () => {
+  it("captures bounded normalized before/after evidence atomically for every committed import type, separate from Gold Lab", async () => {
+    for (const importType of ["spec", "premix", "cheese"]) {
+      const id = `qc-capture-${importType}-0001`;
+      const input = { ...change(`qc-${importType}`), importType };
+      input.changes.mixes.upsert[0].name = "Synthétique Δ QC";
+      input.changes.mixes.upsert[0].notes = "PRIVATE_SOURCE_NOTES";
+      // Cheese imports may only change cheese recipes.
+      const body = importType === "cheese" ? {
+        importType, sourceLabel: "PRIVATE_FILENAME.xlsx",
+        changes: { cheeseRecipes: { upsert: [{ id: "qc-cheese", name: "Synthetic cheese", components: [], enabled: true }] } },
+      } : input;
+      const applied = await apply(id, body);
+      expect(applied.status).toBe(200);
+      const detail = await qcDetail(id);
+      expect(detail).toMatchObject({ qcStatus: "pending", revision: 0, applyStatus: "applied", evidenceAvailable: true });
+      const [operation] = await db.select().from(tables.importOperationsTable).where(eq(tables.importOperationsTable.id, id));
+      expect(detail.resultHash).toBe(operation.resultHash);
+      expect(JSON.stringify(detail.summary)).not.toMatch(/PRIVATE_SOURCE_NOTES|PRIVATE_FILENAME|sourceText|distillEvidence/);
+      expect(detail.undo.available).toBe(false); // manage-qc grants no importer writes
+      expect((await qcDetail(id, "inventory")).undo.available).toBe(true);
+    }
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+  });
+
+  it("audits verify/reject, rejects stale revisions/hashes and preserves exact dropped-response retries", async () => {
+    const id = "qc-decisions-operation-0001";
+    expect((await apply(id, change())).status).toBe(200);
+    const detail = await qcDetail(id);
+    const first = decisionFor(detail, "qc-decision-retry-0001");
+    const saved = await qcDecision(id, first);
+    expect(saved.status).toBe(201);
+    const receipt = await saved.json() as { revision: number };
+    const replay = await qcDecision(id, first);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ revision: receipt.revision, replayed: true });
+    expect((await qcDecision(id, { ...first, reason: "Changed retry" })).status).toBe(409);
+    expect((await qcDecision(id, first, "qc-peer")).status).toBe(409);
+    expect((await qcDecision(id, { ...first, decisionId: "qc-stale-revision-0001", status: "rejected" })).status).toBe(409);
+    expect((await qcDecision(id, { ...first, decisionId: "qc-stale-hash-000001", expectedResultHash: "0".repeat(64) })).status).toBe(409);
+    const verified = await qcDetail(id);
+    expect(verified.qcStatus).toBe("verified");
+    expect((await qcDecision(id, { ...decisionFor(verified, "qc-reject-operation-0001", "rejected"), reason: "   " })).status).toBe(400);
+    expect((await qcDecision(id, decisionFor(verified, "qc-reject-operation-0001", "rejected"), "qc-peer")).status).toBe(201);
+    const rejected = await qcDetail(id);
+    expect(rejected).toMatchObject({ qcStatus: "rejected", applyStatus: "applied" });
+    expect(rejected.decisions.map((event) => event.actorId)).toEqual(["qc-peer", "qc-reviewer"]);
+    expect(rejected.undo.guidance).toMatch(/does not undo/);
+    expect((await db.select().from(tables.mixesTable))[0].batchSize).toBe(1);
+    const events = await db.select().from(tables.qcWorkflowEventsTable);
+    expect(events).toHaveLength(3); // capture plus two decisions
+    expect(events.every((event) => event.runId === null)).toBe(true);
+    const badges = await fetch(`${baseUrl}/api/qc/import-review-badges`, { headers: headers("profiles") });
+    expect(await badges.json()).toEqual({ pending: 0, rejected: 1 });
+    const redacted = await fetch(`${baseUrl}/api/qc/events/${rejected.decisions[0].id}/redactions`, {
+      method: "POST", headers: headers("qc-peer"), body: JSON.stringify({
+        operationId: "c36103dd-f785-4339-8af7-e327e8720079", reason: "Synthetic privacy request", fields: ["payload.reason"],
+      }),
+    });
+    expect(redacted.status).toBe(201);
+    expect((await qcDetail(id)).decisions[0].reason).toBe("[redacted]");
+  });
+
+  it("allows only one concurrent reviewer at the same revision", async () => {
+    const id = "qc-concurrent-operation-0001";
+    expect((await apply(id, change())).status).toBe(200);
+    const detail = await qcDetail(id);
+    const outcomes = await Promise.all([
+      qcDecision(id, decisionFor(detail, "qc-reviewer-one-000001")),
+      qcDecision(id, decisionFor(detail, "qc-reviewer-two-000001", "rejected"), "qc-peer"),
+    ]);
+    expect(outcomes.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect((await qcDetail(id)).decisions).toHaveLength(1);
+  });
+
+  it("excludes failed/in-progress Applies, rolls back QC capture on failure, and cannot verify undone results", async () => {
+    const id = "qc-failed-operation-0001";
+    route.setImportOperationFailureHookForTest((stage) => { if (stage === "after-history") throw new Error("Synthetic atomic failure"); });
+    try { expect((await apply(id, change())).status).toBe(500); }
+    finally { route.setImportOperationFailureHookForTest(); }
+    expect(await db.select().from(tables.qcWorkflowEventsTable)).toHaveLength(0);
+    for (const status of ["applying", "failed"]) {
+      await db.insert(tables.importOperationsTable).values({ id: `qc-${status}-operation-0001`, importType: "premix", sourceLabel: "Synthetic", requestHash: "x", resultHash: "a".repeat(64), status });
+      expect((await qcDecision(`qc-${status}-operation-0001`, {
+        decisionId: `qc-${status}-decision-0001`, expectedResultHash: "a".repeat(64), expectedRevision: 0, status: "verified", reason: "Synthetic",
+      })).status).toBe(409);
+    }
+    const queue = await fetch(`${baseUrl}/api/qc/import-reviews?status=all`, { headers: headers("qc-reviewer") });
+    expect(await queue.json()).toMatchObject({ items: [] });
+    expect((await apply("qc-undone-operation-0001", change())).status).toBe(200);
+    const detail = await qcDetail("qc-undone-operation-0001");
+    const undo = await fetch(`${baseUrl}/api/import-operations/qc-undone-operation-0001/undo`, { method: "POST", headers: headers(), body: JSON.stringify({ expectedResultHash: detail.resultHash }) });
+    expect(undo.status).toBe(200);
+    expect((await qcDecision(detail.operationId, decisionFor(detail, "qc-undone-decision-0001"))).status).toBe(409);
+    expect((await qcDetail(detail.operationId)).applyStatus).toBe("undone");
+  });
+
+  it("retains interpretable decisions/summary after source expiry, retirement and operation purge; legacy stays unreviewed", async () => {
+    const id = "qc-retention-operation-0001";
+    expect((await apply(id, { ...change(), importType: "spec", sourceEvidence: {
+      sourceText: "SYNTHETIC_PRIVATE_SOURCE", parseVersion: SPEC_IMPORT_PARSE_VERSION,
+    } })).status).toBe(200);
+    const before = await qcDetail(id);
+    expect((await qcDecision(id, decisionFor(before, "qc-retention-decision-0001", "rejected"))).status).toBe(201);
+    await db.update(tables.importOperationsTable).set({
+      createdAt: new Date(Date.now() - 91 * 86400000),
+    }).where(eq(tables.importOperationsTable.id, id));
+    const { runImportSourceRetention } = await import("../lib/importSourceRetention");
+    expect((await runImportSourceRetention()).sourceTextsRemoved).toBe(1);
+    const [expired] = await db.select().from(tables.importOperationsTable).where(eq(tables.importOperationsTable.id, id));
+    expect(expired.distillEvidence.sourceText).toBeUndefined();
+    expect((await qcDetail(id)).summary).toEqual(before.summary);
+    await db.delete(tables.importOperationsTable).where(eq(tables.importOperationsTable.id, id));
+    const retained = await qcDetail(id);
+    expect(retained).toMatchObject({ qcStatus: "rejected", applyStatus: "source-removed", summary: before.summary, undo: { available: false } });
+    expect(retained.decisions[0]).toMatchObject({ status: "rejected", reason: "Synthetic committed-result review" });
+    expect((await qcDecision(id, decisionFor(retained, "qc-retired-decision-0001"))).status).toBe(409);
+    await db.insert(tables.importOperationsTable).values({
+      id: "qc-legacy-operation-0001", importType: "premix", sourceLabel: "Legacy", requestHash: "x", resultHash: "a".repeat(64), status: "applied",
+    });
+    const legacy = await qcDetail("qc-legacy-operation-0001");
+    expect(legacy).toMatchObject({ qcStatus: "pending", evidenceAvailable: false, summary: null, revision: 0 });
+    expect((await qcDecision(legacy.operationId, decisionFor(legacy, "qc-legacy-decision-0001"))).status).toBe(409);
+  });
+
+  it("respects append-only summary redaction and reports guarded Undo unavailable after an affected edit", async () => {
+    const id = "qc-redacted-operation-0001";
+    expect((await apply(id, change())).status).toBe(200);
+    const detail = await qcDetail(id);
+    await db.update(tables.mixesTable).set({ batchSize: 9 }).where(eq(tables.mixesTable.id, "mix-atomic"));
+    expect((await qcDetail(id, "inventory")).undo.available).toBe(false);
+    const [capture] = await db.select().from(tables.qcWorkflowEventsTable)
+      .where(eq(tables.qcWorkflowEventsTable.operationId, `import-commit:${id}`));
+    const redacted = await fetch(`${baseUrl}/api/qc/events/${capture.id}/redactions`, {
+      method: "POST", headers: headers("qc-reviewer"), body: JSON.stringify({
+        operationId: "c36103dd-f785-4339-8af7-e327e8720080", reason: "Synthetic privacy request", fields: ["payload.summary"],
+      }),
+    });
+    expect(redacted.status).toBe(201);
+    expect((await qcDetail(id))).toMatchObject({ summary: null, evidenceAvailable: false, qcStatus: "pending" });
+    expect((await qcDecision(id, decisionFor(detail, "qc-redacted-decision-0001"))).status).toBe(409);
+    const [original] = await db.select().from(tables.qcWorkflowEventsTable).where(eq(tables.qcWorkflowEventsTable.id, capture.id));
+    expect(original.payload.summary).toEqual(detail.summary);
+  });
+
+  it("bounds and pages status queues without repeating operations and keeps committed evidence append-only", async () => {
+    const ids = ["qc-pagination-operation-0001", "qc-pagination-operation-0002"];
+    for (const id of ids) expect((await apply(id, change(id))).status).toBe(200);
+    const getPage = async (query: string) => {
+      const response = await fetch(`${baseUrl}/api/qc/import-reviews?${query}`, { headers: headers("qc-reviewer") });
+      expect(response.status).toBe(200);
+      return response.json() as Promise<{ items: QcDetail[]; nextCursor: string | null }>;
+    };
+    const first = await getPage("status=all&limit=1");
+    expect(first.items.map((row) => row.operationId)).toEqual([ids[0]]);
+    const next = await getPage(`status=all&limit=1&cursor=${first.nextCursor}`);
+    expect(next.items.map((row) => row.operationId)).toEqual([ids[1]]);
+    expect(next.nextCursor).toBeNull();
+    const detail = await qcDetail(ids[0]);
+    expect((await qcDecision(ids[0], decisionFor(detail, "qc-pagination-decision-0001"))).status).toBe(201);
+    expect((await getPage("status=verified")).items.map((row) => row.operationId)).toEqual([ids[0]]);
+    expect((await getPage("status=pending")).items.map((row) => row.operationId)).toEqual([ids[1]]);
+    await expect(db.execute(sql`UPDATE qc_workflow_events SET actor_id = 'changed' WHERE record_id = ${ids[0]}`)).rejects.toThrow();
+    await expect(db.execute(sql`DELETE FROM qc_workflow_events WHERE record_id = ${ids[0]}`)).rejects.toThrow();
+  });
+
+  it("fences queue/detail/decisions and history while exposing counts only to same-scope staff", async () => {
+    const id = "qc-authorization-operation-0001";
+    expect((await apply(id, change())).status).toBe(200);
+    const detail = await qcDetail(id);
+    for (const url of ["/qc/import-reviews", `/qc/import-reviews/${id}`]) {
+      expect((await fetch(`${baseUrl}/api${url}`, { headers: headers("profiles") })).status).toBe(403);
+      expect((await fetch(`${baseUrl}/api${url}`)).status).toBe(401);
+    }
+    expect((await qcDecision(id, decisionFor(detail, "qc-denied-decision-0001"), "profiles")).status).toBe(403);
+    const badge = await fetch(`${baseUrl}/api/qc/import-review-badges`, { headers: headers("profiles") });
+    expect(await badge.json()).toEqual({ pending: 1, rejected: 0 });
+    expect(badge.headers.get("cache-control")).toBe("no-store");
+    const sandboxBadge = await fetch(`${baseUrl}/api/qc/import-review-badges`, { headers: headers("sandbox") });
+    expect(await sandboxBadge.json()).toEqual({ pending: 0, rejected: 0 });
+    expect((await fetch(`${baseUrl}/api/qc/import-reviews/${id}`, { headers: headers("sandbox") })).status).toBe(404);
+    expect((await qcDecision(id, decisionFor(detail, "qc-sandbox-decision-0001"), "sandbox")).status).toBe(409);
+    const history = await fetch(`${baseUrl}/api/qc/history`, { headers: headers("profiles") });
+    // Ordinary operator lacks record-qc; a QC operator is checked below.
+    expect(history.status).toBe(403);
+    await db.update(tables.userRolesTable).set({ role: "qc-operator" }).where(eq(tables.userRolesTable.userId, "profiles"));
+    const qcHistory = await fetch(`${baseUrl}/api/qc/history`, { headers: headers("profiles") });
+    expect(qcHistory.status).toBe(200);
+    expect(await qcHistory.json()).toMatchObject({ items: [] });
+    expect((await fetch(`${baseUrl}/api/qc/import-reviews?limit=51`, { headers: headers("inventory") })).status).toBe(400);
+  });
+});
 async function apply(
   operationId: string,
   body: Record<string, unknown>,

@@ -1613,10 +1613,10 @@ describe("POST /sync/station-activity — server-confirmed station evidence", ()
 });
 
 describe("factory purge retains QC history", () => {
-  it.each(["live", "sandbox"] as const)("retains immutable label checks and reference versions through %s reset and purge", async (scope) => {
+  it.each(["live", "sandbox"] as const)("retains immutable label and import QC evidence through %s reset and purge", async (scope) => {
     const original = await db.insert(qcWorkflowEventsTable).values(
       (["live", "sandbox"] as const).flatMap((fixtureScope) =>
-        (["label-reference", "label-reference-review", "label-check"] as const).map((eventType) => ({
+        (["label-reference", "label-reference-review", "label-check", "import-committed", "import-review"] as const).map((eventType) => ({
           scope: fixtureScope,
           operationId: `retained-${fixtureScope}-${eventType}`,
           recordId: `retained-label-${fixtureScope}`,
@@ -1628,6 +1628,11 @@ describe("factory purge retains QC history", () => {
             sourceIdentity: "SYNTHETIC-RETENTION-REF",
             observed: { productName: "Synthetic Product", lotText: "LOT-TEST", dateText: "printed text" },
             outcome: "not-evaluated",
+            ...(eventType.startsWith("import-") ? {
+              operationId: `synthetic-import-${fixtureScope}`, resultHash: "a".repeat(64),
+              status: "rejected", reason: "Synthetic retained review",
+              summary: { entities: [{ entity: "mixes", before: 0, after: 1, created: 1, updated: 0, deleted: 0 }], changes: [], omittedChanges: 0 },
+            } : {}),
           },
         })),
       ),

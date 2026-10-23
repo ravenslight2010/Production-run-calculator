@@ -5,6 +5,125 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type QcImportReviewItemQcStatus = typeof QcImportReviewItemQcStatus[keyof typeof QcImportReviewItemQcStatus];
+
+
+export const QcImportReviewItemQcStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface QcImportReviewItem {
+  operationId: string;
+  /** @nullable */
+  resultHash: string | null;
+  importType: string;
+  createdAt: string;
+  applyStatus: string;
+  qcStatus: QcImportReviewItemQcStatus;
+  revision: number;
+  evidenceAvailable: boolean;
+}
+
+export type QcImportReviewSummaryEntitiesItem = {
+  entity: string;
+  before: number;
+  after: number;
+  created: number;
+  updated: number;
+  deleted: number;
+};
+
+export type QcImportReviewSummaryChangesItemBefore = {[key: string]: unknown};
+
+export type QcImportReviewSummaryChangesItemAfter = {[key: string]: unknown};
+
+export type QcImportReviewSummaryChangesItem = {
+  entity: string;
+  row: string;
+  action: string;
+  fields: string[];
+  before: QcImportReviewSummaryChangesItemBefore;
+  after: QcImportReviewSummaryChangesItemAfter;
+};
+
+export interface QcImportReviewSummary {
+  entities: QcImportReviewSummaryEntitiesItem[];
+  /** @maxItems 30 */
+  changes: QcImportReviewSummaryChangesItem[];
+  omittedChanges: number;
+}
+
+export type QcImportReviewDetailDecisionsItemStatus = typeof QcImportReviewDetailDecisionsItemStatus[keyof typeof QcImportReviewDetailDecisionsItemStatus];
+
+
+export const QcImportReviewDetailDecisionsItemStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export type QcImportReviewDetailDecisionsItem = {
+  id: number;
+  status: QcImportReviewDetailDecisionsItemStatus;
+  resultHash: string;
+  reason: string;
+  actorId: string;
+  createdAt: string;
+};
+
+export type QcImportReviewDetailUndo = {
+  available: boolean;
+  guidance: string;
+};
+
+export type QcImportReviewDetail = QcImportReviewItem & ({
+  summary: QcImportReviewSummary | null;
+  summaryLimitation: string;
+  /** @maxItems 20 */
+  decisions: QcImportReviewDetailDecisionsItem[];
+  undo: QcImportReviewDetailUndo;
+});
+
+export type QcImportReviewDecisionInputStatus = typeof QcImportReviewDecisionInputStatus[keyof typeof QcImportReviewDecisionInputStatus];
+
+
+export const QcImportReviewDecisionInputStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface QcImportReviewDecisionInput {
+  /** @pattern ^[A-Za-z0-9_-]{16,120}$ */
+  decisionId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  expectedResultHash: string;
+  /** @minimum 0 */
+  expectedRevision: number;
+  status: QcImportReviewDecisionInputStatus;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  reason: string;
+}
+
+export type QcImportReviewDecisionResultQcStatus = typeof QcImportReviewDecisionResultQcStatus[keyof typeof QcImportReviewDecisionResultQcStatus];
+
+
+export const QcImportReviewDecisionResultQcStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface QcImportReviewDecisionResult {
+  operationId: string;
+  resultHash: string;
+  qcStatus: QcImportReviewDecisionResultQcStatus;
+  revision: number;
+  replayed: boolean;
+}
+
 export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion];
 
 
@@ -3174,6 +3293,8 @@ export const QcEventEventType = {
   'date-code-check': 'date-code-check',
   'date-code-reference': 'date-code-reference',
   'date-code-reference-review': 'date-code-reference-review',
+  'import-committed': 'import-committed',
+  'import-review': 'import-review',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
   'cleaning-verification': 'cleaning-verification',
@@ -4291,6 +4412,8 @@ export const QcRedactionInputFieldsItem = {
   actorId: 'actorId',
   ingredientName: 'ingredientName',
   payloadnote: 'payload.note',
+  payloadreason: 'payload.reason',
+  payloadsummary: 'payload.summary',
   payloadinstrument: 'payload.instrument',
   payloadlotNumber: 'payload.lotNumber',
   payloadexpectedComponents: 'payload.expectedComponents',
@@ -8894,6 +9017,47 @@ export interface ManagerActionItemUpdate {
 export type ClientTodayParameter = string;
 
 export type SyncSnapshotParameter = string;
+
+export type GetQcImportReviewBadges200 = {
+  /** @minimum 0 */
+  pending: number;
+  /** @minimum 0 */
+  rejected: number;
+};
+
+export type ListQcImportReviewsParams = {
+/**
+ * @maxLength 120
+ */
+cursor?: string;
+status?: ListQcImportReviewsStatus;
+/**
+ * @minimum 1
+ * @maximum 50
+ */
+limit?: number;
+};
+
+export type ListQcImportReviewsStatus = typeof ListQcImportReviewsStatus[keyof typeof ListQcImportReviewsStatus];
+
+
+export const ListQcImportReviewsStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+  all: 'all',
+} as const;
+
+export type ListQcImportReviews200 = {
+  /** @maxItems 50 */
+  items: QcImportReviewItem[];
+  /** @nullable */
+  nextCursor: string | null;
+};
+
+export type DecideQcImportReview409 = {
+  error: string;
+};
 
 export type GetBuildInfo503Status = typeof GetBuildInfo503Status[keyof typeof GetBuildInfo503Status];
 

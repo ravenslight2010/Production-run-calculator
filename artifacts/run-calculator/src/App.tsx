@@ -42,6 +42,7 @@ import {
 import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 import { createUpdateCoordinator, type UpdateState } from "./pwaUpdateCoordinator";
 import { AppUpdateControl } from "./components/AppUpdateControl";
+import { QcImportReviewBadge } from "./components/QcImportReview";
 
 const queryClient = new QueryClient();
 registerMasterDataQueryClient(queryClient);
@@ -199,6 +200,7 @@ function HomeGate() {
   }
   return isAuthenticated ? (
     <MasterDataPolling>
+      <QcImportReviewBadge key={userId ?? "anonymous"} />
       <Suspense fallback={<AppLoadingSurface />}>
         <LazyHome />
       </Suspense>
