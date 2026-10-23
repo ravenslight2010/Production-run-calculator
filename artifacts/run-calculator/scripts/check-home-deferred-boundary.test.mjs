@@ -504,6 +504,73 @@ test("source boundary clearly rejects ambiguous local workspace package names", 
   }
 });
 
+test("source boundary identifies a workspace package manifest with invalid JSON", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+  });
+  const manifestPath = path.join(
+    fixture.workspaceRoot,
+    "lib/home-bridge/package.json",
+  );
+  fs.writeFileSync(manifestPath, '{"name":');
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.equal(
+          error.message,
+          `Invalid workspace package manifest at "${manifestPath}": invalid JSON.`,
+        );
+        return true;
+      },
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+for (const [label, manifest] of [
+  ["missing", { exports: { ".": "./src/index.ts" } }],
+  ["non-string", { name: null, exports: { ".": "./src/index.ts" } }],
+]) {
+  test(`source boundary identifies a workspace package manifest with a ${label} name`, () => {
+    const fixture = createSourceFixture({
+      homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+      helperSource: "",
+      packageSource: "export const bridge = true;",
+      runWorkspaceList: (workspaceRoot) => ({
+        status: 0,
+        stdout: JSON.stringify([
+          { path: path.join(workspaceRoot, "lib/home-bridge") },
+        ]),
+      }),
+    });
+    const manifestPath = path.join(
+      fixture.workspaceRoot,
+      "lib/home-bridge/package.json",
+    );
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    try {
+      assert.throws(
+        () => checkHomeDeferredSourceBoundary(fixture),
+        (error) => {
+          assert.equal(
+            error.message,
+            `Invalid workspace package manifest at "${manifestPath}": expected "name" to be a string.`,
+          );
+          return true;
+        },
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
+
 test("workspace listing process failures include command context and bounded details", () => {
   let invokedWithRoot;
   const fixture = createSourceFixture({

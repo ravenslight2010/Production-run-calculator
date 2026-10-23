@@ -215,12 +215,59 @@ function workspaceDiscoveryError(workspaceRoot, detail, { timedOut = false } = {
   );
 }
 
+function workspaceManifestJsonError(workspaceRoot, detail) {
+  const match = detail.match(
+    /Failed to parse\s+(.+?)(?:\s+package\.json|([/\\]package\.json)):/i,
+  );
+  if (!match) return null;
+
+  const reportedPath = match[2]
+    ? `${match[1]}${match[2]}`
+    : path.join(match[1], "package.json");
+  const root = path.resolve(workspaceRoot);
+  const manifestPath = path.resolve(root, reportedPath);
+  const relativePath = path.relative(root, manifestPath);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+  return new Error(
+    `Invalid workspace package manifest at "${normalize(manifestPath)}": invalid JSON.`,
+  );
+}
+
 export function runPnpmWorkspaceList(root, spawn = spawnSync) {
   return spawn(
     "pnpm",
     ["--dir", root, "--recursive", "list", "--json", "--depth", "-1"],
     { encoding: "utf8", timeout: WORKSPACE_DISCOVERY_TIMEOUT_MS },
   );
+}
+
+function readWorkspacePackageManifest(manifestPath, readSource) {
+  const source = readSource(manifestPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(source);
+  } catch {
+    throw new Error(
+      `Invalid workspace package manifest at "${normalize(manifestPath)}": invalid JSON.`,
+    );
+  }
+  if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    Array.isArray(manifest) ||
+    typeof manifest.name !== "string"
+  ) {
+    throw new Error(
+      `Invalid workspace package manifest at "${normalize(manifestPath)}": expected "name" to be a string.`,
+    );
+  }
+  return manifest;
 }
 
 function discoverWorkspacePackageDirectories(
@@ -235,6 +282,8 @@ function discoverWorkspacePackageDirectories(
     ]
       .filter(Boolean)
       .join("; ") || `exit status ${result.status}`;
+    const manifestError = workspaceManifestJsonError(workspaceRoot, detail);
+    if (manifestError) throw manifestError;
     throw workspaceDiscoveryError(workspaceRoot, detail, {
       timedOut: result.error?.code === "ETIMEDOUT",
     });
@@ -285,7 +334,7 @@ function workspacePackageRoot(
   const matches = [];
   for (const candidateDirectory of workspacePackageDirectories) {
     const manifestPath = path.join(candidateDirectory, "package.json");
-    const manifest = JSON.parse(readSource(manifestPath));
+    const manifest = readWorkspacePackageManifest(manifestPath, readSource);
     if (manifest.name === packageName) matches.push(candidateDirectory);
   }
   if (matches.length > 1) {
@@ -377,7 +426,7 @@ function resolveWorkspaceSource(
   }
 
   const manifestPath = path.join(packageRoot, "package.json");
-  const manifest = JSON.parse(readSource(manifestPath));
+  const manifest = readWorkspacePackageManifest(manifestPath, readSource);
   const exportKey = packageSubpath ? `.${packageSubpath}` : ".";
   const target = exportTarget(manifest.exports, exportKey);
   if (!target || !target.startsWith("./")) {
