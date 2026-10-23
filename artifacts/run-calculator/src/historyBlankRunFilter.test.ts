@@ -4,6 +4,7 @@
 // before this change, or by older peers over sync, cleans up too).
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { setCompletedHistoryIdentity } from "./completedHistorySync";
 import {
   isDisplayableHistoryRun,
   filterMeaningfulHistory,
@@ -16,7 +17,11 @@ import { DEFAULT_VALUES, RUN_KEY, type HistoryDay, type RunMeta } from "./types"
 const run = (over: Partial<RunMeta> = {}): RunMeta =>
   ({ id: over.id ?? "r1", brand: "", flavor: "", ...over }) as RunMeta;
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  setCompletedHistoryIdentity(null);
+  localStorage.clear();
+  setCompletedHistoryIdentity("history-test");
+});
 
 describe("isDisplayableHistoryRun", () => {
   it("hides blank unnamed runs, keeps named/started/noted ones", () => {

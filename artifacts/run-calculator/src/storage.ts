@@ -59,7 +59,7 @@ import {
   type CrustField,
 } from "./types";
 import { normalizeDayBreaks } from "./dayTimeline";
-import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun } from "./completedHistorySync";
+import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun, loadCompletedHistoryForActiveScope } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
 import {
@@ -1066,61 +1066,26 @@ export function saveProfileSubTab(
   flavor: string,
   subTab: "dough" | "crusts",
 ): void {
-  if (!profileWritesAllowed) return;
   if (!brand && !flavor) return;
   const profileKey = canonicalProfileKey(brand, flavor);
-  // Embed in the dough profile blob so the server-pool sync distributes it.
-  // The old unscoped :subtab key is migration-only once the cache is active.
-  if (!profileCacheIsActive()) {
-    try { localStorage.setItem(profileKey + ":subtab", subTab); } catch {}
-  }
-  try {
-    const raw = readProfileBlob(profileKey, "dough");
-    const blob: Record<string, unknown> = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    if (blob._subTab !== subTab) {
-      blob._subTab = subTab;
-      writeProfileBlob(profileKey, "dough", JSON.stringify(blob));
-      // Trigger a server-pool push so other tablets receive the update.
-      markProfileEdited(profileKey);
-    }
-  } catch {}
+  try { localStorage.setItem(profileKey + ":subtab", subTab); } catch {}
 }
 
 /**
  * Return the saved Line Type preference for a brand+flavor pair, or null when
  * none has been explicitly recorded (caller defaults to "dough").
  *
- * Checks the fast-access `:subtab` key first; falls back to `_subTab` inside
- * the dough profile blob (populated on devices that reconciled a server update
- * but have not yet toggled the line type locally).
+ * This is device navigation, not shared setup metadata.
  */
 export function loadProfileSubTab(
   brand: string,
   flavor: string,
 ): "dough" | "crusts" | null {
   const profileKey = canonicalProfileKey(brand, flavor);
-  if (!profileCacheIsActive()) {
-    try {
-      const v = localStorage.getItem(profileKey + ":subtab");
-      if (v === "dough" || v === "crusts") return v;
-    } catch { return null; }
-  }
-  // Fallback: read _subTab from the dough profile blob (set by server reconcile
-  // on tablets that haven't toggled locally yet).
   try {
-    const raw = readProfileBlob(profileKey, "dough");
-    if (raw) {
-      const blob = JSON.parse(raw) as Record<string, unknown>;
-      const embedded = blob._subTab;
-      if (embedded === "dough" || embedded === "crusts") {
-        // Seed the fast-access key so subsequent calls don't need to parse.
-        if (!profileCacheIsActive()) {
-          try { localStorage.setItem(profileKey + ":subtab", embedded); } catch {}
-        }
-        return embedded;
-      }
-    }
-  } catch {}
+    const v = localStorage.getItem(profileKey + ":subtab");
+    if (v === "dough" || v === "crusts") return v;
+  } catch { return null; }
   return null;
 }
 
@@ -1490,21 +1455,7 @@ export function overlayRunMetaStamps(runs: RunMeta[]): RunMeta[] {
 }
 
 export function loadHistory(): HistoryDay[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (raw) {
-      const history = JSON.parse(raw) as HistoryDay[];
-      for (const day of history) {
-        for (const vals of Object.values(day.runValues ?? {})) {
-          const o = vals as unknown as Record<string, unknown>;
-          resolvePep1Combined(o, typeof o.pep1Combined === "boolean");
-          normalizePepFields(o);
-        }
-      }
-      return history;
-    }
-  } catch {}
-  return [];
+  return loadCompletedHistoryForActiveScope();
 }
 
 // A history run worth keeping/showing: it has a name (brand or flavor), was
@@ -1526,12 +1477,10 @@ export function filterMeaningfulHistory(days: HistoryDay[]): HistoryDay[] {
 
 export function archiveDayToHistory(ds: DayState, date: string): void {
   try {
-    const history = loadHistory().filter(h => h.date !== date);
     // Never archive blank/unnamed placeholder runs; if nothing meaningful ran
     // that day (e.g. an off-day sign-in), don't create a history entry at all.
     const keptRuns = ds.runs.filter(isDisplayableHistoryRun);
     if (keptRuns.length === 0) {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
       return;
     }
     const runValues: Record<string, FormValues> = {};
@@ -1544,9 +1493,8 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
         queueCompletedRun(date, run, runValues[run.id]);
       }
     }
-    const entry: HistoryDay = { date, runs: keptRuns, runValues };
-    const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+    // Completed payloads are retained only by the durable finalization outbox.
+    // Mutable active-run settings remain in their existing recovery store.
   } catch {}
 }
 
@@ -1897,19 +1845,7 @@ export function applyIngredientMerge(map: MergeMap): void {
     );
     saveTemplates(templates);
   } catch {}
-  // ── History ──
-  try {
-    const history = loadHistory().map((day) => ({
-      ...day,
-      runValues: Object.fromEntries(
-        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
-          id,
-          mergeSettingsObject(vals as unknown as Record<string, unknown>, map) as unknown as FormValues,
-        ]),
-      ),
-    }));
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch {}
+  // Immutable completed history is not rewritten by master-data maintenance.
   // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
   const runPrefix = RUN_KEY("");
   const keysToRewrite: string[] = [];
@@ -2194,7 +2130,12 @@ export function removeStaleRecipeReference(
 // (bounded by MAX_CHANGE_HISTORY + quota-safe trimming on write).
 const APP_KEY_PREFIX = "run-calc-";
 function excludedFromMasterUndo(key: string): boolean {
+  if (key.startsWith("run-calc-shared-history-review-v1:")) return true;
   return key === "run-calc-supervisor-pin" || key.startsWith("run-calc-fkv-")
+    || key.startsWith("run-calc-profile-cache-")
+    || key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")
+    || key.startsWith("run-calc-templates")
+    || key.startsWith("run-calc-completed-history-")
     || /(?:outbox|queue|operational-intent)/i.test(key);
 }
 
@@ -2980,7 +2921,9 @@ export function purgeOrphanedProfilesIfNeeded(
       const sep = entry.key.indexOf("__");
       if (sep < 0) continue;
       const brandLc = entry.key.slice(0, sep);
-      if (!known.has(brandLc)) orphans.add(entry.key);
+      // A legacy cleanup is not an explicit deletion of a newer owned edit.
+      // Its brand directory may still be awaiting delivery on another queue.
+      if (!known.has(brandLc) && !hasPendingProfileWrite(entry.key)) orphans.add(entry.key);
     }
     for (const key of orphans) {
       deleteCachedProfile(key);

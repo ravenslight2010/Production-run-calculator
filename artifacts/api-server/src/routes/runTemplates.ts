@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, runTemplatesTable, type RunTemplateRow } from "@workspace/db";
 import { SaveRunTemplatesBody, DeleteRunTemplatesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { broadcastMasterDataChanged } from "./sync";
 
 const router: IRouter = Router();
 
@@ -246,6 +247,7 @@ router.post("/run-templates", async (req: Request, res: Response) => {
       }
     }
     const templates = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope);
     res.json({ templates });
   } catch (err) {
     req.log.error({ err }, "failed to save run templates");
@@ -286,6 +288,7 @@ router.delete("/run-templates", async (req: Request, res: Response) => {
       }
     }
     const templates = await listAll();
+    broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope);
     res.json({ templates });
   } catch (err) {
     req.log.error({ err }, "failed to delete run templates");

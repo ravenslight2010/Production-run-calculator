@@ -1807,6 +1807,39 @@ describe("factory purge retains QC history", () => {
   });
 });
 
+describe("GET /completed-history — bounded stable archive", () => {
+  it("pages equal completion timestamps without skipping records, and preserves scope and date fences", async () => {
+    for (const scope of ["live", "sandbox"] as const) {
+      for (const runId of ["page-a", "page-b", "page-c"]) {
+        await db.insert(completedRunHistoryTable).values({
+          id: `${scope}-${runId}`, scope, operationId: `${scope}-${runId}`, runId,
+          date: "2030-03-10", completedAt: new Date("2030-03-10T12:00:00Z"),
+          snapshot: { dayState: { runs: [{ id: runId, endedAt: 1 }] }, runValues: {} },
+          snapshotHash: `${scope}-${runId}`, actorId: USER,
+        });
+      }
+    }
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await fetch(`${baseUrl}/api/completed-history?from=2030-03-10&to=2030-03-10&limit=1${cursor ? `&cursor=${cursor}` : ""}`, { headers: managerAuthHeaders() });
+      expect(result.status).toBe(200);
+      const body = await result.json() as {
+        history: Array<{ operationId: string; runId: string }>; nextCursor?: string;
+      };
+      expect(body.history).toHaveLength(1);
+      expect(body.history[0].operationId.startsWith("live-")).toBe(true);
+      seen.push(body.history[0].runId);
+      cursor = body.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(["page-a", "page-b", "page-c"]);
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(6);
+    for (const query of ["limit=0", "limit=201", "cursor=bad"]) {
+      expect((await fetch(`${baseUrl}/api/completed-history?${query}`, { headers: managerAuthHeaders() })).status).toBe(400);
+    }
+  });
+});
+
 const EVIDENCE_DATE = "2030-03-10";
 const EVIDENCE_RUN = "evidence-run";
 

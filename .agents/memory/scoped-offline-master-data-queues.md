@@ -1,9 +1,15 @@
 ---
 name: Scoped offline master-data queues
-description: Conflict and scope rules for server-authoritative master data with a browser cache and durable offline outbox.
+description: Scope and conflict rules for memory-read shared records and durable owned offline recovery.
 ---
 
 Offline master-data snapshots, migration markers, and outboxes must be partitioned by the authenticated data scope. Every asynchronous reconcile or flush captures its starting scope and must refuse to mutate local state after a scope switch.
+
+Acknowledged shared directories and completed archives belong in memory, not a durable read cache. Each unsent operation must own its payload and revision rather than consulting a mutable read copy at delivery time. Keep unresolved legacy/undo evidence distinct from normal reads; never infer its account owner.
+
+**Why:** The approved reduced-persistence boundary retains offline recovery, not permanent duplicate business records. A read finishing after a newer edit was acknowledged can be just as stale as a late write response.
+
+**How to apply:** Fence both delivery and read adoption by identity and local mutation generation. Preserve and verify owned unsent payloads before retiring matched legacy copies; retain ambiguous evidence for review. Strip legacy archives from queued daily-sync replay only after preserving unresolved evidence.
 
 **Why:** A shared browser can switch between live and sandbox identities while requests are in flight. Global storage keys or unfenced continuations can display or upload one scope's data in the other.
 

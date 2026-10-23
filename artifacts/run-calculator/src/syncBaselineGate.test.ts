@@ -311,11 +311,12 @@ describe("SSE sync baseline gate", () => {
     expect(canonicalPush).toContain("if (screenMode !== null) throw new Error");
   });
 
-  it("omits unchanged history from hot pushes and records it only after acknowledgement", () => {
+  it("never publishes archived history in new daily-sync snapshots", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
-    expect(source).toContain("lastSyncedHistorySigRef");
-    expect(source).toContain("historySig !== lastSyncedHistorySigRef.current");
-    expect(source).toContain("if (payload.history !== undefined)");
-    expect(source).toContain("lastSyncedHistorySigRef.current = JSON.stringify(payload.history)");
+    const build = source.slice(source.indexOf("const buildSyncPayload"), source.indexOf("const buildSyncPayload") + 15000);
+    expect(build).not.toContain("historySig");
+    expect(build).not.toContain("loadHistory()");
+    expect(build).not.toContain("{ history");
+    expect(source).not.toContain("localStorage.setItem(HISTORY_KEY");
   });
 });

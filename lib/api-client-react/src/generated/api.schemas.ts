@@ -1208,6 +1208,8 @@ export type CompletedHistoryRecord = CompletedRunFinalization & {
 };
 
 export interface CompletedHistoryList {
+  /** Opaque exclusive date/run-id cursor; absent on the last page */
+  nextCursor?: string;
   history: CompletedHistoryRecord[];
 }
 
@@ -9863,6 +9865,16 @@ export type RotateSignupCode201 = {
 export type ListCompletedHistoryParams = {
 from?: string;
 to?: string;
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+/**
+ * @maxLength 4096
+ * @pattern ^[A-Za-z0-9_-]+$
+ */
+cursor?: string;
 };
 
 export type ListApplicatorBatchEvidenceParams = {

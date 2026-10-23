@@ -3,6 +3,10 @@ import { DEFAULT_RUN_TO_TIME } from "../runToTime";
 import { browserStorage as localStorage } from "../adapters/browserRecordStore";
 import { subscribeFactoryDirectory, factoryDirectoryState } from "../factoryDirectory";
 import { FactoryDirectoryStatus } from "../components/FactoryDirectoryStatus";
+import { SharedRecordsStatus } from "../components/SharedRecordsStatus";
+import { omitArchivedSyncHistory } from "../sharedRecordMigration";
+import { currentRunCsvRows, historyRunCsvRows } from "../runCsvRows";
+import { reconcileRunTemplates } from "../runTemplatesRepository";
 import { FactoryDirectoryBoundary } from "../components/FactoryDirectoryBoundary";
 import { purgeLegacyPinCopies } from "../purgeLegacyPinCopies";
 import { reviewProfileImport } from "../importProfileReview";
@@ -348,6 +352,7 @@ import {
   reconcileProfilesFromServer,
   reconcileProfilesFromServerDetailed,
   seedProfilesFromServer,
+  startProfileReconciliation,
   type ProfileReconcileResult,
 } from "../profileServerSync";
 import {
@@ -484,7 +489,7 @@ import {
 import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "../cycleCount";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cachedProfileKeys } from "../profileCache";
+import { cachedProfileKeys, getProfileCacheGeneration, subscribeProfileCache } from "../profileCache";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
@@ -1836,10 +1841,8 @@ export default function Home() {
       scope: me.sandbox ? "sandbox" : "live",
       userId: me.userId,
     } : null);
-    setCompletedHistoryScope(me ? (me.sandbox ? "sandbox" : "live") : null);
     if (me) {
       const scopedHistory = loadCompletedHistoryForActiveScope();
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(scopedHistory)); } catch {}
       setHistory(scopedHistory);
     }
   }, [me?.sandbox, me?.userId]);
@@ -2022,21 +2025,27 @@ export default function Home() {
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
   useEffect(() => {
     if (!me) return;
-    const updatePending = () => setPendingHistoryUploads(pendingCompletedHistoryCount());
+    const updatePending = () => {
+      setPendingHistoryUploads(pendingCompletedHistoryCount());
+      setHistory(loadCompletedHistoryForActiveScope());
+    };
     const reconcile = async () => {
       await flushCompletedHistoryOutbox();
       updatePending();
       await hydrateCompletedHistory(loadHistory(), (days) => {
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(days)); } catch {}
         setHistory(days);
       });
     };
     void reconcile();
     const onOnline = () => { void reconcile(); };
     window.addEventListener("online", onOnline);
+    window.addEventListener("focus", onOnline);
+    const poll = window.setInterval(onOnline, 60_000);
     window.addEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
     return () => {
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", onOnline);
+      window.clearInterval(poll);
       window.removeEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, updatePending);
     };
   }, [me?.sandbox, me?.userId]);
@@ -8250,30 +8259,8 @@ export default function Home() {
       // SEND brandProfiles/crustProfiles in their payload (the fields stay in
       // SyncPayload for tolerance) but they are deliberately ignored here.
 
-      // ── History (merge by date, union of runs per day) ──
-      if (payload.history && payload.history.length > 0) {
-        const local = loadHistory();
-        const byDate = new Map<string, HistoryDay>();
-        for (const day of [...local, ...payload.history]) {
-          const existing = byDate.get(day.date);
-          if (!existing) {
-            byDate.set(day.date, { ...day });
-          } else {
-            // Merge runs (de-dup by id, remote wins for same id)
-            const runMap = new Map<string, RunMeta>();
-            for (const r of [...existing.runs, ...day.runs]) runMap.set(r.id, r);
-            const mergedRunValues = { ...existing.runValues, ...day.runValues };
-            byDate.set(day.date, { date: day.date, runs: [...runMap.values()], runValues: mergedRunValues });
-          }
-        }
-        const merged = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, MAX_HISTORY_DAYS);
-        // Skip the save + re-render when history is unchanged; the outgoing payload
-        // always echoes loadHistory(), so each SSE cycle would otherwise re-render.
-        if (JSON.stringify(merged) !== JSON.stringify(local)) {
-          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch {}
-          setHistory(merged);
-        }
-      }
+      // Legacy daily-sync history is not canonical immutable evidence.
+      // History reads are owned exclusively by completedHistorySync.
 
       requestAnimationFrame(() => {
         if (options?.peerReceivedAt !== undefined) {
@@ -8402,33 +8389,19 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenMode, me?.userId, me?.sandbox, canManageFactorySettings]);
 
-  // ── Brand+flavor profile pool reconcile (boot) ──
-  // Profiles live in their own factory-wide server pool with per-profile
-  // last-write-wins stamps (they are no longer part of the sync payload —
-  // the old unstamped map let a stale device clobber fresh edits). On boot
-  // this runs the marker-guarded one-time migration (existing local profiles
-  // are pushed up with a floor stamp) and then reconciles: adopt server-newer
-  // copies into the localStorage cache, push local-newer ones up, and drop
-  // local copies of profiles deleted remotely. SSE invalidations and foreground
-  // recovery keep long-lived tabs converged; queued pushes retry on each pass.
-  // Best-effort — a fetch failure changes nothing locally.
+  // Profiles use scoped memory and owned recovery, independently of the daily
+  // sync baseline. Reattach even when a failed login restores the same user.
+  const profileRepositoryGeneration = useSyncExternalStore(
+    subscribeProfileCache, getProfileCacheGeneration,
+  );
   useEffect(() => {
-    if (screenMode !== null) return;
-    let cancelled = false;
-    const pass = async () => {
-      try {
-        const result = await reconcileProfilesFromServerDetailed();
-        if (cancelled || !result.changed) return;
-        // Profile-derived pickers/cards read localStorage lazily, but the die
-        // types list self-heals from profiles — re-run so an adopted profile's
-        // die size shows up without a reload.
-        setDieTypes(healDieTypesFromProfiles());
-        applyProfileReconcileRef.current(result);
-      } catch {}
-    };
-    void pass();
-    return () => { cancelled = true; };
-  }, [screenMode]);
+    if (screenMode !== null || !me) return;
+    return startProfileReconciliation((result) => {
+      if (!result.changed) return;
+      setDieTypes(healDieTypesFromProfiles());
+      applyProfileReconcileRef.current(result);
+    });
+  }, [screenMode, me?.userId, me?.sandbox, profileRepositoryGeneration]);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
@@ -8456,6 +8429,8 @@ export default function Home() {
       const current = () => !cancelled && generation === configurationGeneration;
       if (families.has("master-data")) {
         await invalidateMasterDataBootstrap(cycleCountQc).catch(() => {});
+        if (!current()) return;
+        await reconcileRunTemplates().catch(() => {});
         if (!current()) return;
       }
       if (families.has("profiles")) {
@@ -9443,6 +9418,7 @@ export default function Home() {
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
     if (screenMode !== null) throw new Error("Station displays are read-only");
     const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    payload = omitArchivedSyncHistory(payload);
     const date = payload.dayState.date ?? todayStr();
     const work = {
       payload,
@@ -10045,8 +10021,6 @@ export default function Home() {
     // factory KV store. Run tombstones are also retained in live sync because
     // the server's additive same-day run merge needs them atomically with the
     // shortened run list to prevent a stale peer from restoring removed runs.
-    const history = loadHistory();
-    const historySig = JSON.stringify(history);
     return {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
@@ -10061,7 +10035,6 @@ export default function Home() {
         } catch { return {}; }
       })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
-      ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
       deletedItems: loadDeletedItems(),
       deletedStamps: loadDeletedStamps(),
       undeletedStamps: loadUndeletedStamps(),
@@ -12686,12 +12659,8 @@ export default function Home() {
   }
 
   function exportCSV() {
-    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual PPM", "Notes", "Stoppages"];
-    const rows: string[][] = [header];
-    for (const run of dayState.runs) {
-      const vals = run.id === currentRunId ? v : loadRunValues(run.id);
-      rows.push(buildRunCsvRow(todayStr(), run, vals));
-    }
+    const rows = currentRunCsvRows(todayStr(), dayState.runs,
+      (run) => run.id === currentRunId ? v : loadRunValues(run.id), buildRunCsvRow);
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -12701,12 +12670,7 @@ export default function Home() {
   }
 
   function exportHistoryCSV(day: HistoryDay) {
-    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual PPM", "Notes", "Stoppages"];
-    const rows: string[][] = [header];
-    for (const run of day.runs) {
-      const vals = day.runValues[run.id] ?? DEFAULT_VALUES;
-      rows.push(buildRunCsvRow(day.date, run, vals as FormValues));
-    }
+    const rows = historyRunCsvRows(day, buildRunCsvRow);
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -15929,6 +15893,7 @@ export default function Home() {
       }}
     >
       <FactoryDirectoryStatus />
+      <SharedRecordsStatus />
       {/* ── Alerts & Floor Mode settings (per-user, follows the account) ── */}
       <AlertSettingsDialog
         open={showAlertSettings}

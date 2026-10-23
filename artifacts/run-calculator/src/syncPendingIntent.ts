@@ -1,5 +1,6 @@
 import { browserRecordStore } from "./adapters/browserRecordStore";
 import type { SyncPayload } from "./types";
+import { withoutArchivedSyncHistory, omitArchivedSyncHistory } from "./sharedRecordMigration";
 
 export type PendingSyncIntent = {
   version: 1;
@@ -48,11 +49,17 @@ export function loadPendingSyncIntent(scope: string, date: string): PendingSyncI
     () => null,
     { decode: (value) => isPendingIntent(value) ? value : null },
   ).read();
-  return item?.scope === scope && item.date === date ? item : null;
+  if (item?.scope !== scope || item.date !== date) return null;
+  return {
+    ...item,
+    baseline: omitArchivedSyncHistory(item.baseline),
+    payload: withoutArchivedSyncHistory(item.payload, scope),
+  };
 }
 
 export function savePendingSyncIntent(intent: PendingSyncIntent): boolean {
   if (!isPendingIntent(intent)) return false;
+  intent = { ...intent, baseline: omitArchivedSyncHistory(intent.baseline), payload: omitArchivedSyncHistory(intent.payload) };
   try {
     if (JSON.stringify(intent).length > MAX_PENDING_RECORD_CHARS) return false;
   } catch {

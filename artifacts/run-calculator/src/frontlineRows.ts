@@ -133,7 +133,10 @@ export function deriveFrontlineNeedRows(
   }
 
   const addApp = (slot: 1 | 2 | 3 | 4) => {
-    const type = v[`app${slot}Type`].trim();
+    // Older immutable snapshots may predate an applicator slot. Missing is
+    // unknown, not a configured ingredient, and must not crash history reads.
+    const rawType = v[`app${slot}Type`];
+    const type = typeof rawType === "string" ? rawType.trim() : "";
     const lbs = q[`app${slot}Lbs`];
     const batches = q[`app${slot}Batches`];
     if (!type || !(lbs > 0)) return;

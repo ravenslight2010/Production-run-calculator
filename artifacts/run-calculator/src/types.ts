@@ -657,7 +657,11 @@ export type PackagingProgress = {
   manualOverrideUntil: number;
 };
 
-export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
+export type HistoryDay = {
+  date: string; runs: RunMeta[]; runValues: Record<string, FormValues>;
+  /** Read-model provenance only; never part of an immutable completion. */
+  pendingRunIds?: string[];
+};
 export type RunTemplate = { id: string; name: string; values: FormValues; brand?: string; flavor?: string; createdAt: string };
 
 export const DAY_KEY = "run-calc-day";

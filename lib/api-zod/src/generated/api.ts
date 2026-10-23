@@ -656,6 +656,10 @@ export const createRoleBodyNameMax = 60;
 export const updateRoleBodyNameMax = 60;
 export const resetStaffPasswordBodyNewPasswordMin = 6;
 export const resetStaffPasswordBodyNewPasswordMax = 200;
+export const listCompletedHistoryQueryLimitDefault = 100;
+export const listCompletedHistoryQueryLimitMax = 200;
+export const listCompletedHistoryQueryCursorMax = 4096;
+export const listCompletedHistoryQueryCursorRegExp = new RegExp('^[A-Za-z0-9_-]+$');
 export const listCompletedHistoryResponseHistoryItemOneOperationIdMax = 300;
 export const listCompletedHistoryResponseHistoryItemOneRunIdMax = 500;
 export const finalizeCompletedRunBodyOperationIdMax = 300;
@@ -9335,9 +9339,16 @@ export const DeleteStaffMemberResponse = zod.void()
 /**
  * @summary List immutable completed-run history for the authenticated scope
  */
+
+
+
+
+
 export const ListCompletedHistoryQueryParams = zod.object({
   "from": zod.date().optional(),
-  "to": zod.date().optional()
+  "to": zod.date().optional(),
+  "limit": zod.coerce.number().int().min(1).max(listCompletedHistoryQueryLimitMax).default(listCompletedHistoryQueryLimitDefault),
+  "cursor": zod.coerce.string().max(listCompletedHistoryQueryCursorMax).regex(listCompletedHistoryQueryCursorRegExp).optional()
 })
 
 
@@ -9345,6 +9356,7 @@ export const ListCompletedHistoryQueryParams = zod.object({
 
 
 export const ListCompletedHistoryResponse = zod.object({
+  "nextCursor": zod.string().optional().describe('Opaque exclusive date/run-id cursor; absent on the last page'),
   "history": zod.array(zod.object({
   "operationId": zod.string().max(listCompletedHistoryResponseHistoryItemOneOperationIdMax),
   "runId": zod.string().max(listCompletedHistoryResponseHistoryItemOneRunIdMax),

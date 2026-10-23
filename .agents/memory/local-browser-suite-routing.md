@@ -26,3 +26,15 @@ For isolated WPE WebKit push tests, `serviceWorker.ready` and `PushManager.getSu
 **Why:** The browser test hung on those APIs despite the registration being active, so waiting for them did not establish app readiness or test the UI.
 
 **How to apply:** Use the active registration for app readiness. For WebKit-only UI/API tests, stub `getSubscription()` to return an empty subscription and label the fixture; do not describe this as native push-delivery verification.
+
+Browser-evaluated callbacks must be self-contained after their test runner
+transforms them, not just in the original TypeScript source.
+
+**Why:** An ad-hoc tsx fixture introduced a name-preservation helper into a
+serialized callback. The helper existed in Node but not in the browser, so
+the fixture failed before exercising application behavior.
+
+**How to apply:** Prefer the repository Playwright runner or plain ESM for
+ad-hoc callbacks. If transformed callbacks need test-only helpers, keep them
+explicitly in the fixture evaluation realm; never patch the app to satisfy
+the harness or report a setup failure as an application regression.

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RunTemplate } from "../types";
 import {
@@ -7,7 +7,10 @@ import {
   reconcileRunTemplates,
   saveRunTemplate,
   getRunTemplatesScope,
-  setRunTemplatesScope,
+  subscribeRunTemplates,
+  runTemplatesVersion,
+  runTemplatesStatus,
+  runTemplatesGeneration,
   startRunTemplatesRepository,
   type RunTemplateScope,
 } from "../runTemplatesRepository";
@@ -20,8 +23,8 @@ export function runTemplatesQueryKey(scope = getRunTemplatesScope()) {
 }
 
 /**
- * Compatibility mutation helpers. They optimistically update the durable local
- * snapshot; callers receive the immediately visible list rather than waiting
+ * Compatibility mutation helpers. They durably queue the intent and update
+ * memory; callers receive the immediately visible list rather than waiting
  * for an unavailable network.
  */
 export async function saveRunTemplateApi(template: RunTemplate): Promise<RunTemplate[]> {
@@ -36,17 +39,19 @@ export async function deleteRunTemplatesApi(ids: string[]): Promise<RunTemplate[
 export function useRunTemplates(): { templates: RunTemplate[]; isLoaded: boolean } {
   const { me } = useAuth();
   const scope: RunTemplateScope = me?.sandbox ? "sandbox" : "live";
-  setRunTemplatesScope(scope);
+  useSyncExternalStore(subscribeRunTemplates, runTemplatesVersion);
+  const generation = runTemplatesGeneration();
   const queryClient = useQueryClient();
-  const queryKey = runTemplatesQueryKey(scope);
+  const queryKey = [...runTemplatesQueryKey(scope), me?.userId ?? null];
   const query = useQuery({
     queryKey,
     queryFn: () => reconcileRunTemplates(),
     initialData: localRunTemplates,
     staleTime: 30_000,
+    enabled: !!me,
   });
   useEffect(() => startRunTemplatesRepository(() => {
     queryClient.setQueryData(queryKey, localRunTemplates());
-  }), [queryClient, scope]);
-  return { templates: query.data ?? localRunTemplates(), isLoaded: query.isFetched };
+  }), [queryClient, scope, me?.userId, generation]);
+  return { templates: localRunTemplates(), isLoaded: runTemplatesStatus() === "ready" };
 }

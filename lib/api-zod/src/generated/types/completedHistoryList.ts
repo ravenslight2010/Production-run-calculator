@@ -8,5 +8,7 @@
 import type { CompletedHistoryRecord } from './completedHistoryRecord';
 
 export interface CompletedHistoryList {
+  /** Opaque exclusive date/run-id cursor; absent on the last page */
+  nextCursor?: string;
   history: CompletedHistoryRecord[];
 }

@@ -11,6 +11,7 @@ import { testDirectoryStorage as localStorage } from "./testDirectoryStorage";
 // guards the merge sync test uses.
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { setRunTemplatesIdentity } from "./runTemplatesRepository";
 import {
   removeStaleRecipeReference,
   saveRunValues,
@@ -45,7 +46,9 @@ import {
 const run = (doughRecipeName: string): FormValues => ({ ...DEFAULT_VALUES, doughRecipeName });
 
 beforeEach(() => {
+  setRunTemplatesIdentity(null);
   localStorage.clear();
+  setRunTemplatesIdentity("stale-recipe-test");
 });
 
 describe("removeStaleRecipeReference clears every surface", () => {

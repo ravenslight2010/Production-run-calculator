@@ -31,6 +31,13 @@ export function applyResetWipe(serverEpoch: number): boolean {
         && !key.startsWith(OPERATIONAL_INTENT_OUTBOX_PREFIX)
          && !key.startsWith("run-calc-fkv-queue-")
          && !key.startsWith("run-calc-fkv-legacy-review:")
+         && !key.startsWith("run-calc-profilesync-")
+         && !key.startsWith("run-calc-profile-cache-")
+         && !key.startsWith("run-calc-profile-")
+         && !key.startsWith("run-calc-crust-profile-")
+         && !key.startsWith("run-calc-templates")
+         && !key.startsWith("run-calc-shared-history-review-v1:")
+         && !key.startsWith("run-calc-completed-history-conflicts")
     );
     for (const key of keys) localStorage.removeItem(key);
     browserRecordStore.record(RESET_EPOCH_KEY, () => 0, {

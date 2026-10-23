@@ -1,7 +1,6 @@
 import { browserStorage } from "./adapters/browserRecordStore";
+import { stableRecordJson } from "./sharedRecordMigration";
 
-const LEGACY_DOUGH_PREFIX = "run-calc-profile-";
-const LEGACY_CRUST_PREFIX = "run-calc-crust-profile-";
 const LEGACY_MIGRATION_OWNER_KEY = "run-calc-profile-cache-legacy-owner-v1";
 const SCOPED_CACHE_PREFIX = "run-calc-profile-cache-v1:";
 
@@ -65,12 +64,12 @@ function parsePersisted(raw: string | null): Map<string, CachedProfileBlobs> {
   }
 }
 
-function persist(): void {
-  const key = scopedStorageKey();
-  if (!key) return;
-  try {
-    browserStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
-  } catch {}
+export type ProfileReadStatus = "loading" | "ready" | "unavailable";
+let readStatus: ProfileReadStatus = "loading";
+export function profileReadStatus(): ProfileReadStatus { return readStatus; }
+export function setProfileReadStatus(next: ProfileReadStatus): void {
+  readStatus = next;
+  notify();
 }
 
 function notify(): void {
@@ -78,6 +77,7 @@ function notify(): void {
   version += 1;
   for (const listener of listeners) listener();
 }
+export const notifyProfileRecoveryChanged = notify;
 
 export function withProfileCacheProjection<T>(run: () => T): T {
   const savedEntries = entries;
@@ -96,87 +96,102 @@ export function withProfileCacheProjection<T>(run: () => T): T {
   }
 }
 
-function importLegacyProfilesOnce(nextIdentityKey: string): Map<string, CachedProfileBlobs> {
-  try {
-    const owner = browserStorage.getItem(LEGACY_MIGRATION_OWNER_KEY);
-    if (owner && owner !== nextIdentityKey) return new Map();
-    const imported = new Map<string, CachedProfileBlobs>();
-    for (let index = 0; index < browserStorage.length; index++) {
-      const storageKey = browserStorage.key(index);
-      if (!storageKey) continue;
-      let key = "";
-      let field: keyof CachedProfileBlobs | null = null;
-      if (storageKey.startsWith(LEGACY_CRUST_PREFIX)) {
-        key = storageKey.slice(LEGACY_CRUST_PREFIX.length);
-        field = "crust";
-      } else if (storageKey.startsWith(LEGACY_DOUGH_PREFIX)) {
-        key = storageKey.slice(LEGACY_DOUGH_PREFIX.length);
-        field = "dough";
-      }
-      if (!field || !isProfileKey(key)) continue;
-      const raw = browserStorage.getItem(storageKey);
-      if (raw === null) continue;
-      const current = imported.get(key) ?? { dough: null, crust: null };
-      imported.set(key, { ...current, [field]: raw });
-    }
-    // Fold the old unscoped fast-access preference into the canonical dough
-    // blob before retiring those keys.
-    for (const [key, blobs] of imported) {
-      const subTab = browserStorage.getItem(`${key}:subtab`);
-      if ((subTab !== "dough" && subTab !== "crusts") || blobs.dough === null) continue;
-      try {
-        const dough = JSON.parse(blobs.dough) as Record<string, unknown>;
-        dough._subTab = subTab;
-        imported.set(key, { ...blobs, dough: JSON.stringify(dough) });
-      } catch {}
-    }
-    browserStorage.setItem(LEGACY_MIGRATION_OWNER_KEY, nextIdentityKey);
-    return imported;
-  } catch {
-    return new Map();
-  }
-}
-
 export function setProfileCacheIdentity(identity: ProfileCacheIdentity | null): void {
   const nextIdentityKey = identity ? makeIdentityKey(identity) : null;
   if (nextIdentityKey === identityKey) return;
   identityKey = nextIdentityKey;
   generation += 1;
+  readStatus = "loading";
   if (!nextIdentityKey) {
     entries = new Map();
     notify();
     return;
   }
-  const persistedRaw = browserStorage.getItem(`${SCOPED_CACHE_PREFIX}${nextIdentityKey}`);
-  entries = parsePersisted(persistedRaw);
-  if (persistedRaw === null) {
-    entries = importLegacyProfilesOnce(nextIdentityKey);
-    persist();
-    // Legacy profile blobs are an import source, never a live mirror. Removing
-    // them prevents later identities and forgotten prefix scans from observing
-    // the first authenticated user's data.
-    for (let index = browserStorage.length - 1; index >= 0; index--) {
-      const key = browserStorage.key(index);
-      if (!key) continue;
-      const legacyDoughKey = key.startsWith(LEGACY_DOUGH_PREFIX)
-        ? key.slice(LEGACY_DOUGH_PREFIX.length)
-        : "";
-      const legacyCrustKey = key.startsWith(LEGACY_CRUST_PREFIX)
-        ? key.slice(LEGACY_CRUST_PREFIX.length)
-        : "";
-      const legacySubTabKey = key.endsWith(":subtab")
-        ? key.slice(0, -":subtab".length)
-        : "";
-      if (
-        isProfileKey(legacyDoughKey) ||
-        isProfileKey(legacyCrustKey) ||
-        isProfileKey(legacySubTabKey)
-      ) {
-        browserStorage.removeItem(key);
+  entries = new Map();
+  // Only explicit, self-contained unsent work may recover on a cold load.
+  try {
+    const pendingKey = `run-calc-profilesync-queue-v1:${nextIdentityKey}`;
+    const pending = JSON.parse(browserStorage.getItem(
+      pendingKey,
+    ) ?? "[]");
+    // Previously scoped key-only operations have trustworthy account ownership.
+    // Capture their original payload before retiring any read copy. A partial
+    // migration is harmless: the source bytes remain until canonical equality.
+    const oldReads = parsePersisted(browserStorage.getItem(`${SCOPED_CACHE_PREFIX}${nextIdentityKey}`));
+    const stamps = JSON.parse(browserStorage.getItem(
+      `run-calc-profilesync-stamps-v1:${nextIdentityKey}`,
+    ) ?? "{}");
+    if (Array.isArray(pending)) {
+      let upgraded = false;
+      for (const op of pending) {
+        if (op?.t !== "up" || op.blobs || !oldReads.has(op.key)) continue;
+        const stamp = stamps?.[op.key];
+        if (typeof stamp !== "number" || !Number.isFinite(stamp)) continue;
+        op.blobs = oldReads.get(op.key); op.updatedAt = stamp; upgraded = true;
+      }
+      if (upgraded) {
+        const serialized = JSON.stringify(pending);
+        browserStorage.setItem(pendingKey, serialized);
+        if (browserStorage.getItem(pendingKey) !== serialized) { notify(); return; }
       }
     }
-  }
+    if (Array.isArray(pending)) for (const op of pending) {
+      if (op?.t !== "up" || !isProfileKey(op.key) || !op.blobs
+        || typeof op.updatedAt !== "number") continue;
+      const restored = parsePersisted(JSON.stringify({ [op.key]: op.blobs }));
+      const blobs = restored.get(op.key);
+      if (blobs) entries.set(op.key, blobs);
+    }
+  } catch {}
   notify();
+}
+
+/** Remove only byte-equivalent acknowledged legacy reads. Interrupted passes
+ * resume by comparing again; differing/unknown-owner evidence is untouched. */
+export function reconcileLegacyProfileReads(
+  canonical: ReadonlyMap<string, CachedProfileBlobs>,
+): void {
+  const key = scopedStorageKey();
+  if (!key) return;
+  const raw = browserStorage.getItem(key);
+  const legacy = parsePersisted(raw);
+  let preserved: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(raw ?? "null");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) preserved = parsed as Record<string, unknown>;
+  } catch {}
+  for (const [id, blobs] of legacy) {
+    const remote = canonical.get(id);
+    if (!remote) continue;
+    try {
+      if (stableRecordJson(JSON.parse(blobs.dough ?? "{}")) === stableRecordJson(JSON.parse(remote.dough ?? "{}"))
+        && stableRecordJson(JSON.parse(blobs.crust ?? "{}")) === stableRecordJson(JSON.parse(remote.crust ?? "{}"))) {
+        legacy.delete(id);
+        if (preserved) delete preserved[id];
+      }
+    } catch {}
+  }
+  if (preserved && Object.keys(preserved).length === 0) {
+    browserStorage.removeItem(key);
+  } else if (preserved && legacy.size < parsePersisted(raw).size) {
+    browserStorage.setItem(key, JSON.stringify(preserved));
+  }
+  const owner = browserStorage.getItem(LEGACY_MIGRATION_OWNER_KEY);
+  if (owner && owner !== identityKey) return;
+  for (const [id, remote] of canonical) {
+    for (const [prefix, field] of [
+      ["run-calc-profile-", "dough"], ["run-calc-crust-profile-", "crust"],
+    ] as const) {
+      const legacyKey = `${prefix}${id}`;
+      const original = browserStorage.getItem(legacyKey);
+      if (original === null || remote[field] === null) continue;
+      try {
+        if (stableRecordJson(JSON.parse(original)) === stableRecordJson(JSON.parse(remote[field]!))) {
+          browserStorage.removeItem(legacyKey);
+        }
+      } catch {}
+    }
+  }
 }
 
 export function getProfileCacheGeneration(): number {
@@ -219,13 +234,11 @@ export function writeCachedProfileBlobs(
   if (current.dough === next.dough && current.crust === next.crust) return;
   if (next.dough === null && next.crust === null) entries.delete(key);
   else entries.set(key, next);
-  persist();
   notify();
 }
 
 export function deleteCachedProfile(key: string): void {
   if (!identityKey || !entries.delete(key)) return;
-  persist();
   notify();
 }
 
@@ -245,7 +258,6 @@ export function replaceCachedProfiles(
     });
   if (unchanged) return true;
   entries = replacement;
-  persist();
   notify();
   return true;
 }
@@ -264,5 +276,6 @@ export function resetProfileCacheForTests(): void {
   generation += 1;
   version += 1;
   entries = new Map();
+  readStatus = "loading";
   listeners.clear();
 }

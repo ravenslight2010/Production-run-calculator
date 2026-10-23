@@ -11,6 +11,7 @@ import {
   reconcileProfilesFromServerDetailed,
   fetchBrandProfilesSnapshot,
   getProfileStamp,
+  startProfileReconciliation,
   resetProfileSyncMemoryFallbackForTests,
 } from "./profileServerSync";
 import {
@@ -119,6 +120,7 @@ beforeEach(() => {
   localStorage.clear();
   resetProfileCacheForTests();
   resetProfileSyncMemoryFallbackForTests();
+  setProfileCacheIdentity({ userId: "test-owner", scope: "live" });
   calls = [];
   listItems = [];
   networkDown = false;
@@ -161,6 +163,48 @@ afterEach(async () => {
   // torn down, so it can't bleed into the next test.
   await settle();
   vi.unstubAllGlobals();
+});
+
+it("automatically retries owned offline edits on reconnect and detaches on cleanup", async () => {
+  networkDown = true;
+  setLocalBlobs(KEY, { targetCases: 17 });
+  markProfileEdited(KEY);
+  await settle();
+  const stop = startProfileReconciliation(vi.fn());
+  try {
+    await settle();
+    expect(readQueue()).toHaveLength(1);
+    networkDown = false;
+    window.dispatchEvent(new Event("online"));
+    await settle();
+    expect(readQueue()).toEqual([]);
+    expect(postCalls().at(-1)?.body).toMatchObject({
+      items: [{ key: KEY, values: { targetCases: 17 } }],
+    });
+  } finally {
+    stop();
+  }
+  const count = calls.length;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(calls).toHaveLength(count);
+});
+
+it("does not retry or adopt a previous identity from its old lifecycle", async () => {
+  const adopt = vi.fn();
+  const stop = startProfileReconciliation(adopt);
+  try {
+    await settle();
+    adopt.mockClear();
+    setProfileCacheIdentity({ userId: "different-owner", scope: "sandbox" });
+    const count = calls.length;
+    window.dispatchEvent(new Event("online"));
+    await settle();
+    expect(calls).toHaveLength(count);
+    expect(adopt).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
 });
 
 describe("persisted push queue", () => {
@@ -510,8 +554,10 @@ describe("persisted push queue", () => {
       setLocalBlobs(key, { i });
     }
     localStorage.setItem(
-      QUEUE_KEY,
-      JSON.stringify(keys.map((key) => ({ t: "up", key }))),
+      scopeProfileCacheStorageKey(QUEUE_KEY),
+      JSON.stringify(keys.map((key) => ({
+        t: "up", key, blobs: readCachedProfileBlobs(key), updatedAt: 1,
+      }))),
     );
 
     await flushProfileQueue();
@@ -527,15 +573,15 @@ describe("persisted push queue", () => {
     expect(readQueue()).toEqual([]);
   });
 
-  it("an upsert whose blobs vanished (deleted meanwhile) is dropped without a POST", async () => {
+  it("keeps a key-only legacy op for review rather than inventing a payload", async () => {
     // Queue an upsert for a key with no local blobs at flush time.
-    localStorage.setItem(QUEUE_KEY, JSON.stringify([{ t: "up", key: KEY }]));
+    localStorage.setItem(scopeProfileCacheStorageKey(QUEUE_KEY), JSON.stringify([{ t: "up", key: KEY }]));
 
     await flushProfileQueue();
     await settle();
 
     expect(postCalls()).toHaveLength(0);
-    expect(readQueue()).toEqual([]);
+    expect(readQueue()).toEqual([{ t: "up", key: KEY }]);
   });
 });
 
@@ -608,7 +654,7 @@ describe("reconcileProfilesFromServer", () => {
     await settle();
 
     expect(changed).toBe(true);
-    expect(JSON.parse(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)!)).toEqual({
+    expect(JSON.parse(readCachedProfileBlobs(KEY).dough!)).toEqual({
       doughRecipeName: "newer",
     });
     expect(getProfileStamp(KEY)).toBe(200);
@@ -617,7 +663,7 @@ describe("reconcileProfilesFromServer", () => {
     expect(postCalls()).toHaveLength(0);
   });
 
-  it("seeds the receiving tablet's fast sub-tab key from a server-newer crust profile", async () => {
+  it("does not change device navigation when receiving a server profile", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "old" });
     writeMap(STAMPS_KEY, { [KEY]: 100 });
     writeMap(SYNCED_KEY, { [KEY]: 100 });
@@ -625,14 +671,14 @@ describe("reconcileProfilesFromServer", () => {
 
     await reconcileProfilesFromServer();
 
-    expect(localStorage.getItem(`${KEY}:subtab`)).toBe("crusts");
-    expect(JSON.parse(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)!)).toMatchObject({
+    expect(localStorage.getItem(`${KEY}:subtab`)).toBeNull();
+    expect(JSON.parse(readCachedProfileBlobs(KEY).dough!)).toMatchObject({
       doughRecipeName: "newer",
       _subTab: "crusts",
     });
   });
 
-  it("re-enqueues a local-newer profile so a lost queue self-heals", async () => {
+  it("adopts canonical values instead of resurrecting an unqueued read copy", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "local-newer" });
     writeMap(STAMPS_KEY, { [KEY]: 300 });
     writeMap(SYNCED_KEY, { [KEY]: 200 });
@@ -642,23 +688,21 @@ describe("reconcileProfilesFromServer", () => {
     const changed = await reconcileProfilesFromServer();
     await settle();
 
-    expect(changed).toBe(false);
+    expect(changed).toBe(true);
     // Local blob untouched…
-    expect(JSON.parse(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)!)).toEqual({
-      doughRecipeName: "local-newer",
+    expect(JSON.parse(readCachedProfileBlobs(KEY).dough!)).toEqual({
+      doughRecipeName: "stale",
     });
     // …and the local copy was pushed up with the local stamp.
-    expect(postCalls()).toHaveLength(1);
-    const body = postCalls()[0].body as { items: ServerItem[] };
-    expect(body.items[0].key).toBe(KEY);
-    expect(body.items[0].values).toEqual({ doughRecipeName: "local-newer" });
-    expect(body.items[0].updatedAt).toBe(300);
+    expect(postCalls()).toHaveLength(0);
   });
 
   it("does not double-enqueue a local-newer profile whose op is already queued", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "local-newer" });
     writeMap(STAMPS_KEY, { [KEY]: 300 });
-    localStorage.setItem(QUEUE_KEY, JSON.stringify([{ t: "up", key: KEY }]));
+    localStorage.setItem(scopeProfileCacheStorageKey(QUEUE_KEY), JSON.stringify([{
+      t: "up", key: KEY, blobs: readCachedProfileBlobs(KEY), updatedAt: 300,
+    }]));
     listItems = [serverItem(KEY, 200, { doughRecipeName: "stale" })];
 
     await reconcileProfilesFromServer();
@@ -702,6 +746,11 @@ describe("reconcileProfilesFromServer", () => {
 
   it("keeps a never-synced local profile absent from the server and pushes it up", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "offline-created" });
+    networkDown = true;
+    markProfileEdited(KEY);
+    await flushProfileQueue();
+    calls = [];
+    networkDown = false;
     writeMap(STAMPS_KEY, { [KEY]: 100 });
     // NOT in the synced map — the server has never seen it.
     listItems = [];
@@ -710,7 +759,7 @@ describe("reconcileProfilesFromServer", () => {
     await settle();
 
     // Local copy preserved and uploaded, never destroyed.
-    expect(JSON.parse(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)!)).toEqual({
+    expect(JSON.parse(readCachedProfileBlobs(KEY).dough!)).toEqual({
       doughRecipeName: "offline-created",
     });
     expect(postCalls()).toHaveLength(1);
@@ -723,7 +772,9 @@ describe("reconcileProfilesFromServer", () => {
     setLocalBlobs(KEY, { doughRecipeName: "just-edited" });
     writeMap(STAMPS_KEY, { [KEY]: 400 });
     writeMap(SYNCED_KEY, { [KEY]: 100 });
-    localStorage.setItem(QUEUE_KEY, JSON.stringify([{ t: "up", key: KEY }]));
+    localStorage.setItem(scopeProfileCacheStorageKey(QUEUE_KEY), JSON.stringify([{
+      t: "up", key: KEY, blobs: readCachedProfileBlobs(KEY), updatedAt: 400,
+    }]));
     listItems = []; // our own push simply hasn't landed yet
 
     // Keep the flush from landing so the pending state is what's under test.
@@ -752,14 +803,16 @@ describe("reconcileProfilesFromServer", () => {
 
     // Blobs survive: the pending op means "our push hasn't landed", not
     // "deleted remotely".
-    expect(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)).not.toBeNull();
+    expect(readCachedProfileBlobs(KEY).dough).not.toBeNull();
     expect(getProfileStamp(KEY)).toBe(400);
   });
 
   it("still retries queued pushes when the server list fails (offline reconcile)", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "V1" });
     writeMap(STAMPS_KEY, { [KEY]: 100 });
-    localStorage.setItem(QUEUE_KEY, JSON.stringify([{ t: "up", key: KEY }]));
+    localStorage.setItem(scopeProfileCacheStorageKey(QUEUE_KEY), JSON.stringify([{
+      t: "up", key: KEY, blobs: readCachedProfileBlobs(KEY), updatedAt: 300,
+    }]));
 
     // GET fails (offline) but the flush kick must still be attempted.
     let getFails = true;
@@ -873,30 +926,31 @@ describe("localStorage full (quota exceeded)", () => {
     markProfileEdited(KEY);
     await settle();
     expect(postCalls()).toHaveLength(1);
-    expect(localStorage.getItem(STAMPS_KEY)).not.toBeNull();
+    expect(localStorage.getItem(scopeProfileCacheStorageKey(STAMPS_KEY))).not.toBeNull();
   });
 });
 
 describe("one-time migration key filter", () => {
-  it("keeps legacy migration owned by the first authenticated identity", async () => {
+  it("does not auto-claim unowned legacy profiles for the next login", async () => {
     localStorage.setItem(`${DOUGH_PREFIX}${KEY}`, JSON.stringify({ doughRecipeName: "legacy" }));
     localStorage.setItem(`${CRUST_PREFIX}${KEY}`, JSON.stringify({}));
 
     setProfileCacheIdentity({ userId: "legacy-owner", scope: "live" });
-    expect(readCachedProfileBlobs(KEY).dough).toBe('{"doughRecipeName":"legacy"}');
+    expect(readCachedProfileBlobs(KEY).dough).toBeNull();
 
     networkDown = true;
     migrateLocalProfilesToServerIfNeeded();
     await settle();
-    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY })]);
+    expect(readQueue()).toEqual([]);
 
     setProfileCacheIdentity({ userId: "later-user", scope: "live" });
     expect(readCachedProfileBlobs(KEY)).toEqual({ dough: null, crust: null });
     expect(readQueue()).toEqual([]);
 
     setProfileCacheIdentity({ userId: "legacy-owner", scope: "live" });
-    expect(readCachedProfileBlobs(KEY).dough).toBe('{"doughRecipeName":"legacy"}');
-    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY })]);
+    expect(readCachedProfileBlobs(KEY).dough).toBeNull();
+    expect(readQueue()).toEqual([]);
+    expect(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)).toBe('{"doughRecipeName":"legacy"}');
   });
 
   it("never enqueues bookkeeping/marker keys without the __ separator", async () => {
@@ -913,8 +967,8 @@ describe("one-time migration key filter", () => {
     await settle();
 
     const queued = readQueue().map((op) => op.key);
-    expect(queued).toEqual([KEY]);
-    expect(localStorage.getItem(MIGRATED_KEY)).toBe("1");
+    expect(queued).toEqual([]);
+    expect(localStorage.getItem(MIGRATED_KEY)).toBeNull();
 
     // Marker set — a second call must not re-enqueue anything.
     localStorage.setItem(QUEUE_KEY, JSON.stringify([]));

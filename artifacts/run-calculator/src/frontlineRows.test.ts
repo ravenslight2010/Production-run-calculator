@@ -19,6 +19,9 @@ const quantities: FrontlineQuantitySource = {
 };
 
 describe("deriveFrontlineNeedRows", () => {
+  it("does not invent ingredient rows or crash on partially populated legacy history", () => {
+    expect(deriveFrontlineNeedRows({ casesNeeded: 13 } as FormValues, quantities)).toEqual([]);
+  });
   it("derives applicator needs from partial and empty recipe rows", () => {
     const values: FormValues = {
       ...DEFAULT_VALUES,

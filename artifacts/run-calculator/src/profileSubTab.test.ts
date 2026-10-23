@@ -19,7 +19,7 @@ describe("profile line-type preference", () => {
     markProfileEdited.mockClear();
   });
 
-  it("embeds the selected sub-tab in the dough profile and marks it edited", () => {
+  it("keeps the selected navigation sub-tab device-local without editing shared setup", () => {
     localStorage.setItem(
       "run-calc-profile-acme__pepperoni",
       JSON.stringify({ doughRecipeName: "Standard" }),
@@ -31,19 +31,18 @@ describe("profile line-type preference", () => {
       JSON.parse(localStorage.getItem("run-calc-profile-acme__pepperoni")!),
     ).toMatchObject({
       doughRecipeName: "Standard",
-      _subTab: "crusts",
     });
     expect(localStorage.getItem("acme__pepperoni:subtab")).toBe("crusts");
-    expect(markProfileEdited).toHaveBeenCalledWith("acme__pepperoni");
+    expect(markProfileEdited).not.toHaveBeenCalled();
   });
 
-  it("loads the embedded sub-tab when the fast-access key is absent", () => {
+  it("does not adopt navigation from shared profile metadata", () => {
     localStorage.setItem(
       "run-calc-profile-acme__pepperoni",
       JSON.stringify({ _subTab: "crusts" }),
     );
 
-    expect(loadProfileSubTab("Acme", "Pepperoni")).toBe("crusts");
-    expect(localStorage.getItem("acme__pepperoni:subtab")).toBe("crusts");
+    expect(loadProfileSubTab("Acme", "Pepperoni")).toBeNull();
+    expect(localStorage.getItem("acme__pepperoni:subtab")).toBeNull();
   });
 });

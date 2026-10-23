@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 describe("profile cache identity", () => {
-  it("keeps durable offline snapshots isolated by user and scope", () => {
+  it("keeps reads memory-only and clears them on user and scope changes", () => {
     setProfileCacheIdentity({ userId: "manager-a", scope: "live" });
     writeCachedProfileBlobs(KEY, { dough: '{"lineSpeed":10}', crust: "{}" });
 
@@ -32,7 +32,8 @@ describe("profile cache identity", () => {
     expect(cachedProfileKeys()).toEqual([]);
 
     setProfileCacheIdentity({ userId: "manager-a", scope: "live" });
-    expect(readCachedProfileBlobs(KEY).dough).toBe('{"lineSpeed":10}');
+    expect(readCachedProfileBlobs(KEY).dough).toBeNull();
+    expect(localStorage.getItem("run-calc-profile-cache-v1:live:authenticated-facility:manager-a")).toBeNull();
   });
 
   it("fences server responses that began under an old identity", () => {
@@ -78,14 +79,14 @@ describe("profile cache identity", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it("imports unscoped legacy profiles only into the first authenticated scope", () => {
+  it("preserves unowned legacy profiles without assigning them to the next login", () => {
     localStorage.setItem("run-calc-profile-acme__pepperoni", '{"lineSpeed":5}');
     localStorage.setItem("run-calc-crust-profile-acme__pepperoni", "{}");
 
     setProfileCacheIdentity({ userId: "legacy-owner", scope: "live" });
-    expect(readCachedProfileBlobs(KEY).dough).toBe('{"lineSpeed":5}');
-    expect(localStorage.getItem("run-calc-profile-acme__pepperoni")).toBeNull();
-    expect(localStorage.getItem("run-calc-crust-profile-acme__pepperoni")).toBeNull();
+    expect(readCachedProfileBlobs(KEY).dough).toBeNull();
+    expect(localStorage.getItem("run-calc-profile-acme__pepperoni")).toBe('{"lineSpeed":5}');
+    expect(localStorage.getItem("run-calc-crust-profile-acme__pepperoni")).toBe("{}");
 
     setProfileCacheIdentity({ userId: "other-user", scope: "live" });
     expect(readCachedProfileBlobs(KEY).dough).toBeNull();
@@ -100,7 +101,7 @@ describe("profile cache identity", () => {
     expect(readCachedProfileBlobs(KEY).dough).toBeNull();
 
     setProfileCacheIdentity({ userId: "manager-a", scope: "live" });
-    expect(readCachedProfileBlobs(KEY).dough).toBe('{"lineSpeed":14}');
+    expect(readCachedProfileBlobs(KEY).dough).toBeNull();
   });
 
   it("does not resurrect a deleted scoped profile from its legacy migration source", () => {

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { omitArchivedSyncHistory } from "../sharedRecordMigration";
 import { createSyncBaselineGate } from "../domain/runSyncPolicy";
 import type { ForegroundStopIntent } from "../foregroundLifecycleIntent";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
@@ -318,7 +319,7 @@ export function useHomeSyncCoordination() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             senderId: clientId,
-            payload,
+            payload: omitArchivedSyncHistory(payload),
             snapshotId: snapshotId || undefined,
             ...(queuedAtEpoch ? { syncMeta: { queuedAt: queuedAtEpoch } } : {}),
           }),
