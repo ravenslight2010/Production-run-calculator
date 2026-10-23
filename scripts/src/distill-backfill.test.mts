@@ -304,7 +304,9 @@ function makeOptions({
   } as const;
 }
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "distill-backfill-test-"));
+// macOS's temporary directory may be an alias under /var for /private/var.
+// Use canonical fixture paths without weakening the repository boundary guard.
+const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "distill-backfill-test-")));
 const repoRoot = path.join(tempRoot, "repo");
 const privateRoot = path.join(tempRoot, "private");
 fs.mkdirSync(path.join(repoRoot, "docs", "evidence"), { recursive: true });
