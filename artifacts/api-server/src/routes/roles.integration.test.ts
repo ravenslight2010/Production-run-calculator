@@ -18,7 +18,8 @@
 // must create the throwaway DB and point DATABASE_URL at it BEFORE importing the
 // router — hence the dynamic imports inside beforeAll.
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { QcResultsReport, QcTrendsReport, QcTraceabilityReport } from "./qcIntelligenceReport";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
@@ -5114,5 +5115,177 @@ describe("QC workflows", () => {
       .then(() => null, (error: unknown) => error);
     expect((deleteError as { cause?: { message?: string } } | null)?.cause?.message)
       .toContain("qc_workflow_events is append-only");
+  });
+
+  it("QC intelligence enforces manager access, effective filters, denominators, redaction and CSV parity", async () => {
+    const path = "/api/qc/intelligence?view=results&from=2026-01-01&to=2026-01-03";
+    expect((await req(null, "GET", path)).status).toBe(401);
+    expect((await req(QC_OPERATOR, "GET", path)).status).toBe(403);
+    expect((await req(QC_OPERATOR, "GET", path.replace("intelligence?", "intelligence.csv?"))).status).toBe(403);
+    const at = new Date("2026-01-02T12:00:00Z");
+    const insert = async (eventType: typeof qcWorkflowEventsTable.$inferSelect.eventType, payload: Record<string, unknown>, extra: Partial<typeof qcWorkflowEventsTable.$inferInsert> = {}) => {
+      const [row] = await db.insert(qcWorkflowEventsTable).values({
+        scope: "live", operationId: randomUUID(), recordId: randomUUID(),
+        eventType, runId: "intelligence-run", ingredientId: "intelligence-ingredient",
+        ingredientName: "Synthetic Ingredient", station: "dough", actorId: QC_OPERATOR,
+        createdAt: at, payload, ...extra,
+      }).returning();
+      return row!;
+    };
+    const original = await insert("weight", {
+      actualValue: 12, actualUnit: "oz", targetValue: 10, targetUnit: "oz",
+      toleranceValue: 0.1, targetVersion: "v1", checkType: "pre-run", outcome: "out-of-tolerance",
+    });
+    await insert("correction", {
+      reason: "Synthetic effective correction", replacement: { actualValue: 10, station: "sauce" },
+    }, { relatedEventId: String(original.id) });
+    const redacted = await insert("weight", {
+      actualValue: 987654.321, actualUnit: "g", targetValue: 10, targetUnit: "g",
+      toleranceValue: 0.1, targetVersion: "v2", checkType: "30-minute", outcome: "out-of-tolerance",
+    });
+    await insert("redaction", { reason: "Synthetic privacy fixture", fields: ["payload.actualValue", "ingredientName"] }, {
+      relatedEventId: String(redacted.id),
+    });
+    await insert("brix-check", {
+      actualBrix: 5, targetBrix: null, toleranceBrix: null, checkType: "interval", outcome: "not-evaluated",
+    }, { station: "sauce" });
+    await insert("weight", { actualValue: 1, actualUnit: "oz", targetUnit: "oz", outcome: "pass" }, {
+      scope: "sandbox", ingredientName: "SANDBOX-ONLY",
+    });
+    const response = await req(QC_MANAGER, "GET", path);
+    expect(response.status).toBe(200);
+    const report = await response.json() as QcResultsReport;
+    expect(report).toMatchObject({
+      view: "results", recordedChecks: 3,
+      coverage: { status: "complete", sampledEvents: 3, includedEvents: 3 },
+    });
+    expect(report.byCheckType).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "weight:pre-run", pass: 1, fail: 0, denominator: 1 }),
+      expect.objectContaining({ key: "weight:30-minute", fail: 1, denominator: 1 }),
+      expect.objectContaining({ key: "brix-check:interval", notEvaluated: 1, denominator: 1 }),
+    ]));
+    const filtered = await req(QC_MANAGER, "GET", `${path}&station=sauce&checkType=pre-run`);
+    expect(await filtered.json()).toMatchObject({
+      recordedChecks: 1, byStation: [{ key: "sauce", pass: 1, denominator: 1 }],
+    });
+    const trends = await req(QC_MANAGER, "GET", path.replace("view=results", "view=trends"));
+    const trendsBody = await trends.json() as QcTrendsReport;
+    expect(trendsBody).toMatchObject({ recordedMeasurements: 2, redactedMeasurementsExcluded: 1 });
+    expect(trendsBody.groups).toHaveLength(2);
+    expect(JSON.stringify(trendsBody)).not.toContain("987654.321");
+    expect(JSON.stringify(trendsBody)).not.toContain("SANDBOX-ONLY");
+    const csv = await req(QC_MANAGER, "GET", path.replace("intelligence?", "intelligence.csv?").replace("view=results", "view=trends"));
+    expect(csv.status).toBe(200);
+    const csvText = await csv.text();
+    expect(csvText).toContain('"dateBasis","event-created-at-utc"');
+    expect(csvText).toContain('"recordedMeasurements","2"');
+    expect(csvText).not.toContain("987654.321");
+    expect(csvText).not.toContain("Synthetic privacy fixture");
+    const partial = await req(QC_MANAGER, "GET", `${path}&limit=1`);
+    expect(await partial.json()).toMatchObject({
+      recordedChecks: 1, coverage: { status: "partial", reason: "event-limit", moreAvailable: true },
+    });
+    for (const invalid of [
+      "/api/qc/intelligence?view=results&from=2025-01-01&to=2026-01-03",
+      `${path}&limit=5001`, `${path}&limit=0`, `${path}&station=invalid`,
+      "/api/qc/intelligence?view=results&from=2026-02-30",
+    ]) expect((await req(QC_MANAGER, "GET", invalid)).status).toBe(400);
+    const originalAfter = await db.select().from(qcWorkflowEventsTable).where(eq(qcWorkflowEventsTable.id, original.id));
+    expect(originalAfter[0]!.payload.actualValue).toBe(12);
+    const indexes = await db.execute(sql`SELECT indexname FROM pg_indexes WHERE tablename IN ('qc_workflow_events', 'completed_run_history')`);
+    expect(indexes.rows.map((row) => row.indexname)).toEqual(expect.arrayContaining([
+      "qc_workflow_events_scope_type_created_id_idx", "qc_workflow_events_scope_related_event_id_idx",
+      "completed_run_history_scope_run_date_idx",
+    ]));
+  });
+
+  it("QC intelligence traces exact scoped canonical identities and preserves unavailable links", async () => {
+    const date = "2026-01-02";
+    const runId = "intelligence-completed";
+    const snapshot = { dayState: { date, runs: [{ id: runId, brand: "Synthetic", flavor: "Cheese", finished: true }] }, runValues: {} };
+    const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable)
+      : value && typeof value === "object"
+        ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, stable(child)]))
+        : value;
+    await db.insert(completedRunHistoryTable).values({
+      id: randomUUID(), operationId: randomUUID(), scope: "live", runId, date,
+      completedAt: new Date(`${date}T13:00:00Z`), snapshot,
+      snapshotHash: createHash("sha256").update(JSON.stringify(stable(snapshot))).digest("hex"),
+      actorId: QC_MANAGER,
+    });
+    const today = facilityDate();
+    await db.insert(dailySyncTable).values({
+      scope: "live", date: today,
+      data: { dayState: { date: today, runs: [{ id: "intelligence-active", brand: "Synthetic", flavor: "Active" }] } },
+    });
+    for (const identity of [runId, "intelligence-active", "similar-name-only"]) {
+      await db.insert(qcWorkflowEventsTable).values({
+        scope: "live", operationId: randomUUID(), recordId: randomUUID(), eventType: "lot",
+        runId: identity, actorId: QC_OPERATOR, createdAt: new Date(`${date}T12:00:00Z`),
+        payload: { lotNumber: `LOT-${identity}` },
+      });
+    }
+    const path = `/api/qc/intelligence?view=traceability&from=${date}&to=${date}`;
+    const report = await (await req(QC_MANAGER, "GET", path)).json() as QcTraceabilityReport;
+    expect(report.coverage.status).toBe("complete");
+    expect(report.lots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ run: expect.objectContaining({ runId, status: "available", source: "completed-run-snapshot", productionDate: date }) }),
+      expect.objectContaining({ run: expect.objectContaining({ runId: "intelligence-active", status: "available", source: "active-day-state", productionDate: today }) }),
+      expect.objectContaining({ run: expect.objectContaining({ runId: "similar-name-only", status: "unavailable", label: null }) }),
+    ]));
+    expect(report.lots.every((lot: { outboundStatus: string }) => lot.outboundStatus === "unavailable")).toBe(true);
+    await db.update(userRolesTable).set({ role: "qc-manager" }).where(eq(userRolesTable.userId, SANDBOX));
+    const sandbox = await (await req(SANDBOX, "GET", path)).json() as QcTraceabilityReport;
+    expect(sandbox.lots).toEqual([]);
+    const oversized = { ...snapshot, padding: "x".repeat(1_048_577) };
+    await db.insert(completedRunHistoryTable).values({
+      id: randomUUID(), operationId: randomUUID(), scope: "live", runId: "intelligence-oversize", date,
+      completedAt: new Date(`${date}T13:00:00Z`), snapshot: oversized,
+      snapshotHash: createHash("sha256").update(JSON.stringify(stable(oversized))).digest("hex"),
+      actorId: QC_MANAGER,
+    });
+    await db.insert(qcWorkflowEventsTable).values({
+      scope: "live", operationId: randomUUID(), recordId: randomUUID(), eventType: "lot",
+      runId: "intelligence-oversize", actorId: QC_OPERATOR, createdAt: new Date(`${date}T12:00:00Z`),
+      payload: { lotNumber: "OVERSIZE-SOURCE" },
+    });
+    const limited = await (await req(QC_MANAGER, "GET", path)).json() as QcTraceabilityReport;
+    expect(limited.coverage).toMatchObject({ status: "partial", reason: "canonical-source-limit" });
+    expect(limited.lots.find((lot) => lot.lotNumber === "OVERSIZE-SOURCE")?.run?.status).toBe("unavailable");
+    for (let index = 0; index < 51; index += 1) {
+      await db.insert(qcWorkflowEventsTable).values({
+        scope: "live", operationId: randomUUID(), recordId: randomUUID(), eventType: "lot",
+        runId: `intelligence-limit-${index}`, actorId: QC_OPERATOR, createdAt: new Date(`${date}T12:00:00Z`),
+        payload: { lotNumber: index === 50 ? "x".repeat(4001) : `BOUNDED-${index}` },
+      });
+    }
+    const sourceLimit = await (await req(QC_MANAGER, "GET", path)).json() as QcTraceabilityReport;
+    expect(sourceLimit.coverage).toMatchObject({ status: "partial", reason: "canonical-source-limit" });
+    const tooLargeCsv = await req(QC_MANAGER, "GET", path.replace("intelligence?", "intelligence.csv?"));
+    expect(tooLargeCsv.status).toBe(413);
+    expect(tooLargeCsv.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("QC intelligence fails closed when correction and redaction reads exceed their bound", async () => {
+    const [original] = await db.insert(qcWorkflowEventsTable).values({
+      scope: "live", operationId: randomUUID(), recordId: randomUUID(), eventType: "weight",
+      actorId: QC_OPERATOR, createdAt: new Date("2026-01-02T12:00:00Z"),
+      payload: { actualValue: 987654.321, actualUnit: "oz", targetValue: 1, targetUnit: "oz", outcome: "fail" },
+    }).returning();
+    const prefix = randomUUID();
+    await db.execute(sql`INSERT INTO qc_workflow_events
+      (scope, operation_id, record_id, event_type, related_event_id, actor_id, payload)
+      SELECT 'live', ${prefix} || '-' || n::text, ${prefix}, 'redaction', ${String(original!.id)}, ${QC_MANAGER},
+        '{"fields":["payload.actualValue"]}'::jsonb
+      FROM generate_series(1, 10001) AS n`);
+    const path = "/api/qc/intelligence?view=trends&from=2026-01-02&to=2026-01-02";
+    const report = await (await req(QC_MANAGER, "GET", path)).json();
+    expect(report).toMatchObject({
+      groups: [], recordedMeasurements: 0,
+      coverage: { status: "partial", reason: "overlay-limit", includedEvents: 0 },
+    });
+    const csv = await (await req(QC_MANAGER, "GET", path.replace("intelligence?", "intelligence.csv?"))).text();
+    expect(csv).toContain("overlay-limit");
+    expect(csv).not.toContain("987654.321");
   });
 });

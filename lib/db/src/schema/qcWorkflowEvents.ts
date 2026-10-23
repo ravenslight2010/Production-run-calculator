@@ -69,9 +69,20 @@ export const qcWorkflowEventsTable = pgTable(
       table.eventType,
       table.id,
     ),
+    index("qc_workflow_events_scope_type_created_id_idx").on(
+      table.scope,
+      table.eventType,
+      table.createdAt,
+      table.id,
+    ),
     index("qc_workflow_events_scope_record_id_idx").on(
       table.scope,
       table.recordId,
+      table.id,
+    ),
+    index("qc_workflow_events_scope_related_event_id_idx").on(
+      table.scope,
+      table.relatedEventId,
       table.id,
     ),
     index("qc_workflow_events_scope_ingredient_id_idx").on(

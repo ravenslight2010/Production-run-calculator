@@ -37,6 +37,15 @@ import {
   type ActivityRunSource,
   type ActivitySnapshotRun,
 } from "./qcAllergenActivity";
+import {
+  buildQcIntelligenceReport,
+  qcIntelligenceCsv,
+  QcIntelligenceCsvLimitError,
+  type QcReportEvent,
+  type QcReportCoverage,
+  type QcReportFilters,
+  type QcReportView,
+} from "./qcIntelligenceReport";
 
 const router: IRouter = Router();
 const MAX_NOTE = 1_000;
@@ -48,6 +57,10 @@ const MAX_RUN_WEIGHT_CHECK_EVENTS = 5_000;
 const MAX_ALLERGEN_ACTIVITY_RUNS = 600;
 const MAX_ALLERGEN_ACTIVITY_EVENTS = 5_000;
 const MAX_EXPORT_PAGE = 500;
+const MAX_INTELLIGENCE_EVENTS = 5_000;
+const MAX_INTELLIGENCE_OVERLAYS = 10_000;
+const MAX_INTELLIGENCE_RUN_SOURCES = 50;
+const MAX_INTELLIGENCE_SNAPSHOT_BYTES = 1_048_576;
 type QcAuditDetail = {
   action: "correction" | "redaction";
   actorId: string | null;
@@ -89,8 +102,18 @@ const qcPlanningQuerySchema = z.object({
   today: activityDateSchema,
   days: z.coerce.number().int().min(1).max(90).default(30),
 }).strict();
-const profileKeySchema = z.string().trim().min(1).max(MAX_PROFILE_KEY);
 const ingredientIdSchema = z.string().trim().min(1).max(200);
+const qcIntelligenceQuerySchema = z.object({
+  view: z.enum(["trends", "results", "traceability"]),
+  from: activityDateSchema.optional(),
+  to: activityDateSchema.optional(),
+  ingredientId: ingredientIdSchema.optional(),
+  station: STATION.optional(),
+  runId: runIdSchema.optional(),
+  checkType: z.enum(["pre-run", "30-minute", "interval"]).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_INTELLIGENCE_EVENTS).default(1_000),
+}).strict();
+const profileKeySchema = z.string().trim().min(1).max(MAX_PROFILE_KEY);
 const noteSchema = z.string().trim().max(MAX_NOTE).optional().default("");
 
 const lotBodySchema = z.object({
@@ -345,6 +368,8 @@ type QcTarget = {
   targetValue: number | null;
   unit: string | null;
   toleranceValue: number | null;
+  targetVersion?: string;
+  targetRecordedAt?: string;
   source: "spec-import" | "qc-override" | "not-configured";
   state: "configured" | "not-evaluated";
   reason?: string;
@@ -850,6 +875,8 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
         targetValue,
         unit,
         toleranceValue,
+        targetVersion: `qc-override:${override.id}`,
+        targetRecordedAt: override.createdAt.toISOString(),
         source: targetValue !== null ? "qc-override" : "not-configured",
         state: targetValue !== null && unit !== null && toleranceValue !== null
           ? "configured"
@@ -868,6 +895,8 @@ async function resolveTargets(profileKey: string): Promise<QcTarget[]> {
         targetValue: values[0]!,
         unit: "oz",
         toleranceValue: 0.1,
+        targetVersion: `profile:${profileRow[0]!.updatedAtMs}`,
+        targetRecordedAt: new Date(profileRow[0]!.updatedAtMs).toISOString(),
         source: "spec-import",
         state: "configured",
       });
@@ -1097,11 +1126,15 @@ function projectAuditActionForReader<
   } as T;
 }
 
-async function hydrateEvents(rows: QcWorkflowEventRow[], includeAuditDetails = false) {
+async function hydrateEvents(
+  rows: QcWorkflowEventRow[],
+  includeAuditDetails = false,
+  boundedOverlayRows?: QcWorkflowEventRow[],
+) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => String(row.id));
   const rowTypes = new Map(rows.map((row) => [String(row.id), row.eventType]));
-  const overlays = await db.select().from(qcWorkflowEventsTable).where(and(
+  const overlays = boundedOverlayRows ?? await db.select().from(qcWorkflowEventsTable).where(and(
     eq(qcWorkflowEventsTable.scope, currentScope()),
     inArray(qcWorkflowEventsTable.relatedEventId, ids),
   )).orderBy(qcWorkflowEventsTable.id);
@@ -1647,6 +1680,8 @@ router.post("/qc/weight-checks", requireCapability("record-qc"), async (req, res
           targetUnit: targetIsConfigured ? target!.unit : null,
           toleranceValue: targetIsConfigured ? target!.toleranceValue : null,
           targetSource: targetIsConfigured ? target!.source : "not-configured",
+          targetVersion: targetIsConfigured ? target!.targetVersion ?? null : null,
+          targetRecordedAt: targetIsConfigured ? target!.targetRecordedAt ?? null : null,
           actualValue: body.actualValue,
           actualUnit: body.actualUnit,
           outcome,
@@ -2984,6 +3019,279 @@ router.get("/qc/history.csv", requireCapability("manage-qc"), async (req, res) =
     res.end();
   } catch (error) {
     reportRouteError(req, res, "failed to export QC history", error);
+  }
+});
+
+function reportDateBoundary(date: string, endOfDay: boolean): Date {
+  return new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+}
+
+function parseQcIntelligenceQuery(value: unknown): {
+  view: QcReportView;
+  filters: QcReportFilters;
+  from: Date;
+  to: Date;
+  limit: number;
+} | null {
+  const parsed = qcIntelligenceQuerySchema.safeParse(value);
+  if (!parsed.success) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultFrom = new Date(`${today}T12:00:00.000Z`);
+  defaultFrom.setUTCDate(defaultFrom.getUTCDate() - 29);
+  const fromDateText = parsed.data.from ?? defaultFrom.toISOString().slice(0, 10);
+  const toDateText = parsed.data.to ?? today;
+  const from = reportDateBoundary(fromDateText, false);
+  const to = reportDateBoundary(toDateText, true);
+  if (from > to || to.getTime() - from.getTime() >= 366 * 24 * 60 * 60_000) return null;
+  return {
+    view: parsed.data.view,
+    filters: {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      ingredientId: parsed.data.ingredientId ?? null,
+      station: parsed.data.station ?? null,
+      runId: parsed.data.runId ?? null,
+      checkType: parsed.data.checkType ?? null,
+    },
+    from,
+    to,
+    limit: parsed.data.limit,
+  };
+}
+
+async function resolveReportRunIdentities(
+  scope: string,
+  runIds: string[],
+): Promise<{ runs: Map<string, {
+  runId: string;
+  status: "available" | "unavailable";
+  source: "completed-run-snapshot" | "active-day-state" | null;
+  productionDate: string | null;
+  label: string | null;
+}>; overflow: boolean }> {
+  const runs = new Map<string, {
+    runId: string;
+    status: "available" | "unavailable";
+    source: "completed-run-snapshot" | "active-day-state" | null;
+    productionDate: string | null;
+    label: string | null;
+  }>();
+  if (runIds.length === 0) return { runs, overflow: false };
+  let overflow = runIds.length > MAX_INTELLIGENCE_RUN_SOURCES;
+  const boundedIds = runIds.slice(0, MAX_INTELLIGENCE_RUN_SOURCES);
+  const rows = await db.select({
+    runId: completedRunHistoryTable.runId,
+    date: completedRunHistoryTable.date,
+    snapshotHash: completedRunHistoryTable.snapshotHash,
+    snapshot: sql<unknown>`CASE WHEN octet_length(${completedRunHistoryTable.snapshot}::text) <= ${MAX_INTELLIGENCE_SNAPSHOT_BYTES} THEN ${completedRunHistoryTable.snapshot} ELSE NULL END`,
+  }).from(completedRunHistoryTable).where(and(
+    eq(completedRunHistoryTable.scope, scope),
+    inArray(completedRunHistoryTable.runId, boundedIds),
+  )).orderBy(asc(completedRunHistoryTable.completedAt))
+    .limit(MAX_INTELLIGENCE_RUN_SOURCES + 1);
+  if (rows.length > MAX_INTELLIGENCE_RUN_SOURCES) return { runs, overflow: true };
+  const seenCompleted = new Set<string>();
+  for (const row of rows) {
+    const runId = row.runId;
+    if (seenCompleted.has(runId)) {
+      runs.set(runId, {
+        runId, status: "unavailable", source: null, productionDate: null, label: null,
+      });
+      continue;
+    }
+    seenCompleted.add(runId);
+    if (row.snapshot === null) overflow = true;
+    const projected = projectActivitySnapshot(row.snapshot, row.date, "completed-snapshot");
+    const exactRun = projected.status === "available"
+      ? projected.runs.find((candidate) => candidate.runId === runId)
+      : null;
+    if (!exactRun || snapshotHash(row.snapshot) !== row.snapshotHash) {
+      runs.set(runId, {
+        runId, status: "unavailable", source: null, productionDate: null, label: null,
+      });
+      continue;
+    }
+    runs.set(runId, {
+      runId,
+      status: "available",
+      source: "completed-run-snapshot",
+      productionDate: row.date,
+      label: exactRun.label,
+    });
+  }
+  const missingIds = boundedIds.filter((runId) => !runs.has(runId));
+  const today = facilityDate();
+  if (missingIds.length > 0) {
+    const currentRows = await db.select({
+      data: sql<unknown>`CASE WHEN octet_length(${dailySyncTable.data}::text) <= ${MAX_INTELLIGENCE_SNAPSHOT_BYTES} THEN ${dailySyncTable.data} ELSE NULL END`,
+    }).from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, scope),
+      eq(dailySyncTable.date, today),
+    )).limit(2);
+    if (currentRows.length === 1) {
+      if (currentRows[0]!.data === null) overflow = true;
+      const projected = projectActivitySnapshot(currentRows[0]!.data, today, "active-day-state");
+      if (projected.status === "available") {
+        for (const runId of missingIds) {
+          const exactRun = projected.runs.find((candidate) => candidate.runId === runId);
+          if (exactRun && !exactRun.ended) {
+            runs.set(runId, {
+              runId,
+              status: "available",
+              source: "active-day-state",
+              productionDate: today,
+              label: exactRun.label,
+            });
+          }
+        }
+      }
+    }
+  }
+  return { runs, overflow };
+}
+
+async function loadQcIntelligenceReport(
+  req: Request,
+): Promise<ReturnType<typeof buildQcIntelligenceReport> | null> {
+  const parsed = parseQcIntelligenceQuery(req.query);
+  if (!parsed) return null;
+  const scope = currentScope();
+  const types: Array<typeof qcWorkflowEventsTable.$inferSelect.eventType> = parsed.view === "trends"
+    ? ["weight", "brix-check"]
+    : parsed.view === "results"
+      ? ["weight", "brix-check", "component-check", "label-check", "date-code-check"]
+      : ["lot"];
+  const conditions = [
+    eq(qcWorkflowEventsTable.scope, scope),
+    inArray(qcWorkflowEventsTable.eventType, types),
+    gte(qcWorkflowEventsTable.createdAt, parsed.from),
+    lte(qcWorkflowEventsTable.createdAt, parsed.to),
+  ];
+  if (parsed.filters.ingredientId) {
+    conditions.push(eq(qcWorkflowEventsTable.ingredientId, parsed.filters.ingredientId));
+  }
+  if (parsed.filters.runId) {
+    conditions.push(eq(qcWorkflowEventsTable.runId, parsed.filters.runId));
+  }
+  const rows = await db.select().from(qcWorkflowEventsTable)
+    .where(and(...conditions))
+    .orderBy(asc(qcWorkflowEventsTable.createdAt), asc(qcWorkflowEventsTable.id))
+    .limit(parsed.limit + 1);
+  const moreAvailable = rows.length > parsed.limit;
+  const sourceRows = rows.slice(0, parsed.limit);
+  let coverage: QcReportCoverage = {
+    status: moreAvailable ? "partial" as const : "complete" as const,
+    sampledEvents: sourceRows.length,
+    includedEvents: 0,
+    maxEvents: parsed.limit,
+    moreAvailable,
+    reason: moreAvailable ? "event-limit" as const : null,
+  };
+  const ids = sourceRows.map((row) => String(row.id));
+  let events: QcReportEvent[] = [];
+  if (ids.length > 0) {
+    const overlayRows = await db.select().from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, scope),
+      inArray(qcWorkflowEventsTable.relatedEventId, ids),
+      inArray(qcWorkflowEventsTable.eventType, ["correction", "redaction"]),
+    )).orderBy(asc(qcWorkflowEventsTable.id))
+      .limit(MAX_INTELLIGENCE_OVERLAYS + 1);
+    if (overlayRows.length > MAX_INTELLIGENCE_OVERLAYS) {
+      coverage = {
+        ...coverage,
+        status: "partial",
+        moreAvailable: true,
+        reason: "overlay-limit",
+      };
+    } else {
+      const hydrated = await hydrateEvents(sourceRows, false, overlayRows);
+      events = hydrated.map((event) => ({
+        id: event.id,
+        eventType: event.eventType,
+        runId: event.runId,
+        profileKey: event.profileKey,
+        ingredientId: event.ingredientId,
+        ingredientName: event.ingredientName,
+        station: event.station,
+        createdAt: event.createdAt,
+        payload: event.payload,
+        ...(event.redactedFields ? { redactedFields: event.redactedFields } : {}),
+      })).filter((event) =>
+        (!parsed.filters.station || event.station === parsed.filters.station)
+        && (!parsed.filters.checkType || event.payload.checkType === parsed.filters.checkType),
+      );
+      coverage = { ...coverage, includedEvents: events.length };
+    }
+  }
+  if (coverage.reason === "overlay-limit") {
+    return buildQcIntelligenceReport(parsed.view, [], parsed.filters, coverage);
+  }
+  let canonicalRuns = new Map<string, {
+    runId: string;
+    status: "available" | "unavailable";
+    source: "completed-run-snapshot" | "active-day-state" | null;
+    productionDate: string | null;
+    label: string | null;
+  }>();
+  if (parsed.view === "traceability") {
+    const resolved = await resolveReportRunIdentities(scope, [
+      ...new Set(events.flatMap((event) => event.runId ? [event.runId] : [])),
+    ]);
+    canonicalRuns = resolved.runs;
+    if (resolved.overflow) {
+      coverage = {
+        ...coverage,
+        status: "partial",
+        moreAvailable: true,
+        reason: "canonical-source-limit",
+      };
+    }
+  }
+  return buildQcIntelligenceReport(parsed.view, events, parsed.filters, coverage, canonicalRuns);
+}
+
+router.get("/qc/intelligence", requireCapability("manage-qc"), async (req, res) => {
+  if (!parseQcIntelligenceQuery(req.query)) {
+    safeError(res, 400, "Invalid or out-of-range QC intelligence report filters");
+    return;
+  }
+  try {
+    const report = await loadQcIntelligenceReport(req);
+    if (!report) {
+      safeError(res, 400, "Invalid or out-of-range QC intelligence report filters");
+      return;
+    }
+    res.json(report);
+  } catch (error) {
+    reportRouteError(req, res, "failed to load QC intelligence report", error);
+  }
+});
+
+router.get("/qc/intelligence.csv", requireCapability("manage-qc"), async (req, res) => {
+  if (!parseQcIntelligenceQuery(req.query)) {
+    safeError(res, 400, "Invalid or out-of-range QC intelligence export filters");
+    return;
+  }
+  try {
+    const report = await loadQcIntelligenceReport(req);
+    if (!report) {
+      safeError(res, 400, "Invalid or out-of-range QC intelligence export filters");
+      return;
+    }
+    const csv = qcIntelligenceCsv(report);
+    res.status(200);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="qc-${report.view}-${report.filters.from.slice(0, 10)}-to-${report.filters.to.slice(0, 10)}.csv"`,
+    );
+    res.send(csv);
+  } catch (error) {
+    if (error instanceof QcIntelligenceCsvLimitError) {
+      safeError(res, 413, "QC export exceeds its size bound. Narrow the date range or filters.");
+      return;
+    }
+    reportRouteError(req, res, "failed to export QC intelligence report", error);
   }
 });
 

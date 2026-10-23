@@ -1728,6 +1728,76 @@ paths:
         "400": { description: Invalid date }
         "403": { description: QC recording capability required }
 
+  /qc/intelligence:
+    get:
+      operationId: getQcIntelligence
+      tags: [inventory]
+      summary: Read bounded manager-only QC intelligence reports
+      description: >-
+        Read-only advisory reports over recorded QC events in the authenticated
+        facility scope. Date filters use event-created-at UTC, not a facility
+        production date. Corrections and redactions are applied to source
+        events before aggregation; correction and redaction action rows are
+        never counted as checks. Missing checks are not inferred or counted as
+        passes. Results include bounded coverage and explicit partial reasons.
+        Lot tracing uses exact stored run IDs and available canonical snapshots.
+        Canonical traversal is capped at 50 run sources, 1 MiB per source
+        snapshot and 600 runs per snapshot. Oversized or unavailable snapshots
+        do not produce inferred identities.
+        Customer and shipment links are returned only when an explicit stored
+        relation exists; this report does not infer one.
+      parameters:
+        - { name: view, in: query, required: true, schema: { type: string, enum: [trends, results, traceability] } }
+        - { name: from, in: query, required: false, description: Inclusive UTC calendar date; defaults to 29 days before the current UTC date, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, description: Inclusive UTC calendar date; defaults to the current UTC date, schema: { type: string, format: date } }
+        - { name: ingredientId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: station, in: query, required: false, schema: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] } }
+        - { name: runId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: checkType, in: query, required: false, schema: { type: string, enum: [pre-run, 30-minute, interval] } }
+        - { name: limit, in: query, required: false, description: Maximum recorded events to inspect; larger result sets are explicitly partial, schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 } }
+      responses:
+        "200":
+          description: Bounded report with applied filters, denominator and coverage metadata
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/QcIntelligenceTrendsResponse" }
+                  - { $ref: "#/components/schemas/QcIntelligenceResultsResponse" }
+                  - { $ref: "#/components/schemas/QcIntelligenceTraceabilityResponse" }
+        "400": { description: Invalid filters or UTC date range longer than 366 days }
+        "401": { description: Authentication required }
+        "403": { description: QC manager capability required }
+
+  /qc/intelligence.csv:
+    get:
+      operationId: exportQcIntelligenceCsv
+      tags: [inventory]
+      summary: Export a filtered, bounded QC intelligence report as CSV
+      description: >-
+        Uses the same manager-only query, overlay projection, filters and event
+        limit as the JSON report. The first rows state date basis and coverage;
+        exports are not full-ledger downloads.
+      parameters:
+        - { name: view, in: query, required: true, schema: { type: string, enum: [trends, results, traceability] } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date } }
+        - { name: ingredientId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: station, in: query, required: false, schema: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] } }
+        - { name: runId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: checkType, in: query, required: false, schema: { type: string, enum: [pre-run, 30-minute, interval] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 } }
+      responses:
+        "200":
+          description: Filtered CSV with bounded coverage metadata
+          content:
+            text/csv:
+              schema: { type: string }
+        "400": { description: Invalid filters or UTC date range longer than 366 days }
+        "401": { description: Authentication required }
+        "403": { description: QC manager capability required }
+        "413": { description: CSV exceeds 4 MiB or a cell exceeds 4000 characters; narrow the report filters }
+
   /qc/allergen-reviews:
     post:
       operationId: recordQcAllergenReview
@@ -9735,6 +9805,143 @@ components:
                 signedOff: { type: boolean }
                 reopened: { type: boolean }
             - type: "null"
+
+    QcIntelligenceCoverage:
+      type: object
+      required: [status, sampledEvents, includedEvents, maxEvents, moreAvailable, reason]
+      properties:
+        status: { type: string, enum: [complete, partial] }
+        sampledEvents: { type: integer, minimum: 0 }
+        includedEvents: { type: integer, minimum: 0 }
+        maxEvents: { type: integer, minimum: 1, maximum: 5000 }
+        moreAvailable: { type: boolean }
+        reason:
+          type: string
+          nullable: true
+          enum: [event-limit, overlay-limit, group-limit, canonical-source-limit, null]
+    QcIntelligenceFilters:
+      type: object
+      required: [from, to, ingredientId, station, runId, checkType]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        ingredientId: { type: string, nullable: true }
+        station: { type: string, nullable: true }
+        runId: { type: string, nullable: true }
+        checkType: { type: string, nullable: true }
+    QcIntelligenceTrendPoint:
+      type: object
+      required: [eventId, recordedAt, actual, target, tolerance, outcome]
+      properties:
+        eventId: { type: integer }
+        recordedAt: { type: string, format: date-time }
+        actual: { type: number }
+        target: { type: number, nullable: true }
+        tolerance: { type: number, nullable: true }
+        outcome: { type: string, enum: [pass, fail, not-evaluated] }
+    QcIntelligenceTrendGroup:
+      type: object
+      required: [metric, ingredientId, ingredientName, profileKey, station, checkType, actualUnit, targetUnit, targetVersion, targetRecordedAt, points]
+      properties:
+        metric: { type: string, enum: [weight, brix] }
+        ingredientId: { type: string, nullable: true }
+        ingredientName: { type: string }
+        profileKey: { type: string, nullable: true }
+        station: { type: string }
+        checkType: { type: string }
+        actualUnit: { type: string }
+        targetUnit: { type: string }
+        targetVersion: { type: string }
+        targetRecordedAt: { type: string, format: date-time, nullable: true }
+        points:
+          type: array
+          maxItems: 5000
+          items: { $ref: "#/components/schemas/QcIntelligenceTrendPoint" }
+    QcIntelligenceResultCounts:
+      type: object
+      required: [key, label, pass, fail, notEvaluated, denominator]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        pass: { type: integer, minimum: 0 }
+        fail: { type: integer, minimum: 0 }
+        notEvaluated: { type: integer, minimum: 0 }
+        denominator: { type: integer, minimum: 0 }
+    QcIntelligenceRunTrace:
+      type: object
+      required: [runId, status, source, productionDate, label]
+      properties:
+        runId: { type: string }
+        status: { type: string, enum: [available, unavailable] }
+        source: { type: string, nullable: true, enum: [completed-run-snapshot, active-day-state, null] }
+        productionDate: { type: string, format: date, nullable: true }
+        label: { type: string, nullable: true }
+    QcIntelligenceLotTrace:
+      type: object
+      required: [eventId, recordedAt, lotNumber, lotNumberStatus, ingredientId, ingredientName, station, run, outboundStatus, outboundExplanation]
+      properties:
+        eventId: { type: integer }
+        recordedAt: { type: string, format: date-time }
+        lotNumber: { type: string, nullable: true }
+        lotNumberStatus: { type: string, enum: [recorded, redacted, unavailable] }
+        ingredientId: { type: string, nullable: true }
+        ingredientName: { type: string, nullable: true }
+        station: { type: string }
+        run:
+          oneOf:
+            - { $ref: "#/components/schemas/QcIntelligenceRunTrace" }
+            - { type: "null" }
+        outboundStatus: { type: string, enum: [unavailable] }
+        outboundExplanation: { type: string }
+    QcIntelligenceTrendsResponse:
+      type: object
+      required: [view, dateBasis, filters, coverage, recordedMeasurements, redactedMeasurementsExcluded, groups]
+      properties:
+        view: { type: string, const: trends }
+        dateBasis: { type: string, const: event-created-at-utc }
+        filters: { $ref: "#/components/schemas/QcIntelligenceFilters" }
+        coverage: { $ref: "#/components/schemas/QcIntelligenceCoverage" }
+        recordedMeasurements: { type: integer, minimum: 0 }
+        redactedMeasurementsExcluded: { type: integer, minimum: 0 }
+        groups:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/QcIntelligenceTrendGroup" }
+    QcIntelligenceResultsResponse:
+      type: object
+      required: [view, dateBasis, filters, coverage, recordedChecks, byCheckType, byStation, byIngredient]
+      properties:
+        view: { type: string, const: results }
+        dateBasis: { type: string, const: event-created-at-utc }
+        filters: { $ref: "#/components/schemas/QcIntelligenceFilters" }
+        coverage: { $ref: "#/components/schemas/QcIntelligenceCoverage" }
+        recordedChecks: { type: integer, minimum: 0 }
+        byCheckType:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/QcIntelligenceResultCounts" }
+        byStation:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/QcIntelligenceResultCounts" }
+        byIngredient:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/QcIntelligenceResultCounts" }
+    QcIntelligenceTraceabilityResponse:
+      type: object
+      required: [view, dateBasis, filters, coverage, lots, outboundAvailability, outboundExplanation]
+      properties:
+        view: { type: string, const: traceability }
+        dateBasis: { type: string, const: event-created-at-utc }
+        filters: { $ref: "#/components/schemas/QcIntelligenceFilters" }
+        coverage: { $ref: "#/components/schemas/QcIntelligenceCoverage" }
+        lots:
+          type: array
+          maxItems: 5000
+          items: { $ref: "#/components/schemas/QcIntelligenceLotTrace" }
+        outboundAvailability: { type: string, enum: [unavailable] }
+        outboundExplanation: { type: string }
 
     QcHistoryResponse:
       type: object

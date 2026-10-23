@@ -79,6 +79,7 @@ import QcImportReview from "./QcImportReview";
 import QcRecipeReview from "./QcRecipeReview";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
 import QcPlanningView from "./QcPlanningView";
+import QcIntelligenceReport from "./QcIntelligenceReport";
 
 export type QcWorkflowTabProps = {
   runId: string;
@@ -288,6 +289,7 @@ export default function QcWorkflowTab({
   const [view, setView] = useState<ViewName>("lots");
   const [showDailyActivity, setShowDailyActivity] = useState(false);
   const [showPlanning, setShowPlanning] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
   const [showImportReview, setShowImportReview] = useState(false);
   const [showRecipeReview, setShowRecipeReview] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
@@ -914,6 +916,7 @@ export default function QcWorkflowTab({
               onClick={() => {
                 setShowDailyActivity((current) => !current);
                 setShowPlanning(false);
+                setShowIntelligence(false);
               }}
               data-testid="button-toggle-allergen-activity"
             >
@@ -928,16 +931,34 @@ export default function QcWorkflowTab({
               onClick={() => {
                 setShowPlanning((current) => !current);
                 setShowDailyActivity(false);
+                setShowIntelligence(false);
               }}
               data-testid="button-toggle-qc-planning"
             >
               {showPlanning ? "Hide upcoming production" : "Upcoming production"}
             </button>
           )}
+          {canManageQc && (
+            <button
+              type="button"
+              className={quietButtonClass}
+              aria-pressed={showIntelligence}
+              onClick={() => {
+                setShowIntelligence((current) => !current);
+                setShowDailyActivity(false);
+                setShowPlanning(false);
+              }}
+              data-testid="button-toggle-qc-intelligence"
+            >
+              {showIntelligence ? "Back to run QC" : "QC intelligence"}
+            </button>
+          )}
         </div>
       </header>
 
-      {showDailyActivity ? (
+      {showIntelligence && canManageQc ? (
+        <QcIntelligenceReport canManageQc={canManageQc} />
+      ) : showDailyActivity ? (
         <QcAllergenActivityReport
           canRead={canRecordQc || canManageQc}
           canManageQc={canManageQc}

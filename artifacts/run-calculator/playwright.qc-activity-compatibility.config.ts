@@ -19,7 +19,7 @@ const viewports = [
 export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
-  testMatch: ["qc-allergen-activity-responsive.spec.ts", "qc-planning-authenticated.spec.ts"],
+  testMatch: ["qc-allergen-activity-responsive.spec.ts", "qc-planning-authenticated.spec.ts", "qc-intelligence-authenticated.spec.ts"],
   timeout: 120_000,
   globalTimeout: 15 * 60_000,
   retries: 0,

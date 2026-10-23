@@ -1,0 +1,86 @@
+{
+  "capturedAt": "2026-10-23T16:46:29.590Z",
+  "outcome": "PASS",
+  "failure": null,
+  "revision": "5ad8da2071a1bbf78d2af87c7d473a7a40ec5257",
+  "sourceState": "current workspace including task changes",
+  "environment": "isolated disposable PostgreSQL and local API/web",
+  "data": "synthetic QC fixtures only; no credentials or payloads retained",
+  "viewport": {
+    "width": 768,
+    "height": 1024
+  },
+  "browser": "tablet-portrait-chromium",
+  "locale": "en-GB",
+  "timezoneId": "Pacific/Kiritimati",
+  "responses": [
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence.csv"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 503,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 503,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 503,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 503,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 503,
+      "path": "/api/qc/intelligence"
+    },
+    {
+      "status": 200,
+      "path": "/api/qc/intelligence"
+    }
+  ],
+  "pageErrors": [],
+  "managerNavigations": [
+    "/",
+    "/",
+    "/",
+    "/"
+  ],
+  "cleanup": "accounts/roles and daily snapshot removed; append-only synthetic ledger retained until disposable database teardown"
+}

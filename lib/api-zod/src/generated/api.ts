@@ -165,6 +165,44 @@ export const getQcPlanningQueryDaysMax = 90;
 export const getQcPlanningResponseRangeDaysMax = 90;
 export const getQcPlanningResponseDaysItemRunsItemCasesNeededMin = 0;
 export const getQcPlanningResponseDaysMax = 90;
+export const getQcIntelligenceQueryIngredientIdMax = 200;
+export const getQcIntelligenceQueryRunIdMax = 200;
+export const getQcIntelligenceQueryLimitDefault = 1000;
+export const getQcIntelligenceQueryLimitMax = 5000;
+export const getQcIntelligenceResponseOneCoverageSampledEventsMin = 0;
+export const getQcIntelligenceResponseOneCoverageIncludedEventsMin = 0;
+export const getQcIntelligenceResponseOneCoverageMaxEventsMax = 5000;
+export const getQcIntelligenceResponseOneRecordedMeasurementsMin = 0;
+export const getQcIntelligenceResponseOneRedactedMeasurementsExcludedMin = 0;
+export const getQcIntelligenceResponseOneGroupsItemPointsMax = 5000;
+export const getQcIntelligenceResponseOneGroupsMax = 100;
+export const getQcIntelligenceResponseTwoCoverageSampledEventsMin = 0;
+export const getQcIntelligenceResponseTwoCoverageIncludedEventsMin = 0;
+export const getQcIntelligenceResponseTwoCoverageMaxEventsMax = 5000;
+export const getQcIntelligenceResponseTwoRecordedChecksMin = 0;
+export const getQcIntelligenceResponseTwoByCheckTypeItemPassMin = 0;
+export const getQcIntelligenceResponseTwoByCheckTypeItemFailMin = 0;
+export const getQcIntelligenceResponseTwoByCheckTypeItemNotEvaluatedMin = 0;
+export const getQcIntelligenceResponseTwoByCheckTypeItemDenominatorMin = 0;
+export const getQcIntelligenceResponseTwoByCheckTypeMax = 100;
+export const getQcIntelligenceResponseTwoByStationItemPassMin = 0;
+export const getQcIntelligenceResponseTwoByStationItemFailMin = 0;
+export const getQcIntelligenceResponseTwoByStationItemNotEvaluatedMin = 0;
+export const getQcIntelligenceResponseTwoByStationItemDenominatorMin = 0;
+export const getQcIntelligenceResponseTwoByStationMax = 100;
+export const getQcIntelligenceResponseTwoByIngredientItemPassMin = 0;
+export const getQcIntelligenceResponseTwoByIngredientItemFailMin = 0;
+export const getQcIntelligenceResponseTwoByIngredientItemNotEvaluatedMin = 0;
+export const getQcIntelligenceResponseTwoByIngredientItemDenominatorMin = 0;
+export const getQcIntelligenceResponseTwoByIngredientMax = 100;
+export const getQcIntelligenceResponseThreeCoverageSampledEventsMin = 0;
+export const getQcIntelligenceResponseThreeCoverageIncludedEventsMin = 0;
+export const getQcIntelligenceResponseThreeCoverageMaxEventsMax = 5000;
+export const getQcIntelligenceResponseThreeLotsMax = 5000;
+export const exportQcIntelligenceCsvQueryIngredientIdMax = 200;
+export const exportQcIntelligenceCsvQueryRunIdMax = 200;
+export const exportQcIntelligenceCsvQueryLimitDefault = 1000;
+export const exportQcIntelligenceCsvQueryLimitMax = 5000;
 export const recordQcAllergenReviewBodyRunIdMax = 200;
 export const recordQcAllergenReviewBodyFootprintAllergensMax = 9;
 export const recordQcAllergenReviewBodyFootprintUnknownIngredientsItemMax = 200;
@@ -2835,6 +2873,166 @@ export const GetQcAllergenActivityResponse = zod.object({
 })
 
 /**
+ * Read-only advisory reports over recorded QC events in the authenticated facility scope. Date filters use event-created-at UTC, not a facility production date. Corrections and redactions are applied to source events before aggregation; correction and redaction action rows are never counted as checks. Missing checks are not inferred or counted as passes. Results include bounded coverage and explicit partial reasons. Lot tracing uses exact stored run IDs and available canonical snapshots. Canonical traversal is capped at 50 run sources, 1 MiB per source snapshot and 600 runs per snapshot. Oversized or unavailable snapshots do not produce inferred identities. Customer and shipment links are returned only when an explicit stored relation exists; this report does not infer one.
+ * @summary Read bounded manager-only QC intelligence reports
+ */
+
+export const GetQcIntelligenceQueryParams = zod.object({
+  "view": zod.enum(['trends', 'results', 'traceability']),
+  "from": zod.date().optional().describe('Inclusive UTC calendar date; defaults to 29 days before the current UTC date'),
+  "to": zod.date().optional().describe('Inclusive UTC calendar date; defaults to the current UTC date'),
+  "ingredientId": zod.coerce.string().max(getQcIntelligenceQueryIngredientIdMax).optional(),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']).optional(),
+  "runId": zod.coerce.string().max(getQcIntelligenceQueryRunIdMax).optional(),
+  "checkType": zod.enum(['pre-run', '30-minute', 'interval']).optional(),
+  "limit": zod.coerce.number().int().min(1).max(getQcIntelligenceQueryLimitMax).default(getQcIntelligenceQueryLimitDefault).describe('Maximum recorded events to inspect; larger result sets are explicitly partial')
+})
+
+export const GetQcIntelligenceResponse = zod.union([zod.object({
+  "view": zod.literal("trends"),
+  "dateBasis": zod.literal("event-created-at-utc"),
+  "filters": zod.object({
+  "from": zod.coerce.date(),
+  "to": zod.coerce.date(),
+  "ingredientId": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "runId": zod.string().nullable(),
+  "checkType": zod.string().nullable()
+}),
+  "coverage": zod.object({
+  "status": zod.enum(['complete', 'partial']),
+  "sampledEvents": zod.int().min(getQcIntelligenceResponseOneCoverageSampledEventsMin),
+  "includedEvents": zod.int().min(getQcIntelligenceResponseOneCoverageIncludedEventsMin),
+  "maxEvents": zod.int().min(1).max(getQcIntelligenceResponseOneCoverageMaxEventsMax),
+  "moreAvailable": zod.boolean(),
+  "reason": zod.union([zod.literal('event-limit'),zod.literal('overlay-limit'),zod.literal('group-limit'),zod.literal('canonical-source-limit'),zod.literal(null)]).nullable()
+}),
+  "recordedMeasurements": zod.int().min(getQcIntelligenceResponseOneRecordedMeasurementsMin),
+  "redactedMeasurementsExcluded": zod.int().min(getQcIntelligenceResponseOneRedactedMeasurementsExcludedMin),
+  "groups": zod.array(zod.object({
+  "metric": zod.enum(['weight', 'brix']),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string(),
+  "profileKey": zod.string().nullable(),
+  "station": zod.string(),
+  "checkType": zod.string(),
+  "actualUnit": zod.string(),
+  "targetUnit": zod.string(),
+  "targetVersion": zod.string(),
+  "targetRecordedAt": zod.coerce.date().nullable(),
+  "points": zod.array(zod.object({
+  "eventId": zod.int(),
+  "recordedAt": zod.coerce.date(),
+  "actual": zod.number(),
+  "target": zod.number().nullable(),
+  "tolerance": zod.number().nullable(),
+  "outcome": zod.enum(['pass', 'fail', 'not-evaluated'])
+})).max(getQcIntelligenceResponseOneGroupsItemPointsMax)
+})).max(getQcIntelligenceResponseOneGroupsMax)
+}),zod.object({
+  "view": zod.literal("results"),
+  "dateBasis": zod.literal("event-created-at-utc"),
+  "filters": zod.object({
+  "from": zod.coerce.date(),
+  "to": zod.coerce.date(),
+  "ingredientId": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "runId": zod.string().nullable(),
+  "checkType": zod.string().nullable()
+}),
+  "coverage": zod.object({
+  "status": zod.enum(['complete', 'partial']),
+  "sampledEvents": zod.int().min(getQcIntelligenceResponseTwoCoverageSampledEventsMin),
+  "includedEvents": zod.int().min(getQcIntelligenceResponseTwoCoverageIncludedEventsMin),
+  "maxEvents": zod.int().min(1).max(getQcIntelligenceResponseTwoCoverageMaxEventsMax),
+  "moreAvailable": zod.boolean(),
+  "reason": zod.union([zod.literal('event-limit'),zod.literal('overlay-limit'),zod.literal('group-limit'),zod.literal('canonical-source-limit'),zod.literal(null)]).nullable()
+}),
+  "recordedChecks": zod.int().min(getQcIntelligenceResponseTwoRecordedChecksMin),
+  "byCheckType": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "pass": zod.int().min(getQcIntelligenceResponseTwoByCheckTypeItemPassMin),
+  "fail": zod.int().min(getQcIntelligenceResponseTwoByCheckTypeItemFailMin),
+  "notEvaluated": zod.int().min(getQcIntelligenceResponseTwoByCheckTypeItemNotEvaluatedMin),
+  "denominator": zod.int().min(getQcIntelligenceResponseTwoByCheckTypeItemDenominatorMin)
+})).max(getQcIntelligenceResponseTwoByCheckTypeMax),
+  "byStation": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "pass": zod.int().min(getQcIntelligenceResponseTwoByStationItemPassMin),
+  "fail": zod.int().min(getQcIntelligenceResponseTwoByStationItemFailMin),
+  "notEvaluated": zod.int().min(getQcIntelligenceResponseTwoByStationItemNotEvaluatedMin),
+  "denominator": zod.int().min(getQcIntelligenceResponseTwoByStationItemDenominatorMin)
+})).max(getQcIntelligenceResponseTwoByStationMax),
+  "byIngredient": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "pass": zod.int().min(getQcIntelligenceResponseTwoByIngredientItemPassMin),
+  "fail": zod.int().min(getQcIntelligenceResponseTwoByIngredientItemFailMin),
+  "notEvaluated": zod.int().min(getQcIntelligenceResponseTwoByIngredientItemNotEvaluatedMin),
+  "denominator": zod.int().min(getQcIntelligenceResponseTwoByIngredientItemDenominatorMin)
+})).max(getQcIntelligenceResponseTwoByIngredientMax)
+}),zod.object({
+  "view": zod.literal("traceability"),
+  "dateBasis": zod.literal("event-created-at-utc"),
+  "filters": zod.object({
+  "from": zod.coerce.date(),
+  "to": zod.coerce.date(),
+  "ingredientId": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "runId": zod.string().nullable(),
+  "checkType": zod.string().nullable()
+}),
+  "coverage": zod.object({
+  "status": zod.enum(['complete', 'partial']),
+  "sampledEvents": zod.int().min(getQcIntelligenceResponseThreeCoverageSampledEventsMin),
+  "includedEvents": zod.int().min(getQcIntelligenceResponseThreeCoverageIncludedEventsMin),
+  "maxEvents": zod.int().min(1).max(getQcIntelligenceResponseThreeCoverageMaxEventsMax),
+  "moreAvailable": zod.boolean(),
+  "reason": zod.union([zod.literal('event-limit'),zod.literal('overlay-limit'),zod.literal('group-limit'),zod.literal('canonical-source-limit'),zod.literal(null)]).nullable()
+}),
+  "lots": zod.array(zod.object({
+  "eventId": zod.int(),
+  "recordedAt": zod.coerce.date(),
+  "lotNumber": zod.string().nullable(),
+  "lotNumberStatus": zod.enum(['recorded', 'redacted', 'unavailable']),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string(),
+  "run": zod.union([zod.object({
+  "runId": zod.string(),
+  "status": zod.enum(['available', 'unavailable']),
+  "source": zod.union([zod.literal('completed-run-snapshot'),zod.literal('active-day-state'),zod.literal(null)]).nullable(),
+  "productionDate": zod.coerce.date().nullable(),
+  "label": zod.string().nullable()
+}),zod.null()]),
+  "outboundStatus": zod.enum(['unavailable']),
+  "outboundExplanation": zod.string()
+})).max(getQcIntelligenceResponseThreeLotsMax),
+  "outboundAvailability": zod.enum(['unavailable']),
+  "outboundExplanation": zod.string()
+})])
+
+/**
+ * Uses the same manager-only query, overlay projection, filters and event limit as the JSON report. The first rows state date basis and coverage; exports are not full-ledger downloads.
+ * @summary Export a filtered, bounded QC intelligence report as CSV
+ */
+
+export const ExportQcIntelligenceCsvQueryParams = zod.object({
+  "view": zod.enum(['trends', 'results', 'traceability']),
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "ingredientId": zod.coerce.string().max(exportQcIntelligenceCsvQueryIngredientIdMax).optional(),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']).optional(),
+  "runId": zod.coerce.string().max(exportQcIntelligenceCsvQueryRunIdMax).optional(),
+  "checkType": zod.enum(['pre-run', '30-minute', 'interval']).optional(),
+  "limit": zod.coerce.number().int().min(1).max(exportQcIntelligenceCsvQueryLimitMax).default(exportQcIntelligenceCsvQueryLimitDefault)
+})
+
+export const ExportQcIntelligenceCsvResponse = zod.unknown()
+
+/**
  * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
  * @summary Record the non-blocking pre-run allergen and staged-ingredient review
  */
@@ -4551,17 +4749,9 @@ export const RecordFreezerSurplusConfirmationResponse = zod.object({
  * @summary Read the original and current manager-corrected surplus decision
  */
 
-
-
 export const GetFreezerSurplusDecisionParams = zod.object({
   "runId": zod.coerce.string().min(1).max(getFreezerSurplusDecisionPathRunIdMax)
 })
-
-
-
-
-
-
 
 export const GetFreezerSurplusDecisionResponse = zod.object({
   "original": zod.object({
@@ -4598,23 +4788,14 @@ export const GetFreezerSurplusDecisionResponse = zod.object({
 })).max(getFreezerSurplusDecisionResponseCorrectionsMax)
 })
 
-
 /**
  * Requires manage-inventory and a reason. Preserves the original decision, uses a revision fence and stable event ID, and applies stock changes transactionally through inventory accounting. A reduction cannot remove allocated or unavailable cases. A date change is rejected if the lot has allocation or adjustment history, or its history is unknown.
  * @summary Append a stock-safe correction to a saved surplus decision
  */
 
-
-
 export const CorrectFreezerSurplusDecisionParams = zod.object({
   "runId": zod.coerce.string().min(1).max(correctFreezerSurplusDecisionPathRunIdMax)
 })
-
-
-
-
-
-
 
 export const CorrectFreezerSurplusDecisionBody = zod.object({
   "eventId": zod.string().min(1).max(correctFreezerSurplusDecisionBodyEventIdMax),
@@ -4623,12 +4804,6 @@ export const CorrectFreezerSurplusDecisionBody = zod.object({
   "productionDate": zod.coerce.date().optional(),
   "reason": zod.string().min(1).max(correctFreezerSurplusDecisionBodyReasonMax)
 })
-
-
-
-
-
-
 
 export const CorrectFreezerSurplusDecisionResponse = zod.object({
   "original": zod.object({
@@ -4664,7 +4839,6 @@ export const CorrectFreezerSurplusDecisionResponse = zod.object({
   "createdAt": zod.coerce.date()
 })).max(correctFreezerSurplusDecisionResponseCorrectionsMax)
 })
-
 
 /**
  * @summary Apply or revise dated surplus for an unstarted run

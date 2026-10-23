@@ -4556,6 +4556,223 @@ export interface QcRunResponse {
   signoff: QcRunResponseSignoff;
 }
 
+export type QcIntelligenceCoverageStatus = typeof QcIntelligenceCoverageStatus[keyof typeof QcIntelligenceCoverageStatus];
+
+
+export const QcIntelligenceCoverageStatus = {
+  complete: 'complete',
+  partial: 'partial',
+} as const;
+
+/**
+ * @nullable
+ */
+export type QcIntelligenceCoverageReason = typeof QcIntelligenceCoverageReason[keyof typeof QcIntelligenceCoverageReason] | null;
+
+
+export const QcIntelligenceCoverageReason = {
+  'event-limit': 'event-limit',
+  'overlay-limit': 'overlay-limit',
+  'group-limit': 'group-limit',
+  'canonical-source-limit': 'canonical-source-limit',
+} as const;
+
+export interface QcIntelligenceCoverage {
+  status: QcIntelligenceCoverageStatus;
+  /** @minimum 0 */
+  sampledEvents: number;
+  /** @minimum 0 */
+  includedEvents: number;
+  /**
+     * @minimum 1
+     * @maximum 5000
+     */
+  maxEvents: number;
+  moreAvailable: boolean;
+  /** @nullable */
+  reason: QcIntelligenceCoverageReason;
+}
+
+export interface QcIntelligenceFilters {
+  from: string;
+  to: string;
+  /** @nullable */
+  ingredientId: string | null;
+  /** @nullable */
+  station: string | null;
+  /** @nullable */
+  runId: string | null;
+  /** @nullable */
+  checkType: string | null;
+}
+
+export type QcIntelligenceTrendPointOutcome = typeof QcIntelligenceTrendPointOutcome[keyof typeof QcIntelligenceTrendPointOutcome];
+
+
+export const QcIntelligenceTrendPointOutcome = {
+  pass: 'pass',
+  fail: 'fail',
+  'not-evaluated': 'not-evaluated',
+} as const;
+
+export interface QcIntelligenceTrendPoint {
+  eventId: number;
+  recordedAt: string;
+  actual: number;
+  /** @nullable */
+  target: number | null;
+  /** @nullable */
+  tolerance: number | null;
+  outcome: QcIntelligenceTrendPointOutcome;
+}
+
+export type QcIntelligenceTrendGroupMetric = typeof QcIntelligenceTrendGroupMetric[keyof typeof QcIntelligenceTrendGroupMetric];
+
+
+export const QcIntelligenceTrendGroupMetric = {
+  weight: 'weight',
+  brix: 'brix',
+} as const;
+
+export interface QcIntelligenceTrendGroup {
+  metric: QcIntelligenceTrendGroupMetric;
+  /** @nullable */
+  ingredientId: string | null;
+  ingredientName: string;
+  /** @nullable */
+  profileKey: string | null;
+  station: string;
+  checkType: string;
+  actualUnit: string;
+  targetUnit: string;
+  targetVersion: string;
+  /** @nullable */
+  targetRecordedAt: string | null;
+  /** @maxItems 5000 */
+  points: QcIntelligenceTrendPoint[];
+}
+
+export interface QcIntelligenceResultCounts {
+  key: string;
+  label: string;
+  /** @minimum 0 */
+  pass: number;
+  /** @minimum 0 */
+  fail: number;
+  /** @minimum 0 */
+  notEvaluated: number;
+  /** @minimum 0 */
+  denominator: number;
+}
+
+export type QcIntelligenceRunTraceStatus = typeof QcIntelligenceRunTraceStatus[keyof typeof QcIntelligenceRunTraceStatus];
+
+
+export const QcIntelligenceRunTraceStatus = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+/**
+ * @nullable
+ */
+export type QcIntelligenceRunTraceSource = typeof QcIntelligenceRunTraceSource[keyof typeof QcIntelligenceRunTraceSource] | null;
+
+
+export const QcIntelligenceRunTraceSource = {
+  'completed-run-snapshot': 'completed-run-snapshot',
+  'active-day-state': 'active-day-state',
+} as const;
+
+export interface QcIntelligenceRunTrace {
+  runId: string;
+  status: QcIntelligenceRunTraceStatus;
+  /** @nullable */
+  source: QcIntelligenceRunTraceSource;
+  /** @nullable */
+  productionDate: string | null;
+  /** @nullable */
+  label: string | null;
+}
+
+export type QcIntelligenceLotTraceLotNumberStatus = typeof QcIntelligenceLotTraceLotNumberStatus[keyof typeof QcIntelligenceLotTraceLotNumberStatus];
+
+
+export const QcIntelligenceLotTraceLotNumberStatus = {
+  recorded: 'recorded',
+  redacted: 'redacted',
+  unavailable: 'unavailable',
+} as const;
+
+export type QcIntelligenceLotTraceOutboundStatus = typeof QcIntelligenceLotTraceOutboundStatus[keyof typeof QcIntelligenceLotTraceOutboundStatus];
+
+
+export const QcIntelligenceLotTraceOutboundStatus = {
+  unavailable: 'unavailable',
+} as const;
+
+export interface QcIntelligenceLotTrace {
+  eventId: number;
+  recordedAt: string;
+  /** @nullable */
+  lotNumber: string | null;
+  lotNumberStatus: QcIntelligenceLotTraceLotNumberStatus;
+  /** @nullable */
+  ingredientId: string | null;
+  /** @nullable */
+  ingredientName: string | null;
+  station: string;
+  run: QcIntelligenceRunTrace | null;
+  outboundStatus: QcIntelligenceLotTraceOutboundStatus;
+  outboundExplanation: string;
+}
+
+export interface QcIntelligenceTrendsResponse {
+  view: 'trends';
+  dateBasis: 'event-created-at-utc';
+  filters: QcIntelligenceFilters;
+  coverage: QcIntelligenceCoverage;
+  /** @minimum 0 */
+  recordedMeasurements: number;
+  /** @minimum 0 */
+  redactedMeasurementsExcluded: number;
+  /** @maxItems 100 */
+  groups: QcIntelligenceTrendGroup[];
+}
+
+export interface QcIntelligenceResultsResponse {
+  view: 'results';
+  dateBasis: 'event-created-at-utc';
+  filters: QcIntelligenceFilters;
+  coverage: QcIntelligenceCoverage;
+  /** @minimum 0 */
+  recordedChecks: number;
+  /** @maxItems 100 */
+  byCheckType: QcIntelligenceResultCounts[];
+  /** @maxItems 100 */
+  byStation: QcIntelligenceResultCounts[];
+  /** @maxItems 100 */
+  byIngredient: QcIntelligenceResultCounts[];
+}
+
+export type QcIntelligenceTraceabilityResponseOutboundAvailability = typeof QcIntelligenceTraceabilityResponseOutboundAvailability[keyof typeof QcIntelligenceTraceabilityResponseOutboundAvailability];
+
+
+export const QcIntelligenceTraceabilityResponseOutboundAvailability = {
+  unavailable: 'unavailable',
+} as const;
+
+export interface QcIntelligenceTraceabilityResponse {
+  view: 'traceability';
+  dateBasis: 'event-created-at-utc';
+  filters: QcIntelligenceFilters;
+  coverage: QcIntelligenceCoverage;
+  /** @maxItems 5000 */
+  lots: QcIntelligenceLotTrace[];
+  outboundAvailability: QcIntelligenceTraceabilityResponseOutboundAvailability;
+  outboundExplanation: string;
+}
+
 export interface QcHistoryResponse {
   items: QcEvent[];
   hasMore: boolean;
@@ -9695,6 +9912,115 @@ export type GetQcAllergenActivityParams = {
  */
 date?: string;
 };
+
+export type GetQcIntelligenceParams = {
+view: GetQcIntelligenceView;
+/**
+ * Inclusive UTC calendar date; defaults to 29 days before the current UTC date
+ */
+from?: string;
+/**
+ * Inclusive UTC calendar date; defaults to the current UTC date
+ */
+to?: string;
+/**
+ * @maxLength 200
+ */
+ingredientId?: string;
+station?: GetQcIntelligenceStation;
+/**
+ * @maxLength 200
+ */
+runId?: string;
+checkType?: GetQcIntelligenceCheckType;
+/**
+ * Maximum recorded events to inspect; larger result sets are explicitly partial
+ * @minimum 1
+ * @maximum 5000
+ */
+limit?: number;
+};
+
+export type GetQcIntelligenceView = typeof GetQcIntelligenceView[keyof typeof GetQcIntelligenceView];
+
+
+export const GetQcIntelligenceView = {
+  trends: 'trends',
+  results: 'results',
+  traceability: 'traceability',
+} as const;
+
+export type GetQcIntelligenceStation = typeof GetQcIntelligenceStation[keyof typeof GetQcIntelligenceStation];
+
+
+export const GetQcIntelligenceStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export type GetQcIntelligenceCheckType = typeof GetQcIntelligenceCheckType[keyof typeof GetQcIntelligenceCheckType];
+
+
+export const GetQcIntelligenceCheckType = {
+  'pre-run': 'pre-run',
+  '30-minute': '30-minute',
+  interval: 'interval',
+} as const;
+
+export type ExportQcIntelligenceCsvParams = {
+view: ExportQcIntelligenceCsvView;
+from?: string;
+to?: string;
+/**
+ * @maxLength 200
+ */
+ingredientId?: string;
+station?: ExportQcIntelligenceCsvStation;
+/**
+ * @maxLength 200
+ */
+runId?: string;
+checkType?: ExportQcIntelligenceCsvCheckType;
+/**
+ * @minimum 1
+ * @maximum 5000
+ */
+limit?: number;
+};
+
+export type ExportQcIntelligenceCsvView = typeof ExportQcIntelligenceCsvView[keyof typeof ExportQcIntelligenceCsvView];
+
+
+export const ExportQcIntelligenceCsvView = {
+  trends: 'trends',
+  results: 'results',
+  traceability: 'traceability',
+} as const;
+
+export type ExportQcIntelligenceCsvStation = typeof ExportQcIntelligenceCsvStation[keyof typeof ExportQcIntelligenceCsvStation];
+
+
+export const ExportQcIntelligenceCsvStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export type ExportQcIntelligenceCsvCheckType = typeof ExportQcIntelligenceCsvCheckType[keyof typeof ExportQcIntelligenceCsvCheckType];
+
+
+export const ExportQcIntelligenceCsvCheckType = {
+  'pre-run': 'pre-run',
+  '30-minute': '30-minute',
+  interval: 'interval',
+} as const;
 
 export type GetQcHistoryParams = {
 /**

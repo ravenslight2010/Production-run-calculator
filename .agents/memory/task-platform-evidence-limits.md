@@ -81,6 +81,10 @@ Do not assume a task's automatic code checkpoint includes its operational eviden
 
 **How to apply:** Inspect the exact remaining paths and ignore exceptions. Managed commit hooks may exclude local metadata even when explicitly staged; retain a sanitized, bounded handoff in a normal shared evidence directory and ignore local originals without deleting them. Never sweep all agent metadata into Git, erase artifacts, or bypass managed rebase continuation.
 
+Check the resulting commit, not just the staged diff, before claiming evidence
+survived a completion sync. Keep any shared evidence mirror out of deployment
+inputs while preserving the requested local working captures.
+
 ## Revision-bound build evidence during task merges
 
 For performance evidence tied to a Git revision, build only after the production inputs are committed, and compare the build's verified revision with the workspace HEAD before treating the capture as current. If a task merge moves HEAD during preparation, or the build reports an unavailable binding, rebuild on a stable committed tree rather than inferring the revision from its source fingerprint.

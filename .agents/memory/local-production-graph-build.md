@@ -14,3 +14,20 @@ Development identity mode still fingerprints every required source input. If ret
 **Why:** A post-sync workspace was missing two ignored source-evidence files that the build policy still requires, so a diagnostic browser build could not start even though the code typechecked.
 
 **How to apply:** Restore only exact, verified local inputs from a preserved baseline when available. Do not fabricate placeholders or run `prepare:publish` just to unblock a local test; if the source cannot be verified, report the browser build as blocked.
+
+## Stale development-stage metadata after a source-policy change
+
+A configuration-loading precheck can fail before TypeScript runs because an
+ignored intermediate from a previous development build uses the old source
+identity policy. Development-mode environment settings alone do not override
+the intermediate record read by Vite configuration.
+
+**Why:** A main-project sync changed the source policy while a completed local
+browser build's stage-start record remained. The configured typecheck rejected
+that obsolete record even though the report code and generated types passed.
+
+**How to apply:** Verify the intermediate is ignored and explicitly has
+development mode, then archive only that stale intermediate and rerun the
+configuration check. Preserve publish identity records and validation guards.
+Do not prepare a publish or weaken source-policy validation to repair local
+metadata.

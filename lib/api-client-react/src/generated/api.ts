@@ -89,6 +89,7 @@ import type {
   ExportAuditLogsCsvParams,
   ExportAuditLogsPdfParams,
   ExportQcHistoryCsvParams,
+  ExportQcIntelligenceCsvParams,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -114,6 +115,7 @@ import type {
   GetQcAllergenActivityParams,
   GetQcHistoryParams,
   GetQcImportReviewBadges200,
+  GetQcIntelligenceParams,
   GetQcPlanningParams,
   GetQcTargetsParams,
   GetShiftHandoffDigestParams,
@@ -232,6 +234,9 @@ import type {
   QcImportReviewDecisionInput,
   QcImportReviewDecisionResult,
   QcImportReviewDetail,
+  QcIntelligenceResultsResponse,
+  QcIntelligenceTraceabilityResponse,
+  QcIntelligenceTrendsResponse,
   QcLabelCheckInput,
   QcLabelReferenceInput,
   QcLabelReferenceReviewInput,
@@ -6668,6 +6673,224 @@ export function useGetQcAllergenActivity<TData = Awaited<ReturnType<typeof getQc
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetQcAllergenActivityQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetQcIntelligenceUrl = (params: GetQcIntelligenceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/intelligence?${stringifiedParams}` : `/api/qc/intelligence`
+}
+
+/**
+ * Read-only advisory reports over recorded QC events in the authenticated facility scope. Date filters use event-created-at UTC, not a facility production date. Corrections and redactions are applied to source events before aggregation; correction and redaction action rows are never counted as checks. Missing checks are not inferred or counted as passes. Results include bounded coverage and explicit partial reasons. Lot tracing uses exact stored run IDs and available canonical snapshots. Canonical traversal is capped at 50 run sources, 1 MiB per source snapshot and 600 runs per snapshot. Oversized or unavailable snapshots do not produce inferred identities. Customer and shipment links are returned only when an explicit stored relation exists; this report does not infer one.
+ * @summary Read bounded manager-only QC intelligence reports
+ */
+export const getQcIntelligence = async (params: GetQcIntelligenceParams, options?: Parameters<typeof customFetch>[1]): Promise<QcIntelligenceTrendsResponse | QcIntelligenceResultsResponse | QcIntelligenceTraceabilityResponse> => {
+
+  return customFetch<QcIntelligenceTrendsResponse | QcIntelligenceResultsResponse | QcIntelligenceTraceabilityResponse>(getGetQcIntelligenceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcIntelligenceQueryKey = (params?: GetQcIntelligenceParams,) => {
+    return [
+    `/api/qc/intelligence`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcIntelligenceQueryOptions = <TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcIntelligenceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcIntelligence>>> = ({ signal }) => getQcIntelligence(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcIntelligenceQueryResult = NonNullable<Awaited<ReturnType<typeof getQcIntelligence>>>
+export type GetQcIntelligenceQueryError = ErrorType<void>
+
+
+export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
+ params: GetQcIntelligenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcIntelligence>>,
+          TError,
+          Awaited<ReturnType<typeof getQcIntelligence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
+ params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcIntelligence>>,
+          TError,
+          Awaited<ReturnType<typeof getQcIntelligence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
+ params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read bounded manager-only QC intelligence reports
+ */
+
+export function useGetQcIntelligence<TData = Awaited<ReturnType<typeof getQcIntelligence>>, TError = ErrorType<void>>(
+ params: GetQcIntelligenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcIntelligence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcIntelligenceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportQcIntelligenceCsvUrl = (params: ExportQcIntelligenceCsvParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/intelligence.csv?${stringifiedParams}` : `/api/qc/intelligence.csv`
+}
+
+/**
+ * Uses the same manager-only query, overlay projection, filters and event limit as the JSON report. The first rows state date basis and coverage; exports are not full-ledger downloads.
+ * @summary Export a filtered, bounded QC intelligence report as CSV
+ */
+export const exportQcIntelligenceCsv = async (params: ExportQcIntelligenceCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getExportQcIntelligenceCsvUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportQcIntelligenceCsvQueryKey = (params?: ExportQcIntelligenceCsvParams,) => {
+    return [
+    `/api/qc/intelligence.csv`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportQcIntelligenceCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportQcIntelligenceCsvQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>> = ({ signal }) => exportQcIntelligenceCsv(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportQcIntelligenceCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>>
+export type ExportQcIntelligenceCsvQueryError = ErrorType<void>
+
+
+export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
+ params: ExportQcIntelligenceCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportQcIntelligenceCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportQcIntelligenceCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
+ params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportQcIntelligenceCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportQcIntelligenceCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
+ params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export a filtered, bounded QC intelligence report as CSV
+ */
+
+export function useExportQcIntelligenceCsv<TData = Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError = ErrorType<void>>(
+ params: ExportQcIntelligenceCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcIntelligenceCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportQcIntelligenceCsvQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

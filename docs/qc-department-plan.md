@@ -1,6 +1,6 @@
 # QC Department — Comprehensive Plan
 
-**Status:** Approved Phase 1 and advisory Slices 0–6 implemented; Slice 6 is a read-only projection of persisted upcoming schedules. Import-review functional and final-state checks demonstrated with synthetic committed operations. Earlier date-code WebKit background diagnostics remain unresolved. The earlier API/web preview startup blocker was repaired without changing project dependencies. Slice 6 workflow restarts initially hit a pnpm bootstrap failure, then both started successfully after provisioning the exact pinned pnpm in an ignored local cache. Real approved label/date-code references remain unavailable and later gates remain deferred.
+**Status:** Approved Phase 1 and advisory Slices 0–7 implemented; Slice 7 adds bounded manager-only intelligence over effective recorded evidence. Verification and source-authority limits are reconciled below; this is not completion of the entire program or a production-release decision. Earlier date-code WebKit background diagnostics remain unresolved. Real approved label/date-code references remain unavailable. Slice 8 enforcement is deferred pending explicit owner policy, neither shipped nor formally declined; optional Slice 9 allergen expansion is not adopted.
 **Updated:** 2026-10-23
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
@@ -254,6 +254,77 @@ and [failure ledger](../.local/tasks/evidence/qc-slice-6-planning/failure-ledger
 Sanitized synthetic per-engine results and screenshots are stored beside those
 files.
 
+## Approved Master-Program Slice 7 — QC Intelligence
+
+**Status:** Implementation complete for bounded, advisory manager reports. The
+[coverage/check map](evidence/qc-slice-7-intelligence/coverage-check-map.md)
+and [failure ledger](evidence/qc-slice-7-intelligence/failure-ledger.md)
+record the actual verification results, including repaired failures and unavailable evidence.
+The reviewed synthetic evidence is mirrored in this tracked documentation
+directory because managed task checkpoints omit ignored `.local` metadata.
+The requested working captures remain under
+`.local/tasks/evidence/qc-slice-7-intelligence/`; raw traces are not copied.
+Focused report/API/PostgreSQL checks passed 11/11 selected tests (194 unrelated
+tests skipped); client checks passed 22/22 before sync and 24/24 after incoming
+Brix reference tests were integrated. Generated parity and the full workspace
+typecheck passed, including the final pinned-runtime rerun after sync;
+post-sync regeneration/library and API typechecks also passed.
+All eight required authenticated viewport/engine
+journeys passed across the Chromium matrix and focused WebKit rerun, including
+filter/export/reload/error/retry and non-manager denial; zero browser page
+errors were recorded. The WebKit failure-injection fixture blocks service
+workers, so it does not establish PWA lifecycle coverage.
+
+- `manage-qc` is required for reports and filtered CSV. `record-qc` alone does not
+  grant access. Authentication supplies live/sandbox scope; no unrelated writes
+  or general audit-log access are granted.
+- Weight and Brix contexts separate measurement/target units, target version,
+  stable ingredient identity, station, timing and profile. Missing target
+  versions remain isolated rather than being merged on numeric equality.
+  Graphs have accessible tabular equivalents.
+- Recorded pass/fail/not-evaluated totals cover weight, Brix, component, label
+  and date-code checks, grouped by check type, station and ingredient. The
+  denominator is recorded checks, not expected or missing checks. Missing
+  records never become passes or proof of cadence compliance.
+- Reports and CSV share the history correction/redaction projection. Original
+  evidence stays append-only; overlays do not add replacement checks to the
+  denominator. Filters apply to effective station/timing values; redacted
+  measurements do not appear in chart points or exports.
+- The date basis is inclusive UTC source-event creation dates, not production
+  dates or correction dates. Filters and coverage accompany every report/export.
+  Default range is 30 UTC dates, maximum 366; source events, overlays, groups,
+  canonical snapshots, traversal and CSV size all have enforced limits. Bounds
+  produce explicit partial/unavailable coverage or an explicit export error,
+  not complete-looking truncation.
+- Lot traces use recorded lot-to-run IDs and exact scoped current/completed-run
+  evidence. Missing, ambiguous, invalid or oversized canonical sources remain
+  unavailable. No explicit lot-to-customer/outbound relation exists in the
+  available model; the report says unavailable. Inventory transfers, matching
+  names and production labels are not evidence of customer shipments.
+- Verification uses disposable PostgreSQL and synthetic authorized accounts.
+  Physical Android Chrome and iOS Safari/PWA are **NOT RUN**. Real operational
+  references remain a separate **MISSING** source-authority gap.
+
+### Master coverage reconciliation
+
+Earlier slice statements below remain the recorded handoffs from their owning
+slices; they were not rerun as part of Slice 7. Their linked capture directories
+are absent in this checkout, so original captures are **MISSING**, not silently
+treated as retained passing evidence.
+
+| Slice | Current factual handoff | Evidence available in this checkout / remaining gap |
+| --- | --- | --- |
+| 0 — Brix | Advisory recording and separately reviewed targets | Earlier plan claim retained; original capture MISSING; real targets require owner review |
+| 1 — Components | Identity/presence checks only | Earlier plan claim retained; original capture MISSING; no cross-contact conclusion |
+| 2 — Labels | Advisory literal text verification | Earlier plan claim retained; original capture MISSING; approved real references MISSING |
+| 3 — Date codes | Advisory exact-text evidence | Earlier plan claim retained; original capture MISSING; approved references MISSING and prior WebKit diagnostics unresolved |
+| 4 — Import review | Advisory review of committed operations | Earlier synthetic handoff retained; original capture MISSING; no approval gate inferred |
+| 5 — Recipe review | Advisory applied-recipe review | Earlier synthetic handoff retained; original capture MISSING; no activation block inferred |
+| 6 — Planning | Read-only bounded canonical schedule projection | Earlier plan claim retained; original capture MISSING; not forecast or schedule enforcement |
+| 7 — Intelligence | Bounded effective measurement/outcome reports and exact stored lot-to-run trace | Current coverage map, failure ledger and synthetic browser captures retained; no outbound/customer relation |
+| 8 — Enforcement | Deferred pending explicit owner policy | Not shipped and not formally declined; no hold/release/clearance enforcement authorized |
+| 9 — Allergen Phase 2 | Optional proposal, unadopted | Not adopted by this request; no expansion or risk certification claimed |
+
 ## QC Phase 1 — Approved and Implemented
 
 ### Lots and weights
@@ -453,14 +524,14 @@ ingredient-expiration mapping or calendar validity is inferred.
 7. **Date verification** — Slice 3 exact-text advisory workflow implemented and functionally verified; real references unavailable; WebKit background diagnostics retained separately
 
 ### Phase 3: Integration & Planning
-8. **Import approval queue** — QC sign-off on imports
-9. **Recipe approval** — QC gate on recipe changes
-10. **Future planning view** — upcoming brands/flavors calendar
+8. **Import review queue** — advisory committed-operation review in Slice 4; no import block
+9. **Recipe review** — advisory applied-recipe review in Slice 5; no activation gate
+10. **Future planning view** — bounded persisted schedule projection in Slice 6
 
 ### Phase 4: Intelligence
-11. **Weight trend graphs** — chart weight drift over time
-12. **Lot traceability report** — full chain from lot → run → customer
-13. **QC analytics** — pass/fail rates, common failures, trends
+11. **Weight and Brix trends** — Slice 7 bounded effective measurements, separate units/targets and accessible tables
+12. **Lot traceability report** — Slice 7 recorded lot → exact run evidence; customer/outbound links unavailable without explicit stored evidence
+13. **QC analytics** — Slice 7 recorded pass/fail/not-evaluated counts and denominators, not inferred compliance
 
 ---
 
