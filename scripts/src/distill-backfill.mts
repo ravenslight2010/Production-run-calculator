@@ -21,6 +21,7 @@ import {
   type VerifiedCandidate,
 } from "@workspace/distill-dataset";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
+import { replaceWindowsMetadataFile } from "./metadata-maintenance-windows.mts";
 
 // SHA-256 of buildParseSpecSheetPrompt({ workbookText: "" }).system. The
 // distill-backfill tests recompute this from the production builder and keep
@@ -271,9 +272,9 @@ type MetadataLockOwner = {
 export function assertMetadataMaintenancePlatformSupported(
   platform: NodeJS.Platform = process.platform,
 ): void {
-  if (platform !== "linux") {
+  if (platform !== "linux" && platform !== "win32") {
     throw new Error(
-      "metadata updates are supported only on Linux by this repository; macOS and Windows do not have the verified flock and process-identity contract. Run this command in a supported Linux x64 environment and leave existing metadata locks untouched.",
+      "metadata updates require Linux x64 or native Windows x64 with Windows PowerShell 5.1 and local NTFS. Run this command in a supported environment and leave existing metadata locks untouched.",
     );
   }
 }
@@ -487,6 +488,9 @@ export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
   readIdentityFile?: LinuxIdentityFileReader,
 ): DecisionFile {
   assertMetadataMaintenancePlatformSupported();
+  if (process.platform !== "linux") {
+    throw new Error("the flock recovery worker is Linux-only; use appendMetadataMaintenanceEntryFile");
+  }
   const resolvedPath = fs.realpathSync(decisionPath);
   const fileStat = fs.statSync(resolvedPath);
   if (!fileStat.isFile()) throw new Error("decision file must be a regular file");
@@ -544,6 +548,16 @@ export function appendMetadataMaintenanceEntryFile(
 ): DecisionFile {
   assertMetadataMaintenancePlatformSupported();
   const resolvedPath = fs.realpathSync(decisionPath);
+  if (process.platform === "win32") {
+    if (process.arch !== "x64") throw new Error("Windows metadata maintenance requires Node x64");
+    const before = fs.readFileSync(resolvedPath);
+    const decision = appendMetadataMaintenanceEntry(
+      JSON.parse(before.toString("utf8")) as unknown,
+      entry,
+    );
+    replaceWindowsMetadataFile(resolvedPath, before, `${JSON.stringify(decision, null, 2)}\n`);
+    return decision;
+  }
   const recoveryGatePath = `${resolvedPath}.metadata-maintenance.lock.recovery.gate`;
   let gateFd: number | undefined;
   try {
