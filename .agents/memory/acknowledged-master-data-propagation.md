@@ -43,3 +43,17 @@ rows before the delayed request even completes.
 it again before open-form or selected-snapshot writes. Use the preceding pool
 signature to distinguish unchanged links from customized rows; when no prior
 signature exists, avoid guessing for unprofiled runs.
+
+Do not enable named-recipe editing before the first canonical master-data
+bootstrap has resolved. A successful save can arrive while the bootstrap query
+has no cached snapshot; updating only an absent cache entry lets the first
+bootstrap response hide the acknowledged recipe from the editor.
+
+**Why:** The disabled query state can look like a loaded empty list unless its
+pending state is treated as loading. A user could save successfully while the
+initial snapshot was still in flight, leaving the new recipe absent from the
+visible list.
+
+**How to apply:** Treat `isPending` as loading for named-recipe managers and
+disable Add until the canonical pool query resolves. Keep a regression check for
+the pre-bootstrap empty state and the acknowledged-save path.

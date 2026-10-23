@@ -178,6 +178,66 @@ authorization are unchanged. Slice 8 enforcement remains deferred pending
 explicit owner policy, neither shipped nor formally declined. Slice 9 allergen
 expansion is not adopted.
 
+## Approved Master-Program Slice 5 — Advisory Applied Recipe QC Review
+
+**Status:** Implemented and verified as advisory review of already-applied
+shared recipe revisions. Review never gates activation or production use.
+
+- Canonical dough, sauce, cheese, and mix saves capture the committed recipe
+  fields, authenticated actor, server time, immutable identity, and exact
+  SHA-256 revision hash in the existing QC event ledger. Mix stock amounts are
+  operational inventory, not recipe content, and do not create review work.
+- Spec, premix, and cheese import Apply captures the resulting recipe revisions
+  in the same transaction. Rolled-back writes leave no capture. Existing queued
+  writes continue through the canonical save routes; no offline queue or
+  propagation contract was replaced.
+- `manage-qc` reviewers can inspect bounded, revision-specific summaries and
+  append an idempotent Verify or Reject decision against the exact identity,
+  hash, and decision revision. Retries return the original receipt; stale
+  decisions conflict. Later recipe edits create new pending work. Rename and
+  delete histories remain tied to immutable IDs rather than name matching;
+  removing a verified same-name merge source does not transfer its decision to
+  the surviving identity.
+- `record-qc` readers receive only the current facility-scoped recipe review
+  status. They do not receive manager-only summary, actor, or decision history.
+  Rejection records a decision but does not undo a recipe, apply replacement
+  values, block production, or change existing save permissions.
+- QC capture and decision events reuse the append-only event ledger and survive
+  reset and factory purge. They are non-run evidence and do not reopen unrelated
+  run sign-offs. No table, column, or production migration was added.
+- The recipe editor waits for canonical master-data bootstrap before enabling
+  Add. This prevents an acknowledged save from being hidden by the first
+  bootstrap response when the editor opens during startup.
+- Verification: focused recipe hash/API checks **8/8**; focused recipe-manager
+  and QC UI tests **24/24**; reset retention **14/14**; factory-purge retention
+  **5/5** (174 unrelated tests skipped); dough, cheese, and mix canonical route
+  integration suites passed, and import-operations integration passed **32/32**
+  after updating its ledger-event assertion for the additional recipe capture.
+  Client profile-refresh and queued-profile-sync tests passed **37/37**.
+  `CI=true pnpm run typecheck`, API code generation, and generated-contract
+  checks passed. Authenticated Chromium and WebKit journeys passed **2/2**, each
+  covering desktop, phone, and both tablet orientations. The task-specific
+  endpoints had no 5xx responses. WebKit retained background cross-origin fetch
+  diagnostics, detailed in the failure ledger; this is not a global clean-browser
+  claim. Physical Android Chrome and iOS Safari/PWA were **NOT RUN**.
+  The configured calculator-wide workflow separately failed on an unrelated,
+  reproducible auto-track assertion; the background release-standard workflow
+  separately failed its existing sync-test shard inventory check. Neither
+  failure was changed in this slice; both are documented with owners/next
+  actions in the failure ledger.
+- One-time system repair/heal jobs that mutate recipe data outside the
+  authorized editor and import Apply flows are not retroactively represented as
+  manager-authored review captures. A recipe whose current content has no
+  matching committed capture is shown as **unreviewed**, not approved.
+
+See the [coverage/check map](../.local/tasks/evidence/qc-slice-5-recipe-review/coverage-check-map.md)
+and [failure ledger](../.local/tasks/evidence/qc-slice-5-recipe-review/failure-ledger.md).
+The browser screenshots and sanitized per-engine results are retained beside
+those files. Physical devices were unavailable, and no production data or
+production migration was used. Slice 8 enforcement remains deferred pending
+explicit owner policy; it is neither shipped nor formally declined. Slice 9
+allergen expansion is not adopted.
+
 ## QC Phase 1 — Approved and Implemented
 
 ### Lots and weights

@@ -43,6 +43,10 @@ import { checkPreHomeReloadSafety } from "./pwaStartupSafety";
 import { createUpdateCoordinator, type UpdateState } from "./pwaUpdateCoordinator";
 import { AppUpdateControl } from "./components/AppUpdateControl";
 import { QcImportReviewBadge } from "./components/QcImportReview";
+import {
+  RECIPE_QC_REVIEW_NOTICE_EVENT,
+  type RecipeQcReviewAcknowledgement,
+} from "./recipeQcReviewNotice";
 
 const queryClient = new QueryClient();
 registerMasterDataQueryClient(queryClient);
@@ -167,6 +171,22 @@ function HomeGate() {
       clearWarmupFailure?.();
     };
   }, [isAuthenticated, toast, updateAndReload]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onRecipeReviewAcknowledged = (event: Event) => {
+      const detail = (event as CustomEvent<RecipeQcReviewAcknowledgement>).detail;
+      if (!detail || detail.status !== "applied-awaiting-review") return;
+      const noun = detail.changedCount === 1 ? "recipe change" : "recipe changes";
+      toast({
+        title: "Applied — awaiting QC review",
+        description: `${detail.changedCount} shared ${noun} are saved and remain available for production. A rejection does not undo them.`,
+        duration: 7000,
+      });
+    };
+    window.addEventListener(RECIPE_QC_REVIEW_NOTICE_EVENT, onRecipeReviewAcknowledged);
+    return () => window.removeEventListener(RECIPE_QC_REVIEW_NOTICE_EVENT, onRecipeReviewAcknowledged);
+  }, [isAuthenticated, toast]);
 
   const [preHomeSafetyUserId, setPreHomeSafetyUserId] = useState<string | null>(null);
   const userId = isAuthenticated ? me?.userId ?? null : null;

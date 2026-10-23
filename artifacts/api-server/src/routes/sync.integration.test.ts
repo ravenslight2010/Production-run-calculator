@@ -1614,7 +1614,7 @@ describe("POST /sync/station-activity — server-confirmed station evidence", ()
 
 describe("factory purge retains QC history", () => {
   it.each(["live", "sandbox"] as const)("retains immutable label and import QC evidence through %s reset and purge", async (scope) => {
-    const original = await db.insert(qcWorkflowEventsTable).values(
+    const originalOperationalEvents = await db.insert(qcWorkflowEventsTable).values(
       (["live", "sandbox"] as const).flatMap((fixtureScope) =>
         (["label-reference", "label-reference-review", "label-check", "import-committed", "import-review"] as const).map((eventType) => ({
           scope: fixtureScope,
@@ -1637,6 +1637,36 @@ describe("factory purge retains QC history", () => {
         })),
       ),
     ).returning();
+    const recipeCaptures = await db.insert(qcWorkflowEventsTable).values(
+      (["live", "sandbox"] as const).map((fixtureScope) => ({
+        scope: fixtureScope,
+        operationId: `retained-recipe-${fixtureScope}`,
+        recordId: `mix:retained-recipe-${fixtureScope}`,
+        eventType: "recipe-committed" as const,
+        runId: null,
+        actorId: fixtureScope === "live" ? MANAGER : SANDBOX,
+        payload: {
+          recipeType: "mix",
+          recipeId: `retained-recipe-${fixtureScope}`,
+          displayName: `Synthetic retained recipe ${fixtureScope}`,
+          resultHash: "b".repeat(64),
+          changedFields: ["batchSize"],
+        },
+      })),
+    ).returning();
+    const recipeDecisions = await db.insert(qcWorkflowEventsTable).values(
+      recipeCaptures.map((capture) => ({
+        scope: capture.scope,
+        operationId: `retained-recipe-review-${capture.scope}`,
+        recordId: capture.recordId,
+        eventType: "recipe-review" as const,
+        relatedEventId: String(capture.id),
+        runId: null,
+        actorId: capture.actorId,
+        payload: { status: "rejected", resultHash: "b".repeat(64), reason: "Synthetic retained decision" },
+      })),
+    ).returning();
+    const original = [...originalOperationalEvents, ...recipeCaptures, ...recipeDecisions];
     for (const action of ["reset", "purge-all"]) {
       const response = await fetch(`${baseUrl}/api/sync/${action}`, {
         method: "POST",

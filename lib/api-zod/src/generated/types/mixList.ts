@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Mix } from './mix';
+import type { RecipeQcReviewAcknowledgement } from './recipeQcReviewAcknowledgement';
 
 export interface MixList {
   items: Mix[];
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
 }

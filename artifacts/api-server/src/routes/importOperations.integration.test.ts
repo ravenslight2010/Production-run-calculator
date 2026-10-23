@@ -218,7 +218,9 @@ describe("import QC review", () => {
     expect(rejected.undo.guidance).toMatch(/does not undo/);
     expect((await db.select().from(tables.mixesTable))[0].batchSize).toBe(1);
     const events = await db.select().from(tables.qcWorkflowEventsTable);
-    expect(events).toHaveLength(3); // capture plus two decisions
+    expect(events.filter((event) => event.eventType !== "recipe-committed")).toHaveLength(3); // import capture plus two decisions
+    expect(events.filter((event) => event.eventType === "recipe-committed")).toHaveLength(1);
+    expect(events).toHaveLength(4);
     expect(events.every((event) => event.runId === null)).toBe(true);
     const badges = await fetch(`${baseUrl}/api/qc/import-review-badges`, { headers: headers("profiles") });
     expect(await badges.json()).toEqual({ pending: 0, rejected: 1 });

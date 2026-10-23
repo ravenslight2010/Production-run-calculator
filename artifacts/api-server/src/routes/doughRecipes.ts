@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, doughRecipesTable, type DoughRecipeRow } from "@workspace/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, doughRecipesTable, qcWorkflowEventsTable, type DoughRecipeRow } from "@workspace/db";
 import { SaveDoughRecipesBody, DeleteDoughRecipesBody } from "@workspace/api-zod";
 import { normalizeNamedRecipe, type NamedRecipe } from "@workspace/named-recipes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { buildRecipeQcCapture, lockRecipeQcFamily } from "../lib/recipeQcReview";
 import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
@@ -151,10 +152,9 @@ router.post(
       // re-point local references only after this endpoint succeeds — a
       // partial commit would strand references to half-renamed names).
       const correlationId = requestCorrelationId(req);
+      let qcChangedCount = 0;
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${"dough-recipes:" + currentScope()}))`,
-        );
+        await lockRecipeQcFamily(tx, currentScope(), "dough");
         const existingRows = await tx
           .select()
           .from(doughRecipesTable)
@@ -210,6 +210,18 @@ router.post(
                 updatedAt: values.updatedAt,
               },
             });
+          const capture = buildRecipeQcCapture("dough", recipe.id, existing ? toApiItem(existing) : undefined, recipe);
+          if (capture) {
+            await tx.insert(qcWorkflowEventsTable).values({
+              scope: currentScope(),
+              operationId: capture.operationId,
+              recordId: capture.recordId,
+              eventType: "recipe-committed",
+              actorId: req.userId!,
+              payload: capture.payload,
+            });
+            qcChangedCount += 1;
+          }
           if (!existing || fieldNames.length > 0) {
             await writeAuditEvent(tx, {
               action: existing ? "dough_recipe_updated" : "dough_recipe_created",
@@ -222,7 +234,12 @@ router.post(
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");
       const items = await listAll();
-      res.json({ items });
+      res.json({
+        items,
+        ...(qcChangedCount
+          ? { recipeQcReview: { status: "applied-awaiting-review", changedCount: qcChangedCount } }
+          : {}),
+      });
     } catch (err) {
       if (err instanceof RecipeRevisionConflict) {
         res.status(409).json({
@@ -257,6 +274,7 @@ router.delete(
       if (ids.length > 0) {
         const correlationId = requestCorrelationId(req);
         await db.transaction(async (tx) => {
+          await lockRecipeQcFamily(tx, currentScope(), "dough");
           const deletedRows = await tx
             .delete(doughRecipesTable)
             .where(

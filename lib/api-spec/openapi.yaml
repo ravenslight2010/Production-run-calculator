@@ -137,6 +137,94 @@ paths:
                 required: [error]
                 properties:
                   error: { type: string }
+  /qc/recipe-review-statuses:
+    get:
+      operationId: listQcRecipeReviewStatuses
+      tags: [qc]
+      summary: Read current recipe review status without manager audit detail
+      description: >-
+        Requires record-qc or manage-qc. Returns current facility recipes and
+        only their advisory status. Legacy or unmatched revisions remain
+        unreviewed; this read does not expose actors, rationale, summaries, or hashes.
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, maxLength: 240 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: Bounded scoped status page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcRecipeReviewStatusPage" }
+        "400": { description: Invalid filters }
+        "401": { description: Authentication required }
+        "403": { description: record-qc or manage-qc required }
+  /qc/recipe-reviews:
+    get:
+      operationId: listQcRecipeReviews
+      tags: [qc]
+      summary: List exact shared-recipe revisions for manager review
+      description: >-
+        Requires manage-qc. The review is advisory: recipe edits are already
+        applied, and a decision never activates, reverts, or blocks a recipe.
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, pattern: "^[1-9][0-9]{0,8}$" } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, verified, rejected, superseded, deleted, all], default: pending } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: Manager-only bounded revision queue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcRecipeReviewQueuePage" }
+        "400": { description: Invalid filters }
+        "401": { description: Authentication required }
+        "403": { description: manage-qc required }
+  /qc/recipe-reviews/{captureId}:
+    get:
+      operationId: getQcRecipeReview
+      tags: [qc]
+      summary: Read a retained recipe revision and its append-only decisions
+      parameters:
+        - { name: captureId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Exact retained revision, including deleted or renamed identity state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcRecipeReviewDetail" }
+        "400": { description: Invalid revision identity }
+        "401": { description: Authentication required }
+        "403": { description: manage-qc required }
+        "404": { description: Revision not found in this facility }
+  /qc/recipe-reviews/{captureId}/decisions:
+    post:
+      operationId: decideQcRecipeReview
+      tags: [qc]
+      summary: Append an advisory decision on an exact recipe hash
+      description: Requires manage-qc. Rejections never undo or modify an applied recipe. Stale revisions conflict.
+      parameters:
+        - { name: captureId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcRecipeReviewDecisionInput" }
+      responses:
+        "200":
+          description: Exact idempotent retry receipt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcRecipeReviewDecisionResult" }
+        "201":
+          description: Decision appended for the current exact recipe revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcRecipeReviewDecisionResult" }
+        "400": { description: Invalid decision or missing rationale }
+        "401": { description: Authentication required }
+        "403": { description: manage-qc required }
+        "404": { description: Revision not found in this facility }
+        "409": { description: Recipe revision or decision history changed }
   /build-info:
     get:
       operationId: getBuildInfo
@@ -6626,6 +6714,101 @@ components:
         qcStatus: { type: string, enum: [verified, rejected] }
         revision: { type: integer }
         replayed: { type: boolean }
+    RecipeQcReviewAcknowledgement:
+      type: object
+      required: [status, changedCount]
+      properties:
+        status: { type: string, enum: [applied-awaiting-review] }
+        changedCount: { type: integer, minimum: 1, maximum: 500 }
+    QcRecipeReviewStatusPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [recipeType, recipeId, recipeName, status]
+            properties:
+              recipeType: { type: string, enum: [dough, sauce, cheese, mix] }
+              recipeId: { type: string }
+              recipeName: { type: string }
+              status: { type: string, enum: [pending, verified, rejected, unreviewed] }
+        nextCursor: { type: [string, "null"], maxLength: 240 }
+    QcRecipeReviewQueueItem:
+      type: object
+      required: [captureId, recipeType, recipeId, recipeName, currentName, status, sourceState, resultHash, actorId, createdAt]
+      properties:
+        captureId: { type: integer, minimum: 1 }
+        recipeType: { type: string, enum: [dough, sauce, cheese, mix] }
+        recipeId: { type: string }
+        recipeName: { type: string }
+        currentName: { type: [string, "null"] }
+        status: { type: string, enum: [pending, verified, rejected, superseded, deleted] }
+        sourceState: { type: string, enum: [active, renamed, deleted] }
+        resultHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+    QcRecipeReviewQueuePage:
+      type: object
+      required: [items, nextCursor, scanLimitReached]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/QcRecipeReviewQueueItem" }
+        nextCursor: { type: [string, "null"] }
+        scanLimitReached: { type: boolean }
+    QcRecipeReviewDecision:
+      type: object
+      required: [id, status, resultHash, reason, actorId, createdAt]
+      properties:
+        id: { type: integer, minimum: 1 }
+        status: { type: string, enum: [verified, rejected] }
+        resultHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        reason: { type: string, maxLength: 1000 }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+    QcRecipeReviewDetail:
+      type: object
+      required: [captureId, recipeType, recipeId, recipeName, currentName, sourceState, status, resultHash, summary, actorId, createdAt, decisionRevision, decisions]
+      properties:
+        captureId: { type: integer, minimum: 1 }
+        recipeType: { type: string, enum: [dough, sauce, cheese, mix] }
+        recipeId: { type: string }
+        recipeName: { type: string }
+        currentName: { type: [string, "null"] }
+        sourceState: { type: string, enum: [active, renamed, deleted] }
+        status: { type: string, enum: [pending, verified, rejected, superseded, deleted] }
+        resultHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        summary: { type: object, additionalProperties: true }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+        decisionRevision: { type: integer, minimum: 0 }
+        decisions:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/QcRecipeReviewDecision" }
+    QcRecipeReviewDecisionInput:
+      type: object
+      additionalProperties: false
+      required: [decisionId, status, expectedResultHash, expectedRevision, reason]
+      properties:
+        decisionId: { type: string, pattern: "^[A-Za-z0-9_-]{16,120}$" }
+        status: { type: string, enum: [verified, rejected] }
+        expectedResultHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        expectedRevision: { type: integer, minimum: 0 }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    QcRecipeReviewDecisionResult:
+      type: object
+      required: [captureId, status, resultHash, decisionRevision, replayed]
+      properties:
+        captureId: { type: integer, minimum: 1 }
+        status: { type: string, enum: [verified, rejected] }
+        resultHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        decisionRevision: { type: integer, minimum: 1 }
+        replayed: { type: boolean }
     SourceLibraryReconciliationCaptureRequest:
       type: object
       required: [deploymentHandoff, expectedDatabaseOwner]
@@ -7136,7 +7319,11 @@ components:
             requestHash: { type: string }
             resultHash: { type: string, nullable: true }
             affectedEntities: { type: object, additionalProperties: true }
-            result: { type: object, additionalProperties: true }
+            result:
+              type: object
+              additionalProperties: true
+              properties:
+                recipeQcReview: { $ref: "#/components/schemas/RecipeQcReviewAcknowledgement" }
             createdAt: { type: integer, format: int64 }
             updatedAt: { type: integer, format: int64 }
             undoneAt: { type: integer, format: int64, nullable: true }
@@ -13443,6 +13630,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Mix"
+        recipeQcReview:
+          $ref: "#/components/schemas/RecipeQcReviewAcknowledgement"
 
     SaveMixesInput:
       type: object
@@ -13692,6 +13881,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CheeseRecipe"
+        recipeQcReview:
+          $ref: "#/components/schemas/RecipeQcReviewAcknowledgement"
 
     SaveCheeseRecipesInput:
       type: object
@@ -13849,6 +14040,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NamedRecipe"
+        recipeQcReview:
+          $ref: "#/components/schemas/RecipeQcReviewAcknowledgement"
 
     SaveNamedRecipesInput:
       type: object

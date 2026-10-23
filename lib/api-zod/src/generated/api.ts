@@ -24,6 +24,27 @@ export const decideQcImportReviewBodyDecisionIdRegExp = new RegExp('^[A-Za-z0-9_
 export const decideQcImportReviewBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const decideQcImportReviewBodyExpectedRevisionMin = 0;
 export const decideQcImportReviewBodyReasonMax = 1000;
+export const listQcRecipeReviewStatusesQueryCursorMax = 240;
+export const listQcRecipeReviewStatusesQueryLimitDefault = 20;
+export const listQcRecipeReviewStatusesQueryLimitMax = 50;
+export const listQcRecipeReviewStatusesResponseItemsMax = 50;
+export const listQcRecipeReviewStatusesResponseNextCursorMax = 240;
+export const listQcRecipeReviewsQueryCursorRegExp = new RegExp('^[1-9][0-9]{0,8}$');
+export const listQcRecipeReviewsQueryStatusDefault = `pending`;
+export const listQcRecipeReviewsQueryLimitDefault = 20;
+export const listQcRecipeReviewsQueryLimitMax = 50;
+export const listQcRecipeReviewsResponseItemsItemResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const listQcRecipeReviewsResponseItemsMax = 50;
+export const getQcRecipeReviewResponseResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getQcRecipeReviewResponseDecisionRevisionMin = 0;
+export const getQcRecipeReviewResponseDecisionsItemResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getQcRecipeReviewResponseDecisionsItemReasonMax = 1000;
+export const getQcRecipeReviewResponseDecisionsMax = 20;
+export const decideQcRecipeReviewBodyDecisionIdRegExp = new RegExp('^[A-Za-z0-9_-]{16,120}$');
+export const decideQcRecipeReviewBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const decideQcRecipeReviewBodyExpectedRevisionMin = 0;
+export const decideQcRecipeReviewBodyReasonMax = 1000;
+export const decideQcRecipeReviewResponseResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getBuildInfoResponseAppBuildIdRegExp = new RegExp('^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$');
 export const getBuildInfoResponseSourceFingerprintSha256RegExp = new RegExp('^[a-f0-9]{64}$');
 export const getBuildInfoResponseGitRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
@@ -277,6 +298,18 @@ export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 90071992547409
 export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
 export const verifySupervisorPinBodyPinRegExp = new RegExp('^\\d{4,8}$');
 export const updateSupervisorPinBodyPinRegExp = new RegExp('^(|\\d{4,8})$');
+export const listMixesResponseRecipeQcReviewChangedCountMax = 500;
+export const saveMixesResponseRecipeQcReviewChangedCountMax = 500;
+export const deleteMixesResponseRecipeQcReviewChangedCountMax = 500;
+export const listCheeseRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const saveCheeseRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const deleteCheeseRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const listDoughRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const saveDoughRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const deleteDoughRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const listSauceRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const saveSauceRecipesResponseRecipeQcReviewChangedCountMax = 500;
+export const deleteSauceRecipesResponseRecipeQcReviewChangedCountMax = 500;
 export const getPublishedSourceLibraryReconciliationCaptureResponseRevisionMax = 128;
 export const getPublishedSourceLibraryReconciliationCaptureResponseEvidenceIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getPublishedSourceLibraryReconciliationCaptureResponseHealIdMax = 128;
@@ -808,6 +841,7 @@ export const applyImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{6
 export const applyImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const applyImportOperationBodySourceEvidenceSourceTextMax = 100000;
 export const applyImportOperationBodySourceEvidenceParseVersionMax = 24;
+export const applyImportOperationResponseOperationResultRecipeQcReviewChangedCountMax = 500;
 export const listDistillationApplyEvidenceQueryLimitDefault = 20;
 export const listDistillationApplyEvidenceQueryLimitMax = 20;
 export const listDistillationApplyEvidenceQueryCursorMax = 512;
@@ -815,9 +849,11 @@ export const listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp
 export const listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp = new RegExp('^[a-f0-9]{64}$');
 export const getImportOperationPathOperationIdMin = 16;
 export const getImportOperationPathOperationIdMax = 120;
+export const getImportOperationResponseOperationResultRecipeQcReviewChangedCountMax = 500;
 export const undoImportOperationPathOperationIdMin = 16;
 export const undoImportOperationPathOperationIdMax = 120;
 export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const undoImportOperationResponseOperationResultRecipeQcReviewChangedCountMax = 500;
 
 
 
@@ -952,6 +988,146 @@ export const DecideQcImportReviewResponse = zod.object({
   "resultHash": zod.string(),
   "qcStatus": zod.enum(['verified', 'rejected']),
   "revision": zod.int(),
+  "replayed": zod.boolean()
+})
+
+
+/**
+ * Requires record-qc or manage-qc. Returns current facility recipes and only their advisory status. Legacy or unmatched revisions remain unreviewed; this read does not expose actors, rationale, summaries, or hashes.
+ * @summary Read current recipe review status without manager audit detail
+ */
+
+
+
+
+export const ListQcRecipeReviewStatusesQueryParams = zod.object({
+  "cursor": zod.coerce.string().max(listQcRecipeReviewStatusesQueryCursorMax).optional(),
+  "limit": zod.coerce.number().int().min(1).max(listQcRecipeReviewStatusesQueryLimitMax).default(listQcRecipeReviewStatusesQueryLimitDefault)
+})
+
+
+
+
+
+export const ListQcRecipeReviewStatusesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "recipeType": zod.enum(['dough', 'sauce', 'cheese', 'mix']),
+  "recipeId": zod.string(),
+  "recipeName": zod.string(),
+  "status": zod.enum(['pending', 'verified', 'rejected', 'unreviewed'])
+})).max(listQcRecipeReviewStatusesResponseItemsMax),
+  "nextCursor": zod.string().max(listQcRecipeReviewStatusesResponseNextCursorMax).nullable()
+})
+
+
+/**
+ * Requires manage-qc. The review is advisory: recipe edits are already applied, and a decision never activates, reverts, or blocks a recipe.
+ * @summary List exact shared-recipe revisions for manager review
+ */
+
+
+
+export const ListQcRecipeReviewsQueryParams = zod.object({
+  "cursor": zod.coerce.string().regex(listQcRecipeReviewsQueryCursorRegExp).optional(),
+  "status": zod.enum(['pending', 'verified', 'rejected', 'superseded', 'deleted', 'all']).default(listQcRecipeReviewsQueryStatusDefault),
+  "limit": zod.coerce.number().int().min(1).max(listQcRecipeReviewsQueryLimitMax).default(listQcRecipeReviewsQueryLimitDefault)
+})
+
+
+
+
+
+export const ListQcRecipeReviewsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "captureId": zod.int().min(1),
+  "recipeType": zod.enum(['dough', 'sauce', 'cheese', 'mix']),
+  "recipeId": zod.string(),
+  "recipeName": zod.string(),
+  "currentName": zod.string().nullable(),
+  "status": zod.enum(['pending', 'verified', 'rejected', 'superseded', 'deleted']),
+  "sourceState": zod.enum(['active', 'renamed', 'deleted']),
+  "resultHash": zod.string().regex(listQcRecipeReviewsResponseItemsItemResultHashRegExp),
+  "actorId": zod.string(),
+  "createdAt": zod.coerce.date()
+})).max(listQcRecipeReviewsResponseItemsMax),
+  "nextCursor": zod.string().nullable(),
+  "scanLimitReached": zod.boolean()
+})
+
+
+/**
+ * @summary Read a retained recipe revision and its append-only decisions
+ */
+
+
+
+export const GetQcRecipeReviewParams = zod.object({
+  "captureId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+
+
+
+
+export const GetQcRecipeReviewResponse = zod.object({
+  "captureId": zod.int().min(1),
+  "recipeType": zod.enum(['dough', 'sauce', 'cheese', 'mix']),
+  "recipeId": zod.string(),
+  "recipeName": zod.string(),
+  "currentName": zod.string().nullable(),
+  "sourceState": zod.enum(['active', 'renamed', 'deleted']),
+  "status": zod.enum(['pending', 'verified', 'rejected', 'superseded', 'deleted']),
+  "resultHash": zod.string().regex(getQcRecipeReviewResponseResultHashRegExp),
+  "summary": zod.record(zod.string(), zod.unknown()),
+  "actorId": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "decisionRevision": zod.int().min(getQcRecipeReviewResponseDecisionRevisionMin),
+  "decisions": zod.array(zod.object({
+  "id": zod.int().min(1),
+  "status": zod.enum(['verified', 'rejected']),
+  "resultHash": zod.string().regex(getQcRecipeReviewResponseDecisionsItemResultHashRegExp),
+  "reason": zod.string().max(getQcRecipeReviewResponseDecisionsItemReasonMax),
+  "actorId": zod.string(),
+  "createdAt": zod.coerce.date()
+})).max(getQcRecipeReviewResponseDecisionsMax)
+})
+
+
+/**
+ * Requires manage-qc. Rejections never undo or modify an applied recipe. Stale revisions conflict.
+ * @summary Append an advisory decision on an exact recipe hash
+ */
+
+
+
+export const DecideQcRecipeReviewParams = zod.object({
+  "captureId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+
+export const DecideQcRecipeReviewBody = zod.object({
+  "decisionId": zod.string().regex(decideQcRecipeReviewBodyDecisionIdRegExp),
+  "status": zod.enum(['verified', 'rejected']),
+  "expectedResultHash": zod.string().regex(decideQcRecipeReviewBodyExpectedResultHashRegExp),
+  "expectedRevision": zod.int().min(decideQcRecipeReviewBodyExpectedRevisionMin),
+  "reason": zod.string().min(1).max(decideQcRecipeReviewBodyReasonMax)
+})
+
+
+
+
+
+export const DecideQcRecipeReviewResponse = zod.object({
+  "captureId": zod.int().min(1),
+  "status": zod.enum(['verified', 'rejected']),
+  "resultHash": zod.string().regex(decideQcRecipeReviewResponseResultHashRegExp),
+  "decisionRevision": zod.int().min(1),
   "replayed": zod.boolean()
 })
 
@@ -5489,6 +5665,9 @@ export const UpdateSupervisorPinResponse = zod.object({
  * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
  * @summary List manager-defined mixes
  */
+
+
+
 export const ListMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5508,7 +5687,11 @@ export const ListMixesResponse = zod.object({
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
   "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(listMixesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5538,6 +5721,9 @@ export const SaveMixesBody = zod.object({
 }).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')).describe('The batch of mixes to create or update (by id)')
 })
 
+
+
+
 export const SaveMixesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5557,7 +5743,11 @@ export const SaveMixesResponse = zod.object({
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
   "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(saveMixesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5568,6 +5758,9 @@ export const SaveMixesResponse = zod.object({
 export const DeleteMixesBody = zod.object({
   "ids": zod.array(zod.string()).describe('The ids of the mixes to delete')
 })
+
+
+
 
 export const DeleteMixesResponse = zod.object({
   "items": zod.array(zod.object({
@@ -5588,7 +5781,11 @@ export const DeleteMixesResponse = zod.object({
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
   "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand/flavor matching is skipped). Absent = false.')
-}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+}).describe('A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(deleteMixesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5707,6 +5904,9 @@ export const MergeIngredientsResponse = zod.object({
  * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined cheese recipes
  */
+
+
+
 export const ListCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5724,7 +5924,11 @@ export const ListCheeseRecipesResponse = zod.object({
   "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(listCheeseRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5752,6 +5956,9 @@ export const SaveCheeseRecipesBody = zod.object({
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of cheese recipes to create or update (by id)')
 })
 
+
+
+
 export const SaveCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5769,7 +5976,11 @@ export const SaveCheeseRecipesResponse = zod.object({
   "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(saveCheeseRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5780,6 +5991,9 @@ export const SaveCheeseRecipesResponse = zod.object({
 export const DeleteCheeseRecipesBody = zod.object({
   "ids": zod.array(zod.string()).describe('The ids of the cheese recipes to delete')
 })
+
+
+
 
 export const DeleteCheeseRecipesResponse = zod.object({
   "items": zod.array(zod.object({
@@ -5798,7 +6012,11 @@ export const DeleteCheeseRecipesResponse = zod.object({
   "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(deleteCheeseRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5806,6 +6024,9 @@ export const DeleteCheeseRecipesResponse = zod.object({
  * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined dough recipes
  */
+
+
+
 export const ListDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5830,7 +6051,11 @@ export const ListDoughRecipesResponse = zod.object({
   "flavor": zod.string()
 }).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
 }).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(listDoughRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5865,6 +6090,9 @@ export const SaveDoughRecipesBody = zod.object({
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
+
+
+
 export const SaveDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5889,7 +6117,11 @@ export const SaveDoughRecipesResponse = zod.object({
   "flavor": zod.string()
 }).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
 }).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(saveDoughRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5900,6 +6132,9 @@ export const SaveDoughRecipesResponse = zod.object({
 export const DeleteDoughRecipesBody = zod.object({
   "ids": zod.array(zod.string()).describe('The ids of the named recipes to delete')
 })
+
+
+
 
 export const DeleteDoughRecipesResponse = zod.object({
   "items": zod.array(zod.object({
@@ -5925,7 +6160,11 @@ export const DeleteDoughRecipesResponse = zod.object({
   "flavor": zod.string()
 }).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
 }).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(deleteDoughRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5933,6 +6172,9 @@ export const DeleteDoughRecipesResponse = zod.object({
  * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined sauce recipes
  */
+
+
+
 export const ListSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -5957,7 +6199,11 @@ export const ListSauceRecipesResponse = zod.object({
   "flavor": zod.string()
 }).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
 }).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(listSauceRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -5992,6 +6238,9 @@ export const SaveSauceRecipesBody = zod.object({
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
+
+
+
 export const SaveSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().describe('Stable client-generated id'),
@@ -6016,7 +6265,11 @@ export const SaveSauceRecipesResponse = zod.object({
   "flavor": zod.string()
 }).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
 }).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(saveSauceRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -6027,6 +6280,9 @@ export const SaveSauceRecipesResponse = zod.object({
 export const DeleteSauceRecipesBody = zod.object({
   "ids": zod.array(zod.string()).describe('The ids of the named recipes to delete')
 })
+
+
+
 
 export const DeleteSauceRecipesResponse = zod.object({
   "items": zod.array(zod.object({
@@ -6052,7 +6308,11 @@ export const DeleteSauceRecipesResponse = zod.object({
   "flavor": zod.string()
 }).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent/empty = unknown.')
 }).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form\'s Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')),
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(deleteSauceRecipesResponseRecipeQcReviewChangedCountMax)
+}).optional()
 })
 
 
@@ -10296,6 +10556,9 @@ export const ApplyImportOperationBody = zod.object({
   "changes": zod.record(zod.string(), zod.unknown()).describe('Reviewed entity batches keyed by supported master-data domain.')
 })
 
+
+
+
 export const ApplyImportOperationResponse = zod.object({
   "operation": zod.object({
   "operationId": zod.string(),
@@ -10306,7 +10569,12 @@ export const ApplyImportOperationResponse = zod.object({
   "requestHash": zod.string(),
   "resultHash": zod.string().nullish(),
   "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
-  "result": zod.record(zod.string(), zod.unknown()).optional(),
+  "result": zod.looseObject({
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(applyImportOperationResponseOperationResultRecipeQcReviewChangedCountMax)
+}).optional()
+}).optional(),
   "createdAt": zod.int().optional(),
   "updatedAt": zod.int().optional(),
   "undoneAt": zod.int().nullish()
@@ -10358,6 +10626,9 @@ export const GetImportOperationParams = zod.object({
   "operationId": zod.coerce.string().min(getImportOperationPathOperationIdMin).max(getImportOperationPathOperationIdMax)
 })
 
+
+
+
 export const GetImportOperationResponse = zod.object({
   "operation": zod.object({
   "operationId": zod.string(),
@@ -10368,7 +10639,12 @@ export const GetImportOperationResponse = zod.object({
   "requestHash": zod.string(),
   "resultHash": zod.string().nullish(),
   "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
-  "result": zod.record(zod.string(), zod.unknown()).optional(),
+  "result": zod.looseObject({
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(getImportOperationResponseOperationResultRecipeQcReviewChangedCountMax)
+}).optional()
+}).optional(),
   "createdAt": zod.int().optional(),
   "updatedAt": zod.int().optional(),
   "undoneAt": zod.int().nullish()
@@ -10392,6 +10668,9 @@ export const UndoImportOperationBody = zod.object({
   "expectedResultHash": zod.string().regex(undoImportOperationBodyExpectedResultHashRegExp).optional()
 })
 
+
+
+
 export const UndoImportOperationResponse = zod.object({
   "operation": zod.object({
   "operationId": zod.string(),
@@ -10402,7 +10681,12 @@ export const UndoImportOperationResponse = zod.object({
   "requestHash": zod.string(),
   "resultHash": zod.string().nullish(),
   "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
-  "result": zod.record(zod.string(), zod.unknown()).optional(),
+  "result": zod.looseObject({
+  "recipeQcReview": zod.object({
+  "status": zod.enum(['applied-awaiting-review']),
+  "changedCount": zod.int().min(1).max(undoImportOperationResponseOperationResultRecipeQcReviewChangedCountMax)
+}).optional()
+}).optional(),
   "createdAt": zod.int().optional(),
   "updatedAt": zod.int().optional(),
   "undoneAt": zod.int().nullish()

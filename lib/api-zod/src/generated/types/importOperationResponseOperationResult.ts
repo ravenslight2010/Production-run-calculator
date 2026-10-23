@@ -5,5 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecipeQcReviewAcknowledgement } from './recipeQcReviewAcknowledgement';
 
-export type ImportOperationResponseOperationResult = { [key: string]: unknown };
+export type ImportOperationResponseOperationResult = {
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
+  [key: string]: unknown;
+ };

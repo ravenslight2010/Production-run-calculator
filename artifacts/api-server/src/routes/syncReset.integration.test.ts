@@ -307,6 +307,33 @@ describe("POST /sync/reset", () => {
           payload: { outcome: "not-evaluated", fixture: true },
         }))),
     ]);
+    const recipeCaptures = await db.insert(qcWorkflowEventsTable).values(
+      (["live", "sandbox"] as const).map((scope) => ({
+        scope,
+        operationId: `reset-recipe-capture-${scope}`,
+        recordId: `mix:reset-recipe-${scope}`,
+        eventType: "recipe-committed" as const,
+        runId: null,
+        actorId: MANAGER,
+        payload: {
+          recipeType: "mix",
+          recipeId: `reset-recipe-${scope}`,
+          displayName: `Synthetic recipe ${scope}`,
+          resultHash: "a".repeat(64),
+          changedFields: ["batchSize"],
+        },
+      })),
+    ).returning();
+    await db.insert(qcWorkflowEventsTable).values(recipeCaptures.map((capture) => ({
+      scope: capture.scope,
+      operationId: `reset-recipe-review-${capture.scope}`,
+      recordId: capture.recordId,
+      eventType: "recipe-review" as const,
+      relatedEventId: String(capture.id),
+      runId: null,
+      actorId: capture.actorId,
+      payload: { status: "verified", resultHash: "a".repeat(64), reason: "Synthetic retained decision" },
+    })));
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
       headers: authHeaders(MANAGER),
@@ -329,6 +356,10 @@ describe("POST /sync/reset", () => {
     expect(qcEvents.filter((event) => event.eventType === "brix-check").map((event) => event.scope).sort())
       .toEqual(["live", "sandbox"]);
     for (const type of ["date-code-check", "date-code-reference", "date-code-reference-review"]) {
+      expect(qcEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
+        .toEqual(["live", "sandbox"]);
+    }
+    for (const type of ["recipe-committed", "recipe-review"]) {
       expect(qcEvents.filter((event) => event.eventType === type).map((event) => event.scope).sort())
         .toEqual(["live", "sandbox"]);
     }

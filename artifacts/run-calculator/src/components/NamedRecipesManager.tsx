@@ -248,7 +248,7 @@ export default function NamedRecipesManager({
           <button
             type="button"
             onClick={addRecipe}
-            disabled={busy}
+            disabled={busy || isLoading}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-50"
           >
             <Plus className="w-3.5 h-3.5" /> Add {label} Recipe

@@ -12,8 +12,8 @@ export function useNamedRecipes(kind: NamedRecipeKind): {
   items: NamedRecipe[];
   isLoading: boolean;
 } {
-  const { data, isLoading } = useMasterDataSlice(
+  const { data, isPending } = useMasterDataSlice(
     kind === "dough" ? "doughRecipes" : "sauceRecipes",
   );
-  return { items: data ?? [], isLoading };
+  return { items: data ?? [], isLoading: isPending };
 }

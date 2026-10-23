@@ -7,6 +7,7 @@
  */
 import { compareImportSnapshots, compareImportSourceVersions, type ImportSnapshot } from "@workspace/spec-import/import-changes";
 import { requestImportSafetyReview, importReviewIdentityEpoch, ImportReviewCancelledError } from "./importSafetyReview";
+import { publishRecipeQcReviewAcknowledgement } from "./recipeQcReviewNotice";
 
 export type ImportOperationType = "spec" | "premix" | "cheese";
 
@@ -278,6 +279,11 @@ async function postOperation<T>(
     throw new ImportOperationError(message, response.status, id);
   }
   const result = validateResponse<T>(payload, id, expectedStatus);
+  if (action === "apply" && result.result && typeof result.result === "object") {
+    publishRecipeQcReviewAcknowledgement(
+      (result.result as Record<string, unknown>).recipeQcReview,
+    );
+  }
   if (action === "apply") clearPendingImportOperation(id);
   return result;
 }

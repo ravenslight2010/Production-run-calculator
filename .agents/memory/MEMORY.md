@@ -106,7 +106,7 @@
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
-- [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — recipe saves must refresh pending runs; cache effects alone can look like bootstrap.
+- [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — refresh pending runs from accepted saves; wait for initial canonical bootstrap before enabling recipe edits.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [PWA cache](pwa-offline-eventsource-fixtures.md) + [deferred cache](pwa-deferred-cache-policy.md) — close owned SSE on outages; lazy loading alone does not warrant excluding precache.

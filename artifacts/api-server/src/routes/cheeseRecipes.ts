@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, cheeseRecipesTable, type CheeseRecipeRow } from "@workspace/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, cheeseRecipesTable, qcWorkflowEventsTable, type CheeseRecipeRow } from "@workspace/db";
 import { SaveCheeseRecipesBody, DeleteCheeseRecipesBody } from "@workspace/api-zod";
 import { normalizeCheeseRecipe, type CheeseRecipe } from "@workspace/cheese-recipes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { buildRecipeQcCapture, lockRecipeQcFamily } from "../lib/recipeQcReview";
 import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
@@ -156,10 +157,9 @@ router.post(
       // can't both pass the pre-read and insert the same name — the second
       // waits for the first to commit and then sees its names as taken.
       const correlationId = requestCorrelationId(req);
+      let qcChangedCount = 0;
       await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${"cheese-recipes:" + currentScope()}))`,
-        );
+        await lockRecipeQcFamily(tx, currentScope(), "cheese");
         const existingRows = await tx
           .select()
           .from(cheeseRecipesTable)
@@ -199,6 +199,18 @@ router.post(
           values.updatedAt = nextRevision(existing?.updatedAt);
           if (!existing) {
             await tx.insert(cheeseRecipesTable).values(values);
+            const capture = buildRecipeQcCapture("cheese", recipe.id, undefined, recipe);
+            if (capture) {
+              await tx.insert(qcWorkflowEventsTable).values({
+                scope: currentScope(),
+                operationId: capture.operationId,
+                recordId: capture.recordId,
+                eventType: "recipe-committed",
+                actorId: req.userId!,
+                payload: capture.payload,
+              });
+              qcChangedCount += 1;
+            }
             await writeAuditEvent(tx, {
               action: "cheese_recipe_created",
               resource: `cheese_recipe:${recipe.id}`,
@@ -240,6 +252,22 @@ router.post(
               ),
             );
           const fieldNames = changedRecipeFields(recipe, existing);
+          const persistedRecipe = {
+            ...recipe,
+            cellulose: recipe.cellulose || existing.cellulose,
+          };
+          const capture = buildRecipeQcCapture("cheese", recipe.id, toApiItem(existing), persistedRecipe);
+          if (capture) {
+            await tx.insert(qcWorkflowEventsTable).values({
+              scope: currentScope(),
+              operationId: capture.operationId,
+              recordId: capture.recordId,
+              eventType: "recipe-committed",
+              actorId: req.userId!,
+              payload: capture.payload,
+            });
+            qcChangedCount += 1;
+          }
           if (fieldNames.length > 0) {
             await writeAuditEvent(tx, {
               action: "cheese_recipe_updated",
@@ -252,7 +280,12 @@ router.post(
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");
       const items = await listAll();
-      res.json({ items });
+      res.json({
+        items,
+        ...(qcChangedCount
+          ? { recipeQcReview: { status: "applied-awaiting-review", changedCount: qcChangedCount } }
+          : {}),
+      });
     } catch (err) {
       if (err instanceof RecipeRevisionConflict) {
         res.status(409).json({
@@ -287,6 +320,7 @@ router.delete(
       if (ids.length > 0) {
         const correlationId = requestCorrelationId(req);
         await db.transaction(async (tx) => {
+          await lockRecipeQcFamily(tx, currentScope(), "cheese");
           const deletedRows = await tx
             .delete(cheeseRecipesTable)
             .where(

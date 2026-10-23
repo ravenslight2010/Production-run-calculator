@@ -22,6 +22,8 @@ export type QcWorkflowEventType =
   | "date-code-reference-review"
   | "import-committed"
   | "import-review"
+  | "recipe-committed"
+  | "recipe-review"
   | "allergen-review"
   | "cleaning"
   | "cleaning-verification"

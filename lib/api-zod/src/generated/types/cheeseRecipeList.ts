@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CheeseRecipe } from './cheeseRecipe';
+import type { RecipeQcReviewAcknowledgement } from './recipeQcReviewAcknowledgement';
 
 export interface CheeseRecipeList {
   items: CheeseRecipe[];
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
 }

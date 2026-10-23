@@ -278,6 +278,9 @@ const redactionBodySchema = z.object({
     "payload.note",
     "payload.reason",
     "payload.summary",
+    "payload.before",
+    "payload.after",
+    "payload.changedFields",
     "payload.instrument",
     "payload.lotNumber",
     "payload.expectedComponents",
@@ -2760,6 +2763,7 @@ router.get("/qc/history", requireCapability("record-qc"), async (req, res) => {
       conditions.push(notInArray(qcWorkflowEventsTable.eventType, [
         "date-code-reference", "date-code-reference-review",
         "import-committed", "import-review",
+        "recipe-committed", "recipe-review",
       ]));
     }
     if (filters.runId) conditions.push(eq(qcWorkflowEventsTable.runId, filters.runId));

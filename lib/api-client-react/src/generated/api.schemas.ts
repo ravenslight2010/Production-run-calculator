@@ -124,6 +124,228 @@ export interface QcImportReviewDecisionResult {
   replayed: boolean;
 }
 
+export type RecipeQcReviewAcknowledgementStatus = typeof RecipeQcReviewAcknowledgementStatus[keyof typeof RecipeQcReviewAcknowledgementStatus];
+
+
+export const RecipeQcReviewAcknowledgementStatus = {
+  'applied-awaiting-review': 'applied-awaiting-review',
+} as const;
+
+export interface RecipeQcReviewAcknowledgement {
+  status: RecipeQcReviewAcknowledgementStatus;
+  /**
+     * @minimum 1
+     * @maximum 500
+     */
+  changedCount: number;
+}
+
+export type QcRecipeReviewStatusPageItemsItemRecipeType = typeof QcRecipeReviewStatusPageItemsItemRecipeType[keyof typeof QcRecipeReviewStatusPageItemsItemRecipeType];
+
+
+export const QcRecipeReviewStatusPageItemsItemRecipeType = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+  mix: 'mix',
+} as const;
+
+export type QcRecipeReviewStatusPageItemsItemStatus = typeof QcRecipeReviewStatusPageItemsItemStatus[keyof typeof QcRecipeReviewStatusPageItemsItemStatus];
+
+
+export const QcRecipeReviewStatusPageItemsItemStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+  unreviewed: 'unreviewed',
+} as const;
+
+export type QcRecipeReviewStatusPageItemsItem = {
+  recipeType: QcRecipeReviewStatusPageItemsItemRecipeType;
+  recipeId: string;
+  recipeName: string;
+  status: QcRecipeReviewStatusPageItemsItemStatus;
+};
+
+export interface QcRecipeReviewStatusPage {
+  /** @maxItems 50 */
+  items: QcRecipeReviewStatusPageItemsItem[];
+  /**
+     * @maxLength 240
+     * @nullable
+     */
+  nextCursor: string | null;
+}
+
+export type QcRecipeReviewQueueItemRecipeType = typeof QcRecipeReviewQueueItemRecipeType[keyof typeof QcRecipeReviewQueueItemRecipeType];
+
+
+export const QcRecipeReviewQueueItemRecipeType = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+  mix: 'mix',
+} as const;
+
+export type QcRecipeReviewQueueItemStatus = typeof QcRecipeReviewQueueItemStatus[keyof typeof QcRecipeReviewQueueItemStatus];
+
+
+export const QcRecipeReviewQueueItemStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+  superseded: 'superseded',
+  deleted: 'deleted',
+} as const;
+
+export type QcRecipeReviewQueueItemSourceState = typeof QcRecipeReviewQueueItemSourceState[keyof typeof QcRecipeReviewQueueItemSourceState];
+
+
+export const QcRecipeReviewQueueItemSourceState = {
+  active: 'active',
+  renamed: 'renamed',
+  deleted: 'deleted',
+} as const;
+
+export interface QcRecipeReviewQueueItem {
+  /** @minimum 1 */
+  captureId: number;
+  recipeType: QcRecipeReviewQueueItemRecipeType;
+  recipeId: string;
+  recipeName: string;
+  /** @nullable */
+  currentName: string | null;
+  status: QcRecipeReviewQueueItemStatus;
+  sourceState: QcRecipeReviewQueueItemSourceState;
+  /** @pattern ^[a-f0-9]{64}$ */
+  resultHash: string;
+  actorId: string;
+  createdAt: string;
+}
+
+export interface QcRecipeReviewQueuePage {
+  /** @maxItems 50 */
+  items: QcRecipeReviewQueueItem[];
+  /** @nullable */
+  nextCursor: string | null;
+  scanLimitReached: boolean;
+}
+
+export type QcRecipeReviewDecisionStatus = typeof QcRecipeReviewDecisionStatus[keyof typeof QcRecipeReviewDecisionStatus];
+
+
+export const QcRecipeReviewDecisionStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface QcRecipeReviewDecision {
+  /** @minimum 1 */
+  id: number;
+  status: QcRecipeReviewDecisionStatus;
+  /** @pattern ^[a-f0-9]{64}$ */
+  resultHash: string;
+  /** @maxLength 1000 */
+  reason: string;
+  actorId: string;
+  createdAt: string;
+}
+
+export type QcRecipeReviewDetailRecipeType = typeof QcRecipeReviewDetailRecipeType[keyof typeof QcRecipeReviewDetailRecipeType];
+
+
+export const QcRecipeReviewDetailRecipeType = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+  mix: 'mix',
+} as const;
+
+export type QcRecipeReviewDetailSourceState = typeof QcRecipeReviewDetailSourceState[keyof typeof QcRecipeReviewDetailSourceState];
+
+
+export const QcRecipeReviewDetailSourceState = {
+  active: 'active',
+  renamed: 'renamed',
+  deleted: 'deleted',
+} as const;
+
+export type QcRecipeReviewDetailStatus = typeof QcRecipeReviewDetailStatus[keyof typeof QcRecipeReviewDetailStatus];
+
+
+export const QcRecipeReviewDetailStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+  superseded: 'superseded',
+  deleted: 'deleted',
+} as const;
+
+export type QcRecipeReviewDetailSummary = { [key: string]: unknown };
+
+export interface QcRecipeReviewDetail {
+  /** @minimum 1 */
+  captureId: number;
+  recipeType: QcRecipeReviewDetailRecipeType;
+  recipeId: string;
+  recipeName: string;
+  /** @nullable */
+  currentName: string | null;
+  sourceState: QcRecipeReviewDetailSourceState;
+  status: QcRecipeReviewDetailStatus;
+  /** @pattern ^[a-f0-9]{64}$ */
+  resultHash: string;
+  summary: QcRecipeReviewDetailSummary;
+  actorId: string;
+  createdAt: string;
+  /** @minimum 0 */
+  decisionRevision: number;
+  /** @maxItems 20 */
+  decisions: QcRecipeReviewDecision[];
+}
+
+export type QcRecipeReviewDecisionInputStatus = typeof QcRecipeReviewDecisionInputStatus[keyof typeof QcRecipeReviewDecisionInputStatus];
+
+
+export const QcRecipeReviewDecisionInputStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface QcRecipeReviewDecisionInput {
+  /** @pattern ^[A-Za-z0-9_-]{16,120}$ */
+  decisionId: string;
+  status: QcRecipeReviewDecisionInputStatus;
+  /** @pattern ^[a-f0-9]{64}$ */
+  expectedResultHash: string;
+  /** @minimum 0 */
+  expectedRevision: number;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  reason: string;
+}
+
+export type QcRecipeReviewDecisionResultStatus = typeof QcRecipeReviewDecisionResultStatus[keyof typeof QcRecipeReviewDecisionResultStatus];
+
+
+export const QcRecipeReviewDecisionResultStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface QcRecipeReviewDecisionResult {
+  /** @minimum 1 */
+  captureId: number;
+  status: QcRecipeReviewDecisionResultStatus;
+  /** @pattern ^[a-f0-9]{64}$ */
+  resultHash: string;
+  /** @minimum 1 */
+  decisionRevision: number;
+  replayed: boolean;
+}
+
 export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion];
 
 
@@ -934,7 +1156,10 @@ export const ImportOperationResponseOperationStatus = {
 
 export type ImportOperationResponseOperationAffectedEntities = { [key: string]: unknown };
 
-export type ImportOperationResponseOperationResult = { [key: string]: unknown };
+export type ImportOperationResponseOperationResult = {
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
+  [key: string]: unknown;
+ };
 
 export type ImportOperationResponseOperation = {
   operationId: string;
@@ -7453,6 +7678,7 @@ export interface Mix {
 
 export interface MixList {
   items: Mix[];
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
 }
 
 export interface SaveMixesInput {
@@ -7593,6 +7819,7 @@ export interface CheeseRecipe {
 
 export interface CheeseRecipeList {
   items: CheeseRecipe[];
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
 }
 
 export interface SaveCheeseRecipesInput {
@@ -7665,6 +7892,7 @@ export interface NamedRecipe {
 
 export interface NamedRecipeList {
   items: NamedRecipe[];
+  recipeQcReview?: RecipeQcReviewAcknowledgement;
 }
 
 export interface SaveNamedRecipesInput {
@@ -9111,6 +9339,43 @@ export type ListQcImportReviews200 = {
 export type DecideQcImportReview409 = {
   error: string;
 };
+
+export type ListQcRecipeReviewStatusesParams = {
+/**
+ * @maxLength 240
+ */
+cursor?: string;
+/**
+ * @minimum 1
+ * @maximum 50
+ */
+limit?: number;
+};
+
+export type ListQcRecipeReviewsParams = {
+/**
+ * @pattern ^[1-9][0-9]{0,8}$
+ */
+cursor?: string;
+status?: ListQcRecipeReviewsStatus;
+/**
+ * @minimum 1
+ * @maximum 50
+ */
+limit?: number;
+};
+
+export type ListQcRecipeReviewsStatus = typeof ListQcRecipeReviewsStatus[keyof typeof ListQcRecipeReviewsStatus];
+
+
+export const ListQcRecipeReviewsStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+  superseded: 'superseded',
+  deleted: 'deleted',
+  all: 'all',
+} as const;
 
 export type GetBuildInfo503Status = typeof GetBuildInfo503Status[keyof typeof GetBuildInfo503Status];
 

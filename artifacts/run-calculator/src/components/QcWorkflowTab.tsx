@@ -76,6 +76,7 @@ import QcLabelVerification, { QcLabelComparison } from "./QcLabelVerification";
 import QcDateCodeVerification, { QcDateCodeComparison } from "./QcDateCodeVerification";
 import QualityHistoryTab from "./QualityHistoryTab";
 import QcImportReview from "./QcImportReview";
+import QcRecipeReview from "./QcRecipeReview";
 import RunAllergenFootprintPanel from "./RunAllergenFootprintPanel";
 
 export type QcWorkflowTabProps = {
@@ -286,6 +287,7 @@ export default function QcWorkflowTab({
   const [view, setView] = useState<ViewName>("lots");
   const [showDailyActivity, setShowDailyActivity] = useState(false);
   const [showImportReview, setShowImportReview] = useState(false);
+  const [showRecipeReview, setShowRecipeReview] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [selectedIngredient, setSelectedIngredient] = useState("");
   const [lotNumber, setLotNumber] = useState("");
@@ -917,6 +919,20 @@ export default function QcWorkflowTab({
         />
       ) : (
       <>
+      {(canRecordQc || canManageQc) && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            className={quietButtonClass}
+            aria-expanded={showRecipeReview}
+            onClick={() => setShowRecipeReview((value) => !value)}
+            data-testid="button-toggle-qc-recipe-review"
+          >
+            <ClipboardCheck className="h-4 w-4" /> {showRecipeReview ? "Hide recipe review" : "Recipe review"}
+          </button>
+          {showRecipeReview && <QcRecipeReview canManageQc={canManageQc} />}
+        </div>
+      )}
       {canManageQc && (
         <div className="space-y-3">
           <button

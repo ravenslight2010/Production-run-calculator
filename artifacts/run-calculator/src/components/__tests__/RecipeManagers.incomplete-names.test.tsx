@@ -20,9 +20,10 @@ import { saveMixes } from "../../mixes";
 const namedItems: NamedRecipe[] = [];
 const cheeseItems: CheeseRecipe[] = [];
 const mixItems: Mix[] = [];
+let namedRecipesLoading = false;
 
 vi.mock("../../hooks/useNamedRecipes", () => ({
-  useNamedRecipes: () => ({ items: namedItems, isLoading: false }),
+  useNamedRecipes: () => ({ items: namedItems, isLoading: namedRecipesLoading }),
 }));
 vi.mock("../../hooks/useCheeseRecipes", () => ({
   useCheeseRecipes: () => ({ items: cheeseItems, isLoading: false }),
@@ -53,6 +54,7 @@ afterEach(() => {
   namedItems.length = 0;
   cheeseItems.length = 0;
   mixItems.length = 0;
+  namedRecipesLoading = false;
   vi.mocked(saveCheeseRecipes).mockClear();
   vi.mocked(saveMixes).mockClear();
 });
@@ -112,6 +114,17 @@ function mix(overrides: Partial<Mix> = {}): Mix {
 }
 
 describe("recipe managers with incomplete persisted names", () => {
+  it("waits for canonical recipe bootstrap before allowing a new recipe save", () => {
+    namedRecipesLoading = true;
+
+    renderWithQueryClient(<NamedRecipesManager kind="dough" />);
+
+    expect(screen.getByText("Loading dough recipes…")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Add Dough Recipe" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("keeps valid dough and sauce rows usable", () => {
     namedItems.push(
       namedRecipe({ id: "blank", name: "   " }),

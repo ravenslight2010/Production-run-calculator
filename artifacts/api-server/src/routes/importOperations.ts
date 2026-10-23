@@ -20,6 +20,11 @@ import {
 import { buildImportQcSummary } from "../lib/importQcSummary";
 import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { currentScope } from "../lib/requestScope";
+import {
+  buildRecipeQcCapture,
+  lockRecipeQcFamily,
+  type RecipeQcFamily,
+} from "../lib/recipeQcReview";
 import { requireAnyCapability, requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { normalizeMix } from "@workspace/mixes";
 import { normalizeCheeseRecipe } from "@workspace/cheese-recipes";
@@ -551,6 +556,44 @@ function normalizeImportRow(name: string, raw: Record<string, unknown>): Record<
   return normalized as Record<string, unknown>;
 }
 
+async function captureImportedRecipeReviews(
+  tx: any,
+  before: Record<string, unknown[]>,
+  after: Record<string, unknown[]>,
+  scope: string,
+  actorId: string,
+): Promise<number> {
+  const entities = [
+    ["doughRecipes", "dough"] as const,
+    ["sauceRecipes", "sauce"] as const,
+    ["cheeseRecipes", "cheese"] as const,
+    ["mixes", "mix"] as const,
+  ] satisfies readonly [string, RecipeQcFamily][];
+  let count = 0;
+  for (const [entity, family] of entities) {
+    const beforeById = new Map((before[entity] ?? []).map((row: any) => [String(row.id), row]));
+    for (const raw of after[entity] ?? []) {
+      const current = normalizeImportRow(entity, raw as Record<string, unknown>);
+      const id = String(current.id ?? "");
+      if (!id) continue;
+      const previousRaw = beforeById.get(id) as Record<string, unknown> | undefined;
+      const previous = previousRaw ? normalizeImportRow(entity, previousRaw) : undefined;
+      const capture = buildRecipeQcCapture(family, id, previous, current);
+      if (!capture) continue;
+      await tx.insert(qcWorkflowEventsTable).values({
+        scope,
+        operationId: capture.operationId,
+        recordId: capture.recordId,
+        eventType: "recipe-committed",
+        actorId,
+        payload: capture.payload,
+      });
+      count += 1;
+    }
+  }
+  return count;
+}
+
 async function applyRows(tx: any, changes: ChangeSet, scope: string): Promise<void> {
   for (const [name, config] of Object.entries(TABLES) as [EntityName, typeof TABLES[EntityName]][]) {
     const change = changes[name];
@@ -843,6 +886,18 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
         }
         return prior[0];
       }
+      const familyByEntity: Record<string, RecipeQcFamily> = {
+        doughRecipes: "dough",
+        sauceRecipes: "sauce",
+        cheeseRecipes: "cheese",
+        mixes: "mix",
+      };
+      const families = [...new Set(
+        Object.keys(changes)
+          .map((entity) => familyByEntity[entity])
+          .filter((family): family is RecipeQcFamily => family !== undefined),
+      )].sort();
+      for (const family of families) await lockRecipeQcFamily(tx, scope, family);
       const before = await capture(tx, changes, scope);
       fail("after-before-snapshot");
       const beforeHash = hash(before);
@@ -852,6 +907,14 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       await applyRows(tx, changes, scope);
       fail("after-domain-writes");
       const after = await capture(tx, changes, scope);
+      const recipeQcChangedCount = await captureImportedRecipeReviews(
+        tx,
+        before as Record<string, unknown[]>,
+        after as Record<string, unknown[]>,
+        scope,
+        req.userId!,
+      );
+      fail("after-recipe-qc-capture");
       const expectedResult = goldInput ? goldExpectedSnapshot(after, importType) : null;
       if (expectedResult && jsonBytes(expectedResult) > MAX_GOLD_EXPECTED_BYTES) {
         const error = new Error("IMPORT_GOLD_EXPECTED_TOO_LARGE"); (error as any).code = "GOLD_TOO_LARGE"; throw error;
@@ -864,7 +927,9 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       const resultHash = hash(after);
       const result = { operationId, resultHash, affectedEntities: Object.fromEntries(
         Object.entries(after).map(([key, value]) => [key, value.length]),
-      ) };
+      ), ...(recipeQcChangedCount
+        ? { recipeQcReview: { status: "applied-awaiting-review", changedCount: recipeQcChangedCount } }
+        : {}) };
       const inserted = await tx.insert(importOperationsTable).values({
         id: operationId, scope, importType,
         sourceKey: body.sourceKey ? String(body.sourceKey).slice(0, 300) : null,

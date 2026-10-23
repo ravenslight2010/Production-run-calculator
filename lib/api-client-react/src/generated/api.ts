@@ -166,6 +166,8 @@ import type {
   ListOperationalIntentReceiptsParams,
   ListQcImportReviews200,
   ListQcImportReviewsParams,
+  ListQcRecipeReviewStatusesParams,
+  ListQcRecipeReviewsParams,
   ListQualityChecksParams,
   ManagerActionItemUpdate,
   ManagerActionQueue,
@@ -233,6 +235,11 @@ import type {
   QcLabelReferencesResponse,
   QcLotInput,
   QcNoteInput,
+  QcRecipeReviewDecisionInput,
+  QcRecipeReviewDecisionResult,
+  QcRecipeReviewDetail,
+  QcRecipeReviewQueuePage,
+  QcRecipeReviewStatusPage,
   QcRedactionInput,
   QcRunResponse,
   QcRunSignoffInput,
@@ -760,6 +767,415 @@ export const useDecideQcImportReview = <TError = ErrorType<void | DecideQcImport
         TContext
       > => {
       return useMutation(getDecideQcImportReviewMutationOptions(options), queryClient);
+    }
+
+export const getListQcRecipeReviewStatusesUrl = (params?: ListQcRecipeReviewStatusesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/recipe-review-statuses?${stringifiedParams}` : `/api/qc/recipe-review-statuses`
+}
+
+/**
+ * Requires record-qc or manage-qc. Returns current facility recipes and only their advisory status. Legacy or unmatched revisions remain unreviewed; this read does not expose actors, rationale, summaries, or hashes.
+ * @summary Read current recipe review status without manager audit detail
+ */
+export const listQcRecipeReviewStatuses = async (params?: ListQcRecipeReviewStatusesParams, options?: Parameters<typeof customFetch>[1]): Promise<QcRecipeReviewStatusPage> => {
+
+  return customFetch<QcRecipeReviewStatusPage>(getListQcRecipeReviewStatusesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListQcRecipeReviewStatusesQueryKey = (params?: ListQcRecipeReviewStatusesParams,) => {
+    return [
+    `/api/qc/recipe-review-statuses`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListQcRecipeReviewStatusesQueryOptions = <TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListQcRecipeReviewStatusesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>> = ({ signal }) => listQcRecipeReviewStatuses(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListQcRecipeReviewStatusesQueryResult = NonNullable<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>>
+export type ListQcRecipeReviewStatusesQueryError = ErrorType<void>
+
+
+export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
+ params: undefined |  ListQcRecipeReviewStatusesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>,
+          TError,
+          Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
+ params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>,
+          TError,
+          Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
+ params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read current recipe review status without manager audit detail
+ */
+
+export function useListQcRecipeReviewStatuses<TData = Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError = ErrorType<void>>(
+ params?: ListQcRecipeReviewStatusesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviewStatuses>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListQcRecipeReviewStatusesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListQcRecipeReviewsUrl = (params?: ListQcRecipeReviewsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/recipe-reviews?${stringifiedParams}` : `/api/qc/recipe-reviews`
+}
+
+/**
+ * Requires manage-qc. The review is advisory: recipe edits are already applied, and a decision never activates, reverts, or blocks a recipe.
+ * @summary List exact shared-recipe revisions for manager review
+ */
+export const listQcRecipeReviews = async (params?: ListQcRecipeReviewsParams, options?: Parameters<typeof customFetch>[1]): Promise<QcRecipeReviewQueuePage> => {
+
+  return customFetch<QcRecipeReviewQueuePage>(getListQcRecipeReviewsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListQcRecipeReviewsQueryKey = (params?: ListQcRecipeReviewsParams,) => {
+    return [
+    `/api/qc/recipe-reviews`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListQcRecipeReviewsQueryOptions = <TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListQcRecipeReviewsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listQcRecipeReviews>>> = ({ signal }) => listQcRecipeReviews(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListQcRecipeReviewsQueryResult = NonNullable<Awaited<ReturnType<typeof listQcRecipeReviews>>>
+export type ListQcRecipeReviewsQueryError = ErrorType<void>
+
+
+export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
+ params: undefined |  ListQcRecipeReviewsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQcRecipeReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listQcRecipeReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
+ params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQcRecipeReviews>>,
+          TError,
+          Awaited<ReturnType<typeof listQcRecipeReviews>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
+ params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List exact shared-recipe revisions for manager review
+ */
+
+export function useListQcRecipeReviews<TData = Awaited<ReturnType<typeof listQcRecipeReviews>>, TError = ErrorType<void>>(
+ params?: ListQcRecipeReviewsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listQcRecipeReviews>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListQcRecipeReviewsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetQcRecipeReviewUrl = (captureId: number,) => {
+
+
+
+
+  return `/api/qc/recipe-reviews/${captureId}`
+}
+
+/**
+ * @summary Read a retained recipe revision and its append-only decisions
+ */
+export const getQcRecipeReview = async (captureId: number, options?: Parameters<typeof customFetch>[1]): Promise<QcRecipeReviewDetail> => {
+
+  return customFetch<QcRecipeReviewDetail>(getGetQcRecipeReviewUrl(captureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcRecipeReviewQueryKey = (captureId: number,) => {
+    return [
+    `/api/qc/recipe-reviews/${captureId}`
+    ] as const;
+    }
+
+
+export const getGetQcRecipeReviewQueryOptions = <TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcRecipeReviewQueryKey(captureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcRecipeReview>>> = ({ signal }) => getQcRecipeReview(captureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: captureId !== null && captureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcRecipeReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getQcRecipeReview>>>
+export type GetQcRecipeReviewQueryError = ErrorType<void>
+
+
+export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
+ captureId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcRecipeReview>>,
+          TError,
+          Awaited<ReturnType<typeof getQcRecipeReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
+ captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcRecipeReview>>,
+          TError,
+          Awaited<ReturnType<typeof getQcRecipeReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
+ captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read a retained recipe revision and its append-only decisions
+ */
+
+export function useGetQcRecipeReview<TData = Awaited<ReturnType<typeof getQcRecipeReview>>, TError = ErrorType<void>>(
+ captureId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRecipeReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcRecipeReviewQueryOptions(captureId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDecideQcRecipeReviewUrl = (captureId: number,) => {
+
+
+
+
+  return `/api/qc/recipe-reviews/${captureId}/decisions`
+}
+
+/**
+ * Requires manage-qc. Rejections never undo or modify an applied recipe. Stale revisions conflict.
+ * @summary Append an advisory decision on an exact recipe hash
+ */
+export const decideQcRecipeReview = async (captureId: number,
+    qcRecipeReviewDecisionInput: QcRecipeReviewDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcRecipeReviewDecisionResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcRecipeReviewDecisionResult>(getDecideQcRecipeReviewUrl(captureId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcRecipeReviewDecisionInput)
+  }
+);}
+
+
+
+
+
+export const getDecideQcRecipeReviewMutationKey = () => ['decideQcRecipeReview'] as const;
+
+export const getDecideQcRecipeReviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideQcRecipeReview>>, TError,DecideQcRecipeReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof decideQcRecipeReview>>, TError,DecideQcRecipeReviewMutationVariables, TContext> => {
+
+const mutationKey = getDecideQcRecipeReviewMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof decideQcRecipeReview>>, DecideQcRecipeReviewMutationVariables> = (props) => {
+          const {captureId,data} = props ?? {};
+
+          return  decideQcRecipeReview(captureId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DecideQcRecipeReviewMutationResult = NonNullable<Awaited<ReturnType<typeof decideQcRecipeReview>>>
+    export type DecideQcRecipeReviewMutationBody = BodyType<QcRecipeReviewDecisionInput>
+    export type DecideQcRecipeReviewMutationError = ErrorType<void>
+    export type DecideQcRecipeReviewMutationVariables = {captureId: number;data: BodyType<QcRecipeReviewDecisionInput>}
+
+    /**
+ * @summary Append an advisory decision on an exact recipe hash
+ */
+export const useDecideQcRecipeReview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideQcRecipeReview>>, TError,DecideQcRecipeReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof decideQcRecipeReview>>,
+        TError,
+        DecideQcRecipeReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDecideQcRecipeReviewMutationOptions(options), queryClient);
     }
 
 export const getGetBuildInfoUrl = () => {
