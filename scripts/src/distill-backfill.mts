@@ -328,6 +328,11 @@ function isMetadataLockOwnerActive(
   readIdentity: ProcessIdentityReader = readProcessIdentity,
 ): boolean {
   const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
+  // A PID lookup on this OS cannot establish the status of a foreign-platform
+  // owner, even when that PID is absent locally.
+  if (owner.identity && owner.identity.platform !== process.platform) {
+    throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
+  }
   try {
     process.kill(owner.pid, 0);
   } catch (error) {
@@ -347,7 +352,6 @@ function isMetadataLockOwnerActive(
 
   let currentIdentity: ProcessIdentity;
   try {
-    if (owner.identity.platform !== process.platform) throw new Error("foreign-platform owner");
     currentIdentity = readIdentity(owner.pid, readIdentityFile);
   } catch {
     throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);

@@ -559,6 +559,36 @@ try {
   assert.equal(fs.readFileSync(unverifiableDarwinDecisionPath, "utf8"), unverifiableDarwinContents);
   assert.equal(fs.existsSync(`${unverifiableDarwinLockPath}.recovery`), false);
 
+  for (const [ownerLabel, pid] of [["live", process.pid], ["dead", abandonedOwnerPid]] as const) {
+    for (const lockKind of ["update", "recovery"] as const) {
+      const foreignDecisionPath = path.join(
+        repoRoot, "docs", "evidence", `foreign-${ownerLabel}-${lockKind}.json`,
+      );
+      const originalDecision = `${JSON.stringify(makeDecision("no-go"))}\n`;
+      fs.writeFileSync(foreignDecisionPath, originalDecision);
+      const foreignUpdatePath = `${foreignDecisionPath}.metadata-maintenance.lock`;
+      const foreignLockPath = lockKind === "recovery"
+        ? `${foreignUpdatePath}.recovery` : foreignUpdatePath;
+      const foreignContents = `${JSON.stringify({
+        pid,
+        identity: process.platform === "darwin"
+          ? { platform: "linux", bootId: currentIdentity.bootId, startTimeTicks: "123" }
+          : { platform: "darwin", bootId: currentIdentity.bootId, startTimeMicros: "123" },
+      })}\n`;
+      fs.writeFileSync(foreignLockPath, foreignContents, { mode: 0o600 });
+      assert.throws(
+        () => appendMetadataMaintenanceEntryFile(foreignDecisionPath, syntheticLockEntry),
+        /cannot establish whether metadata lock owner .* leave the lock untouched/u,
+      );
+      assert.equal(fs.readFileSync(foreignLockPath, "utf8"), foreignContents);
+      assert.equal(fs.readFileSync(foreignDecisionPath, "utf8"), originalDecision);
+      assert.equal(
+        fs.existsSync(lockKind === "recovery" ? foreignUpdatePath : `${foreignUpdatePath}.recovery`),
+        false,
+      );
+    }
+  }
+
   const activeLockDecisionPath = path.join(repoRoot, "docs", "evidence", "active-lock.json");
   fs.writeFileSync(activeLockDecisionPath, JSON.stringify(makeDecision("no-go")));
   const activeLockPath = `${activeLockDecisionPath}.metadata-maintenance.lock`;
