@@ -87,6 +87,7 @@ export function useRunLifecycleManager(deps: {
 }) {
   const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
   const pauseDecisionPauseIdRef = useRef<string | null>(null);
+  const pauseDecisionStartedAtRef = useRef(0);
   const deferredLifecycleRef = useRef<{
     runId: string;
     action: "start" | "pause" | "resume" | "end";
@@ -306,7 +307,7 @@ export function useRunLifecycleManager(deps: {
     deps.flushFormWrites();
     const now = Date.now();
     const observed = deps.overlayRunMetaStamps([run])[0] ?? run;
-    deps.queueOperationalIntent({
+    const pauseIntent = deps.queueOperationalIntent({
       runId: run.id,
       observedGeneration: `${run.id}:${observed.metaUpdatedAt ?? observed.startedAt ?? 0}`,
       effectiveAt: now,
@@ -315,7 +316,9 @@ export function useRunLifecycleManager(deps: {
       preLifecycle: deps.capturePreEndLifecycle(observed),
     });
     void deps.flushOperationalIntentOutbox();
-    const stop: Stoppage = { id: deps.genId(), reason: "", type: "pause", startedAt: now, stopTunnel: true };
+    // The canonical pause reducer uses this same intent-bound identity. An
+    // acknowledgement must not replace the choice's target with another pause.
+    const stop: Stoppage = { id: `offline:${pauseIntent.id}`, reason: "", type: "pause", startedAt: now, stopTunnel: true };
     const next = { ...base, runs: base.runs.map((candidate, i) => i === index ? { ...candidate, pausedAt: now, pausedStoppageId: stop.id, stoppages: [...(candidate.stoppages ?? []), stop] } : candidate) };
     deps.dayStateRef.current = next;
     deps.setDayState(next);
@@ -323,6 +326,7 @@ export function useRunLifecycleManager(deps: {
     deps.schedulePush(next, 0);
     deps.setActiveTab("run");
     pauseDecisionPauseIdRef.current = stop.id;
+    pauseDecisionStartedAtRef.current = now;
     setPauseDecisionRunId(run.id);
   });
   pauseRunRef.current = pauseRun;
@@ -333,7 +337,10 @@ export function useRunLifecycleManager(deps: {
     const pauseId = pauseDecisionPauseIdRef.current;
     const base = deps.dayStateRef.current;
     const run = base.runs.find((candidate) => candidate.id === runId);
-    if (!pauseId || !run?.pausedAt || run.pausedStoppageId !== pauseId || !deps.canChoosePauseTunnelPolicy(run.pausedAt, Date.now())) {
+    const matchingPause = run?.stoppages?.some((stop) => stop.id === pauseId && stop.type === "pause" && !stop.endedAt);
+    if (!pauseId || !run?.pausedAt || !matchingPause ||
+      (run.pausedStoppageId != null && run.pausedStoppageId !== pauseId) ||
+      !deps.canChoosePauseTunnelPolicy(pauseDecisionStartedAtRef.current, Date.now())) {
       setPauseDecisionRunId(null);
       return;
     }
@@ -459,8 +466,11 @@ export function useRunLifecycleManager(deps: {
   useEffect(() => {
     if (!pauseDecisionRunId) return;
     const pauseId = pauseDecisionPauseIdRef.current;
-    const pausedAt = deps.currentRun?.id === pauseDecisionRunId ? deps.currentRun.pausedAt : undefined;
-    if (!pausedAt || deps.currentRun?.pausedStoppageId !== pauseId) { setPauseDecisionRunId(null); return; }
+    const selected = deps.currentRun?.id === pauseDecisionRunId ? deps.currentRun : undefined;
+    const matchingPause = selected?.stoppages?.some((stop) => stop.id === pauseId && stop.type === "pause" && !stop.endedAt);
+    const pausedAt = pauseDecisionStartedAtRef.current;
+    if (!selected?.pausedAt || !matchingPause ||
+      (selected.pausedStoppageId != null && selected.pausedStoppageId !== pauseId)) { setPauseDecisionRunId(null); return; }
     const close = () => setPauseDecisionRunId(null);
     const timer = window.setTimeout(close, deps.pauseDecisionRemainingMs(pausedAt, Date.now()));
     const closeWhenHidden = () => {

@@ -11,4 +11,5 @@ export type OperationalRunViewFormulaProvenanceLinePhasesVersion = typeof Operat
 
 export const OperationalRunViewFormulaProvenanceLinePhasesVersion = {
   NUMBER_1: 1,
+  NUMBER_2: 2,
 } as const;

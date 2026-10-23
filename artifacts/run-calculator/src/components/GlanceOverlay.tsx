@@ -69,14 +69,14 @@ const GlanceOverlay = memo(function GlanceOverlay() {
             <p className="text-5xl font-black tabular-nums" data-testid="glance-time-remaining">{fmtTime(calc.adjustedTimeSec)}</p>
           </div>
         )}
-        {/* Pace + PPM */}
+        {/* Pace + pizza/pair throughput */}
         <div className="flex items-center justify-center gap-4">
           {calc.paceStatus !== null && (
             <span className={`text-base font-bold ${calc.paceStatus === "behind" ? "text-amber-400" : "text-emerald-400"}`}>
               {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} ahead` : `▼ ${Math.abs(calc.paceDelta)} behind`}
             </span>
           )}
-          {calc.ppm > 0 && <span className="text-base font-bold text-muted-foreground">{calc.ppm} PPM</span>}
+          {calc.ppm > 0 && <span className="text-base font-bold text-muted-foreground">{calc.ppm} pizzas/min · {calc.ppm / 2} pairs/min</span>}
         </div>
       </div>
       <p className="absolute bottom-6 text-xs text-muted-foreground/50">Tap anywhere to dismiss</p>

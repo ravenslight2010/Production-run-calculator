@@ -1087,7 +1087,7 @@ export default function SetupProfileEditor({
                       </div>
                     </div>
                     {lineType === "crusts" ? (
-                      <NumField control={form.control} name="approxLineSpeed" label="Approximate Line Speed (ppm)" step="0.1" />
+                      <NumField control={form.control} name="approxLineSpeed" label="Approximate Line Speed (pizzas/min)" step="0.1" />
                     ) : (
                       <div className="grid grid-cols-2 gap-3">
                         <NumField control={form.control} name="crustsPerCycle" label="Crusts Per Cycle" step="1" />

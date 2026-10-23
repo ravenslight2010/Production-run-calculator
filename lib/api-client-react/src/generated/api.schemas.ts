@@ -5588,10 +5588,21 @@ export interface OperationalLinePhase {
   remainMs: number;
 }
 
+/**
+ * Four physical sections; numbered stages retain their legacy meanings for older clients.
+ */
+export type OperationalRunViewElapsedPhaseSections = {
+  pressOven: OperationalLinePhase;
+  frontline: OperationalLinePhase;
+  freezeTunnel: OperationalLinePhase;
+  packaging: OperationalLinePhase;
+};
 export type OperationalRunViewElapsedPhase = {
   stage1: OperationalLinePhase;
   stage2: OperationalLinePhase;
   stage3: OperationalLinePhase;
+  /** Four physical sections; numbered stages retain their legacy meanings for older clients. */
+  sections?: OperationalRunViewElapsedPhaseSections;
 };
 
 export type OperationalRunViewElapsed = {
@@ -5707,6 +5718,7 @@ export type OperationalRunViewFormulaProvenanceLinePhasesVersion = typeof Operat
 
 export const OperationalRunViewFormulaProvenanceLinePhasesVersion = {
   NUMBER_1: 1,
+  NUMBER_2: 2,
 } as const;
 
 export type OperationalRunViewFormulaProvenance = {
@@ -7454,6 +7466,18 @@ export interface DieLineDefaultsEntry {
      * @nullable
      */
   preTunnelMin?: number | null;
+  /**
+     * Press/Oven transit minutes; zero is intentional. Absent uses the editable legacy allocation, not a measured time.
+     * @minimum 0
+     * @nullable
+     */
+  pressOvenMin?: number | null;
+  /**
+     * Frontline transit minutes; zero is intentional. Absent allocates the remaining legacy pre-tunnel window.
+     * @minimum 0
+     * @nullable
+     */
+  frontlineMin?: number | null;
   /**
      * Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12").
      * @nullable

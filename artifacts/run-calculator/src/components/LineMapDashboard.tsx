@@ -8,7 +8,7 @@ import {
 } from "../frontlineRows";
 import type { HomeTab } from "../hooks/useHomeNavigation";
 import type { ScheduledDay, ScheduledRun } from "../scheduledDays";
-import type { StationActivityEvidence } from "@workspace/live-calc";
+import { resolveLineTiming, type PhaseInfo, type StationActivityEvidence } from "@workspace/live-calc";
 import {
   Layers, Droplets, Flame, Boxes, Snowflake, Package, Warehouse,
   ArrowRight, Play, Pause, Square, Clock, AlertTriangle,
@@ -172,7 +172,9 @@ export default function LineMapDashboard() {
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     autoTrackProgress, autoTrackSuggestion,
     stationActivity, stationActivityNowMs,
+    linePhases,
   } = useLiveRun();
+  const liveSections = linePhases?.sections;
 
   const goToTab = navigate ?? (() => {});
   const productLabel = currentProductLabel(currentRun);
@@ -208,16 +210,25 @@ export default function LineMapDashboard() {
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Press/Oven (derived from calc — cases left / completed)
-    const pressStatus = deriveStationStatus(runStatus, hasRun, isRunning && calc.pressCasesLeft > 0);
+    const timing = resolveLineTiming(ve);
+    const sections = liveSections;
+    const sectionStatus = (phase: PhaseInfo | undefined, fallback: ZoneStatus["status"]): ZoneStatus["status"] => {
+      if (!phase) return fallback;
+      if (phase.state === "paused") return "stopped";
+      if (phase.state !== "empty") return "active";
+      return runStatus === "ended" ? "stopped" : runStatus === "pending" ? "upstream" : "idle";
+    };
+    const pressStatus = sectionStatus(sections?.pressOven, deriveStationStatus(runStatus, hasRun, isRunning && calc.pressCasesLeft > 0));
     const pressMetrics = [
       calc.pressCasesLeft > 0 ? { label: "Cases left", value: String(calc.pressCasesLeft) } : null,
       calc.casesCompleted > 0 ? { label: "Cases done", value: `${fmtNum(calc.casesCompleted)} / ${fmtNum(v.casesNeeded)}` } : null,
-      calc.ppm > 0 ? { label: "Line speed", value: `${fmtNum(calc.ppm)} ppm` } : null,
+      calc.ppm > 0 ? { label: "Pair rate", value: `${fmtNum(calc.ppm / 2)} pairs/min` } : null,
+      calc.ppm > 0 ? { label: "Pizza rate", value: `${fmtNum(calc.ppm)} pizzas/min` } : null,
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Frontline (apps + pep)
     const frontlineStatus = (() => {
-      return deriveStationStatus(runStatus, hasRun, isRunning && pressStatus === "active");
+      return sectionStatus(sections?.frontline, deriveStationStatus(runStatus, hasRun, isRunning && pressStatus === "active"));
     })();
     const hasConfiguredPep = [v.pep1Type, v.pep1TypeB, v.pep2Type, v.pep2TypeB]
       .some((type) => typeof type === "string" && type.trim().length > 0);
@@ -252,16 +263,16 @@ export default function LineMapDashboard() {
     }));
 
     // Freeze Tunnel (derived from calc — cases in freezer)
-    const tunnelStatus = deriveStationStatus(runStatus, hasRun, isRunning && calc.casesInFreezer > 0);
+    const tunnelStatus = sectionStatus(sections?.freezeTunnel, deriveStationStatus(runStatus, hasRun, isRunning && calc.casesInFreezer > 0));
     const tunnelMetrics = [
       calc.casesInFreezer > 0 ? { label: "Cases in tunnel", value: String(calc.casesInFreezer) } : null,
       casesFreezerPct > 0 ? { label: "Fill level", value: `${Math.round(casesFreezerPct * 100)}%` } : null,
-      ve.freezerTime > 0 ? { label: "Transit time", value: `${fmtNum(ve.freezerTime)} min` } : null,
+      ve.freezerTime > 0 ? { label: "Tunnel transit", value: `${fmtNum(timing.tunnelMin)} min` } : null,
     ].filter(Boolean) as { label: string; value: string }[];
 
     // Packaging (derived from calc — cases completed vs needed)
     const packActive = calc.casesCompleted > 0 && calc.casesCompleted < v.casesNeeded;
-    const packStatus = deriveStationStatus(runStatus, hasRun, isRunning && packActive);
+    const packStatus = sectionStatus(sections?.packaging, deriveStationStatus(runStatus, hasRun, isRunning && packActive));
     const packMetrics = [
       autoTrackSuggestion ? { label: "Skids", value: `${autoTrackSuggestion.skids} full` } : null,
       autoTrackSuggestion ? { label: "Current skid", value: `${autoTrackSuggestion.casesOnSkid} / ${v.casesPerSkid}` } : null,
@@ -276,8 +287,8 @@ export default function LineMapDashboard() {
     const stationZones: ZoneStatus[] = [
       { id: "dough" as ZoneId, label: "Dough", icon: <Layers className="w-5 h-5" />, navTab: "dough", status: doughStatus, metrics: doughMetrics, sub: "Mix · Form · Stage" },
       { id: "sauce" as ZoneId, label: "Sauce", icon: <Droplets className="w-5 h-5" />, navTab: "sauce", status: sauceStatus, metrics: sauceMetrics, sub: "Mix · Barrel" },
-      { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: `Pre-tunnel ${fmtNum(v.preTunnelMin || 2.5)} min` },
-      { id: "frontline" as ZoneId, label: "Frontline", icon: <Boxes className="w-5 h-5" />, navTab: "frontline", status: frontlineStatus, metrics: frontlineMetrics, sub: "App 1-4 · Pep 1-2" },
+      { id: "press" as ZoneId, label: "Press / Oven", icon: <Flame className="w-5 h-5" />, navTab: "run", status: pressStatus, metrics: pressMetrics, sub: `Pairs · ${fmtNum(timing.pressOvenMin)} min · ${sections?.pressOven.state ?? pressStatus}` },
+      { id: "frontline" as ZoneId, label: "Frontline", icon: <Boxes className="w-5 h-5" />, navTab: "frontline", status: frontlineStatus, metrics: frontlineMetrics, sub: `Single pizzas · ${fmtNum(timing.frontlineMin)} min · ${fmtNum(calc.ppm)} pizzas/min · ${sections?.frontline.state ?? frontlineStatus}` },
       { id: "freezeTunnel" as ZoneId, label: "Freeze Tunnel", icon: <Snowflake className="w-5 h-5" />, navTab: "run", status: tunnelStatus, metrics: tunnelMetrics, sub: `Total ${fmtNum(ve.freezerTime)} min` },
       { id: "packaging" as ZoneId, label: "Packaging", icon: <Package className="w-5 h-5" />, navTab: "packaging", status: packStatus, metrics: packMetrics, sub: `Post-tunnel ${fmtNum(v.postTunnelMin || 2.5)} min` },
       { id: "warehouse" as ZoneId, label: "Warehouse", icon: <Warehouse className="w-5 h-5" />, navTab: "warehouse", status: deriveStationStatus(runStatus, hasRun, false), metrics: whMetrics, sub: "Cooler · Freezer" },
@@ -296,6 +307,7 @@ export default function LineMapDashboard() {
   }, [
     calc, currentRun, dayState, runStatus, v, ve, autoTrackSuggestion, casesFreezerPct,
     stationActivity, stationActivityNowMs,
+    liveSections,
   ]);
 
   // Overall line status
@@ -384,7 +396,7 @@ export default function LineMapDashboard() {
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg border bg-card p-2">
             <div className="text-xs text-muted-foreground">Line Speed</div>
-            <div className="text-sm font-bold tabular-nums">{calc.ppm > 0 ? `${fmtNum(calc.ppm)} ppm` : "—"}</div>
+            <div className="text-sm font-bold tabular-nums">{calc.ppm > 0 ? `${fmtNum(calc.ppm)} pizzas/min · ${fmtNum(calc.ppm / 2)} pairs/min` : "—"}</div>
           </div>
           <div className="rounded-lg border bg-card p-2">
             <div className="text-xs text-muted-foreground">Freeze Transit</div>

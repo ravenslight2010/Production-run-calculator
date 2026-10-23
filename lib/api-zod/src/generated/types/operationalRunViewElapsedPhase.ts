@@ -6,9 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OperationalLinePhase } from './operationalLinePhase';
+import type { OperationalRunViewElapsedPhaseSections } from './operationalRunViewElapsedPhaseSections';
 
 export type OperationalRunViewElapsedPhase = {
   stage1: OperationalLinePhase;
   stage2: OperationalLinePhase;
   stage3: OperationalLinePhase;
+  /** Four physical sections; numbered stages retain their legacy meanings for older clients. */
+  sections?: OperationalRunViewElapsedPhaseSections;
 };

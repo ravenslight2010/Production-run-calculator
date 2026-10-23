@@ -42,6 +42,13 @@ If `run-release-node.sh` exits before a check starts with Node's conflicting `--
 **How to apply:** Preserve the original failure, remove only the conflicting inherited Node option for the retry (for example, `env -u NODE_OPTIONS`), and keep the release runner's own checks and HTTPS protections enabled.
 
 
+## Package-manager bootstrap and process exhaustion
+
+Thread-creation or shell-fork failures can come from a recursive package-manager bootstrap, not an application leak. Inspect the command ancestry before treating them as app failures.
+
+**Why:** A workspace-provided older pnpm repeatedly tried to install the project's pinned newer pnpm through itself, exhausting the local process quota before the app or tests started.
+
+**How to apply:** Stop only the identified failed workflow or its confirmed bootstrap subtree; do not broadly kill Node processes. Keep validation locks intact. If exact installed tool commands are used for a bounded check, record that provenance separately from a successful configured workflow.
 ## Validation runner identity
 
 Verify that the repository's pinned package manager actually starts before interpreting a command failure as a code failure.

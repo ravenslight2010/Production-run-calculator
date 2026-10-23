@@ -36,10 +36,10 @@ function coerceEntry(raw: unknown): DieLineDefaultsEntry | null {
     if (!Number.isFinite(entry[k])) return null;
   }
   // Optional tunnel overrides — present only when the manager set them.
-  for (const k of ["preTunnelMin", "postTunnelMin"] as const) {
+  for (const k of ["preTunnelMin", "postTunnelMin", "pressOvenMin", "frontlineMin"] as const) {
     if (r[k] !== undefined && r[k] !== null) {
       const n = num(r[k]);
-      if (Number.isFinite(n) && n > 0) entry[k] = n;
+      if (Number.isFinite(n) && n >= 0) entry[k] = n;
     }
   }
   return entry;
@@ -63,7 +63,7 @@ export async function saveDieLineDefaults(
   });
   if (!res.ok) throw new Error(`Save die line defaults failed (${res.status})`);
   const data = (await res.json()) as { entries: unknown };
-  if (!Array.isArray(data.entries)) return [];
+  if (!Array.isArray(data.entries)) throw new Error("Save die line defaults returned an invalid response. Retry saving.");
   return data.entries.map(coerceEntry).filter((e): e is DieLineDefaultsEntry => e !== null);
 }
 
@@ -99,6 +99,8 @@ export function toOverridesMap(entries: DieLineDefaultsEntry[]): DieLineDefaults
       casesPerLayer: e.casesPerLayer,
     };
     if (e.preTunnelMin != null) def.preTunnelMin = e.preTunnelMin;
+    if (e.pressOvenMin != null) def.pressOvenMin = e.pressOvenMin;
+    if (e.frontlineMin != null) def.frontlineMin = e.frontlineMin;
     if (e.postTunnelMin != null) def.postTunnelMin = e.postTunnelMin;
     out[key] = def;
   }

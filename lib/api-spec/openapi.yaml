@@ -10988,6 +10988,15 @@ components:
                 stage1: { $ref: "#/components/schemas/OperationalLinePhase" }
                 stage2: { $ref: "#/components/schemas/OperationalLinePhase" }
                 stage3: { $ref: "#/components/schemas/OperationalLinePhase" }
+                sections:
+                  type: object
+                  description: "Four physical sections; numbered stages retain their legacy meanings for older clients."
+                  required: [pressOven, frontline, freezeTunnel, packaging]
+                  properties:
+                    pressOven: { $ref: "#/components/schemas/OperationalLinePhase" }
+                    frontline: { $ref: "#/components/schemas/OperationalLinePhase" }
+                    freezeTunnel: { $ref: "#/components/schemas/OperationalLinePhase" }
+                    packaging: { $ref: "#/components/schemas/OperationalLinePhase" }
         pace:
           type: object
           required: [ppm, paceStatus, paceDelta, catchUpPpm]
@@ -11041,7 +11050,7 @@ components:
               type: array
               items: { type: string, enum: [computeCasesOnLine, computeCasesInFreezer] }
             linePhases: { type: string, enum: [computeLinePhases] }
-            linePhasesVersion: { type: integer, enum: [1] }
+            linePhasesVersion: { type: integer, enum: [1, 2] }
 
     OperationalLinePhase:
       type: object
@@ -13258,6 +13267,16 @@ components:
           description: >-
             Pre-tunnel dwell time override in minutes. Absent = use the app's
             built-in per-die-size default (3.5 min for 7", 2.0 min for 12").
+        pressOvenMin:
+          type: number
+          minimum: 0
+          nullable: true
+          description: "Press/Oven transit minutes; zero is intentional. Absent uses the editable legacy allocation, not a measured time."
+        frontlineMin:
+          type: number
+          minimum: 0
+          nullable: true
+          description: "Frontline transit minutes; zero is intentional. Absent allocates the remaining legacy pre-tunnel window."
         postTunnelMin:
           type: number
           nullable: true

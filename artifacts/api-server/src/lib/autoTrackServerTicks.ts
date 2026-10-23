@@ -87,10 +87,12 @@ function pausedPackagingDrain(
     pauseStopsTunnel,
     lastPauseStopsTunnel: true,
     runStatus: "paused",
-    preTunnelMin: number(values.preTunnelMin) > 0
+    pressOvenMin: typeof values.pressOvenMin === "number" ? values.pressOvenMin : undefined,
+    frontlineMin: typeof values.frontlineMin === "number" ? values.frontlineMin : undefined,
+    preTunnelMin: typeof values.preTunnelMin === "number"
       ? number(values.preTunnelMin)
       : DEFAULT_OUTER_STAGE_MIN,
-    postTunnelMin: number(values.postTunnelMin) > 0
+    postTunnelMin: typeof values.postTunnelMin === "number"
       ? number(values.postTunnelMin)
       : DEFAULT_OUTER_STAGE_MIN,
     freezerTime: number(values.freezerTime),

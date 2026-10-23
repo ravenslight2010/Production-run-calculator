@@ -345,6 +345,8 @@ export * from "./applicatorStock";
 export * from "./sauceStock";
 export * from "./wallClockEngine";
 export * from "./linePhases";
+export * from "./lineTiming";
+export * from "./lineSections";
 export * from "./operationalRunView";
 export * from "./operationalProjection";
 export * from "./stagedSupply";

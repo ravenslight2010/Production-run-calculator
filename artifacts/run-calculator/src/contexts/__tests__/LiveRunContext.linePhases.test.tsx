@@ -41,7 +41,7 @@ const fakeRun = {
   startedAt: NOW_MS - 60_000,
 } as const;
 
-// Server-owned phase model: stage 1 filling with 150s left, downstream empty.
+// Server-owned legacy phase model: stage 1 filling with 150s left, downstream empty.
 const SERVER_PHASES: LinePhases = {
   stage1: { label: "Press · Oven · Frontline", state: "filling", remainMs: 150_000 },
   stage2: { label: "Freeze tunnel", state: "empty", remainMs: 0 },
@@ -98,18 +98,20 @@ function TestProvider({
   operationalSnapshotReceipt = null,
   currentRun = undefined,
   runStatus = "running",
+  values = DEFAULT_VALUES,
 }: {
   children: ReactNode;
   operationalProjection?: OperationalProjection | null;
   operationalSnapshotReceipt?: { runId: string; snapshotId: string; capturedAt: number } | null;
   currentRun?: FakeRun | undefined;
   runStatus?: "pending" | "running" | "paused" | "ended";
+  values?: FormValues;
 }) {
-  const form = useForm<FormValues>({ defaultValues: DEFAULT_VALUES });
+  const form = useForm<FormValues>({ defaultValues: values });
   return (
     <LiveRunProvider
-      v={DEFAULT_VALUES}
-      ve={DEFAULT_VALUES}
+      v={values}
+      ve={values}
       runStatus={runStatus}
       currentRun={currentRun}
       currentRunId={RUN_ID}
@@ -199,6 +201,8 @@ describe("LiveRunProvider — line-phase model adoption", () => {
     expect(phaseProbe.current?.stage1.remainMs).toBe(148_000);
     expect(phaseProbe.current?.stage2.state).toBe("empty");
     expect(phaseProbe.current?.stage3.state).toBe("empty");
+    expect(phaseProbe.current?.sections?.pressOven.label).toBe("Press / Oven");
+    expect(phaseProbe.current?.sections?.frontline.label).toBe("Frontline");
   });
 
   it("falls back to local derivation without a confirmed projection", () => {
@@ -212,6 +216,39 @@ describe("LiveRunProvider — line-phase model adoption", () => {
     // elapsed → stage 1 filling with (2.5 - 1) minutes remaining.
     expect(phaseProbe.current?.stage1.state).toBe("filling");
     expect(phaseProbe.current?.stage1.remainMs).toBe(90_000);
+  });
+
+  it("interpolates the independent server sections without reinterpreting legacy stages", () => {
+    const sections: NonNullable<LinePhases["sections"]> = {
+      pressOven: { label: "Press / Oven", state: "active", remainMs: 0 },
+      frontline: { label: "Frontline", state: "filling", remainMs: 60_000 },
+      freezeTunnel: { label: "Freeze Tunnel", state: "empty", remainMs: 0 },
+      packaging: { label: "Wrapper / Packaging", state: "empty", remainMs: 0 },
+    };
+    render(
+      <TestProvider currentRun={fakeRun} operationalSnapshotReceipt={freshReceipt}
+        operationalProjection={projectionFor({ linePhases: { ...SERVER_PHASES, sections } })}>
+        <Probe probeRef={phaseProbe} />
+      </TestProvider>,
+    );
+    expect(phaseProbe.current?.sections?.pressOven.state).toBe("active");
+    expect(phaseProbe.current?.sections?.frontline.remainMs).toBe(58_000);
+    expect(phaseProbe.current?.stage1.remainMs).toBe(148_000);
+    expect(phaseProbe.current?.stage1.label).toBe("Press · Oven · Frontline");
+  });
+
+  it("resolves the same explicit split locally after reload without a server frame", () => {
+    render(
+      <TestProvider currentRun={fakeRun} values={{
+        ...DEFAULT_VALUES, freezerTime: 10, preTunnelMin: 2, postTunnelMin: 1,
+        pressOvenMin: 0.5, frontlineMin: 1.5,
+      }}>
+        <Probe probeRef={phaseProbe} />
+      </TestProvider>,
+    );
+    expect(phaseProbe.current?.sections?.pressOven.state).toBe("active");
+    expect(phaseProbe.current?.sections?.frontline.state).toBe("filling");
+    expect(phaseProbe.current?.sections?.frontline.remainMs).toBe(60_000);
   });
 
   it("falls back to local derivation when the projection lifecycle differs", () => {

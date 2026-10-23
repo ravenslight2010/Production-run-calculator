@@ -2,8 +2,13 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DayState, FormValues, RunMeta } from "../types";
 import { useRunLifecycleManager } from "./useRunLifecycleManager";
+import { canChoosePauseTunnelPolicy, pauseDecisionRemainingMs, shouldClosePauseDecision } from "../pausePolicy";
 
-const values = { casesNeeded: 100, casesPerSkid: 10, skidsCompleted: 0, casesOnCurrentSkid: 0, batchesReady: 0 } as FormValues;
+const values = {
+  casesNeeded: 100, casesPerSkid: 10, skidsCompleted: 0,
+  casesOnCurrentSkid: 0, batchesReady: 0,
+  pressOvenMin: 1.25, frontlineMin: 0.75, preTunnelMin: 2,
+} as FormValues;
 const run = (id: string, extra: Partial<RunMeta> = {}) => ({ id, brand: "Brand", flavor: "Flavor", ...extra }) as RunMeta;
 const day = (runs: RunMeta[], currentIndex = 0) => ({ date: "2026-01-01", runs, currentIndex }) as DayState;
 
@@ -18,7 +23,7 @@ function setup(state: DayState) {
   } as never;
   const dayStateRef = { current: state };
   const spies = {
-    queue: vi.fn(), save: vi.fn(), push: vi.fn(), resetArrays: vi.fn(),
+    queue: vi.fn().mockReturnValue({ id: "pause-intent-1" }), save: vi.fn(), push: vi.fn(), resetArrays: vi.fn(),
     overlay: vi.fn((runs: RunMeta[]) => runs),
     inventory: vi.fn(() => [{ itemKey: "flour", qty: 3 }]),
     foregroundNotice: vi.fn(), syncEvent: vi.fn(),
@@ -149,7 +154,9 @@ describe("useRunLifecycleManager", () => {
     deps.lastFormRunIdRef.current = "form-owner";
     const { result } = renderHook(() => useRunLifecycleManager(deps));
     act(() => result.current.switchToRun(0));
-    expect(deps.saveRunValues).toHaveBeenCalledWith("form-owner", expect.anything());
+    expect(deps.saveRunValues).toHaveBeenCalledWith("form-owner", expect.objectContaining({
+      pressOvenMin: 1.25, frontlineMin: 0.75, preTunnelMin: 2,
+    }));
     expect(deps.saveRunValues).not.toHaveBeenCalledWith("day-current", expect.anything());
   });
 
@@ -287,6 +294,57 @@ describe("useRunLifecycleManager", () => {
     expect(deps.applyResumeToRun).toHaveBeenCalled();
     expect(deps.dayStateRef.current.runs[0].pausedAt).toBeUndefined();
     expect(spies.save).toHaveBeenCalledBefore(spies.push);
+  });
+
+  it("keeps the same intent-bound pause choice after canonical acknowledgement", () => {
+    const { deps } = setup(day([run("a", { startedAt: 10 })]));
+    const { result, rerender } = renderHook(() => useRunLifecycleManager(deps));
+    act(() => {
+      result.current.pauseRun();
+      deps.currentRun = deps.dayStateRef.current.runs[0];
+    });
+    expect(result.current.pauseDecisionRunId).toBe("a");
+    const canonical = {
+      ...deps.currentRun, pausedStoppageId: undefined,
+      pausedAt: deps.currentRun.pausedAt! + 1,
+      stoppages: [{ ...deps.currentRun.stoppages![0], startedAt: deps.currentRun.pausedAt! + 1 }],
+    };
+    deps.dayStateRef.current = day([canonical]);
+    deps.currentRun = canonical;
+    rerender();
+    expect(result.current.pauseDecisionRunId).toBe("a");
+    act(() => result.current.setPauseTunnelPolicy(false));
+    expect(deps.dayStateRef.current.runs[0].stoppages).toEqual([
+      expect.objectContaining({ id: "offline:pause-intent-1", stopTunnel: false }),
+    ]);
+    expect(result.current.pauseDecisionRunId).toBeNull();
+  });
+
+  it("does not extend the choice deadline on acknowledgement or target another pause", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const { deps } = setup(day([run("a", { startedAt: 10 })]));
+      Object.assign(deps, { canChoosePauseTunnelPolicy, pauseDecisionRemainingMs, shouldClosePauseDecision });
+      const { result, rerender, unmount } = renderHook(() => useRunLifecycleManager(deps));
+      act(() => { result.current.pauseRun(); deps.currentRun = deps.dayStateRef.current.runs[0]; });
+      act(() => vi.advanceTimersByTime(500));
+      deps.currentRun = { ...deps.currentRun, pausedStoppageId: undefined, pausedAt: 100_500 };
+      deps.dayStateRef.current = day([deps.currentRun]);
+      rerender();
+      act(() => vi.advanceTimersByTime(9_500));
+      expect(result.current.pauseDecisionRunId).toBeNull();
+      const different = { ...deps.currentRun, pausedStoppageId: "another-pause",
+        stoppages: [{ id: "another-pause", type: "pause", startedAt: 110_000 }] };
+      deps.dayStateRef.current = day([different]);
+      deps.currentRun = different;
+      rerender();
+      act(() => result.current.setPauseTunnelPolicy(false));
+      expect(deps.dayStateRef.current.runs[0].stoppages?.[0].stopTunnel).toBeUndefined();
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ends with overlay stamp, frozen inventory, and next-run reset", () => {

@@ -177,6 +177,9 @@ export const formSchema = z.object({
   // standard pre/post dwell).  A one-time boot heal writes 2.5 into any
   // existing profile that still has 0 stored from before this default was set.
   preTunnelMin: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.preTunnelMin),
+  // Absent means editable half/half legacy allocation, not a measured default.
+  pressOvenMin: z.coerce.number().finite().min(0).optional(),
+  frontlineMin: z.coerce.number().finite().min(0).optional(),
   postTunnelMin: z.coerce.number().min(0).default(FACTORY_TIMING_DEFAULTS.postTunnelMin),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.

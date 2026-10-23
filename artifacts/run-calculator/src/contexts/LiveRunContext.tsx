@@ -37,6 +37,7 @@ import {
   computePackagingDrainElapsedSec,
   computeEndedRunElapsedSec,
   lineHasPackagingDrain,
+  linePhaseRows,
   type LinePhases,
 } from "../linePhases";
 import { pauseStopsTunnel } from "../pausePolicy";
@@ -332,7 +333,7 @@ export function LiveRunProvider({
     : localElapsedBatchSec;
 
   const serverLinePhases = confirmedProjection?.linePhases ?? null;
-  // Slice 5: the 3-stage line-phase model is server-owned. While a confirmed
+  // The four-section line-phase model is server-owned. While a confirmed
   // projection exists for the current run AND its lifecycle stamp matches the
   // local run status (a just-paused/ended run falls back locally for at most
   // one tick until the server delivers the new lifecycle frame), adopt the
@@ -361,24 +362,35 @@ export function LiveRunProvider({
       pauseStopsTunnel: pauseStopsTunnel(openPause),
       lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
       runStatus,
-      preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
-      postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
+      pressOvenMin: ve.pressOvenMin,
+      frontlineMin: ve.frontlineMin,
+      preTunnelMin: ve.preTunnelMin,
+      postTunnelMin: ve.postTunnelMin,
       freezerTime: Number(ve.freezerTime),
       nowMs: operationalNowMs,
       endedAt: currentRun?.endedAt,
     });
-    if (
-      !serverLinePhases ||
-      !confirmedProjection ||
-      confirmedProjection.facts.runStatus !== runStatus
-    ) {
+    if (!serverLinePhases || !confirmedProjection || confirmedProjection.facts.runStatus !== runStatus) {
       return local;
     }
     const deltaMs = Math.max(0, operationalNowMs - confirmedProjection.capturedAtServerMs);
-    const wouldTransition = [serverLinePhases.stage1, serverLinePhases.stage2, serverLinePhases.stage3]
+    const wouldTransition = linePhaseRows(serverLinePhases)
       .some((phase) => phase.remainMs > 0 && phase.remainMs - deltaMs <= 0);
     if (wouldTransition) return local;
     return {
+      ...(serverLinePhases.sections ? {
+        sections: {
+          pressOven: { ...serverLinePhases.sections.pressOven, remainMs: Math.max(0, serverLinePhases.sections.pressOven.remainMs - deltaMs) },
+          frontline: { ...serverLinePhases.sections.frontline, remainMs: Math.max(0, serverLinePhases.sections.frontline.remainMs - deltaMs) },
+          freezeTunnel: { ...serverLinePhases.sections.freezeTunnel, remainMs: Math.max(0, serverLinePhases.sections.freezeTunnel.remainMs - deltaMs) },
+          packaging: { ...serverLinePhases.sections.packaging, remainMs: Math.max(0, serverLinePhases.sections.packaging.remainMs - deltaMs) },
+        },
+      } : {
+        // Older servers still own the original numbered stages. Derive only
+        // the additive physical sections from the same confirmed elapsed clock
+        // so the new UI does not revert to a combined Press/Oven/Frontline row.
+        sections: local.sections,
+      }),
       stage1: { ...serverLinePhases.stage1, remainMs: Math.max(0, serverLinePhases.stage1.remainMs - deltaMs) },
       stage2: { ...serverLinePhases.stage2, remainMs: Math.max(0, serverLinePhases.stage2.remainMs - deltaMs) },
       stage3: { ...serverLinePhases.stage3, remainMs: Math.max(0, serverLinePhases.stage3.remainMs - deltaMs) },
@@ -394,6 +406,8 @@ export function LiveRunProvider({
     runStatus,
     ve.freezerTime,
     ve.preTunnelMin,
+    ve.pressOvenMin,
+    ve.frontlineMin,
     ve.postTunnelMin,
   ]);
   const packagingDrainActive =
@@ -419,7 +433,7 @@ export function LiveRunProvider({
         ? operationalServerCalc
         : calc);
   const packagingAutoTrackActive =
-    runStatus !== "running" || linePhases.stage3.state === "active";
+    runStatus !== "running" || (linePhases.sections?.packaging ?? linePhases.stage3).state === "active";
   const packagingDrainElapsedSec = computePackagingDrainElapsedSec({
     elapsedBatchSec,
     pausedAt: currentRun?.pausedAt,
@@ -435,8 +449,10 @@ export function LiveRunProvider({
       return pauseStopsTunnel(openPause);
     })(),
     runStatus,
-    preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
-    postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
+    pressOvenMin: ve.pressOvenMin,
+    frontlineMin: ve.frontlineMin,
+    preTunnelMin: ve.preTunnelMin,
+    postTunnelMin: ve.postTunnelMin,
     freezerTime: Number(ve.freezerTime),
     nowMs: nowTime.getTime(),
   });

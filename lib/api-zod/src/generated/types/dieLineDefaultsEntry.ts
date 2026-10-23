@@ -26,6 +26,18 @@ export interface DieLineDefaultsEntry {
      */
   preTunnelMin?: number | null;
   /**
+     * Press/Oven transit minutes; zero is intentional. Absent uses the editable legacy allocation, not a measured time.
+     * @minimum 0
+     * @nullable
+     */
+  pressOvenMin?: number | null;
+  /**
+     * Frontline transit minutes; zero is intentional. Absent allocates the remaining legacy pre-tunnel window.
+     * @minimum 0
+     * @nullable
+     */
+  frontlineMin?: number | null;
+  /**
      * Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12").
      * @nullable
      */

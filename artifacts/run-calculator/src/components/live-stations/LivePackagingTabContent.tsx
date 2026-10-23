@@ -15,6 +15,7 @@ import { PackagingSpeedNudgeFeedback } from "../PackagingSpeedNudgeFeedback";
 import { runUnlockedManualSectionAction } from "../../packagingManager";
 import { isPackagingDrainComplete } from "../../linePhases";
 import { getFreezerSurplusRemainingMs } from "../../freezerSurplus";
+import { linePhaseRows } from "@workspace/live-calc";
 
 export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
@@ -244,7 +245,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   // current run in every lifecycle state (running / paused / ended),
                   // falling back locally inside LiveRunContext when offline/lagging.
                   const phases = linePhases;
-                  const rows = [phases.stage1, phases.stage2, phases.stage3];
+                  const rows = linePhaseRows(phases);
                   const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
                   if (!anyVisible && !showEmptying) return null;
                   // A phase can drain only from its persisted pause / end record.

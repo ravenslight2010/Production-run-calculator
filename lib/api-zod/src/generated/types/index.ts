@@ -513,6 +513,7 @@ export * from './operationalRunViewAdvisoryFreezer';
 export * from './operationalRunViewAdvisoryLine';
 export * from './operationalRunViewElapsed';
 export * from './operationalRunViewElapsedPhase';
+export * from './operationalRunViewElapsedPhaseSections';
 export * from './operationalRunViewFormulaProvenance';
 export * from './operationalRunViewFormulaProvenanceCalculator';
 export * from './operationalRunViewFormulaProvenanceCalculatorVersion';

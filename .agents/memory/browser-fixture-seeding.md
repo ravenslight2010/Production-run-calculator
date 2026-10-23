@@ -68,3 +68,15 @@ update its shared profile while a pending-run snapshot remains stale.
 **How to apply:** After mounting the Run tab, assert the operational state badge
 shows `Confirmed server baseline` before the first edit, then separately assert
 the fixture run selection/count. Avoid fixed sleeps.
+
+For independent-browser and serial-project fixtures, bind assertions to the
+rendered form's run identity, not equal settings or the server's current index.
+
+**Why:** Device-local selection can differ from server selection, and earlier
+matrix cases can leave another run with identical settings. Matching those values
+selected an ended run rather than the paused run actually being tested.
+
+**How to apply:** Read the rendered owner ID, verify canonical values under that
+exact key, and explicitly select that same run in the independent browser. Keep
+its operational storage empty; copying cached run values would hide hydration
+failures.

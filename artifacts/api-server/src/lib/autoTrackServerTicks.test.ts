@@ -231,6 +231,20 @@ describe("server auto-track claim builders", () => {
     expect(source.runValues[RUN].sauceBarrelsMade).toBe(0);
   });
 
+  it("preserves pizza totals and claim identities when paired transit is split into singles", () => {
+    const legacy = payload({ preTunnelMin: 0.5, postTunnelMin: 0.5 });
+    const split = payload({
+      preTunnelMin: 0.5, postTunnelMin: 0.5,
+      pressOvenMin: 0.1, frontlineMin: 0.4,
+    });
+    expect(computeServerCalc(split as never, [], NOW)?.calc)
+      .toEqual(computeServerCalc(legacy as never, [], NOW)?.calc);
+    expect(buildNetSecondServerClaims(split, NOW, "split-parity"))
+      .toEqual(buildNetSecondServerClaims(legacy, NOW, "split-parity"));
+    expect(buildWallClockServerClaims(split, NOW, "split-parity"))
+      .toEqual(buildWallClockServerClaims(legacy, NOW, "split-parity"));
+  });
+
   it("surfaces calculation failures so the server tick runner can record and retry them", () => {
     const failure = new Error("canonical calculation failed");
     const invalidPayload = new Proxy({}, {
@@ -416,6 +430,8 @@ describe("server auto-track claim builders", () => {
     const source = payload({
       freezerTime: 3,
       preTunnelMin: 0.5,
+      pressOvenMin: 0.1,
+      frontlineMin: 0.4,
       postTunnelMin: 0.5,
       skidsCompleted: 1,
       casesOnCurrentSkid: 0,
