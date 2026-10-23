@@ -403,7 +403,6 @@ describe("Pepperoni supply controls retained alongside applicator batches", () =
   const fixture = (queueManualCorrection = vi.fn(), runId = RUN_ID) =>
     <FrontlineNavigationFixture values={PEPPERONI_VALUES} runId={runId} queueManualCorrection={queueManualCorrection} />;
   const input = (register: string) => screen.getByTestId(`stock-${register}-lbs`) as HTMLInputElement;
-      const controls = applicatorSupplyControls(slot);
   function navigateAwayAndBack() {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Dough" }), { button: 0, ctrlKey: false });
     expect(screen.queryByTestId("stock-pep1-lbs")).toBeNull();

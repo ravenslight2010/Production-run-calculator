@@ -11,6 +11,7 @@ const documentationPath = new URL(
   "../docs/performance-budgets.md",
   import.meta.url,
 );
+const packageManifestPath = new URL("../package.json", import.meta.url);
 
 const numberWords = new Map([
   ["one", 1],
@@ -62,5 +63,31 @@ test("calculator test duration and worker prerequisite match the guide", () => {
     documentedMinimumWorkers,
     MIN_CALCULATOR_TEST_WORKERS,
     `Calculator test worker prerequisite drift: performance-budgets.md documents at least ${documentedMinimumWorkers} available CPU workers, but check-test-duration.mjs enforces at least ${MIN_CALCULATOR_TEST_WORKERS}.`,
+  );
+});
+
+test("standard calculator tests run Vitest through the duration guard once", () => {
+  const packageManifest = JSON.parse(
+    readFileSync(packageManifestPath, "utf8"),
+  );
+  const testScript = packageManifest.scripts?.test;
+  const budgetScript = packageManifest.scripts?.["test:budget"];
+
+  assert.equal(typeof testScript, "string");
+  assert.equal(
+    budgetScript,
+    "node scripts/check-test-duration.mjs",
+    "the budget command must execute the existing duration guard",
+  );
+  assert.equal(
+    [...testScript.matchAll(/(?:^|&&)\s*pnpm run test:budget(?:\s|$)/g)]
+      .length,
+    1,
+    "the standard calculator test command must use the duration-guarded Vitest run",
+  );
+  assert.doesNotMatch(
+    testScript,
+    /(?:^|&&)\s*vitest run(?:\s|$)/,
+    "the standard calculator test command must not launch a second unmeasured Vitest run",
   );
 });

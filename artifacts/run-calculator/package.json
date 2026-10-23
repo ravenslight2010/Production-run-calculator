@@ -21,7 +21,7 @@
     "test:vite-config-loading": "node --test scripts/check-vite-config-loading.test.mjs",
     "pretypecheck": "pnpm run test:vite-config-loading && pnpm run check:vite-config-loading && pnpm --filter @workspace/inventory-math exec node ../../node_modules/typescript/bin/tsc -b --force && pnpm --filter @workspace/spec-import exec node ../../node_modules/typescript/bin/tsc -b && pnpm --filter @workspace/recipe-guide-import exec node ../../node_modules/typescript/bin/tsc -b --force",
     "typecheck": "pnpm run check:as-any-budget && node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run test:budget:contract && pnpm run check:as-any-budget && pnpm run test:as-any-budget && pnpm run test:deferred-home-boundary && pnpm run test:home-deferred-build-registration && vitest run",
+    "test": "pnpm run test:budget:contract && pnpm run check:as-any-budget && pnpm run test:as-any-budget && pnpm run test:deferred-home-boundary && pnpm run test:home-deferred-build-registration && pnpm run test:budget",
     "test:budget": "node scripts/check-test-duration.mjs",
     "test:budget:lower": "CALCULATOR_TEST_WORKERS=4 node scripts/check-test-duration.mjs",
     "test:budget:unit": "node --test scripts/check-test-duration.test.mjs",

@@ -33,9 +33,12 @@ describe("shared live calculation boundary", () => {
 
   it("does not create automatic batch claims without a valid configured weight", () => {
     const base = {
-      syncVersion: 1 as const, completeness: "complete" as const,
-      dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, substitutions: [{ action: "replace" }], runs: [{ id: "run-1", startedAt: 1_000 }] },
-      runValues: { "run-1": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, tempCycleSpeed: 12 } },
+      type: "cheese",
+      recipe: undefined,
+      ozPerPizza: 1,
+      casesNeeded: 100,
+      pizzasPerCase: 10,
+      ppm: 60,
     };
     expect(computeAppSlotInfo({ ...base, batchLbs: 0 })).toMatchObject({
       effectiveBatchLbs: 0, required: 0, cadence: 0, validForClaim: false,
