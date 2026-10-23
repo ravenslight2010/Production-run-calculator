@@ -1,3 +1,4 @@
+import { ImportReviewTiming } from "../importReviewTiming";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
@@ -1480,6 +1481,7 @@ export default function SpecImportDialog({
 
           {!loading && !error && prepared && (
             <>
+              <ImportReviewTiming prepared={prepared} />
               {step === 1 ? (
                 <p className="text-sm text-muted-foreground">
                   <span className="font-medium text-foreground">Step 1 of 2 — products.</span>{" "}

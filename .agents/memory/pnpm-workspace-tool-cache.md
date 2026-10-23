@@ -24,3 +24,15 @@ runner and the exact package-manager pin to repair tool provisioning. Do not
 downgrade the pin, disable strict checks or TLS, or label an unstarted check
 passed. Verify the bare manager's version and expected cache-bin layout before
 retrying completion; installation success alone is insufficient.
+
+Recursive bootstrap can exhaust the container's process/thread limit before
+any project check starts, making unrelated shell commands and app workflows
+fail with resource errors.
+
+**Why:** Concurrent workflow launches amplified one recursive version switch
+into dozens of installer processes; the application code was not the cause.
+
+**How to apply:** Inspect process ancestry when resource errors accompany a
+version-switching install. Stop only the confirmed recursive installer tree,
+repair the exact pinned tool's cache entry, then restore affected app workflows.
+Do not respond by lowering test coverage or changing the repository's pin.

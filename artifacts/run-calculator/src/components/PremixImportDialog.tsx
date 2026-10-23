@@ -1,3 +1,4 @@
+import { ImportReviewTiming } from "../importReviewTiming";
 import { useEffect, useMemo, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle, Link2 } from "lucide-react";
 import {
@@ -384,6 +385,7 @@ export default function PremixImportDialog({
 
           {!loading && !error && prepared && (
             <>
+              <ImportReviewTiming prepared={prepared} />
               <p className="text-sm text-muted-foreground">
                 Review each mix below. Uncheck any you don't want, or fix a wrong
                 product match. Checked mixes marked{" "}

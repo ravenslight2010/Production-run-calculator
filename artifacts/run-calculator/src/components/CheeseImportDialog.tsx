@@ -1,3 +1,4 @@
+import { ImportReviewTiming } from "../importReviewTiming";
 import { useEffect, useState } from "react";
 import {
   X,
@@ -377,6 +378,7 @@ export default function CheeseImportDialog({
 
           {!loading && !error && prepared && (
             <>
+              <ImportReviewTiming prepared={prepared} />
               <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/40 p-2">
                 Tip: for the best matching, import in this order — dough &amp;
                 sauce recipes first, then spec sheets, then cheese and premix

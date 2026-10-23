@@ -616,6 +616,7 @@ import { saveAiCorrections } from "../aiCorrections";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
+import { startImportReviewTiming } from "../importReviewTiming";
 import {
   buildActiveRunIds,
   buildPersistedRunValues,
@@ -13052,9 +13053,8 @@ export default function Home() {
       if (gen !== specImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
         recordPerformance("import-spec-parse", performance.now() - parseStartedAt, "api");
-        recordPerformance("import-spec-review-open", 0, "render");
-        recordMemorySample("import-spec-review-open");
       }
+      startImportReviewTiming(prepared, "spec");
       // Remember which file(s) this came from so each distinct spec sheet keeps
       // its own two most recent versions (per-file retention, newest = default).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
@@ -13862,9 +13862,8 @@ export default function Home() {
       if (gen !== premixImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
         recordPerformance("import-premix-parse", performance.now() - parseStartedAt, "api");
-        recordPerformance("import-premix-review-open", 0, "render");
-        recordMemorySample("import-premix-review-open");
       }
+      startImportReviewTiming(prepared, "premix");
       // Remember which file(s) this came from so each distinct premix workbook
       // keeps its own two most recent versions (per-file retention).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
@@ -14381,9 +14380,8 @@ export default function Home() {
       if (gen !== cheeseImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
         recordPerformance("import-cheese-parse", performance.now() - parseStartedAt, "api");
-        recordPerformance("import-cheese-review-open", 0, "render");
-        recordMemorySample("import-cheese-review-open");
       }
+      startImportReviewTiming(prepared, "cheese");
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setCheeseImportPrepared(prepared);
     } catch (err) {
