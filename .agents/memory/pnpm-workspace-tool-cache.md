@@ -25,6 +25,23 @@ downgrade the pin, disable strict checks or TLS, or label an unstarted check
 passed. Verify the bare manager's version and expected cache-bin layout before
 retrying completion; installation success alone is insufficient.
 
+When the system pnpm repeatedly self-installs the workspace pin, invoke the
+exact package through `npm exec --yes --package=pnpm@<packageManager> -- pnpm`
+under `scripts/src/run-release-node.sh` for a single validation command. If a
+configured check itself invokes bare `pnpm`, cache the exact package outside
+the repository and link its executable into the ignored workspace
+`node_modules/.bin` directory, which is already ahead of the system pnpm on
+this workspace's PATH. Verify the selected version before running checks.
+
+**Why:** In this workspace, the system pnpm was older than the project pin and
+its self-install loop exhausted available threads before project scripts ran;
+the npm-provisioned exact pnpm reached checks without changing repository
+package policy.
+
+**How to apply:** Keep the tool cache and link outside tracked source. Do not
+change `packageManager`, the lockfile, or the runner solely to accommodate a
+local tool-cache problem.
+
 Recursive bootstrap can exhaust the container's process/thread limit before
 any project check starts, making unrelated shell commands and app workflows
 fail with resource errors.

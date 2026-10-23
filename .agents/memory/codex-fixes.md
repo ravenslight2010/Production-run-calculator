@@ -1421,3 +1421,18 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: A rendered hit-area check catches undersized actions that visibility and clickability checks miss, reducing missed production actions on compact screens.
 
 **Verification**: Focused isolated Chromium browser run passed all five viewports; Run Calculator typecheck passed.
+
+## Calculator routine test-limit contract
+
+**Date**: 2026-10-23
+**Files changed**:
+- `artifacts/run-calculator/package.json`
+- `artifacts/run-calculator/src/autoTrackTraysBatches.test.tsx`
+
+**What was wrong**: The standard calculator test command did not run the focused duration/worker documentation contract. The full suite also exposed a stale auto-track test setup that armed packaging suppression while asserting dough tray suppression.
+
+**What the fix was**: Added the contract test to the package's standard test chain while retaining its standalone command. Corrected the tray test to arm the dough-specific suppression ref.
+
+**Why it was needed**: CI invokes the package's standard test command, so placing the contract there ensures guide/runner drift fails routine validation. The test setup must use the suppression channel the tray countdown actually observes.
+
+**Verification**: Focused contract passed; full calculator suite passed (3,507 passed, 1 skipped); workspace typecheck passed.
