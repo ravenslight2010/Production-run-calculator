@@ -58,6 +58,9 @@ function sample(
       superuserReservedSlots: 4,
       roleReservedSlots: 0,
       serverClientBackends: 9,
+      ...(schemaVersion >= 2
+        ? { activeWaitingBackends: 0, lockWaitingBackends: 0 }
+        : {}),
       ...database,
     },
   };
@@ -105,6 +108,82 @@ test("emits a sanitized revision-bound report but never enables peer SSE", () =>
     platformMetrics.peakMetricsCapturedAtUtc);
   assert.equal(result.conclusion.livePeerSseSupported, false);
   assert.equal(result.conclusion.deploymentSettingsChanged, false);
+});
+
+test("summarizes bounded PostgreSQL wait counts and keeps missing historical counts unknown", () => {
+  const middleV2WithoutWaitCounts = {
+    ...sample("2026-10-11T00:05:00.000Z"),
+    schemaVersion: 2,
+  };
+  const legacy = report([
+    sample(windowStart),
+    middleV2WithoutWaitCounts,
+    sample(windowEnd),
+  ]);
+  assert.deepEqual(legacy.capacitySamples.postgresWaitEvents, {
+    sampleCount: 0,
+    samplesWithActiveWaiters: 0,
+    maximumActiveWaiters: null,
+    samplesWithLockWaiters: 0,
+    maximumLockWaiters: null,
+  });
+
+  const withWaitCounts = report([
+    sample(windowStart, { activeWaitingBackends: 0, lockWaitingBackends: 0 }, 2),
+    sample("2026-10-11T00:05:00.000Z", {
+      activeWaitingBackends: 4,
+      lockWaitingBackends: 2,
+    }, 2),
+    sample(windowEnd, { activeWaitingBackends: 1, lockWaitingBackends: 0 }, 2),
+  ]);
+  assert.deepEqual(withWaitCounts.capacitySamples.postgresWaitEvents, {
+    sampleCount: 3,
+    samplesWithActiveWaiters: 2,
+    maximumActiveWaiters: 4,
+    samplesWithLockWaiters: 1,
+    maximumLockWaiters: 2,
+  });
+});
+
+test("wait-count parser preserves bounds across generated inputs", () => {
+  fc.assert(fc.property(
+    fc.integer({ min: 0, max: 100 }),
+    fc.integer({ min: 0, max: 100 }),
+    (activeWaiters, candidateLockWaiters) => {
+      const lockWaiters = Math.min(activeWaiters, candidateLockWaiters);
+      const validSamples = [
+        sample(windowStart, { activeWaitingBackends: activeWaiters, lockWaitingBackends: lockWaiters }, 2),
+        sample("2026-10-11T00:05:00.000Z", {
+          activeWaitingBackends: activeWaiters, lockWaitingBackends: lockWaiters,
+        }, 2),
+        sample(windowEnd, { activeWaitingBackends: activeWaiters, lockWaitingBackends: lockWaiters }, 2),
+      ];
+      const valid = report(validSamples);
+      assert.equal(valid.capacitySamples.postgresWaitEvents.maximumActiveWaiters, activeWaiters);
+      assert.equal(valid.capacitySamples.postgresWaitEvents.maximumLockWaiters, lockWaiters);
+
+      if (candidateLockWaiters > activeWaiters) {
+        const invalidSamples = [
+          sample(windowStart, { activeWaitingBackends: activeWaiters, lockWaitingBackends: lockWaiters }, 2),
+          sample("2026-10-11T00:05:00.000Z", {
+            activeWaitingBackends: activeWaiters,
+            lockWaitingBackends: candidateLockWaiters,
+          }, 2),
+          sample(windowEnd, { activeWaitingBackends: activeWaiters, lockWaitingBackends: lockWaiters }, 2),
+        ];
+        assert.throws(() => report(invalidSamples), /wait-event counts are inconsistent/i);
+      }
+    },
+  ));
+
+  const incomplete = sample("2026-10-11T00:05:00.000Z", {
+    activeWaitingBackends: 1,
+    lockWaitingBackends: undefined,
+  }, 2);
+  assert.throws(
+    () => report([sample(windowStart), incomplete, sample(windowEnd)]),
+    /incomplete wait-event counts/i,
+  );
 });
 
 test("platform metrics remain fresh through 24 hours; older or future windows cannot prove a budget", () => {

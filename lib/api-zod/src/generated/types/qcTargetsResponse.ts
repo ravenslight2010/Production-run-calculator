@@ -5,9 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { QcBrixTarget } from './qcBrixTarget';
 import type { QcTarget } from './qcTarget';
 
 export interface QcTargetsResponse {
   profileKey: string;
   targets: QcTarget[];
+  brixTargets?: QcBrixTarget[];
 }

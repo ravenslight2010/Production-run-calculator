@@ -863,7 +863,7 @@ imports in prod. Rules now in force:
 - **Dough/sauce procedure targets must NEVER create brands.** The tie loop
   filters targets to already-known brand+flavors AND canonicalizes them onto
   the existing registry spelling (a loose match must not mint "Aldo" beside
-  "Aldo's"). A dough workbook once minted 4 junk brands in prod this way.
+  "Aldo's"). A dough workbook once minted [redacted location].
 - profileAutofill's planner must mirror any change here exactly.
 
 ## Automatic fallback for valid unresolved workbooks (WEB ONLY)

@@ -11,25 +11,29 @@ Auth endpoints live in OpenAPI for codegen: `/auth/sign-up`, `/auth/sign-in`, `/
 
 **Orval name collision gotcha:** the request-body schema in `components/schemas` must NOT share a name with the operation's generated zod body (`<operationId>Body`), or `lib/api-zod` re-exports the same name from both `generated/types` and `generated/api` → TS2308. That's why sign-up/in use schema `AuthCredentials` (→ zod `SignUpBody`), and change-password uses schema `ChangePasswordCredentials` (→ zod `ChangePasswordBody`).
 
-**change-password gating:** the auth router is mounted publicly (before the global `requireAuth`), so `/auth/change-password` applies `requireAuth` **inline** as per-route middleware. It verifies `currentPassword` against the stored hash, then `updateUserPassword` rewrites the scrypt hash. Session is NOT rotated (token still valid). UI lives in the InventoryTab settings area (any signed-in user), next to the manager-only StaffRolesCard, on both web + mobile.
+**change-password gating:** the auth router is mounted publicly (before the global `requireAuth`), so `/auth/change-password` applies `requireAuth` **inline** as per-route middleware. It verifies `currentPassword` against the stored hash, then `updateUserPassword` rewrites the scrypt hash. Session is NOT rotated (token still valid). UI lives in the InventoryTab settings area (any signed-in user), next to the manager-only StaffRolesCard.
 
-## Transport split (the key non-obvious thing)
+## Current and historical transport behavior
 - **Web** (`run-calculator`): authenticates via an **httpOnly cookie `rc_auth`** set by the server on sign-up/in; same-origin requests send it automatically — no token threading. Web client uses raw fetch by design (not generated hooks).
-- **Mobile** (`run-calculator-mobile`): has no cookie jar, so it threads a **bearer token** explicitly. Token is returned in the sign-up/in JSON body, stored in `expo-secure-store` (key `rc_auth_token`), and exposed via `setAuthTokenGetter`. The generated API client and the raw SSE/REST transports (sync client, inventoryShared, aiOptimize) all read that getter and attach `Authorization: Bearer`.
+- **Historical mobile client** (`run-calculator-mobile`): the old Expo app used explicit bearer headers, but it is archived and is not a maintained product target. Do not use it as a reason to retain server auth exceptions.
 
-**Why:** SSE/REST on mobile bypass the generated client, so each transport must independently pick up the bearer or it 401s.
+**Why:** the product is now maintained as one responsive web app; the old mobile transport notes describe an archived client.
 
 ## Server gating
 - `requireAuth` (verifies token from `Authorization: Bearer` OR `rc_auth` cookie) gates **all** `/api/*` except `/api/healthz` and the public `/api/auth/*` router.
 - Role gating (`requireRole("manager")`) is on the SAME endpoints as before (item CRUD, AI photo, settings, staff admin). NEVER gate `/sync` day-state by role — breaks parity.
 - Verify quickly: `/api/healthz`→200; protected route signed out→401; operator hitting a manager-only route (`/api/users`)→403; wrong password→401; duplicate username→409; sign-out→204.
 
-## Expo-web preview blank — FIXED (height race, not an auth issue)
-react-native-web's `flex:1` tree measures against `#root`, which has no intrinsic height, and collapses to zero. Setting height in a `useEffect` runs too late. Fix: set `html/body/#root` height **synchronously at module-load** in `app/_layout.tsx` (guarded by `Platform.OS === "web"`) **and** bake the same CSS into `app/+html.tsx`. **How to apply:** fix root-height race at module scope or `+html.tsx`, never in a `useEffect`.
+## Historical Expo-web preview layout
+The old Expo web preview required root-height styles to render its React Native web tree. That client is archived and is not a maintained product target.
 
-## Expo-web preview signed-in data (CORS + SSE) — FIXED
-The expo-web preview is served cross-origin from `*.expo.worf.replit.dev` calling the API at `*.worf.replit.dev/api/*` (native is unaffected — no CORS, bearer via header):
-- **CORS** (`api-server/src/app.ts`): origin is an allowlist function, not blanket `origin:true`. Reflects configured `REPLIT_DOMAINS` always; reflects localhost + `*.replit.dev` only when `NODE_ENV !== "production"`. No-Origin requests (native/curl) always pass.
-- **SSE auth on web**: the browser `EventSource` cannot set an `Authorization` header, so it appends the token as `?token=`. The server promotes `?token=` → `Authorization: Bearer` in a middleware that runs **before** auth, gated to `NODE_ENV !== "production"` only.
+**Why:** the product is maintained as a responsive web app; old Expo implementation notes can send changes into an unsupported client.
 
-**Why:** EventSource has no header API; same-origin web uses cookies and is unaffected. **How to apply:** keep token-in-URL acceptance dev-only; never blanket-reflect CORS origins.
+**How to apply:** follow the web-only product boundary. Do not modify or restore archived Expo sources to fix current web UI.
+
+## Retired Expo-web preview
+An earlier Expo web preview used the cross-origin `*.expo.worf.replit.dev` origin. No maintained client in the repository uses that path; current web EventSource callers use relative same-origin `/api/...` URLs. Development query-token promotion has been removed. The general development CORS policy remains unchanged.
+
+**Why:** retaining credentials in URL query strings is not justified without a maintained caller, and the web-only product boundary supersedes the old Expo preview note.
+
+**How to apply:** do not restore query-token authentication for an archived client. If a supported cross-origin browser client is introduced later, design its authentication transport explicitly and keep credentials out of URLs where possible.

@@ -6,6 +6,7 @@ import {
   index,
   check,
   integer,
+  serial,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
@@ -26,7 +27,7 @@ import { z } from "zod/v4";
 export const auditLogsTable = pgTable(
   "audit_logs",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     actor: text("actor").notNull(), // stable server-authenticated actor ID
     action: text("action").notNull(), // 'factory_reset', 'role_change', 'rule_edit', etc.

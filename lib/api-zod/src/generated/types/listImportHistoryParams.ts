@@ -9,6 +9,12 @@ import type { ListImportHistoryStatus } from './listImportHistoryStatus';
 import type { ListImportHistoryType } from './listImportHistoryType';
 
 export type ListImportHistoryParams = {
+/**
+ * Exact scoped source identity, bounded to 300 characters
+ * @minLength 1
+ * @maxLength 300
+ */
+sourceKey?: string;
 type?: ListImportHistoryType;
 status?: ListImportHistoryStatus;
 customer?: string;

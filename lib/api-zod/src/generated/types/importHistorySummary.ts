@@ -5,10 +5,15 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ImportHistorySummaryAppliedValues } from './importHistorySummaryAppliedValues';
 import type { ImportHistorySummaryCounts } from './importHistorySummaryCounts';
+import type { ImportHistorySummaryPersistence } from './importHistorySummaryPersistence';
 import type { ImportHistorySummaryPhases } from './importHistorySummaryPhases';
 
 export interface ImportHistorySummary {
+  /** Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence. */
+  appliedValues?: ImportHistorySummaryAppliedValues;
+  persistence?: ImportHistorySummaryPersistence;
   phases?: ImportHistorySummaryPhases;
   counts?: ImportHistorySummaryCounts;
   warnings?: string[];

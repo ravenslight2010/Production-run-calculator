@@ -63,6 +63,20 @@ export type DataHealthRepair = {
 };
 
 export type DataHealthWorkspace = {
+  importCoverage?: {
+    scanned: number;
+    truncated: boolean;
+    limitation: string;
+    detectors: { tables?: Record<string, { scanned: number; truncated: boolean }>; findingsTruncated?: boolean; payloadsTruncated?: boolean };
+    sources: Array<{
+      importType: string;
+      status: "observed" | "missing-evidence";
+      lastSuccessfulAt: number | null;
+      recognizedSource: boolean;
+      recovery: string;
+      observedRecords: number;
+    }>;
+  };
   findings: DataHealthFinding[];
   safeRepairs: DataHealthRepair[];
   summary: Record<string, number>;

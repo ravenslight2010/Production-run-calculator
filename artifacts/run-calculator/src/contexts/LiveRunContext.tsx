@@ -53,6 +53,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   classifyOperationalDisplay,
+  LIVE_CALC_STALE_MS,
   shouldUseServerCalc,
   type OperationalDisplayState,
   type OperationalSnapshotReceipt,
@@ -118,6 +119,9 @@ export interface LiveRunContextValue {
   /** Local ticking values remain projections until this run has a server receipt. */
   operationalDisplayState: OperationalDisplayState;
   operationalSnapshotReceipt: OperationalSnapshotReceipt | null;
+  /** Fresh, selected-run activity evidence from the server projection only. */
+  stationActivity: OperationalProjection["stationActivity"] | null;
+  stationActivityNowMs: number;
 }
 
 // Module-level calcRef is kept as a compatibility export for existing callers.
@@ -267,6 +271,14 @@ export function LiveRunProvider({
       receipt: operationalSnapshotReceipt,
       nowMs: nowTime.getTime() + serverClockOffsetMs,
     });
+  const stationActivityProjectionFresh = !!(
+    adoptServerCalc
+    && confirmedProjection
+    && confirmedProjection.runId === currentRunId
+    && Number.isFinite(confirmedProjection.capturedAtServerMs)
+    && operationalNowMs >= confirmedProjection.capturedAtServerMs
+    && operationalNowMs - confirmedProjection.capturedAtServerMs <= LIVE_CALC_STALE_MS
+  );
   const calc = useMemo((): Calc => {
     if (adoptServerCalc) {
       // Server-authority calc: the streamed server calc is fresh and tied to
@@ -719,6 +731,10 @@ export function LiveRunProvider({
       packagingDrainActive,
       operationalDisplayState,
       operationalSnapshotReceipt,
+      stationActivity: stationActivityProjectionFresh
+        ? confirmedProjection?.stationActivity ?? null
+        : null,
+      stationActivityNowMs: operationalNowMs,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
@@ -737,6 +753,9 @@ export function LiveRunProvider({
       packagingDrainActive,
       operationalDisplayState,
       operationalSnapshotReceipt,
+      stationActivityProjectionFresh,
+      confirmedProjection,
+      operationalNowMs,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     ],
   );

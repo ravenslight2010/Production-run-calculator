@@ -32,7 +32,7 @@ test.afterAll(async () => {
   }
 });
 
-test("staff sees a clear confirmation and diagnostic reference after reporting an issue", async ({
+test("staff can retry a failed issue report without retyping and sees its diagnostic reference", async ({
   page,
 }) => {
   const username = uniqueTestId("issue_report");
@@ -45,7 +45,23 @@ test("staff sees a clear confirmation and diagnostic reference after reporting a
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Report an issue", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Report an issue" });
-  await dialog.getByPlaceholder(/tapped Save/i).fill("The Save button did not respond.");
+  const description = "The Save button did not respond.";
+  const descriptionField = dialog.getByPlaceholder(/tapped Save/i);
+  await descriptionField.fill(description);
+
+  let rejectNextReport = true;
+  await page.route("**/api/incidents", async (route) => {
+    if (route.request().method() === "POST" && rejectNextReport) {
+      rejectNextReport = false;
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+
+  await dialog.getByRole("button", { name: "Send report" }).click();
+  await expect(dialog).toContainText("Couldn't send your report. Please try again.");
+  await expect(descriptionField).toHaveValue(description);
 
   const submission = page.waitForResponse(
     (response) =>
@@ -62,6 +78,7 @@ test("staff sees a clear confirmation and diagnostic reference after reporting a
   };
   incidentIds.add(result.incidentId);
 
+  await expect(descriptionField).not.toBeVisible();
   await expect(dialog).toContainText("Your report was recorded for manager review.");
   await expect(dialog.locator("code")).toHaveText(result.correlationId);
   await expect(dialog).not.toContainText(/seen before|last time this helped|kind of problem has come up before/i);

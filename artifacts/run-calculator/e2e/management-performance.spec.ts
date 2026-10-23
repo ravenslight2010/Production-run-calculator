@@ -8,6 +8,8 @@
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
+import fs from "node:fs";
+import path from "node:path";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
 import {
@@ -41,6 +43,37 @@ type ResourceEvidence = {
   failed?: boolean;
   errorText?: string;
 };
+
+function openingAssetPaths(): string[] {
+  const outputDir = path.resolve(process.cwd(), "dist/public");
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(outputDir, ".vite/workbook-boundary-manifest.json"), "utf8"),
+  ) as {
+    chunks?: Record<string, { isEntry?: boolean; name?: string; imports?: string[] }>;
+  };
+  const chunks = Object.entries(manifest.chunks ?? []);
+  const byFile = new Map(chunks);
+  const roots = chunks.filter(([, chunk]) => chunk.isEntry || chunk.name === "home");
+  if (!roots.some(([, chunk]) => chunk.isEntry) || !roots.some(([, chunk]) => chunk.name === "home")) {
+    throw new Error("Matching production build manifest must contain both application and Home entries.");
+  }
+
+  const visited = new Set<string>();
+  const visit = (file: string) => {
+    if (visited.has(file)) return;
+    const chunk = byFile.get(file);
+    if (!chunk) throw new Error(`Build manifest is missing imported opening chunk ${file}.`);
+    visited.add(file);
+    for (const imported of chunk.imports ?? []) visit(imported);
+  };
+  for (const [file] of roots) visit(file);
+
+  const html = fs.readFileSync(path.join(outputDir, "index.html"), "utf8");
+  const cssFiles = [...html.matchAll(/href=["']([^"']+\.css)["']/g)]
+    .map(([, href]) => href.replace(/^\.?\//, ""))
+    .filter((file) => !file.startsWith("../") && !path.isAbsolute(file));
+  return [...new Set([...visited, ...cssFiles])];
+}
 
 function safePath(url: string): string {
   try {
@@ -539,6 +572,11 @@ test(
   const username = uniqueTestId("e2e_authenticated_slow_network");
   testUsernames.add(username);
   const homeChunkRequests: string[] = [];
+  const collectOpeningByteEvidence = process.env.HOME_OPENING_BYTE_EVIDENCE === "1";
+  if (collectOpeningByteEvidence && process.env.RELEASE_BROWSER_LOCAL_SERVERS !== "1") {
+    throw new Error("Opening-byte evidence requires the source-matched local production build.");
+  }
+  const measuredOpeningAssets = collectOpeningByteEvidence ? openingAssetPaths() : null;
   let authenticatedVisitStarted = false;
   const failedResources: ResourceEvidence[] = [];
   const slowNetworkStartedAt = Date.now();
@@ -563,6 +601,13 @@ test(
   await signUp(page, username);
   await promoteToManager(username);
   await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  const networkCacheControl = collectOpeningByteEvidence
+    ? await page.context().newCDPSession(page)
+    : null;
+  if (networkCacheControl) {
+    await networkCacheControl.send("Network.enable");
+    await networkCacheControl.send("Network.setCacheDisabled", { cacheDisabled: true });
+  }
   await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
 
@@ -582,6 +627,32 @@ test(
   }
   const runReadyMs = performance.now() - authenticatedVisitStartedAt;
   const diagnostics = await capturedDiagnostics(page);
+  const openingAssetTransfers = measuredOpeningAssets
+    ? await page.evaluate((expectedPaths) => {
+        const expected = new Set(expectedPaths);
+        const resources = performance
+          .getEntriesByType("resource")
+          .filter((entry): entry is PerformanceResourceTiming => entry instanceof PerformanceResourceTiming)
+          .flatMap((entry) => {
+            let pathname: string;
+            try {
+              pathname = new URL(entry.name).pathname.replace(/^\/+/, "");
+            } catch {
+              return [];
+            }
+            return expected.has(pathname) ? [entry] : [];
+          });
+        return {
+          expectedAssetCount: expected.size,
+          observedAssetCount: new Set(
+            resources.map((entry) => new URL(entry.name).pathname.replace(/^\/+/, "")),
+          ).size,
+          encodedBodyBytes: resources.reduce((sum, entry) => sum + entry.encodedBodySize, 0),
+          networkTransferBytes: resources.reduce((sum, entry) => sum + entry.transferSize, 0),
+        };
+      }, measuredOpeningAssets)
+    : null;
+  await networkCacheControl?.detach();
   const homeChunkDiagnostic = diagnostics.find((entry) => entry.name === "startup:home-chunk-load");
   const failureDiagnostic = diagnostics.find((entry) => entry.name === "startup:home-chunk-load-failure");
   const evidence = {
@@ -592,29 +663,44 @@ test(
     homeChunkDiagnostic: homeChunkDiagnostic
       ? { name: homeChunkDiagnostic.name, durationMs: homeChunkDiagnostic.durationMs, kind: homeChunkDiagnostic.kind }
       : null,
+    openingAssetTransfers,
     chunkLoadFailure: failureDiagnostic
       ? { name: failureDiagnostic.name, durationMs: failureDiagnostic.durationMs, kind: failureDiagnostic.kind }
       : null,
     failedResources,
     setup: "isolated account and facility created; manager role authorized",
   };
-    await testInfo.attach("calculator-authenticated-slow-network.json", {
-      body: JSON.stringify(evidence, null, 2),
-      contentType: "application/json",
-    });
-    if (visitError) throw visitError;
-    expect(homeChunkRequests.length, "the deferred Home bundle should load after authentication").toBeGreaterThan(0);
-    expect(homeChunkDiagnostic, "the deferred Home bundle should report its load timing").toBeDefined();
-    expect(failureDiagnostic, "the deferred Home bundle must not fail to load").toBeUndefined();
+  if (openingAssetTransfers) {
     expect(
-      runReadyMs,
-      `authenticated calculator was not usable within ${AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs}ms; evidence=${JSON.stringify({
-        elapsedMs: Math.round(runReadyMs),
-        homeChunkRequests: homeChunkRequests.length,
-        failedResources,
-        diagnostics: diagnostics.filter((entry) => entry.name.startsWith("startup:")),
-        setupElapsedMs: Date.now() - slowNetworkStartedAt,
-      })}`,
-    ).toBeLessThanOrEqual(AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs);
+      openingAssetTransfers.observedAssetCount,
+      "all source-matched opening JavaScript/CSS assets should have browser timing entries",
+    ).toBe(openingAssetTransfers.expectedAssetCount);
+    expect(openingAssetTransfers.encodedBodyBytes, "opening assets should report encoded body bytes").toBeGreaterThan(0);
+    expect(openingAssetTransfers.networkTransferBytes, "opening assets should be fetched rather than served from cache").toBeGreaterThan(0);
+  }
+  console.log("authenticated slow-network measurement", JSON.stringify({
+    networkProfile: evidence.networkProfile,
+    authenticatedVisitMs: evidence.authenticatedVisitMs,
+    budgetMs: evidence.budgetMs,
+    openingAssetTransfers,
+  }));
+  await testInfo.attach("calculator-authenticated-slow-network.json", {
+    body: JSON.stringify(evidence, null, 2),
+    contentType: "application/json",
+  });
+  if (visitError) throw visitError;
+  expect(homeChunkRequests.length, "the deferred Home bundle should load after authentication").toBeGreaterThan(0);
+  expect(homeChunkDiagnostic, "the deferred Home bundle should report its load timing").toBeDefined();
+  expect(failureDiagnostic, "the deferred Home bundle must not fail to load").toBeUndefined();
+  expect(
+    runReadyMs,
+    `authenticated calculator was not usable within ${AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs}ms; evidence=${JSON.stringify({
+      elapsedMs: Math.round(runReadyMs),
+      homeChunkRequests: homeChunkRequests.length,
+      failedResources,
+      diagnostics: diagnostics.filter((entry) => entry.name.startsWith("startup:")),
+      setupElapsedMs: Date.now() - slowNetworkStartedAt,
+    })}`,
+  ).toBeLessThanOrEqual(AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs);
   },
 );

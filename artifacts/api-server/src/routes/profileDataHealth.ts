@@ -12,6 +12,8 @@ import {
   sauceRecipesTable,
   specImportAliasesTable,
   mergeAliasesTable,
+  importHistoryTable,
+  importOperationsTable,
 } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -98,6 +100,16 @@ export type DataHealthRepair =
   };
 
 export type DataHealthWorkspace = {
+  importCoverage: {
+    scanned: number;
+    truncated: boolean;
+    limitation: string;
+    detectors: MasterDataHealthReport["coverage"];
+    sources: Array<{
+      importType: string; status: string; lastSuccessfulAt: number | null;
+      recognizedSource: boolean; recovery: string; observedRecords: number;
+    }>;
+  };
   findings: DataHealthFinding[];
   safeRepairs: DataHealthRepair[];
   summary: Record<string, number>;
@@ -476,6 +488,38 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
   }).from(dataHealthRepairBatchesTable)
     .where(eq(dataHealthRepairBatchesTable.scope, scope))
     .orderBy(desc(dataHealthRepairBatchesTable.appliedAt)).limit(10);
+  const history = await executor.select({
+    importType: importHistoryTable.importType,
+    sourceKey: importHistoryTable.sourceKey,
+    status: importHistoryTable.status,
+    operationId: importHistoryTable.operationId,
+    operationStatus: importOperationsTable.status,
+    createdAt: importHistoryTable.createdAt,
+  }).from(importHistoryTable).leftJoin(importOperationsTable, and(
+    eq(importHistoryTable.operationId, importOperationsTable.id),
+    eq(importOperationsTable.scope, scope),
+  )).where(eq(importHistoryTable.scope, scope))
+    .orderBy(desc(importHistoryTable.createdAt), desc(importHistoryTable.id)).limit(201);
+  const observed = history.slice(0, 200);
+  const importCoverage = {
+    scanned: observed.length,
+    truncated: history.length > 200,
+    limitation: "Recent history is coverage evidence, not proof that every product requires every source. Missing evidence is not a confirmed defect. Local guide/schedule records do not provide atomic Apply or Undo guarantees. Findings reuse the existing bounded profile, master-data and source reconcilers; reads never repair.",
+    detectors: master.coverage,
+    sources: ["spec", "premix", "cheese", "shipping", "sauce", "dough", "schedule"].map((importType) => {
+      const entries = observed.filter((row) => row.importType === importType);
+      const last = entries.find((row) => row.status === "complete" &&
+        (!row.operationId || row.operationStatus === "applied"));
+      return {
+        importType,
+        status: last ? "observed" : "missing-evidence",
+        lastSuccessfulAt: last?.createdAt.getTime() ?? null,
+        recognizedSource: !!last?.sourceKey,
+        recovery: ["spec", "premix", "cheese"].includes(importType) ? "atomic-guarded-undo" : "local-or-sync-only",
+        observedRecords: entries.length,
+      };
+    }),
+  };
   return {
     findings,
     safeRepairs: [
@@ -488,6 +532,7 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     cleanupHistory,
     aiRetention,
     sourceReconciliation,
+    importCoverage,
     repairBatches: batches.map((batch) => {
       const value = record(batch.summary);
       return { ...batch, summary: {

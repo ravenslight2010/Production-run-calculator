@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   NEAR_DUPLICATE_POLICY,
@@ -240,6 +241,416 @@ export function appendMetadataMaintenanceEntry(
     ...decision,
     maintenanceHistory: [...(decision.maintenanceHistory ?? []), entry],
   };
+}
+
+function resolveMetadataDecisionPath(repoRoot: string, decisionPath: string): string {
+  const realRepoRoot = fs.realpathSync(repoRoot);
+  const resolvedPath = fs.realpathSync(path.resolve(realRepoRoot, decisionPath));
+  if (!isWithin(realRepoRoot, resolvedPath)) {
+    throw new Error("--decision must resolve to a file inside the repository");
+  }
+  if (!fs.statSync(resolvedPath).isFile()) {
+    throw new Error("--decision must resolve to a regular file");
+  }
+  return resolvedPath;
+}
+
+type LinuxProcessIdentity = {
+  platform: "linux";
+  bootId: string;
+  startTimeTicks: string;
+};
+
+type LinuxIdentityFileReader = (filePath: string) => string;
+
+type MetadataLockOwner = {
+  pid: number;
+  identity?: LinuxProcessIdentity;
+};
+
+export function assertMetadataMaintenancePlatformSupported(
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== "linux") {
+    throw new Error(
+      "metadata updates are supported only on Linux by this repository; macOS and Windows do not have the verified flock and process-identity contract. Run this command in a supported Linux x64 environment and leave existing metadata locks untouched.",
+    );
+  }
+}
+
+function readLinuxProcessIdentity(
+  pid: number,
+  readIdentityFile: LinuxIdentityFileReader = (filePath) => fs.readFileSync(filePath, "utf8"),
+): LinuxProcessIdentity {
+  if (process.platform !== "linux") {
+    assertMetadataMaintenancePlatformSupported();
+  }
+
+  let statContents: string;
+  let bootId: string;
+  try {
+    statContents = readIdentityFile(`/proc/${pid}/stat`);
+    bootId = readIdentityFile("/proc/sys/kernel/random/boot_id").trim();
+  } catch {
+    throw new Error(`cannot establish the Linux process identity for metadata lock owner ${pid}`);
+  }
+
+  // The command name is parenthesized and may itself contain spaces or
+  // parentheses. Fields after its final ')' start at proc stat field 3.
+  const commandEnd = statContents.lastIndexOf(")");
+  const fields = commandEnd < 0 ? [] : statContents.slice(commandEnd + 1).trim().split(/\s+/u);
+  const startTimeTicks = fields[19];
+  if (!/^[a-f0-9-]{36}$/u.test(bootId) || !startTimeTicks || !/^\d+$/u.test(startTimeTicks)) {
+    throw new Error(`cannot validate the Linux process identity for metadata lock owner ${pid}`);
+  }
+  return { platform: "linux", bootId, startTimeTicks };
+}
+
+function serializeMetadataLockOwner(): string {
+  return `${JSON.stringify({
+    pid: process.pid,
+    identity: readLinuxProcessIdentity(process.pid),
+  })}\n`;
+}
+
+function readMetadataLockOwner(lockPath: string, lockKind: "update" | "recovery"): MetadataLockOwner {
+  const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
+  let lockStat: fs.Stats;
+  let contents: string;
+  try {
+    lockStat = fs.lstatSync(lockPath);
+    if (!lockStat.isFile() || lockStat.isSymbolicLink() || lockStat.size > 256) {
+      throw new Error("not a small regular file");
+    }
+    contents = fs.readFileSync(lockPath, "utf8");
+  } catch {
+    throw new Error(`metadata ${lockKind} lock is malformed or unreadable. ${guidance}`);
+  }
+
+  const legacyMatch = /^([1-9]\d{0,14})\n?$/u.exec(contents);
+  if (legacyMatch) {
+    const pid = Number(legacyMatch[1]);
+    if (Number.isSafeInteger(pid) && pid > 0) return { pid };
+    throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(contents) as unknown;
+  } catch {
+    throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
+  }
+  if (
+    !isRecord(value)
+    || Object.keys(value).length !== 2
+    || !Number.isSafeInteger(value.pid)
+    || (value.pid as number) <= 0
+    || !isRecord(value.identity)
+    || Object.keys(value.identity).length !== 3
+    || value.identity.platform !== "linux"
+    || typeof value.identity.bootId !== "string"
+    || !/^[a-f0-9-]{36}$/u.test(value.identity.bootId)
+    || typeof value.identity.startTimeTicks !== "string"
+    || !/^\d+$/u.test(value.identity.startTimeTicks)
+  ) {
+    throw new Error(`metadata ${lockKind} lock has an invalid owner. ${guidance}`);
+  }
+  return {
+    pid: value.pid as number,
+    identity: value.identity as unknown as LinuxProcessIdentity,
+  };
+}
+
+function isMetadataLockOwnerActive(
+  owner: MetadataLockOwner,
+  lockPath: string,
+  readIdentityFile?: LinuxIdentityFileReader,
+): boolean {
+  const guidance = `Inspect ${lockPath}; remove it only after confirming no metadata update or recovery is active.`;
+  try {
+    process.kill(owner.pid, 0);
+  } catch (error) {
+    if (isRecord(error) && error.code === "ESRCH") return false;
+    if (isRecord(error) && error.code === "EPERM") {
+      if (!owner.identity) {
+        throw new Error(`metadata lock owner PID ${owner.pid} is permission-protected and has no process identity; leave the legacy lock untouched. ${guidance}`);
+      }
+    } else {
+      throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
+    }
+  }
+
+  if (!owner.identity) {
+    throw new Error(`metadata lock owner PID ${owner.pid} is a live legacy PID-only lock; PID reuse cannot be distinguished, so leave it untouched. ${guidance}`);
+  }
+
+  let currentIdentity: LinuxProcessIdentity;
+  try {
+    currentIdentity = readLinuxProcessIdentity(owner.pid, readIdentityFile);
+  } catch {
+    throw new Error(`cannot establish whether metadata lock owner ${owner.pid} is active; leave the lock untouched and retry after checking the process. ${guidance}`);
+  }
+  return currentIdentity.bootId === owner.identity.bootId
+    && currentIdentity.startTimeTicks === owner.identity.startTimeTicks;
+}
+
+function acquireMetadataMaintenanceLock(
+  lockPath: string,
+  readIdentityFile?: LinuxIdentityFileReader,
+): number {
+  const lockContents = serializeMetadataLockOwner();
+  let initialFd: number | undefined;
+  try {
+    initialFd = fs.openSync(lockPath, "wx", 0o600);
+  } catch (error) {
+    if (!isRecord(error) || error.code !== "EEXIST") throw error;
+  }
+  if (initialFd !== undefined) {
+    try {
+      fs.writeFileSync(initialFd, lockContents, "utf8");
+      return initialFd;
+    } catch (error) {
+      fs.closeSync(initialFd);
+      fs.rmSync(lockPath, { force: true });
+      throw error;
+    }
+  }
+
+  const recoveryLockPath = `${lockPath}.recovery`;
+  let recoveryFd: number | undefined;
+  try {
+    try {
+      recoveryFd = fs.openSync(recoveryLockPath, "wx", 0o600);
+    } catch (error) {
+      if (isRecord(error) && error.code === "EEXIST") {
+        throw new Error(
+          `metadata lock recovery is already in progress or its recovery lock is stale; retry after it finishes, or inspect ${recoveryLockPath} and remove it only after confirming its owner is inactive`,
+        );
+      }
+      throw error;
+    }
+    fs.writeFileSync(recoveryFd, lockContents, "utf8");
+
+    const owner = readMetadataLockOwner(lockPath, "update");
+    if (isMetadataLockOwnerActive(owner, lockPath, readIdentityFile)) {
+      throw new Error(`another metadata update is active (lock owner PID ${owner.pid}); retry after it finishes`);
+    }
+
+    fs.unlinkSync(lockPath);
+    const replacementFd = fs.openSync(lockPath, "wx", 0o600);
+    try {
+      fs.writeFileSync(replacementFd, lockContents, "utf8");
+      return replacementFd;
+    } catch (error) {
+      fs.closeSync(replacementFd);
+      fs.rmSync(lockPath, { force: true });
+      throw error;
+    }
+  } finally {
+    if (recoveryFd !== undefined) {
+      fs.closeSync(recoveryFd);
+      fs.rmSync(recoveryLockPath, { force: true });
+    }
+  }
+}
+
+function clearAbandonedMetadataRecoveryGuard(lockPath: string): void {
+  const recoveryLockPath = `${lockPath}.recovery`;
+  try {
+    fs.lstatSync(recoveryLockPath);
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return;
+    throw new Error(
+      `metadata recovery lock is unreadable. Inspect ${recoveryLockPath}; remove it only after confirming no metadata recovery is active.`,
+    );
+  }
+
+  const owner = readMetadataLockOwner(recoveryLockPath, "recovery");
+  if (isMetadataLockOwnerActive(owner, recoveryLockPath)) {
+    throw new Error(
+      `metadata lock recovery is already active (owner PID ${owner.pid}); retry after it finishes`,
+    );
+  }
+
+  try {
+    fs.unlinkSync(recoveryLockPath);
+  } catch {
+    throw new Error(
+      `metadata recovery lock could not be cleared safely. Inspect ${recoveryLockPath}; remove it only after confirming no metadata recovery is active.`,
+    );
+  }
+}
+
+export function appendMetadataMaintenanceEntryFileWithRecoveryGate(
+  decisionPath: string,
+  entry: unknown,
+  readIdentityFile?: LinuxIdentityFileReader,
+): DecisionFile {
+  assertMetadataMaintenancePlatformSupported();
+  const resolvedPath = fs.realpathSync(decisionPath);
+  const fileStat = fs.statSync(resolvedPath);
+  if (!fileStat.isFile()) throw new Error("decision file must be a regular file");
+
+  const lockPath = `${resolvedPath}.metadata-maintenance.lock`;
+  let lockFd: number | undefined;
+  let temporaryDirectory: string | undefined;
+  try {
+    clearAbandonedMetadataRecoveryGuard(lockPath);
+    lockFd = acquireMetadataMaintenanceLock(lockPath, readIdentityFile);
+
+    const decision = appendMetadataMaintenanceEntry(
+      readJson(resolvedPath, "decision file"),
+      entry,
+    );
+    temporaryDirectory = fs.mkdtempSync(
+      path.join(path.dirname(resolvedPath), ".distill-metadata-maintenance-"),
+    );
+    const temporaryPath = path.join(temporaryDirectory, path.basename(resolvedPath));
+    const temporaryFd = fs.openSync(temporaryPath, "wx", fileStat.mode & 0o777);
+    try {
+      fs.writeFileSync(temporaryFd, `${JSON.stringify(decision, null, 2)}\n`, "utf8");
+      fs.fsyncSync(temporaryFd);
+    } finally {
+      fs.closeSync(temporaryFd);
+    }
+    fs.renameSync(temporaryPath, resolvedPath);
+    return decision;
+  } finally {
+    if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    if (lockFd !== undefined) {
+      fs.closeSync(lockFd);
+      fs.rmSync(lockPath, { force: true });
+    }
+  }
+}
+
+function metadataWorkerNodeArgs(): string[] {
+  const args: string[] = [];
+  for (let index = 0; index < process.execArgv.length; index++) {
+    const arg = process.execArgv[index]!;
+    if (["-e", "--eval", "-p", "--print"].includes(arg)) {
+      index++;
+      continue;
+    }
+    if (arg.startsWith("--eval=") || arg.startsWith("--print=")) continue;
+    args.push(arg);
+  }
+  return args;
+}
+
+export function appendMetadataMaintenanceEntryFile(
+  decisionPath: string,
+  entry: unknown,
+): DecisionFile {
+  assertMetadataMaintenancePlatformSupported();
+  const resolvedPath = fs.realpathSync(decisionPath);
+  const recoveryGatePath = `${resolvedPath}.metadata-maintenance.lock.recovery.gate`;
+  let gateFd: number | undefined;
+  try {
+    // Keep this inode stable: removing it could let concurrent processes lock different inodes.
+    gateFd = fs.openSync(
+      recoveryGatePath,
+      fs.constants.O_CREAT | fs.constants.O_RDWR | fs.constants.O_NOFOLLOW,
+      0o600,
+    );
+    const gateStat = fs.fstatSync(gateFd);
+    if (!gateStat.isFile()) throw new Error("not a regular file");
+  } catch {
+    throw new Error(
+      `metadata recovery gate is unavailable. Inspect ${recoveryGatePath} and retry after confirming no metadata maintenance is active.`,
+    );
+  } finally {
+    if (gateFd !== undefined) fs.closeSync(gateFd);
+  }
+
+  const moduleUrl = pathToFileURL(fileURLToPath(import.meta.url)).href;
+  const workerSource = [
+    `import { appendMetadataMaintenanceEntryFileWithRecoveryGate } from ${JSON.stringify(moduleUrl)};`,
+    "let input = \"\";",
+    "for await (const chunk of process.stdin) input += chunk;",
+    "try {",
+    "  const request = JSON.parse(input);",
+    "  const result = appendMetadataMaintenanceEntryFileWithRecoveryGate(request.decisionPath, request.entry);",
+    "  process.stdout.write(JSON.stringify(result));",
+    "} catch (error) {",
+    "  console.error(error instanceof Error ? error.message : \"metadata maintenance failed\");",
+    "  process.exitCode = 1;",
+    "}",
+  ].join("\n");
+  const result = spawnSync(
+    "flock",
+    [
+      "--exclusive",
+      "--nonblock",
+      recoveryGatePath,
+      process.execPath,
+      ...metadataWorkerNodeArgs(),
+      "--input-type=module",
+      "-e",
+      workerSource,
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      input: JSON.stringify({ decisionPath: resolvedPath, entry }),
+      maxBuffer: 64 * 1024,
+    },
+  );
+
+  if (result.error) {
+    throw new Error(
+      `metadata recovery gate could not start (${result.error.message}); leave existing locks untouched and retry after checking the local flock utility`,
+    );
+  }
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    if (!stderr || /^flock:/u.test(stderr)) {
+      throw new Error(
+        `metadata lock recovery is already in progress or the recovery gate is unavailable; retry after it finishes, or inspect ${recoveryGatePath}`,
+      );
+    }
+    throw new Error(stderr || "metadata maintenance worker failed");
+  }
+
+  try {
+    return JSON.parse(result.stdout) as DecisionFile;
+  } catch {
+    throw new Error("metadata maintenance worker returned an invalid result");
+  }
+}
+
+export function runMetadataMaintenanceCommand(args: string[], repoRoot: string): DecisionFile {
+  if (args[0] === "--") args = args.slice(1);
+  if (args[0] !== "append-metadata") {
+    throw new Error("metadata command must start with append-metadata");
+  }
+
+  const values = new Map<string, string>();
+  const valueFlags = new Set(["--date", "--note", "--decision"]);
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index]!;
+    if (!valueFlags.has(arg)) throw new Error(`unknown metadata option: ${arg}`);
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
+    if (values.has(arg)) throw new Error(`${arg} may be provided only once`);
+    values.set(arg, value);
+    index++;
+  }
+
+  const date = values.get("--date");
+  const note = values.get("--note");
+  if (date === undefined || note === undefined) {
+    throw new Error("append-metadata requires --date and --note");
+  }
+  const decisionPath = resolveMetadataDecisionPath(
+    repoRoot,
+    values.get("--decision") ?? DEFAULT_DECISION_RELATIVE_PATH,
+  );
+  return appendMetadataMaintenanceEntryFile(decisionPath, {
+    date,
+    changeType: "metadata-only",
+    note,
+  });
 }
 
 function validateGoDecision(
@@ -980,8 +1391,15 @@ async function main(): Promise<void> {
   const scriptPath = fileURLToPath(import.meta.url);
   const repoRoot = path.resolve(path.dirname(scriptPath), "../..");
   try {
-    const result = await runBackfill(parseArguments(process.argv.slice(2), repoRoot));
-    process.exitCode = result.exitCode;
+    const args = process.argv.slice(2);
+    if (args[0] === "--") args.shift();
+    if (args[0] === "append-metadata") {
+      const updated = runMetadataMaintenanceCommand(args, repoRoot);
+      console.log(`Appended metadata-only maintenance entry dated ${updated.maintenanceHistory?.at(-1)?.date}.`);
+    } else {
+      const result = await runBackfill(parseArguments(args, repoRoot));
+      process.exitCode = result.exitCode;
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "distillation backfill failed");
     process.exitCode = 1;

@@ -22,6 +22,7 @@ type Props = {
   error: string | null;
   prepared: PremixImportPrepared | null;
   applying: boolean;
+  goldCaptureEnabled?: boolean;
   /**
    * Confirm with the reviewed mixes (and their pull-note freezer settings),
    * plus any name mappings the "use existing mix" picks should be remembered as,
@@ -33,6 +34,7 @@ type Props = {
     newAliases: SpecImportAlias[],
     mixesToRemove: string[],
     destructiveChangesAcknowledged: boolean,
+    captureGoldCase?: boolean,
   ) => void;
 };
 
@@ -60,6 +62,7 @@ export default function PremixImportDialog({
   error,
   prepared,
   applying,
+  goldCaptureEnabled = false,
   onConfirm,
 }: Props) {
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
@@ -77,6 +80,7 @@ export default function PremixImportDialog({
   // explanatory note instead of tripping the generic duplicate-target block.
   const [mergedAwayKeys, setMergedAwayKeys] = useState<Set<string>>(new Set());
   const [destructiveChangesConfirmed, setDestructiveChangesConfirmed] = useState(false);
+  const [captureGoldCase, setCaptureGoldCase] = useState(false);
 
   const existing = useMemo(
     () => new Set(prepared?.existingIds ?? []),
@@ -94,6 +98,7 @@ export default function PremixImportDialog({
   // ORIGINAL parsed ids so freezer-pull notes and selection survive.
   useEffect(() => {
     if (prepared) {
+      setCaptureGoldCase(false);
       setDestructiveChangesConfirmed(false);
       const existsById = (id: string) => prepared.existingIds.includes(id);
       const nextRedirects = new Map<string, string>();
@@ -127,6 +132,7 @@ export default function PremixImportDialog({
       );
       setRedirects(nextRedirects);
     } else {
+      setCaptureGoldCase(false);
       setDestructiveChangesConfirmed(false);
       setItems([]);
       setSelected(new Set());
@@ -309,14 +315,14 @@ export default function PremixImportDialog({
       }
     }
     // Prep-only blocks contribute their pull notes unconditionally.
-    onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases, [...removedMixes], destructiveChangesConfirmed);
+    onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases, [...removedMixes], destructiveChangesConfirmed, captureGoldCase);
   };
 
   return (
     <div
       // No close-on-backdrop-click: the AI parse is slow and the review step
       // holds unsaved edits — a stray tap would silently cancel the import.
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
     >
       <div
         ref={dialogRef}
@@ -816,6 +822,22 @@ export default function PremixImportDialog({
             </>
           )}
         </div>
+
+        {goldCaptureEnabled && prepared && (
+          <label className="mx-4 flex cursor-pointer items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={captureGoldCase}
+              onChange={(event) => setCaptureGoldCase(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+              data-testid="premix-import-gold-opt-in"
+            />
+            <span>
+              Save this reviewed input and the applied result as a private evaluation case.
+              Only opt in when source-use and retention are authorized.
+            </span>
+          </label>
+        )}
 
         <div className="flex items-center justify-end gap-2 border-t border-border p-4">
           <button

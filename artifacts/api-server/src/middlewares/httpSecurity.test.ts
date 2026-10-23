@@ -1,12 +1,11 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CONTENT_SECURITY_POLICY,
-  createQueryTokenPromotionMiddleware,
   httpSecurityHeaders,
 } from "./httpSecurity";
 
@@ -41,10 +40,9 @@ async function withServer<T>(
   }
 }
 
-function createTestApp(nodeEnv: string | undefined, optIn: string | undefined): Express {
+function createTestApp(): Express {
   const app = express();
   app.use(httpSecurityHeaders);
-  app.use("/api", createQueryTokenPromotionMiddleware(nodeEnv, optIn));
   app.get("/api/auth-transport", (req, res) => {
     res.json({
       authorization: req.get("authorization") ?? null,
@@ -60,7 +58,7 @@ describe("HTTP security headers", () => {
     ["API response", "/api/auth-transport"],
     ["static response", "/index.html"],
   ])("sets compatible headers on %s", async (_label, route) => {
-    await withServer(createTestApp("development", undefined), async (origin) => {
+    await withServer(createTestApp(), async (origin) => {
       const response = await fetch(`${origin}${route}`);
       expect(response.status).toBe(200);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -83,56 +81,11 @@ describe("HTTP security headers", () => {
   });
 });
 
-describe("query-token promotion", () => {
-  it.each([
-    {
-      name: "default development",
-      nodeEnv: "development",
-      optIn: undefined,
-      expectedAuthorization: null,
-    },
-    {
-      name: "explicit development opt-in",
-      nodeEnv: "development",
-      optIn: "true",
-      expectedAuthorization: "Bearer synthetic-test-token",
-    },
-    {
-      name: "production despite opt-in",
-      nodeEnv: "production",
-      optIn: "true",
-      expectedAuthorization: null,
-    },
-    {
-      name: "unset environment without opt-in",
-      nodeEnv: undefined,
-      optIn: undefined,
-      expectedAuthorization: null,
-    },
-  ])("$name", async ({ nodeEnv, optIn, expectedAuthorization }) => {
-    await withServer(createTestApp(nodeEnv, optIn), async (origin) => {
-      const response = await fetch(
-        `${origin}/api/auth-transport?token=synthetic-test-token`,
-        { headers: { Cookie: "rc_auth=synthetic-cookie" } },
-      );
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        authorization: expectedAuthorization,
-        cookie: "rc_auth=synthetic-cookie",
-      });
-    });
-  });
-
-  it("preserves an existing Authorization header when opt-in is enabled", async () => {
-    await withServer(createTestApp("development", "true"), async (origin) => {
-      const response = await fetch(
-        `${origin}/api/auth-transport?token=synthetic-test-token`,
-        { headers: { Authorization: "Bearer header-token" } },
-      );
-      await expect(response.json()).resolves.toEqual({
-        authorization: "Bearer header-token",
-        cookie: null,
-      });
-    });
-  });
+it("keeps the Caddy policy aligned with the Express policy", async () => {
+  const caddyfile = await readFile(
+    new URL("../../../../docker/Caddyfile", import.meta.url),
+    "utf8",
+  );
+  const caddyPolicy = caddyfile.match(/Content-Security-Policy\s+"([^"]+)"/)?.[1];
+  expect(caddyPolicy).toBe(CONTENT_SECURITY_POLICY);
 });

@@ -14,7 +14,7 @@ const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 
 async function openManagerAttention(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^More/ }).click();
-  await page.getByRole("menuitem", { name: "Manager attention", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Manager attention/ }).click();
   await expect(page.getByRole("dialog", { name: "Manager attention" })).toBeVisible();
 }
 
@@ -65,20 +65,41 @@ async function expectSmallTextContrast(locator: Locator, label: string): Promise
   ).toBeGreaterThanOrEqual(4.5);
 }
 
-test("manager-attention header and More-menu badges meet small-text contrast", async ({
-  page,
-  playwright,
-}) => {
-  test.setTimeout(60_000);
+async function createReviewableIncident(
+  page: Page,
+  token: string,
+  description: string,
+): Promise<string> {
+  const response = await page.request.post(`${API_BASE}/api/incidents`, {
+    headers: { Cookie: `rc_auth=${token}` },
+    data: {
+      source: "user_report",
+      screen: "Run",
+      appPlatform: "web",
+      description,
+    },
+  });
+  expect(response.ok(), `incident fixture creation failed: ${await response.text()}`).toBe(true);
+  const body = await response.json() as { incidentId: string };
+  return body.incidentId;
+}
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
 
   try {
     const account = await fixtures.createAccount({
-      username: uniqueTestId("e2e_manager_attention_contrast"),
+      username: uniqueTestId("e2e_manager_attention"),
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
     await page.route("**/api/incidents/actionable-count", (route) =>
       route.fulfill({
         status: 200,
@@ -90,15 +111,21 @@ test("manager-attention header and More-menu badges meet small-text contrast", a
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
-    const headerBadge = page.getByLabel("1 manager actions need attention", { exact: true });
+        const headerBadge = page.getByLabel(
+          `${count} manager actions need attention`,
+          { exact: true },
+        );
     await expect(headerBadge).toBeVisible();
     await expect(headerBadge).toHaveText("1");
     await expectSmallTextContrast(headerBadge, "Header manager-attention badge");
 
     await page.getByRole("button", { name: /^More/ }).click();
-    const menuItem = page.getByRole("menuitem", { name: "Manager attention", exact: true });
-    await expect(menuItem).toBeVisible();
-    const menuBadge = menuItem.locator('span[aria-hidden="true"]');
+        const menuItem = page.getByRole("menuitem", {
+          name: accessibleMenuName,
+          exact: true,
+        });
+        await expect(menuItem, `accessible menu item at ${viewport.name}`).toBeVisible();
+        const menuBadge = menuItem.locator('span[aria-hidden="true"]');
     await expect(menuBadge).toBeVisible();
     await expect(menuBadge).toHaveText("1");
     await expectSmallTextContrast(menuBadge, "More-menu manager-attention badge");
@@ -107,21 +134,29 @@ test("manager-attention header and More-menu badges meet small-text contrast", a
   }
 });
 
-test("manager-attention badges show full counts at desktop, phone, and tablet widths", async ({
+test("manager can review and resolve an incident with Enter and Space", async ({
   page,
   playwright,
 }) => {
   test.setTimeout(120_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
   let mockedAttentionCount = 1;
 
   try {
     const account = await fixtures.createAccount({
-      username: uniqueTestId("e2e_manager_attention_counts"),
+      username: uniqueTestId("e2e_manager_attention"),
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
     await page.route("**/api/incidents/actionable-count", (route) =>
       route.fulfill({
         status: 200,
@@ -218,13 +253,21 @@ test("manager can open and close Manager attention using only the keyboard", asy
   test.setTimeout(60_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
 
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
+
   try {
     const account = await fixtures.createAccount({
-      username: uniqueTestId("e2e_manager_attention_keyboard"),
+      username: uniqueTestId("e2e_manager_attention"),
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
     await page.route("**/api/incidents/actionable-count", (route) =>
       route.fulfill({
         status: 200,
@@ -243,20 +286,331 @@ test("manager can open and close Manager attention using only the keyboard", asy
     await page.keyboard.press("Enter");
 
     const managerAttentionItem = page.getByRole("menuitem", {
-      name: "Manager attention",
-      exact: true,
+      name: /^Manager attention/,
     });
     await expect(managerAttentionItem).toBeVisible();
     await page.keyboard.press("Home");
     await expect(managerAttentionItem).toBeFocused();
     await page.keyboard.press("Enter");
 
-    const dialog = page.getByRole("dialog", { name: "Manager attention" });
+      const dialog = page.getByRole("dialog", { name: "Manager attention" });
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(moreButton).toBeVisible();
     await expect(moreButton).toBeFocused();
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
+test("manager can keyboard-open each Manager attention workflow and retain useful focus", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(90_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_manager_attention"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+    const scheduledBrand = uniqueTestId("AttentionBrand");
+    const scheduledFlavor = uniqueTestId("AttentionFlavor");
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+    await page.route("**/api/password-reset-requests", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: uniqueTestId("keyboard-reset"),
+          userId: uniqueTestId("keyboard-staff"),
+          username: "keyboard-fixture-staff",
+          requestedAt: new Date().toISOString(),
+        }]),
+      });
+    });
+    await page.route("**/api/incidents/actionable-count", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ count: 1 }),
+      }));
+    await page.route("**/api/sync/scheduled?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          date: tomorrow,
+          runCount: 1,
+          runs: [{
+            id: uniqueTestId("keyboard-scheduled"),
+            brand: scheduledBrand,
+            flavor: scheduledFlavor,
+            casesNeeded: 10,
+            dieType: "",
+          }],
+        }]),
+      }));
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const activateByTabAndEnter = async (action: Locator) => {
+      for (let tabCount = 0; tabCount < 40; tabCount += 1) {
+        if (await action.evaluate((element) => element === document.activeElement)) break;
+        await page.keyboard.press("Tab");
+      }
+      await expect(action).toBeFocused();
+      await page.keyboard.press("Enter");
+    };
+    const expectUsefulFocus = async () => {
+      const focused = page.locator(":focus");
+      await expect(focused).toBeVisible();
+      const focusState = await focused.evaluate((element) => ({
+        tagName: element.tagName,
+        enabled: !("disabled" in element) || !(element as HTMLButtonElement).disabled,
+        actionable:
+          element.matches("button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])"),
+      }));
+      expect(focusState.tagName, "focus must not be abandoned on the document body").not.toMatch(
+        /^(BODY|HTML)$/,
+      );
+      expect(focusState.enabled, "focus must remain on an enabled control").toBe(true);
+      expect(focusState.actionable, "focus must remain on a keyboard-operable control").toBe(true);
+    };
+
+    const moreButton = page.getByRole("button", { name: /^More/ });
+    const workflows = [
+      {
+        kind: "password-resets",
+        destination: () => page.getByRole("heading", { name: "Staff Roster" }),
+      },
+      {
+        kind: "incidents",
+        destination: () =>
+          page
+            .locator(".station-tabs [role='tabpanel'][data-state='active']")
+            .getByText("Reported issues", { exact: true }),
+      },
+      {
+        kind: "recipe-setup",
+        destination: () => page.getByRole("dialog", { name: "Setup Profiles" }),
+      },
+    ] as const;
+
+    for (const workflow of workflows) {
+      await openManagerAttention(page);
+      const dialog = page.getByRole("dialog", { name: "Manager attention" });
+      await expect(dialog.getByTestId(`manager-attention-${workflow.kind}`)).toBeVisible();
+      const action = dialog.getByTestId(`manager-attention-action-${workflow.kind}`);
+      await activateByTabAndEnter(action);
+      await expect(workflow.destination()).toBeVisible();
+      await expect(dialog).toBeHidden();
+      await expectUsefulFocus();
+
+      if (workflow.kind !== "recipe-setup") {
+        await expect(
+          page.locator(".station-tabs [role='tabpanel'][data-state='active']"),
+        ).toBeFocused();
+      } else {
+        await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
+        await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
+        await page.getByRole("dialog", { name: "Setup Profiles" })
+          .getByRole("button", { name: "Close", exact: true })
+          .click();
+      }
+      await expect(moreButton).toBeVisible();
+    }
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
+test("manager can approve and decline password resets by keyboard and retain useful focus", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(150_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  try {
+    const manager = await fixtures.createAccount({
+      username: uniqueTestId("e2e_reset_keyboard_manager"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    const approvedStaff = await fixtures.createAccount({
+      username: uniqueTestId("e2e_reset_keyboard_approved"),
+      password: PASSWORD,
+      capabilities: [],
+      onboardingSeen: true,
+    });
+    const declinedStaff = await fixtures.createAccount({
+      username: uniqueTestId("e2e_reset_keyboard_declined"),
+      password: PASSWORD,
+      capabilities: [],
+      onboardingSeen: true,
+    });
+    const approvedRequestId = uniqueTestId("keyboard_approved_reset");
+    const declinedRequestId = uniqueTestId("keyboard_declined_reset");
+    const seedDb = new Client({
+      connectionString: requireIsolatedTestDatabase("seed malformed manager-attention alias"),
+    });
+    try {
+      await seedDb.connect();
+    const now = Date.now();
+      await seedDb.query(
+        `INSERT INTO password_reset_requests (id, user_id, status, created_at)
+         VALUES ($1, $2, 'pending', $3), ($4, $5, 'pending', $6)`,
+        [
+          approvedRequestId,
+          approvedStaff.userId,
+          new Date(now),
+          declinedRequestId,
+          declinedStaff.userId,
+          new Date(now - 1_000),
+        ],
+      );
+    } finally {
+      await seedDb.end().catch(() => {});
+    }
+
+    await page.context().addCookies([
+      { name: "rc_auth", value: manager.token, url: API_BASE },
+    ]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await openManagerAttention(page);
+    await page.getByTestId("manager-attention-action-password-resets").click();
+
+    const approvedRow = page.getByTestId(`password-reset-request-${approvedRequestId}`);
+    const declinedRow = page.getByTestId(`password-reset-request-${declinedRequestId}`);
+    await expect(approvedRow).toContainText(approvedStaff.username);
+    await expect(declinedRow).toContainText(declinedStaff.username);
+
+    const tabTo = async (target: Locator) => {
+      for (let tabCount = 0; tabCount < 120; tabCount += 1) {
+        if (await target.evaluate((element) => element === document.activeElement)) return;
+        await page.keyboard.press("Tab");
+      }
+      throw new Error("Keyboard navigation did not reach the requested password reset control.");
+    };
+
+    const approvedDecline = approvedRow.getByRole("button", {
+      name: "Decline",
+      exact: true,
+    });
+    const approve = approvedRow.getByRole("button", {
+      name: "Approve",
+      exact: true,
+    });
+    await tabTo(approvedDecline);
+    await expect(approvedDecline).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(approve).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    const codeDialog = page.getByRole("dialog", {
+      name: `Reset code for ${approvedStaff.username}`,
+    });
+    await expect(codeDialog).toBeVisible();
+    await expect(codeDialog.getByText(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/)).toBeVisible();
+    const approvedStatus = page.getByTestId("password-reset-decision-status");
+    await expect(approvedStatus).toContainText(
+      `Password reset request for ${approvedStaff.username} approved.`,
+    );
+
+    const doneButton = codeDialog.getByRole("button", { name: "Done", exact: true });
+    await tabTo(doneButton);
+    await expect(doneButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(codeDialog).toBeHidden();
+    await expect(approvedRow).toBeHidden();
+    await expect(declinedRow).toBeVisible();
+    const declinedAction = declinedRow.getByRole("button", {
+      name: "Decline",
+      exact: true,
+    });
+    await expect(declinedAction).toBeFocused();
+
+    const declinedApprove = declinedRow.getByRole("button", {
+      name: "Approve",
+      exact: true,
+    });
+    await page.keyboard.press("Tab");
+    await expect(declinedApprove).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(declinedAction).toBeFocused();
+    await page.keyboard.press("Space");
+
+    await expect(declinedRow).toBeHidden();
+    await expect(page.getByText("No pending password reset requests.")).toBeVisible();
+    await expect(page.getByTestId("password-reset-decision-status")).toContainText(
+      `Password reset request for ${declinedStaff.username} declined.`,
+    );
+    await expect(
+      page.getByText("Password reset requests", { exact: true }),
+    ).toBeFocused();
+
+    const verifyDb = new Client({
+      connectionString: requireIsolatedTestDatabase(
+        "verify keyboard password reset decisions",
+      ),
+    });
+    try {
+      await verifyDb.connect();
+      const result = await seedDb.query<{ id: number }>(
+        `INSERT INTO spec_import_aliases
+          (scope, kind, external_name, canonical_name, context)
+         VALUES ('live', 'flavor', $1, $2, NULL)
+         RETURNING id`,
+        [malformedAliasExternalName, malformedAliasCanonicalName],
+      );
+      expect(result.rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: approvedRequestId,
+            status: "approved",
+            code_hash: expect.any(String),
+          }),
+          expect.objectContaining({
+            id: declinedRequestId,
+            status: "declined",
+            code_hash: null,
+          }),
+        ]),
+      );
+    } finally {
+      await verifyDb.end().catch(() => {});
+    }
+    expect(browserErrors).toEqual([]);
   } finally {
     await fixtures.cleanup();
   }
@@ -268,6 +622,10 @@ test("manager setup stays usable when recipe names are incomplete", async ({
 }) => {
   test.setTimeout(120_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
   page.on("response", (response) => {
@@ -283,6 +641,10 @@ test("manager setup stays usable when recipe names are incomplete", async ({
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
     const scheduledBrand = uniqueTestId("AttentionBrand");
     const scheduledFlavor = uniqueTestId("AttentionFlavor");
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
@@ -421,6 +783,10 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
   test.setTimeout(120_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
 
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
+
   try {
     const account = await fixtures.createAccount({
       username: uniqueTestId("e2e_manager_attention"),
@@ -428,6 +794,10 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
     const brand = uniqueTestId("RecipeRoundTripBrand");
     const flavor = uniqueTestId("RecipeRoundTripFlavor");
 
@@ -660,6 +1030,10 @@ test("manager attention remains stable across dialog and destination transitions
 }, testInfo: TestInfo) => {
   test.setTimeout(120_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  const incidentIds: string[] = [];
+
+  const incidentIds: string[] = [];
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
   page.on("response", (response) => {
@@ -676,6 +1050,10 @@ test("manager attention remains stable across dialog and destination transitions
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
+
+    const description = `Keyboard queue exit ${uniqueTestId("incident").slice(-8)}`;
     const malformedAliasExternalName = uniqueTestId("MalformedFlavorAlias");
     const malformedAliasCanonicalName = uniqueTestId("CanonicalFlavor");
     const seedDb = new Client({
@@ -847,3 +1225,46 @@ test("manager attention remains stable across dialog and destination transitions
     await fixtures.cleanup();
   }
 });
+
+    const resolvedButton = incident.getByRole("button", { name: "Mark resolved" });
+
+    const focused = page.locator(":focus");
+
+async function deleteIncidentFixtures(incidentIds: readonly string[]): Promise<void> {
+  if (incidentIds.length === 0) return;
+  const connectionString = requireIsolatedTestDatabase("clean up manager incident fixtures");
+  const db = new Client({ connectionString });
+  try {
+    await db.connect();
+    await db.query(
+      "DELETE FROM incidents WHERE id = ANY($1::text[]) AND scope = 'live'",
+      [incidentIds],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
+    const incidentId = await createReviewableIncident(page, account.token, description);
+
+    const reviewedIncident = page.getByTestId("incident-row").filter({
+      has: page.locator(`[data-incident-header="${incidentId}"]`),
+    });
+
+    const reviewedButton = incident.getByRole("button", { name: "Mark reviewed" });
+
+async function tabToControl(page: Page, control: Locator, maxTabs = 30): Promise<void> {
+  for (let tabCount = 0; tabCount < maxTabs; tabCount += 1) {
+    if (await control.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press("Tab");
+  }
+  await expect(control).toBeFocused();
+}
+
+    const headerButton = incident.locator("[data-incident-header]");
+
+    const incident = page.getByTestId("incident-row").filter({
+      has: page.locator(`[data-incident-header="${incidentId}"]`),
+    });
+
+    const section = page.locator('section[aria-labelledby="incident-list-heading"]');

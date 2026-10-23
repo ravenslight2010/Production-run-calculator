@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   EXPECTED_PRODUCTION_PROMPT_SHA256,
   appendMetadataMaintenanceEntry,
+  appendMetadataMaintenanceEntryFile,
+  assertMetadataMaintenancePlatformSupported,
+  appendMetadataMaintenanceEntryFileWithRecoveryGate,
   loadProductionContract,
+  runMetadataMaintenanceCommand,
   runBackfill,
 } from "./distill-backfill.mts";
 import {
@@ -23,6 +28,14 @@ const contract = {
   currentParseVersion: "41",
 };
 const digest = "a".repeat(64);
+
+assert.doesNotThrow(() => assertMetadataMaintenancePlatformSupported("linux"));
+for (const unsupportedPlatform of ["darwin", "win32"] as const) {
+  assert.throws(
+    () => assertMetadataMaintenancePlatformSupported(unsupportedPlatform),
+    /supported only on Linux.*supported Linux x64 environment.*leave existing metadata locks untouched/u,
+  );
+}
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const currentProductionContract = await loadProductionContract(workspaceRoot);
@@ -91,6 +104,69 @@ function makeDecision(decision: "go" | "no-go") {
   };
 }
 
+function runConcurrentMetadataAppend(
+  decisionPath: string,
+  date: string,
+  note: string,
+): Promise<{ code: number | null; stderr: string }> {
+  const moduleUrl = pathToFileURL(path.join(workspaceRoot, "scripts/src/distill-backfill.mts")).href;
+  const workerPath = path.join(path.dirname(decisionPath), ".metadata-append-worker.mts");
+  fs.writeFileSync(workerPath, [
+    `import { appendMetadataMaintenanceEntryFile } from ${JSON.stringify(moduleUrl)};`,
+    "const [decisionPath, date, note] = process.argv.slice(2);",
+    "try { appendMetadataMaintenanceEntryFile(decisionPath!, { date, changeType: \"metadata-only\", note }); }",
+    "catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }",
+  ].join("\n"));
+  const child = spawn(
+    path.join(workspaceRoot, "scripts/node_modules/.bin/tsx"),
+    [workerPath, decisionPath, date, note],
+    {
+      cwd: workspaceRoot,
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ code, stderr }));
+  });
+}
+
+function spawnRecoveryGuardHolder(lockPath: string): {
+  child: ReturnType<typeof spawn>;
+  recoveryPath: string;
+  gatePath: string;
+  ready: Promise<void>;
+} {
+  const recoveryPath = `${lockPath}.recovery`;
+  const gatePath = `${recoveryPath}.gate`;
+  const holderScript = [
+    `const fs = require("node:fs");`,
+    "const stat = fs.readFileSync(`/proc/${process.pid}/stat`, \"utf8\");",
+    "const fields = stat.slice(stat.lastIndexOf(\")\") + 1).trim().split(/\\s+/u);",
+    "const owner = { pid: process.pid, identity: { platform: \"linux\", bootId: fs.readFileSync(\"/proc/sys/kernel/random/boot_id\", \"utf8\").trim(), startTimeTicks: fields[19] } };",
+    `fs.writeFileSync(${JSON.stringify(recoveryPath)}, JSON.stringify(owner) + String.fromCharCode(10), { mode: 0o600 });`,
+    `process.stdout.write("recovery-ready\\n");`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+  const child = spawn(
+    "flock",
+    ["--no-fork", "--exclusive", gatePath, process.execPath, "-e", holderScript],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const ready = new Promise<void>((resolve, reject) => {
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (chunk.includes("recovery-ready\n")) resolve();
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`recovery guard holder exited before readiness (${code})`)));
+  });
+  return { child, recoveryPath, gatePath, ready };
+}
+
 function makeCandidate(brand: string, index: number, mismatch = false) {
   const sourceText = `Brand\t${brand}\nCase Pack\t12\nNotes\tSynthetic Supplier 42\nLine\t${index}`;
   const values = { profile: { brand, pizzasPerCase: 12 } };
@@ -157,6 +233,19 @@ function writeJsonl(filePath: string, records: unknown[]) {
   fs.writeFileSync(filePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, { mode: 0o600 });
 }
 
+function readTestLinuxProcessIdentity(pid: number) {
+  const statContents = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+  const commandEnd = statContents.lastIndexOf(")");
+  const fields = commandEnd < 0 ? [] : statContents.slice(commandEnd + 1).trim().split(/\s+/u);
+  const startTimeTicks = fields[19];
+  assert.ok(startTimeTicks && /^\d+$/u.test(startTimeTicks));
+  return {
+    platform: "linux" as const,
+    bootId: fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
+    startTimeTicks,
+  };
+}
+
 function makeOptions({
   repoRoot,
   decisionPath,
@@ -216,6 +305,82 @@ fs.mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
 const decisionPath = path.join(repoRoot, "docs", "evidence", "decision.json");
 const redactionPath = path.join(privateRoot, "redaction.json");
 const evidencePath = path.join(privateRoot, "corpus.jsonl");
+const metadataCommandPath = path.join(repoRoot, "docs", "evidence", "metadata-command.json");
+const priorMaintenanceEntry = {
+  date: "2026-10-08",
+  changeType: "metadata-only",
+  note: "Earlier decision and evidence review remains in history.",
+};
+const metadataCommandRecord = {
+  ...makeDecision("no-go"),
+  maintenanceHistory: [priorMaintenanceEntry],
+  retainedContext: { ownerNote: "Preserve non-history metadata as well." },
+};
+fs.writeFileSync(metadataCommandPath, `${JSON.stringify(metadataCommandRecord, null, 2)}\n`);
+const metadataCommandBefore = JSON.parse(fs.readFileSync(metadataCommandPath, "utf8")) as Record<string, unknown>;
+const metadataCommandEntry = {
+  date: "2026-10-21",
+  changeType: "metadata-only",
+  note: "Refreshed metadata without changing the decision or evaluation evidence.",
+};
+const metadataCommandResult = runMetadataMaintenanceCommand([
+  "append-metadata",
+  "--decision",
+  path.relative(repoRoot, metadataCommandPath),
+  "--date",
+  metadataCommandEntry.date,
+  "--note",
+  metadataCommandEntry.note,
+], repoRoot);
+const metadataCommandWritten = JSON.parse(fs.readFileSync(metadataCommandPath, "utf8")) as Record<string, unknown>;
+assert.deepEqual(metadataCommandResult.maintenanceHistory, [
+  priorMaintenanceEntry,
+  metadataCommandEntry,
+]);
+assert.deepEqual(metadataCommandWritten, metadataCommandResult);
+assert.equal(metadataCommandWritten.decision, "no-go");
+assert.deepEqual(metadataCommandWritten.benchmark, metadataCommandBefore.benchmark);
+assert.deepEqual(metadataCommandWritten.trainingEvaluation, metadataCommandBefore.trainingEvaluation);
+assert.deepEqual(metadataCommandWritten.datasetSafety, metadataCommandBefore.datasetSafety);
+assert.deepEqual(
+  Object.fromEntries(Object.entries(metadataCommandWritten).filter(([key]) => key !== "maintenanceHistory")),
+  Object.fromEntries(Object.entries(metadataCommandBefore).filter(([key]) => key !== "maintenanceHistory")),
+);
+
+const legacyDecisionPath = path.join(repoRoot, "docs", "evidence", "legacy-decision.json");
+const legacyDecisionRecord = {
+  ...makeDecision("no-go"),
+  retainedLegacyNote: "A legacy record has no maintenanceHistory property.",
+};
+fs.writeFileSync(legacyDecisionPath, JSON.stringify(legacyDecisionRecord));
+const legacyAppend = runMetadataMaintenanceCommand([
+  "append-metadata",
+  "--decision",
+  path.relative(repoRoot, legacyDecisionPath),
+  "--date",
+  "2026-10-21",
+  "--note",
+  "Appended metadata to a legacy record without changing its decision.",
+], repoRoot);
+assert.deepEqual(legacyAppend.maintenanceHistory, [{
+  date: "2026-10-21",
+  changeType: "metadata-only",
+  note: "Appended metadata to a legacy record without changing its decision.",
+}]);
+assert.deepEqual(
+  Object.fromEntries(Object.entries(legacyAppend).filter(([key]) => key !== "maintenanceHistory")),
+  legacyDecisionRecord,
+);
+
+const invalidMetadataCommandBefore = fs.readFileSync(metadataCommandPath, "utf8");
+for (const invalidArgs of [
+  ["append-metadata", "--decision", path.relative(repoRoot, metadataCommandPath), "--date", "2026-02-30", "--note", "Invalid calendar date."],
+  ["append-metadata", "--decision", path.relative(repoRoot, metadataCommandPath), "--date", "2026-10-21", "--note", "  "],
+]) {
+  assert.throws(() => runMetadataMaintenanceCommand(invalidArgs, repoRoot), /metadata maintenance entry/u);
+  assert.equal(fs.readFileSync(metadataCommandPath, "utf8"), invalidMetadataCommandBefore);
+}
+
 const systemPromptSentToOutput: string[] = [];
 const dependencies = {
   contract,
@@ -230,6 +395,283 @@ const redaction = {
 fs.writeFileSync(redactionPath, JSON.stringify(redaction), { mode: 0o600 });
 
 try {
+  const syntheticLockEntry = {
+    date: "2026-10-21",
+    changeType: "metadata-only",
+    note: "Synthetic lock recovery test.",
+  };
+  const priorRecoveryHistoryEntry = {
+    date: "2026-10-08",
+    changeType: "metadata-only",
+    note: "Earlier maintenance history must survive recovery.",
+  };
+  const abandonedOwnerPid = 2_000_000_000;
+  assert.throws(() => process.kill(abandonedOwnerPid, 0), { code: "ESRCH" });
+  const abandonedOwner = {
+    pid: abandonedOwnerPid,
+    identity: {
+      platform: "linux" as const,
+      bootId: "00000000-0000-0000-0000-000000000000",
+      startTimeTicks: "123",
+    },
+  };
+
+  const interruptedRecoveryDecisionPath = path.join(repoRoot, "docs", "evidence", "interrupted-recovery.json");
+  fs.writeFileSync(interruptedRecoveryDecisionPath, JSON.stringify({
+    ...makeDecision("no-go"),
+    maintenanceHistory: [priorRecoveryHistoryEntry],
+  }));
+  const interruptedRecoveryLockPath = `${interruptedRecoveryDecisionPath}.metadata-maintenance.lock`;
+  const activeRecoveryHolder = spawnRecoveryGuardHolder(interruptedRecoveryLockPath);
+  await activeRecoveryHolder.ready;
+  const interruptedRecoveryContents = fs.readFileSync(activeRecoveryHolder.recoveryPath, "utf8");
+  assert.equal(
+    (JSON.parse(interruptedRecoveryContents) as { pid: number }).pid,
+    activeRecoveryHolder.child.pid,
+  );
+  try {
+    assert.throws(
+      () => appendMetadataMaintenanceEntryFile(interruptedRecoveryDecisionPath, syntheticLockEntry),
+      /metadata lock recovery is already in progress/u,
+    );
+    assert.equal(fs.readFileSync(activeRecoveryHolder.recoveryPath, "utf8"), interruptedRecoveryContents);
+    assert.equal(fs.existsSync(interruptedRecoveryLockPath), false);
+  } finally {
+    activeRecoveryHolder.child.kill("SIGKILL");
+    await new Promise<void>((resolve, reject) => {
+      activeRecoveryHolder.child.once("error", reject);
+      activeRecoveryHolder.child.once("exit", () => resolve());
+    });
+  }
+  fs.writeFileSync(interruptedRecoveryLockPath, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
+  const recoveredInterruptedAppend = appendMetadataMaintenanceEntryFile(
+    interruptedRecoveryDecisionPath,
+    syntheticLockEntry,
+  );
+  assert.deepEqual(recoveredInterruptedAppend.maintenanceHistory, [
+    priorRecoveryHistoryEntry,
+    syntheticLockEntry,
+  ]);
+  assert.equal(fs.existsSync(activeRecoveryHolder.recoveryPath), false);
+  assert.equal(fs.existsSync(interruptedRecoveryLockPath), false);
+  assert.equal(fs.existsSync(activeRecoveryHolder.gatePath), true);
+
+  const malformedRecoveryDecisionPath = path.join(repoRoot, "docs", "evidence", "malformed-recovery.json");
+  fs.writeFileSync(malformedRecoveryDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const malformedRecoveryLockPath = `${malformedRecoveryDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(`${malformedRecoveryLockPath}.recovery`, "not-a-pid\n", { mode: 0o600 });
+  assert.throws(
+    () => appendMetadataMaintenanceEntryFile(malformedRecoveryDecisionPath, syntheticLockEntry),
+    /recovery lock has an invalid owner/u,
+  );
+  assert.equal(fs.readFileSync(`${malformedRecoveryLockPath}.recovery`, "utf8"), "not-a-pid\n");
+  assert.equal(fs.existsSync(malformedRecoveryLockPath), false);
+
+  const unverifiedIdentityCases = [
+    {
+      name: "unreadable-owner-process-record",
+      readIdentityFile(filePath: string) {
+        if (filePath === `/proc/${process.pid}/stat`) {
+          throw new Error("synthetic procfs permission failure");
+        }
+        return fs.readFileSync(filePath, "utf8");
+      },
+    },
+    {
+      name: "invalid-owner-boot-identity",
+      readIdentityFile(filePath: string) {
+        if (filePath === "/proc/sys/kernel/random/boot_id") {
+          return "not-a-valid-boot-identity\n";
+        }
+        return fs.readFileSync(filePath, "utf8");
+      },
+    },
+  ];
+  for (const testCase of unverifiedIdentityCases) {
+    const unverifiedDecisionPath = path.join(
+      repoRoot,
+      "docs",
+      "evidence",
+      `${testCase.name}.json`,
+    );
+    const originalDecisionContents = `${JSON.stringify(makeDecision("no-go"))}\n`;
+    fs.writeFileSync(unverifiedDecisionPath, originalDecisionContents);
+    const unverifiedLockPath = `${unverifiedDecisionPath}.metadata-maintenance.lock`;
+    const originalLockContents = `${JSON.stringify({
+      pid: process.pid,
+      identity: readTestLinuxProcessIdentity(process.pid),
+    })}\n`;
+    fs.writeFileSync(unverifiedLockPath, originalLockContents, { mode: 0o600 });
+
+    assert.throws(
+      () => appendMetadataMaintenanceEntryFileWithRecoveryGate(
+        unverifiedDecisionPath,
+        syntheticLockEntry,
+        testCase.readIdentityFile,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /cannot establish whether metadata lock owner .* leave the lock untouched/u);
+        assert.ok(error.message.includes(
+          `Inspect ${unverifiedLockPath}; remove it only after confirming no metadata update or recovery is active.`,
+        ));
+        return true;
+      },
+    );
+    assert.equal(fs.readFileSync(unverifiedLockPath, "utf8"), originalLockContents);
+    assert.equal(fs.readFileSync(unverifiedDecisionPath, "utf8"), originalDecisionContents);
+    assert.equal(fs.existsSync(`${unverifiedLockPath}.recovery`), false);
+  }
+
+  const activeLockDecisionPath = path.join(repoRoot, "docs", "evidence", "active-lock.json");
+  fs.writeFileSync(activeLockDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const activeLockPath = `${activeLockDecisionPath}.metadata-maintenance.lock`;
+  const activeHolderScript = [
+    `const fs = require("node:fs");`,
+    `fs.openSync(${JSON.stringify(activeLockPath)}, "wx", 0o600);`,
+    `process.stdout.write("lock-ready\\n");`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+  const activeHolder = spawn(process.execPath, ["-e", activeHolderScript], {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const holderReady = new Promise<void>((resolve, reject) => {
+    activeHolder.stdout?.setEncoding("utf8");
+    activeHolder.stdout?.on("data", (chunk: string) => {
+      if (chunk.includes("lock-ready\n")) resolve();
+    });
+    activeHolder.once("error", reject);
+    activeHolder.once("exit", (code) => reject(new Error(`active lock holder exited before readiness (${code})`)));
+  });
+  await holderReady;
+  try {
+    const activeOwner = {
+      pid: activeHolder.pid!,
+      identity: readTestLinuxProcessIdentity(activeHolder.pid!),
+    };
+    fs.writeFileSync(activeLockPath, `${JSON.stringify(activeOwner)}\n`);
+    assert.throws(
+      () => appendMetadataMaintenanceEntryFile(activeLockDecisionPath, syntheticLockEntry),
+      /metadata update is active/u,
+    );
+    assert.equal(fs.readFileSync(activeLockPath, "utf8"), `${JSON.stringify(activeOwner)}\n`);
+    assert.equal(fs.existsSync(`${activeLockPath}.recovery`), false);
+  } finally {
+    activeHolder.kill("SIGTERM");
+    await new Promise<void>((resolve, reject) => {
+      activeHolder.once("error", reject);
+      activeHolder.once("exit", () => resolve());
+    });
+    fs.rmSync(activeLockPath);
+  }
+
+  const malformedLockDecisionPath = path.join(repoRoot, "docs", "evidence", "malformed-lock.json");
+  fs.writeFileSync(malformedLockDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const malformedLockPath = `${malformedLockDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(malformedLockPath, "not-a-pid\n", { mode: 0o600 });
+  assert.throws(
+    () => appendMetadataMaintenanceEntryFile(malformedLockDecisionPath, syntheticLockEntry),
+    /invalid owner/u,
+  );
+  assert.equal(fs.readFileSync(malformedLockPath, "utf8"), "not-a-pid\n");
+  assert.equal(fs.existsSync(`${malformedLockPath}.recovery`), false);
+  fs.rmSync(malformedLockPath);
+
+  const legacyLockDecisionPath = path.join(repoRoot, "docs", "evidence", "legacy-active-lock.json");
+  fs.writeFileSync(legacyLockDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const legacyLockPath = `${legacyLockDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(legacyLockPath, `${process.pid}\n`, { mode: 0o600 });
+  assert.throws(
+    () => appendMetadataMaintenanceEntryFile(legacyLockDecisionPath, syntheticLockEntry),
+    /live legacy PID-only lock.*PID reuse cannot be distinguished/u,
+  );
+  assert.equal(fs.readFileSync(legacyLockPath, "utf8"), `${process.pid}\n`);
+  assert.equal(fs.existsSync(`${legacyLockPath}.recovery`), false);
+  fs.rmSync(legacyLockPath);
+
+  const reusedPidDecisionPath = path.join(repoRoot, "docs", "evidence", "reused-pid-lock.json");
+  fs.writeFileSync(reusedPidDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const reusedPidLockPath = `${reusedPidDecisionPath}.metadata-maintenance.lock`;
+  const reusedPidOwner = {
+    pid: process.pid,
+    identity: {
+      ...readTestLinuxProcessIdentity(process.pid),
+      startTimeTicks: "0",
+    },
+  };
+  fs.writeFileSync(reusedPidLockPath, `${JSON.stringify(reusedPidOwner)}\n`, { mode: 0o600 });
+  const reusedPidAppend = appendMetadataMaintenanceEntryFile(reusedPidDecisionPath, syntheticLockEntry);
+  assert.deepEqual(reusedPidAppend.maintenanceHistory, [syntheticLockEntry]);
+  assert.equal(fs.existsSync(reusedPidLockPath), false);
+  assert.equal(fs.existsSync(`${reusedPidLockPath}.recovery`), false);
+
+  const abandonedLockDecisionPath = path.join(repoRoot, "docs", "evidence", "abandoned-lock.json");
+  fs.writeFileSync(abandonedLockDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const abandonedLockPath = `${abandonedLockDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(abandonedLockPath, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
+  const recoveredAppend = appendMetadataMaintenanceEntryFile(abandonedLockDecisionPath, syntheticLockEntry);
+  assert.deepEqual(recoveredAppend.maintenanceHistory, [syntheticLockEntry]);
+  assert.equal(fs.existsSync(abandonedLockPath), false);
+  assert.equal(fs.existsSync(`${abandonedLockPath}.recovery`), false);
+
+  const abandonedLegacyDecisionPath = path.join(repoRoot, "docs", "evidence", "abandoned-legacy-lock.json");
+  fs.writeFileSync(abandonedLegacyDecisionPath, JSON.stringify(makeDecision("no-go")));
+  const abandonedLegacyLockPath = `${abandonedLegacyDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(abandonedLegacyLockPath, `${abandonedOwnerPid}\n`, { mode: 0o600 });
+  const abandonedLegacyAppend = appendMetadataMaintenanceEntryFile(
+    abandonedLegacyDecisionPath,
+    syntheticLockEntry,
+  );
+  assert.deepEqual(abandonedLegacyAppend.maintenanceHistory, [syntheticLockEntry]);
+  assert.equal(fs.existsSync(abandonedLegacyLockPath), false);
+
+  const racingDecisionPath = path.join(repoRoot, "docs", "evidence", "racing-lock.json");
+  fs.writeFileSync(racingDecisionPath, JSON.stringify({
+    ...makeDecision("no-go"),
+    maintenanceHistory: [priorRecoveryHistoryEntry],
+  }));
+  const racingLockPath = `${racingDecisionPath}.metadata-maintenance.lock`;
+  fs.writeFileSync(racingLockPath, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
+  fs.writeFileSync(`${racingLockPath}.recovery`, `${JSON.stringify(abandonedOwner)}\n`, { mode: 0o600 });
+  const racingResults = await Promise.all([
+    runConcurrentMetadataAppend(
+      racingDecisionPath,
+      "2026-10-21",
+      "First concurrent synthetic recovery attempt.",
+    ),
+    runConcurrentMetadataAppend(
+      racingDecisionPath,
+      "2026-10-21",
+      "Second concurrent synthetic recovery attempt.",
+    ),
+  ]);
+  const racingSuccesses = racingResults.filter((result) => result.code === 0);
+  assert.ok(
+    racingSuccesses.length >= 1,
+    `at least one contender must recover and append; results: ${JSON.stringify(racingResults)}`,
+  );
+  for (const result of racingResults) {
+    if (result.code !== 0) {
+      assert.match(result.stderr, /metadata (?:update is active|lock recovery is already in progress)/u);
+    }
+  }
+  const racingDecision = JSON.parse(fs.readFileSync(racingDecisionPath, "utf8")) as {
+    maintenanceHistory: Array<{ note: string }>;
+  };
+  assert.equal(racingDecision.maintenanceHistory.length, racingSuccesses.length + 1);
+  assert.equal(racingDecision.maintenanceHistory[0]?.note, priorRecoveryHistoryEntry.note);
+  assert.deepEqual(
+    new Set(racingDecision.maintenanceHistory.map((entry) => entry.note)),
+    new Set([
+      priorRecoveryHistoryEntry.note,
+      ...racingResults.flatMap((result, index) => result.code === 0
+        ? [index === 0 ? "First concurrent synthetic recovery attempt." : "Second concurrent synthetic recovery attempt."]
+        : []),
+    ]),
+  );
+  assert.equal(fs.existsSync(racingLockPath), false);
+  assert.equal(fs.existsSync(`${racingLockPath}.recovery`), false);
+
   fs.writeFileSync(decisionPath, JSON.stringify({
     ...makeDecision("no-go"),
     maintenanceUpdate: {

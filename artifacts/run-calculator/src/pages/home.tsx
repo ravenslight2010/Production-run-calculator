@@ -1,5 +1,8 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
 import { DEFAULT_RUN_TO_TIME } from "../runToTime";
+import { reviewProfileImport } from "../importProfileReview";
+import { ImportReviewCancelledError } from "../importSafetyReview";
+import { reviewScheduleImport, scheduleAppliedValues } from "../importScheduleReview";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -480,6 +483,7 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
+import { fetchImportGoldConfig, makeImportGoldInput } from "../importGold";
 import {
   clearPendingImportOperation,
   createImportOperationId,
@@ -594,9 +598,12 @@ import {
   savePendingDuplicateReviews,
   resolvePendingDuplicateReview,
   duplicateReviewGroupKey,
+  fetchDeniedMerges,
+  restoreDeniedMerges,
   isCurrentMergeSuggestionRequest,
   type ReviewedMergeSuggestion,
   type MergeSuggestCategory,
+  type DeniedMerge,
 } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
@@ -630,7 +637,7 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, getOperationalDeviceId, operationalIntentBlocksLifecycle, queueOperationalIntent, reportRejectedManualSectionErrors, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
@@ -871,6 +878,7 @@ const loadDoughGuideImportDialog = () =>
     default: module.DoughGuideImportDialog,
   }));
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
+const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
@@ -1803,6 +1811,8 @@ export default function Home() {
   }
   const premixImportOperationRef = useRef<string | null>(null);
   const cheeseImportOperationRef = useRef<string | null>(null);
+  const sauceGuideSourceKeyRef = useRef<string | undefined>(undefined);
+  const doughGuideSourceKeyRef = useRef<string | undefined>(undefined);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
   useEffect(() => {
     visibleTabScheduler.start();
@@ -3150,6 +3160,14 @@ export default function Home() {
   const canRecordQc = hasCapability("record-qc");
   const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
+  const { data: importGoldConfig } = useQuery({
+    queryKey: ["import-gold-config"],
+    queryFn: fetchImportGoldConfig,
+    enabled: canManageStaff,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const goldCaptureEnabled = canManageStaff && importGoldConfig?.enabled === true;
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
@@ -4271,9 +4289,17 @@ export default function Home() {
   const [showFloorMode, setShowFloorMode] = useState(false);
   // Combined per-user "Alerts & Floor Mode" settings panel (header menu).
   const [showAlertSettings, setShowAlertSettings] = useState(false);
+  const [headerMoreMenuOpen, setHeaderMoreMenuOpen] = useState(false);
+  const openAlertSettingsAfterMenuCloseRef = useRef(false);
+  const queueAlertSettingsOpenAfterMenuClose = (source: "click" | "select") => {
+    openAlertSettingsAfterMenuCloseRef.current = true;
+    setHeaderMoreMenuOpen(false);
+  };
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
   const [showManagerAttention, setShowManagerAttention] = useState(false);
+  const [managerAttentionFocusDestination, setManagerAttentionFocusDestination] =
+    useState<"staff" | "incidents" | null>(null);
   const managerAttentionTriggerRef = useRef<HTMLButtonElement>(null);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
@@ -4537,6 +4563,26 @@ export default function Home() {
   const [mergeSuggestError, setMergeSuggestError] = useState("");
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
+  const [ignoredMergePanelOpen, setIgnoredMergePanelOpen] = useState(false);
+  const [ignoredMergeFilter, setIgnoredMergeFilter] = useState<{
+    scopeKey: string;
+    query: string;
+  } | null>(null);
+  const [ignoredMergeState, setIgnoredMergeState] = useState<{
+    scopeKey: string;
+    pairs: DeniedMerge[];
+  } | null>(null);
+  const [ignoredMergeBusy, setIgnoredMergeBusy] = useState(false);
+  const [ignoredMergeError, setIgnoredMergeError] = useState("");
+  const [restoringIgnoredMergeKey, setRestoringIgnoredMergeKey] = useState("");
+  const [recentlyIgnoredMerge, setRecentlyIgnoredMerge] = useState<{
+    key: string;
+    scopeKey: string;
+    category: MergeSuggestCategory;
+    brand?: string;
+    pairs: DeniedMerge[];
+    status: "ignored" | "restoring" | "restored" | "error" | "save-error";
+  } | null>(null);
   // Checked suggestion groups for batch apply, keyed by target+sources (stable
   // across list re-renders; stale keys from removed suggestions are harmless
   // because counts intersect against the live list).
@@ -5092,6 +5138,62 @@ export default function Home() {
         return { category: "ingredient", universe: mergeFullUniverse };
     }
   }, [mergeCategory, mergeBfMode, mergeBfBrand, mergeUniverse, mergeFullUniverse]);
+  const ignoredMergeScopeKey = JSON.stringify([
+    mergeSuggestScope.category,
+    mergeSuggestScope.category === "flavor" ? mergeSuggestScope.brand?.trim().toLowerCase() ?? "" : "",
+  ]);
+  const scopedIgnoredMerges =
+    ignoredMergeState?.scopeKey === ignoredMergeScopeKey ? ignoredMergeState.pairs : [];
+  // A query is only visible in the scope where it was entered, so scope changes
+  // never show old rows under a stale category or flavor brand.
+  const ignoredMergeFilterQuery =
+    ignoredMergeFilter?.scopeKey === ignoredMergeScopeKey ? ignoredMergeFilter.query : "";
+  const visibleIgnoredMerges = useMemo(() => {
+    const query = ignoredMergeFilterQuery.trim().toLowerCase();
+    if (!query) return scopedIgnoredMerges;
+    return scopedIgnoredMerges.filter((pair) =>
+      pair.nameA.toLowerCase().includes(query) || pair.nameB.toLowerCase().includes(query),
+    );
+  }, [ignoredMergeFilterQuery, scopedIgnoredMerges]);
+
+  useEffect(() => {
+    if (!ignoredMergePanelOpen || !canManageProfiles) return;
+    const controller = new AbortController();
+    let active = true;
+    setIgnoredMergeState(null);
+    setIgnoredMergeBusy(true);
+    setIgnoredMergeError("");
+    void fetchDeniedMerges(
+      mergeSuggestScope.category,
+      mergeSuggestScope.brand,
+      controller.signal,
+    )
+      .then((pairs) => {
+        if (active) setIgnoredMergeState({ scopeKey: ignoredMergeScopeKey, pairs });
+      })
+      .catch((error) => {
+        if (active && !controller.signal.aborted) {
+          setIgnoredMergeError(
+            error instanceof Error && error.message.includes("invalid ignored-match list")
+              ? "The ignored-match list couldn't be read. Refresh and try again."
+              : "Couldn't load ignored matches. Refresh and try again.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIgnoredMergeBusy(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    canManageProfiles,
+    ignoredMergePanelOpen,
+    ignoredMergeScopeKey,
+    mergeSuggestScope.brand,
+    mergeSuggestScope.category,
+  ]);
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
@@ -5440,17 +5542,84 @@ export default function Home() {
       persistPendingDuplicateReview(pendingDuplicateReviewAfterResolution(0));
     }
     const scope = mergeSuggestScope;
+    const scopeKey = ignoredMergeScopeKey;
+    const key = mergeSuggestKey(s);
     try {
-      await denyMerge(s.target, sources, scope.category, scope.brand);
+      const pairs = await denyMerge(s.target, sources, scope.category, scope.brand);
+      if (canManageProfiles) {
+        setRecentlyIgnoredMerge({
+          key,
+          scopeKey,
+          category: scope.category,
+          brand: scope.brand,
+          pairs,
+          status: "ignored",
+        });
+      }
     } catch {
-      // Non-fatal: the suggestion is already hidden for this session; it may
-      // reappear on a later scan if the deny didn't persist.
+      setRecentlyIgnoredMerge(canManageProfiles ? {
+        key,
+        scopeKey,
+        category: scope.category,
+        brand: scope.brand,
+        pairs: [],
+        status: "save-error",
+      } : null);
     }
     if (mergeCategory === "ingredients") {
       void resolvePendingDuplicateReview(
         duplicateReviewGroupKey(s.target, s.sources, "ingredient"),
         "ignored",
       ).then((result) => persistPendingDuplicateReview(result.count)).catch(() => {});
+    }
+  }
+
+  async function undoRecentlyIgnoredMerge() {
+    const recent = recentlyIgnoredMerge;
+    if (
+      !canManageProfiles ||
+      !recent ||
+      recent.scopeKey !== ignoredMergeScopeKey ||
+      recent.pairs.length === 0 ||
+      (recent.status !== "ignored" && recent.status !== "error")
+    ) return;
+
+    setRecentlyIgnoredMerge({ ...recent, status: "restoring" });
+    setRestoringIgnoredMergeKey(recent.key);
+    try {
+      const remaining = await restoreDeniedMerges(
+        recent.pairs,
+        recent.category,
+        recent.brand,
+      );
+      setIgnoredMergeState({ scopeKey: recent.scopeKey, pairs: remaining });
+      setRecentlyIgnoredMerge({ ...recent, status: "restored" });
+      setMergeSuggestNote("Match restored. Scan again to see it in suggestions.");
+    } catch {
+      setRecentlyIgnoredMerge({ ...recent, status: "error" });
+    } finally {
+      setRestoringIgnoredMergeKey("");
+    }
+  }
+
+  async function restoreIgnoredMerge(pair: DeniedMerge) {
+    const scope = mergeSuggestScope;
+    const scopeKey = ignoredMergeScopeKey;
+    const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+    setRestoringIgnoredMergeKey(pairKey);
+    setIgnoredMergeError("");
+    try {
+      const remaining = await restoreDeniedMerges([pair], scope.category, scope.brand);
+      setIgnoredMergeState({ scopeKey, pairs: remaining });
+      setMergeSuggestNote("Match restored. Scan again to see it in suggestions.");
+    } catch (error) {
+      setIgnoredMergeError(
+        error instanceof Error && error.message.includes("invalid ignored-match list")
+          ? "The server couldn't confirm the restored match. Refresh and check its status."
+          : "Couldn't restore this match. Please retry; if it continues, refresh and try again.",
+      );
+    } finally {
+      setRestoringIgnoredMergeKey("");
     }
   }
 
@@ -6176,6 +6345,8 @@ export default function Home() {
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
+  const scheduleEditorReviewIdentityRef = useRef("");
+  scheduleEditorReviewIdentityRef.current = JSON.stringify([scheduleEditorRuns, scheduleEditorRunValues]);
   const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
   const [scheduleBreaksExpanded, setScheduleBreaksExpanded] = useState(false);
   const scheduleBreakSummary = useMemo(
@@ -6856,6 +7027,36 @@ export default function Home() {
     serverCalcReceiptRef.current = receipt;
     setServerCalcReceipt(receipt);
   }
+  const confirmStationActivity = useCallback(async (station: "freezeTunnel" | "warehouse") => {
+    if (!isOnline || !currentRunId) {
+      throw new Error("Connect to the production network and select the active run to confirm activity.");
+    }
+    const response = await fetch(
+      `/api/sync/station-activity?today=${encodeURIComponent(todayStr())}&epoch=${getStoredResetEpoch()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: `line-map:${crypto.randomUUID()}`,
+          runId: currentRunId,
+          station,
+          senderId: getOperationalDeviceId(),
+        }),
+      },
+    );
+    const body = await response.json().catch(() => null) as {
+      ok?: boolean;
+      error?: string;
+      snapshotId?: string;
+      operationalProjection?: OperationalProjection | null;
+    } | null;
+    if (!response.ok || body?.ok !== true || !body.snapshotId) {
+      throw new Error(body?.error ?? "Activity could not be confirmed. Refresh and try again.");
+    }
+    if (body.operationalProjection) {
+      adoptOperationalProjection(body.operationalProjection, body.snapshotId);
+    }
+  }, [currentRunId, isOnline]);
   function adoptServerCalcReceipt(
     serverCalc: { runId: string; calc: Calc } | null | undefined,
     snapshotId: string | undefined,
@@ -7254,13 +7455,40 @@ export default function Home() {
   const canViewManagerAttention =
     isManager || canApproveResets || canReviewIncidents || canManageProfiles;
 
+  useEffect(() => {
+    if (!managerAttentionFocusDestination || activeTab !== managerAttentionFocusDestination) return;
+
+    let frame = 0;
+    let attempts = 0;
+    const focusDestinationAfterDialogCloses = () => {
+      const dialog = document.querySelector('[data-testid="manager-attention-dialog"]');
+      if (dialog && attempts < 120) {
+        attempts += 1;
+        frame = window.requestAnimationFrame(focusDestinationAfterDialogCloses);
+        return;
+      }
+      if (!dialog) {
+        document
+          .querySelector<HTMLElement>(
+            ".station-tabs [role='tabpanel'][data-state='active']",
+          )
+          ?.focus();
+      }
+      setManagerAttentionFocusDestination(null);
+    };
+    frame = window.requestAnimationFrame(focusDestinationAfterDialogCloses);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, managerAttentionFocusDestination]);
+
   function resolveManagerAttention(item: ManagerAttentionItem) {
     setShowManagerAttention(false);
     if (item.kind === "password-resets") {
+      setManagerAttentionFocusDestination("staff");
       setActiveTab("staff");
       return;
     }
     if (item.kind === "incidents") {
+      setManagerAttentionFocusDestination("incidents");
       setActiveTab("incidents");
       return;
     }
@@ -13013,6 +13241,7 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
     destructiveChangesAcknowledged = false,
     destructiveReviewSignature?: string,
+    captureGoldCase = false,
   ) {
     if (!specImportPrepared) return;
     // The commit spans profile and inventory master-data writes after an AI
@@ -13055,7 +13284,13 @@ export default function Home() {
     specImportOperationRef.current = operationId;
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
-        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(
+          toCommit,
+          forceUpdateProfileKeys,
+          acceptedNewMixIngredientNames,
+          operationId,
+          captureGoldCase ? { input: makeImportGoldInput({ profiles: editedParsed.profiles, recipes: editedParsed.recipes }) } : undefined,
+        );
       finishSpecImportOutcome("success");
       setSpecImportReviewNotice(null);
       setSpecImportRetryPending(false);
@@ -13462,6 +13697,12 @@ export default function Home() {
       });
       specImportOperationRef.current = null;
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) {
+        specImportOperationRef.current = null;
+        setSpecImportError(null);
+        setSpecImportReviewNotice(null);
+        return;
+      }
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
         if (specImportRetryPending) {
           setSpecImportRetryBlocked(true);
@@ -13673,6 +13914,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     mixesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
+    captureGoldCase = false,
   ) {
     if (!premixImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -13704,6 +13946,7 @@ export default function Home() {
         newAliases,
         mixesToRemove,
         operationId,
+        captureGoldCase ? { input: makeImportGoldInput({ candidates: premixImportPrepared.candidates.map(({ mix }) => mix) }) } : undefined,
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
@@ -13780,6 +14023,7 @@ export default function Home() {
         });
       }
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) return;
       void recordImportHistory({
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared?.sourceNames ?? []),
@@ -13847,7 +14091,11 @@ export default function Home() {
     }
     setShippingImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).shippingImport.commitShippingImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review shipping guide changes", rows, "shipping", deriveSourceKey(shippingImportFileNameRef.current ? [shippingImportFileNameRef.current] : []));
+      if (!reviewed) return;
+      const result = workflow.shippingImport.commitShippingImport(rows, acknowledged);
+      reviewed.verify();
       const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
       void recordImportHistory({
         importType: "shipping",
@@ -13855,6 +14103,7 @@ export default function Home() {
         sourceLabel: buildShippingGuideLabel(rows.length, shippingImportFileNameRef.current),
         status: shippingSkipped > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed brand links", commit: "committed profile patches" },
           source: { rows: rows.length, fields: rows.reduce((n, r) => n + Object.keys(r.patch).length, 0) },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -13931,6 +14180,7 @@ export default function Home() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    sauceGuideSourceKeyRef.current = deriveSourceKey([file.name]);
     const gen = ++sauceGuideImportGenRef.current;
     setSauceGuideImportPrepared(null);
     setSauceGuideImportError(null);
@@ -13969,12 +14219,20 @@ export default function Home() {
     }
     setSauceGuideImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review sauce guide changes", rows
+        .filter((row) => row.brand.trim() && row.recipeName.trim() && row.ozPerPizza > 0 && !(row.wasNullBrand && row.wasNullRecipe))
+        .map((row) => ({ ...row, patch: { frontlineRecipeName: row.recipeName.trim(), sauceOzPerPizza: row.ozPerPizza } })), "sauce", sauceGuideSourceKeyRef.current);
+      if (!reviewed) return;
+      const result = workflow.recipeGuideImport.commitSauceGuideImport(rows, acknowledged);
+      reviewed.verify();
       void recordImportHistory({
         importType: "sauce",
+        sourceKey: sauceGuideSourceKeyRef.current,
         sourceLabel: "Sauce recipe guide",
         status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
           source: { rows: rows.length },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -14006,6 +14264,7 @@ export default function Home() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    doughGuideSourceKeyRef.current = deriveSourceKey([file.name]);
     const gen = ++doughGuideImportGenRef.current;
     setDoughGuideImportPrepared(null);
     setDoughGuideImportError(null);
@@ -14046,12 +14305,20 @@ export default function Home() {
     }
     setDoughGuideImportApplying(true);
     try {
-      const result = (await loadWorkbookWorkflow()).recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
+      const workflow = await loadWorkbookWorkflow();
+      const reviewed = await reviewProfileImport("Review dough guide changes", rows
+        .filter((row) => row.brand.trim() && row.doughRecipeName.trim() && !(row.wasNullBrand && row.wasNullRecipe))
+        .map((row) => ({ ...row, patch: { doughRecipeName: row.doughRecipeName.trim() } })), "dough", doughGuideSourceKeyRef.current);
+      if (!reviewed) return;
+      const result = workflow.recipeGuideImport.commitDoughGuideImport(rows, acknowledged);
+      reviewed.verify();
       void recordImportHistory({
         importType: "dough",
+        sourceKey: doughGuideSourceKeyRef.current,
         sourceLabel: "Dough recipe guide",
         status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
         summary: {
+          ...(reviewed.values ? { appliedValues: reviewed.values, persistence: "local-verified" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
           source: { rows: rows.length },
           landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
@@ -14156,6 +14423,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
+    captureGoldCase = false,
   ) {
     if (!cheeseImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -14181,7 +14449,14 @@ export default function Home() {
     const operationId = cheeseImportOperationRef.current ?? createImportOperationId();
     cheeseImportOperationRef.current = operationId;
     try {
-      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove, operationId);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(
+        cheeseImportPrepared,
+        recipesToApply,
+        newAliases,
+        recipesToRemove,
+        operationId,
+        captureGoldCase ? { input: makeImportGoldInput({ recipes: cheeseImportPrepared.candidates.map(({ recipe }) => recipe) }) } : undefined,
+      );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -14271,6 +14546,7 @@ export default function Home() {
       // recipes by name, and refresh pending runs + the open form.
       void propagateCheeseRecipeUpdates(result.saved);
     } catch (err) {
+      if (err instanceof ImportReviewCancelledError) return;
       void recordImportHistory({
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared?.sourceNames ?? []),
@@ -14320,8 +14596,6 @@ export default function Home() {
   }
 
   async function commitExcelImport(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const date = payload.date;
     // Fetch the existing day payload so we can append additively WITHOUT
     // dropping any existing run metadata (started/ended times, stoppages,
@@ -14372,6 +14646,19 @@ export default function Home() {
       deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
       undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
     };
+    const appliedValues = scheduleAppliedValues(date, payload.runs);
+    if (!await reviewScheduleImport(date,
+      { runs: existingRuns.map((run) => ({ ...run, casesPlanned: existingRunValues[run.id]?.casesNeeded })) },
+      {
+        runs: runs.map((run) => ({ ...run, casesPlanned: runValues[run.id]?.casesNeeded })),
+        brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+        flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+      }, false, payload.sourceKey, appliedValues,
+    )) return;
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+    outPayload.brands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+    outPayload.brandFlavors = loadBrandFlavors();
     let ok = false;
     try {
       // Key the day boundary + live-view broadcast on the operator's local
@@ -14408,11 +14695,14 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     if (ok) {
+      payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
         status: "complete",
         summary: {
+          ...(appliedValues ? { appliedValues, persistence: "sync-acknowledged" as const } : {}),
           phases: { parse: "deterministic parse", linking: "reviewed brand/flavor links", commit: "saved schedule day" },
           source: { runs: payload.runs.length, brands: payload.createBrands.length, flavors: payload.createFlavors.length },
           landed: { runs: payload.runs.length },
@@ -14433,9 +14723,7 @@ export default function Home() {
     }
   }
 
-  function importExcelIntoEditor(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+  async function importExcelIntoEditor(payload: ImportCommit) {
     const newRuns: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
     const newVals: Record<string, FormValues> = {};
     for (const r of payload.runs) {
@@ -14444,6 +14732,20 @@ export default function Home() {
       newVals[id] = { ...(profile ?? DEFAULT_VALUES), casesNeeded: r.casesPlanned };
       newRuns.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: r.casesPlanned });
     }
+    const originalEditor = JSON.stringify([scheduleEditorRuns, scheduleEditorRunValues]);
+    if (!await reviewScheduleImport(payload.date,
+      { runs: scheduleEditorRuns.map((run) => ({ ...run, casesPlanned: run.casesNeeded })) },
+      {
+        runs: [...scheduleEditorRuns.filter(r => r.brand || r.casesNeeded), ...newRuns].map((run) => ({ ...run, casesPlanned: run.casesNeeded })),
+        brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+        flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+      }, true)) return;
+    if (originalEditor !== scheduleEditorReviewIdentityRef.current) {
+      toast({ title: "Schedule changed", description: "Review the import again before adding it to the editor.", variant: "destructive" });
+      return;
+    }
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     setScheduleEditorRunValues(prev => ({ ...prev, ...newVals }));
     // Drop any empty placeholder rows so the imported rows don't leave a blank
     // run that blocks the Save Schedule validation.
@@ -14452,6 +14754,7 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     setImportIntoEditor(false);
+    // No learning or successful-Apply receipt: the editor still needs Save.
   }
 
   // Multi-sheet schedule planner commit: each date in `payload.byDate` is written
@@ -14461,14 +14764,14 @@ export default function Home() {
   // in-progress day isn't wiped). Only dates present in the file are touched.
   async function commitMultiDayImport(payload: ImportCommit) {
     const { runExcel } = await loadWorkbookWorkflow();
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const byDate = payload.byDate ?? [];
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
     let failed = 0;
+    let confirmedDays = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
+    const appliedScheduleRows: NonNullable<ReturnType<typeof scheduleAppliedValues>>["runs"] = [];
     // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
@@ -14559,6 +14862,50 @@ export default function Home() {
         deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
         undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
       };
+      const appliedValues = scheduleAppliedValues(date, dayRuns);
+      if (!await reviewScheduleImport(date,
+        { runs: existingRuns.map((run) => ({ ...run, casesPlanned: existingRunValues[run.id]?.casesNeeded })) },
+        {
+          runs: runs.map((run) => ({ ...run, casesPlanned: runValues[run.id]?.casesNeeded })),
+          brands: payload.createBrands.map((brand) => ({ key: brand, name: brand })),
+          flavors: payload.createFlavors.map((item) => ({ key: JSON.stringify(item), ...item })),
+        }, false, payload.sourceKey, appliedValues,
+      )) {
+        setImportProgress(null);
+        if (done > 0) {
+          // Days are independently acknowledged. Cancelling a later proposal
+          // cannot roll back earlier writes or claim the whole file was cancelled.
+          void recordImportHistory({
+            importType: "schedule",
+            sourceKey: payload.sourceKey,
+            sourceLabel: "Schedule workbook",
+            status: "partial",
+            summary: {
+              counts: { confirmedDays, unconfirmedDays: failed, processedDays: done },
+              warnings: [`Stopped after ${done} processed days; ${confirmedDays} were confirmed saved. Earlier unconfirmed requests may still have reached the server.`],
+              followUp: ["Reload the schedule before importing again. The cancelled day and remaining days were not sent; earlier saves were not undone."],
+            },
+          }).catch(() => {});
+          void fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(async (response) => {
+            if (!response.ok) throw new Error("Could not refresh the partially imported schedule.");
+            setScheduledDays(normalizeScheduledDays(await response.json()));
+          }).catch(() => {
+            toast({ title: "Reload the schedule", description: "Earlier day saves were not undone. The planner could not be refreshed.", variant: "destructive" });
+          });
+          setShowImportDialog(false);
+          setImportResult(null);
+          setImportIntoEditor(false);
+          toast({
+            title: "Schedule import stopped partway through",
+            description: `${confirmedDays} days were confirmed saved; ${failed} day requests were not confirmed. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
+          });
+        }
+        return;
+      }
+      for (const b of payload.createBrands) addBrand(b);
+      for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+      outPayload.brands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+      outPayload.brandFlavors = loadBrandFlavors();
       let dayOk = false;
       try {
         // Pass the client's local `today` so the server keys the day boundary
@@ -14616,6 +14963,10 @@ export default function Home() {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
       if (!dayOk) failed += 1;
+      else {
+        confirmedDays += 1;
+        if (appliedValues) appliedScheduleRows.push(...appliedValues.runs);
+      }
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
@@ -14627,11 +14978,15 @@ export default function Home() {
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
     if (failed === 0) {
+      payload.onApplied?.();
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
         status: skippedToday > 0 ? "partial" : "complete",
         summary: {
+          ...(appliedScheduleRows.length <= 500 && JSON.stringify(appliedScheduleRows).length <= 95_000
+            ? { appliedValues: { runs: appliedScheduleRows }, persistence: "sync-acknowledged" as const } : {}),
           phases: { parse: "deterministic multi-day parse", linking: "reviewed brand/flavor links", commit: "saved schedule days" },
           source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
           landed: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) - skippedToday },
@@ -15237,7 +15592,7 @@ export default function Home() {
   const homeCtxValue = useMemo(() => ({
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, addBrand,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
-    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus,
+    confirmRunSurplus, replaceRunSurplus, refreshFreezerSurplus, confirmStationActivity,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
@@ -15246,7 +15601,7 @@ export default function Home() {
     applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
-    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    buildSyncPayload, canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
     checklistSatisfied, cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields, cheeseImportApplying,
     cheeseImportError, cheeseImportGenRef, cheeseImportInputRef, cheeseImportLoading, cheeseImportPrepared, cheeseImportProgress,
@@ -15267,7 +15622,7 @@ export default function Home() {
     handleApplyMerge, handleApplyRecipeNameMerge, handleCheeseImportConfirm, handleCheeseImportFile, handleConfirmMerge, handleImportFile,
     handlePremixImportConfirm, handlePremixImportFile, handleRemoveStaleReference, handleScheduleImportFile, handleSetupProfileSaved, handleShippingImportConfirm,
     handleShippingImportFile, handleSpecImportConfirm, handleSpecImportFile, handleStaleSyncWrite, handleSuggestMerges, handleUndoChange,
-    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, importDefaultDate, importExcelIntoEditor,
+    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, restoreIgnoredMerge, importDefaultDate, importExcelIntoEditor,
     importInputRef, importIntoEditor, importProgress, importResult, ingredientCatalog, ingredientTypeOptions,
     ingredientTypes, initialFinishTimestampRef, isFullscreen, isManager, isOnline, isRecipeNameCategory,
     isSupervisor, isSyncApplyingRef, lastEndedRun, lastLocalEditRef, lastRunRecall, lastSyncSigRef,
@@ -15279,6 +15634,8 @@ export default function Home() {
     mergeFormRef, mergeFromImport, mergeFullUniverse, mergeMap, mergePoolLabel, mergePreviewCount,
     mergeSources, mergeStaleCi, mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected, mergeSuggestions, mergeTarget,
+    ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError, ignoredMergeScopeKey,
+    ignoredMergeFilterQuery, visibleIgnoredMerges, scopedIgnoredMerges, restoringIgnoredMergeKey,
     mergeTargetOptions, mergeUniverse, mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput,
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
@@ -15318,6 +15675,7 @@ export default function Home() {
     setMergeBfMode, setMergeBusy, setMergeCategory, setMergeConfirming, setMergeError,
     setMergeFromImport, setMergeSources, setMergeSuggestBusy, setMergeSuggestError, setMergeSuggestNote, setMergeSuggestRan,
     setMergeSuggestSelected, setMergeSuggestions, setMergeTarget, setMergedAwayTomb, setMgIngInput, setMgNamesInput,
+    setIgnoredMergePanelOpen, setIgnoredMergeState, setIgnoredMergeFilter,
     setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
     setNewPin, setNewPinConfirm, setNewReasonInput, setPep1ShowB, setPep2ShowB, setPepTypes,
     setPinChangeMsg, setPinError, setPinInput, setPremixImportApplying, setPremixImportError, setPremixImportLoading,
@@ -15357,7 +15715,7 @@ export default function Home() {
     activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
     freezerSurplus, freezerSurplusLoaded, freezerSurplusBusy, freezerSurplusError,
     batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
-    canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    canApproveResets, canEditRules, canManageInventory, canManageProfiles, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
     checklistAcks, checklistSatisfied,
     cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields,
@@ -15385,6 +15743,9 @@ export default function Home() {
     mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected,
     mergeSuggestions, mergeTarget, mergeTargetOptions, mergeUniverse,
+    ignoredMergePanelOpen, ignoredMergeState, ignoredMergeBusy, ignoredMergeError,
+    ignoredMergeScopeKey, ignoredMergeFilterQuery, visibleIgnoredMerges, scopedIgnoredMerges,
+    restoringIgnoredMergeKey,
     mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
     mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
@@ -16231,6 +16592,112 @@ export default function Home() {
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated. Separate inventory products are preserved and follow their production ingredient link. This can't be undone."}
                     </p>
 
+                    {canManageProfiles &&
+                      !(mergeSuggestScope.category === "flavor" && !mergeSuggestScope.brand) && (
+                      <section
+                        data-testid="ignored-merge-matches"
+                        aria-label="Previously ignored matches"
+                        className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-2"
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={ignoredMergePanelOpen}
+                          aria-controls="ignored-merge-pair-list"
+                          onClick={() => setIgnoredMergePanelOpen((open) => !open)}
+                          className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-foreground"
+                        >
+                          <span>Previously ignored matches</span>
+                          {ignoredMergeState?.scopeKey === ignoredMergeScopeKey && (
+                            <span className="text-[11px] font-normal text-muted-foreground">
+                              {scopedIgnoredMerges.length}
+                            </span>
+                          )}
+                        </button>
+                        {ignoredMergePanelOpen && (
+                          <div id="ignored-merge-pair-list" className="space-y-2">
+                            {ignoredMergeError && (
+                              <p role="alert" className="text-[11px] text-amber-600 dark:text-amber-500">
+                                {ignoredMergeError}
+                              </p>
+                            )}
+                            {ignoredMergeBusy ? (
+                              <p className="text-[11px] text-muted-foreground">Loading ignored matches…</p>
+                            ) : scopedIgnoredMerges.length > 0 ? (
+                              <>
+                                <label
+                                  htmlFor="ignored-merge-filter"
+                                  className="block text-[11px] font-medium text-muted-foreground"
+                                >
+                                  Filter ignored matches by recipe name
+                                </label>
+                                <div className="flex gap-2">
+                                  <input
+                                    id="ignored-merge-filter"
+                                    type="search"
+                                    value={ignoredMergeFilterQuery}
+                                    onChange={(event) => setIgnoredMergeFilter({
+                                      scopeKey: ignoredMergeScopeKey,
+                                      query: event.currentTarget.value,
+                                    })}
+                                    placeholder="Search either recipe name"
+                                    autoComplete="off"
+                                    className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                  />
+                                  {ignoredMergeFilterQuery && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIgnoredMergeFilter({
+                                        scopeKey: ignoredMergeScopeKey,
+                                        query: "",
+                                      })}
+                                      className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted"
+                                    >
+                                      Clear filter
+                                    </button>
+                                  )}
+                                </div>
+                                {visibleIgnoredMerges.length > 0 ? (
+                                  <ul className="space-y-1.5">
+                                    {visibleIgnoredMerges.map((pair) => {
+                                      const pairKey = [pair.nameA, pair.nameB].sort().join("::");
+                                      return (
+                                        <li
+                                          key={pairKey}
+                                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/60 px-2.5 py-2"
+                                        >
+                                          <span className="min-w-0 break-words text-xs">
+                                            {pair.nameA} ↔ {pair.nameB}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            aria-label={`Restore ignored match ${pair.nameA} and ${pair.nameB}`}
+                                            disabled={Boolean(restoringIgnoredMergeKey)}
+                                            onClick={() => void restoreIgnoredMerge(pair)}
+                                            className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50"
+                                          >
+                                            {restoringIgnoredMergeKey === pairKey ? "Restoring…" : "Restore"}
+                                          </button>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    No ignored matches contain “{ignoredMergeFilterQuery.trim()}”.
+                                    Clear the filter to see all ignored matches.
+                                  </p>
+                                )}
+                              </>
+                            ) : !ignoredMergeError ? (
+                              <p className="text-[11px] text-muted-foreground">
+                                No ignored matches in this selection.
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </section>
+                    )}
+
                     {/* Deterministic + optional AI suggestions: each tab scans ONLY its own
                         name pool (mergeSuggestScope.universe) — Ingredients scans
                         the full cross-category ingredient list, every recipe-name
@@ -16241,6 +16708,47 @@ export default function Home() {
                     {mergeSuggestScope.universe.length > 0 &&
                       !(mergeCategory === "brandflavor" && mergeBfMode === "flavors" && !mergeBfBrand) && (
                       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
+                        {canManageProfiles &&
+                          recentlyIgnoredMerge?.scopeKey === ignoredMergeScopeKey && (
+                          <div
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/70 px-2.5 py-2"
+                            role={
+                              recentlyIgnoredMerge.status === "error" ||
+                              recentlyIgnoredMerge.status === "save-error"
+                                ? "alert"
+                                : "status"
+                            }
+                          >
+                            <span className="min-w-0 break-words text-xs">
+                              {recentlyIgnoredMerge.status === "save-error"
+                                ? "Couldn't save this ignore. It may appear again on a later scan."
+                                : recentlyIgnoredMerge.status === "error"
+                                ? "Couldn't undo this ignore. Please retry."
+                                : recentlyIgnoredMerge.status === "restored"
+                                ? "Ignore undone. Scan again to see this match in suggestions."
+                                : `Ignored: ${recentlyIgnoredMerge.pairs
+                                    .map((pair) => `${pair.nameA} ↔ ${pair.nameB}`)
+                                    .join(", ")}`}
+                            </span>
+                            {(recentlyIgnoredMerge.status === "ignored" ||
+                              recentlyIgnoredMerge.status === "restoring" ||
+                              recentlyIgnoredMerge.status === "error") && (
+                              <button
+                                type="button"
+                                aria-label={`Undo ignore ${recentlyIgnoredMerge.pairs
+                                  .map((pair) => `${pair.nameA} and ${pair.nameB}`)
+                                  .join(", ")}`}
+                                disabled={recentlyIgnoredMerge.status === "restoring"}
+                                onClick={() => void undoRecentlyIgnoredMerge()}
+                                className="shrink-0 rounded border border-border px-2.5 py-1 text-[11px] font-semibold hover:bg-muted disabled:opacity-50"
+                              >
+                                {recentlyIgnoredMerge.status === "restoring"
+                                  ? "Undoing…"
+                                  : "Undo ignore"}
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>
@@ -17000,6 +17508,11 @@ export default function Home() {
                     />
                     <SyncConflictStatsCard />
                     <AuditLogCard />
+                    <DeferredSurface
+                      label="import gold evaluation lab"
+                      load={loadImportGoldLabCard}
+                      componentProps={{}}
+                    />
                   </div>
                 )}
 
@@ -17219,7 +17732,9 @@ export default function Home() {
             </button>
             {/* Header overflow menu */}
             <DropdownMenu
+              open={headerMoreMenuOpen}
               onOpenChange={(open) => {
+                setHeaderMoreMenuOpen(open);
                 if (open && (canManageStaff || canApproveResets)) {
                   preloadStaffManagementSurface();
                 }
@@ -17248,7 +17763,17 @@ export default function Home() {
                   )}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                onCloseAutoFocus={(event) => {
+                  if (!openAlertSettingsAfterMenuCloseRef.current) return;
+                  openAlertSettingsAfterMenuCloseRef.current = false;
+                  event.preventDefault();
+                  window.requestAnimationFrame(() => {
+                    setShowAlertSettings(true);
+                  });
+                }}
+              >
                 {canViewManagerAttention && (
                   <DropdownMenuItem
                     aria-label={
@@ -17329,7 +17854,10 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
+                <DropdownMenuItem
+                  onSelect={() => queueAlertSettingsOpenAfterMenuClose("select")}
+                  onClick={() => queueAlertSettingsOpenAfterMenuClose("click")}
+                >
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -18137,9 +18665,12 @@ export default function Home() {
               canCreate: isSupervisor,
               defaultDate: importDefaultDate,
               onConfirm: (payload) => {
-                if (payload.multiDay) { void commitMultiDayImport(payload); return; }
-                if (importIntoEditor) importExcelIntoEditor(payload);
-                else void commitExcelImport(payload);
+                const work = payload.multiDay ? commitMultiDayImport(payload)
+                  : importIntoEditor ? importExcelIntoEditor(payload) : commitExcelImport(payload);
+                void work.catch((error: unknown) => {
+                  setImportProgress(null);
+                  toast({ title: "Schedule import needs review", description: error instanceof Error ? error.message : "The schedule could not be verified. No automatic retry was made.", variant: "destructive" });
+                });
               },
               progress: importProgress,
             }}
@@ -18214,6 +18745,7 @@ export default function Home() {
                     values: form.getValues(),
                   }
                 : null,
+              goldCaptureEnabled,
               onConfirm: handleSpecImportConfirm,
             }}
           />
@@ -18248,6 +18780,7 @@ export default function Home() {
               error: premixImportError,
               prepared: premixImportPrepared,
               applying: premixImportApplying,
+              goldCaptureEnabled,
               onConfirm: handlePremixImportConfirm,
             }}
           />
@@ -18360,6 +18893,7 @@ export default function Home() {
               error: cheeseImportError,
               prepared: cheeseImportPrepared,
               applying: cheeseImportApplying,
+              goldCaptureEnabled,
               onConfirm: handleCheeseImportConfirm,
             }}
           />

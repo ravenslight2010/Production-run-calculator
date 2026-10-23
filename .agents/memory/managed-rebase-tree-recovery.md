@@ -11,6 +11,12 @@ Treat a successful rebase as history completion, not proof that the resulting tr
 
 After a conflict-heavy browser-test replay, also run the browser spec inventory/parse check. Package typecheck may exclude end-to-end specs, and a transpile-only check can miss syntax diagnostics; a malformed spec once survived both checks after a rebase.
 
+Treat persisted browser pass summaries as evidence for the tree that produced them, not automatically for the post-sync tree.
+
+**Why:** A saved Playwright pass result remained present after a managed sync malformed the corresponding spec. The old result could not establish that the new source even parsed.
+
+**How to apply:** After a sync changes a spec, inventory/parse that spec and rerun its required matrix before claiming the new tree passes. A saved result without matching source provenance is insufficient.
+
 In managed rebases, an `INDEX_LOCKED` response can occur while the operation is advancing to another conflict. Inspect the managed operation and current conflict state before treating that response alone as a stuck rebase.
 
 **Why:** A continuation reported `INDEX_LOCKED` despite having recorded progress and exposing the next conflict; a blind retry or manual index recovery could disrupt the managed operation.
@@ -52,3 +58,17 @@ failure stages; neither established that the existing GitHub credential was bad.
 **How to apply:** Use bounded, noninteractive read-only checks against existing
 routes. Preserve host-key verification, never accept an unverified key to unblock
 completion, and never send a GitHub token to an unrelated Replit SSH endpoint.
+
+When a managed conflict affects a test file, inspect the full file and both
+staged versions before editing. Conflict markers can split related test bodies
+and leave duplicate fragments outside the test suite; broad hunks may fail to
+match the conflict's exact text.
+
+**Why:** A Line Map test conflict combined independent incoming and task-owned
+fixtures, while leaving a trailing test assertion outside the suite. Exact,
+small edits exposed and preserved both behaviors; the post-resolution test run
+then caught fixture values that had to stay distinct.
+
+**How to apply:** Use the exact conflict text from the file and compare both
+staged versions. Resolve one boundary at a time, then scan the entire file for
+markers and trailing fragments and rerun the owning tests before continuing.

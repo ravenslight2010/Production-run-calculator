@@ -46,7 +46,10 @@ function makePrepared(): PremixImportPrepared {
   };
 }
 
-function renderDialog(prepared: PremixImportPrepared) {
+function renderDialog(
+  prepared: PremixImportPrepared,
+  options: { goldCaptureEnabled?: boolean; onConfirm?: ReturnType<typeof vi.fn> } = {},
+) {
   return render(
     <PremixImportDialog
       open={true}
@@ -55,7 +58,8 @@ function renderDialog(prepared: PremixImportPrepared) {
       error={null}
       prepared={prepared}
       applying={false}
-      onConfirm={vi.fn()}
+      goldCaptureEnabled={options.goldCaptureEnabled}
+      onConfirm={options.onConfirm ?? vi.fn()}
     />,
   );
 }
@@ -108,5 +112,13 @@ describe("PremixImportDialog merge re-import guidance", () => {
     ) as HTMLInputElement;
     expect(oldRow.checked).toBe(true);
     expect(screen.queryByTestId("premix-merged-away-mix:old-blend")).toBeNull();
+  });
+
+  it("includes explicit gold opt-in in the Apply callback", () => {
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(), { goldCaptureEnabled: true, onConfirm });
+    screen.getByTestId("premix-import-gold-opt-in").click();
+    screen.getByRole("button", { name: /Apply/ }).click();
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(true);
   });
 });

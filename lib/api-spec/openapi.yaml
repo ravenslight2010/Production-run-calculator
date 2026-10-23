@@ -620,7 +620,9 @@ paths:
       operationId: consumeInventoryDayStart
       tags: [inventory]
       summary: Deduct the scheduled day's mix components and daily supplies
-      description: Idempotent by production date; retries of the same date have no physical effect.
+      description: >-
+        Idempotent by production date; retries of the same date have no physical
+        effect. Ambiguous prepared-mix source units reject the full transaction.
       requestBody:
         required: false
         content:
@@ -646,6 +648,18 @@ paths:
                     type: string
         "400":
           description: Invalid production date
+        "403":
+          description: Manager role required
+        "409":
+          description: Prepared-mix source unit conversion is ambiguous; no day-start stock effects were applied
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
 
   /inventory/merge:
     post:
@@ -1051,11 +1065,13 @@ paths:
     get:
       operationId: getQcTargets
       tags: [inventory]
-      summary: Resolve explicit imported and reviewed QC weight targets
+      summary: Resolve explicit imported weight targets and separate reviewed Brix targets
       description: >-
         Uses the authenticated facility scope. An ingredient without one
         unambiguous explicit target is returned as not-evaluated; crust targets
         are included only if the import contract provides an explicit value.
+        Brix targets are returned separately and are manager-configured only;
+        a missing target or tolerance is not-evaluated and never inherits weight settings.
       parameters:
         - name: profileKey
           in: query
@@ -1089,6 +1105,35 @@ paths:
               schema: { $ref: "#/components/schemas/QcEventResponse" }
         "400": { description: Invalid target or tolerance }
         "403": { description: QC manager capability required }
+
+  /qc/brix-targets:
+    post:
+      operationId: setQcBrixTarget
+      tags: [inventory]
+      summary: Add or clear an explicitly reviewed Brix target and tolerance
+      description: >-
+        Manager-only, append-only configuration for the canonical Brix unit.
+        Target and tolerance are both required to configure a target, and both
+        must be null to clear it. No weight target or default tolerance is used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcBrixTargetInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the original target event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Audited Brix target-setting event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid Brix target or tolerance }
+        "403": { description: QC manager capability required }
+        "409": { description: Operation identity conflicts with a different request }
 
   /qc/lots:
     post:
@@ -1132,6 +1177,38 @@ paths:
               schema: { $ref: "#/components/schemas/QcEventResponse" }
         "400": { description: Invalid weight or missing out-of-tolerance note }
         "403": { description: QC recording capability required }
+
+  /qc/brix-checks:
+    post:
+      operationId: recordQcBrixCheck
+      tags: [inventory]
+      summary: Record an advisory pre-run or interval Brix reading
+      description: >-
+        The server binds the reading to the canonical run profile, snapshots
+        the latest manager-reviewed Brix target and tolerance, and evaluates
+        only in the canonical Brix unit. Missing configuration is
+        not-evaluated. Target values and outcomes are not accepted from callers.
+        A repeated operation ID with the same reading returns the original event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcBrixCheckInput" }
+      responses:
+        "200":
+          description: Idempotent retry returned the original Brix event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "201":
+          description: Server-evaluated append-only Brix event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid Brix reading }
+        "403": { description: QC recording capability required }
+        "404": { description: Run or ingredient is unavailable in this facility scope }
+        "409": { description: Run profile or operation identity conflicts }
 
   /qc/component-checks:
     post:
@@ -4525,6 +4602,10 @@ paths:
       tags: [specImport]
       summary: List recent workbook import review records
       parameters:
+        - name: sourceKey
+          in: query
+          description: Exact scoped source identity, bounded to 300 characters
+          schema: { type: string, minLength: 1, maxLength: 300 }
         - name: type
           in: query
           schema: { type: string, enum: [spec, premix, cheese, sauce, dough, schedule, shipping, recipe] }
@@ -5694,6 +5775,32 @@ paths:
         "500":
           description: Safe automatic tracking failure
 
+  /sync/station-activity:
+    post:
+      operationId: confirmStationActivity
+      tags: [sync]
+      summary: Confirm activity at the Freeze Tunnel or Warehouse for the active run
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: epoch
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StationActivityConfirmationRequest" }
+      responses:
+        "200":
+          description: Accepted server-timestamped confirmation or idempotent retry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StationActivityConfirmationResponse" }
+        "400": { description: Invalid confirmation request }
+        "409": { description: Production day or active run changed before confirmation }
+        "500": { description: Confirmation could not be recorded }
+
   /sync/manual-section:
     post:
       operationId: submitManualSectionEdit
@@ -5781,6 +5888,122 @@ paths:
         "400":
           description: Invalid cursor
 
+  /import-gold/config:
+    get:
+      operationId: getImportGoldConfig
+      tags: [specImport]
+      summary: Read manager-only import-gold feature and provider configuration
+      responses:
+        "200":
+          description: Current non-secret evaluator configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldConfig" }
+        "403": { description: Manager capability required }
+  /import-gold/cases:
+    get:
+      operationId: listImportGoldCases
+      tags: [specImport]
+      summary: List bounded, scoped import-gold cases and recent scores
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Scoped evaluation cases
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldCasesResponse" }
+        "403": { description: Manager capability required }
+  /import-gold/cases/{id}/exclusion:
+    patch:
+      operationId: setImportGoldCaseExclusion
+      tags: [specImport]
+      summary: Exclude or restore a case for scoring and export
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldExclusionRequest" }
+      responses:
+        "200": { description: Exclusion state updated }
+        "404": { description: Case not found in the current scope }
+        "403": { description: Manager capability required }
+  /import-gold/cases/{id}:
+    delete:
+      operationId: deleteImportGoldCase
+      tags: [specImport]
+      summary: Permanently delete a case and its score history for retention purposes
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "204": { description: Case and score history deleted }
+        "404": { description: Case not found in the current scope }
+        "403": { description: Manager capability required }
+  /import-gold/export.jsonl:
+    get:
+      operationId: exportImportGoldCases
+      tags: [specImport]
+      summary: Export up to 100 active scoped evaluation cases as JSONL
+      responses:
+        "200":
+          description: One JSON evaluation case per line
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        "403": { description: Manager capability required }
+  /import-gold/score:
+    post:
+      operationId: scoreImportGoldCases
+      tags: [specImport]
+      summary: Score up to three active scoped cases with one configured provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldScoreRequest" }
+      responses:
+        "200":
+          description: Per-case score results and provider errors
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldScoreResponse" }
+        "403": { description: Manager capability required }
+        "503": { description: Provider is not configured }
+  /import-operations/preview:
+    post:
+      operationId: previewImportOperation
+      tags: [imports]
+      summary: Read affected current values and the last successful scoped source Apply
+      description: Read-only review of an explicit atomic import write set. Does not learn aliases, repair data, or change stock. Pass expectedStateHash to Apply to reject stale reviews.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportOperationApplyInput"
+      responses:
+        "200":
+          description: Current proposal and bounded prior successful Apply evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportOperationPreview"
+        "400":
+          description: Invalid or oversized review
+        "401":
+          description: Sign-in required
+        "403":
+          description: Missing importer or entity capability
   /import-operations/{operationId}/apply:
     post:
       operationId: applyImportOperation
@@ -6197,6 +6420,37 @@ components:
         canonical: { type: integer, minimum: 0, maximum: 1000000 }
         stale: { type: integer, minimum: 0, maximum: 1000000 }
         nonCanonical: { type: integer, minimum: 0, maximum: 1000000 }
+    ImportOperationPreview:
+      type: object
+      required: [expectedStateHash, before, after, baseline]
+      properties:
+        expectedStateHash:
+          type: string
+        before:
+          type: object
+          additionalProperties: true
+        after:
+          type: object
+          additionalProperties: true
+        baseline:
+          type: object
+          required: [status, limitation]
+          properties:
+            status:
+              type: string
+              enum: [available, unavailable]
+            operationId:
+              type: string
+            appliedAt:
+              type: number
+            before:
+              type: object
+              additionalProperties: true
+            after:
+              type: object
+              additionalProperties: true
+            limitation:
+              type: string
     ImportOperationApplyInput:
       type: object
       required: [importType, sourceLabel, changes]
@@ -6206,6 +6460,13 @@ components:
         sourceLabel: { type: string, maxLength: 300 }
         requestHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
         expectedStateHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        goldCapture:
+          type: object
+          description: Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
+          required: [input]
+          additionalProperties: false
+          properties:
+            input: { type: object, maxProperties: 2 }
         sourceEvidence:
           type: object
           description: Exact bounded source text retained privately with a live spec Apply.
@@ -6218,6 +6479,100 @@ components:
           type: object
           description: Reviewed entity batches keyed by supported master-data domain.
           additionalProperties: true
+    ImportGoldConfig:
+      type: object
+      required: [enabled, localConfigured, geminiConfigured, retention, persistsAcrossFactoryPurge]
+      properties:
+        enabled: { type: boolean }
+        localConfigured: { type: boolean }
+        geminiConfigured: { type: boolean }
+        retention: { type: string }
+        persistsAcrossFactoryPurge: { type: boolean }
+    ImportGoldScoreRequest:
+      type: object
+      required: [provider]
+      additionalProperties: false
+      properties:
+        provider: { type: string, enum: [local, gemini] }
+        caseIds:
+          type: array
+          maxItems: 3
+          items: { type: integer, minimum: 1 }
+    ImportGoldExclusionRequest:
+      type: object
+      required: [excluded]
+      additionalProperties: false
+      properties:
+        excluded: { type: boolean }
+    ImportGoldCase:
+      type: object
+      required: [id, importType, sourceLabel, excluded, createdAt, scores]
+      properties:
+        id: { type: integer }
+        importType: { type: string, enum: [spec, premix, cheese] }
+        sourceLabel: { type: string }
+        excluded: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        scores:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldScore" }
+    ImportGoldScore:
+      type: object
+      required: [id, provider, status, accuracy, comparedFields, equalFields, errorCode, fieldDiffs, createdAt]
+      properties:
+        id: { type: integer }
+        provider: { type: string, enum: [local, gemini] }
+        status: { type: string, enum: [scored, error] }
+        accuracy: { type: number, nullable: true }
+        comparedFields: { type: integer }
+        equalFields: { type: integer }
+        errorCode: { type: string, nullable: true }
+        fieldDiffs:
+          type: array
+          items:
+            type: object
+            required: [field, expected, predicted]
+            properties:
+              field: { type: string }
+              expected: {}
+              predicted: {}
+        createdAt: { type: string, format: date-time }
+    ImportGoldCasesResponse:
+      type: object
+      required: [cases]
+      properties:
+        cases:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldCase" }
+    ImportGoldScoreResponse:
+      type: object
+      required: [results, scoredCount, errorCount]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [caseId, provider, status]
+            properties:
+              caseId: { type: integer }
+              provider: { type: string, enum: [local, gemini] }
+              status: { type: string, enum: [scored, error] }
+              accuracy: { type: number }
+              comparedFields: { type: integer }
+              equalFields: { type: integer }
+              errorCode: { type: string }
+              scoreId: { type: integer }
+              fieldDiffs:
+                type: array
+                items:
+                  type: object
+                  required: [field, expected, predicted]
+                  properties:
+                    field: { type: string }
+                    expected: {}
+                    predicted: {}
+        scoredCount: { type: integer }
+        errorCount: { type: integer }
     DistillationApplyEvidenceRecord:
       type: object
       required:
@@ -6850,6 +7205,7 @@ components:
         - capturedAtServerMs
         - calculationRevision
         - effectiveElapsedSec
+        - stationActivity
         - timers
         - counters
         - facts
@@ -6863,6 +7219,10 @@ components:
         capturedAtServerMs: { type: number }
         calculationRevision: { type: integer, minimum: 0 }
         effectiveElapsedSec: { type: number }
+        stationActivity:
+          oneOf:
+            - $ref: "#/components/schemas/StationActivityMap"
+            - { type: "null" }
         timers:
           type: object
           required: [nextBatchInSec, pressRemainingSec, freezerElapsedSec, freezerRemainingSec]
@@ -6913,6 +7273,54 @@ components:
         calc: { type: object, additionalProperties: true }
         due:
           $ref: "#/components/schemas/OperationalProjectionSchedule"
+
+    StationActivityMap:
+      type: object
+      description: Latest server-accepted station events for the projection's run; absent keys have no evidence.
+      additionalProperties: false
+      properties:
+        dough: { $ref: "#/components/schemas/StationActivityEvidence" }
+        sauce: { $ref: "#/components/schemas/StationActivityEvidence" }
+        press: { $ref: "#/components/schemas/StationActivityEvidence" }
+        frontline: { $ref: "#/components/schemas/StationActivityEvidence" }
+        freezeTunnel: { $ref: "#/components/schemas/StationActivityEvidence" }
+        packaging: { $ref: "#/components/schemas/StationActivityEvidence" }
+        warehouse: { $ref: "#/components/schemas/StationActivityEvidence" }
+
+    StationActivityEvidence:
+      type: object
+      required: [runId, eventAtServerMs, source]
+      properties:
+        runId: { type: string }
+        eventAtServerMs: { type: number, minimum: 1 }
+        source: { type: string, enum: [automatic, manual, confirmed] }
+
+    StationActivityConfirmationRequest:
+      type: object
+      required: [id, runId, station, senderId]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 8, maxLength: 160, pattern: "^[A-Za-z0-9:_-]+$" }
+        runId: { type: string, minLength: 1, maxLength: 160 }
+        station: { type: string, enum: [freezeTunnel, warehouse] }
+        senderId: { type: string, maxLength: 160 }
+
+    StationActivityConfirmationResponse:
+      type: object
+      required: [ok, duplicate, runId, station, eventAtServerMs, canonicalRevision, serverTime, snapshotId, operationalProjection]
+      properties:
+        ok: { type: boolean, const: true }
+        duplicate: { type: boolean }
+        runId: { type: string }
+        station: { type: string, enum: [freezeTunnel, warehouse] }
+        eventAtServerMs: { type: integer, minimum: 1 }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 1 }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        operationalProjection:
+          oneOf:
+            - $ref: "#/components/schemas/OperationalProjection"
+            - { type: "null" }
 
     OperationalProjectionSchedule:
       type: object
@@ -8041,7 +8449,7 @@ components:
         recordId: { type: string, format: uuid }
         eventType:
           type: string
-          enum: [lot, weight, component-check, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+          enum: [lot, weight, brix-check, component-check, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
         runId: { type: string, nullable: true }
         profileKey: { type: string, nullable: true }
         ingredientId: { type: string, nullable: true }
@@ -8086,6 +8494,23 @@ components:
         targets:
           type: array
           items: { $ref: "#/components/schemas/QcTarget" }
+        brixTargets:
+          type: array
+          items: { $ref: "#/components/schemas/QcBrixTarget" }
+
+    QcBrixTarget:
+      type: object
+      required: [ingredientId, ingredientName, targetBrix, toleranceBrix, source, state]
+      properties:
+        ingredientId: { type: string }
+        ingredientName: { type: string }
+        targetBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        toleranceBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        source: { type: string, enum: [qc-override, not-configured] }
+        state: { type: string, enum: [configured, not-evaluated] }
+        reason: { type: string }
+        overrideEventId: { type: integer }
+        targetRecordedAt: { type: string, format: date-time }
 
     QcTargetInput:
       type: object
@@ -8098,6 +8523,33 @@ components:
         unit: { type: string, nullable: true, enum: [oz, g, lb, kg] }
         toleranceValue: { type: number, nullable: true, minimum: 0 }
         reason: { type: string, minLength: 1, maxLength: 500 }
+
+    QcBrixTargetInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, profileKey, ingredientId, targetBrix, toleranceBrix, reason]
+      properties:
+        operationId: { type: string, format: uuid }
+        profileKey: { type: string, minLength: 1, maxLength: 400 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        targetBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        toleranceBrix: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    QcBrixCheckInput:
+      type: object
+      additionalProperties: false
+      required: [operationId, runId, profileKey, ingredientId, station, checkType, actualBrix]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        profileKey: { type: string, minLength: 1, maxLength: 400 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        station: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] }
+        checkType: { type: string, enum: [pre-run, interval] }
+        actualBrix: { type: number, minimum: 0, maximum: 100 }
+        instrument: { type: string, maxLength: 120 }
+        note: { type: string, maxLength: 1000 }
 
     QcLotInput:
       type: object
@@ -8421,9 +8873,9 @@ components:
         fields:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 6
           uniqueItems: true
-          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.lotNumber, payload.expectedComponents] }
+          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.instrument, payload.lotNumber, payload.expectedComponents] }
 
     Capability:
       type: string
@@ -10199,6 +10651,13 @@ components:
       type: object
       additionalProperties: true
       properties:
+        appliedValues:
+          type: object
+          description: Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.
+          additionalProperties: true
+        persistence:
+          type: string
+          enum: [local-verified, sync-acknowledged]
         phases:
           type: object
           additionalProperties: { type: string }
@@ -10626,6 +11085,27 @@ components:
       type: object
       required: [findings, safeRepairs, summary, cleanupHistory, repairBatches, aiRetention, sourceReconciliation]
       properties:
+        importCoverage:
+          type: object
+          required: [scanned, truncated, limitation, sources, detectors]
+          properties:
+            scanned: { type: integer, minimum: 0, maximum: 200 }
+            truncated: { type: boolean }
+            limitation: { type: string }
+            detectors: { type: object, additionalProperties: true }
+            sources:
+              type: array
+              maxItems: 7
+              items:
+                type: object
+                required: [importType, status, lastSuccessfulAt, recognizedSource, recovery, observedRecords]
+                properties:
+                  importType: { type: string, enum: [spec, premix, cheese, shipping, sauce, dough, schedule] }
+                  status: { type: string, enum: [observed, missing-evidence] }
+                  lastSuccessfulAt: { type: number, nullable: true }
+                  recognizedSource: { type: boolean }
+                  recovery: { type: string, enum: [atomic-guarded-undo, local-or-sync-only] }
+                  observedRecords: { type: integer, minimum: 0, maximum: 200 }
         findings: { type: array, items: { $ref: "#/components/schemas/DataHealthFinding" } }
         safeRepairs: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthRepair" } }
         summary: { type: object, additionalProperties: { type: integer } }

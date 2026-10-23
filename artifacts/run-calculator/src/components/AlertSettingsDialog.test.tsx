@@ -63,4 +63,33 @@ describe("AlertSettingsDialog Web Push recovery", () => {
     expect(onTogglePref).not.toHaveBeenCalled();
     expect(onToggleFloorMode).not.toHaveBeenCalled();
   });
+
+  it("restores the recovery option when the dialog is reopened", async () => {
+    vi.mocked(getWebPushStatus)
+      .mockResolvedValueOnce({ state: "enabled", subscription })
+      .mockResolvedValueOnce({
+        state: "error",
+        error: "The server rejected this device’s saved notification subscription.",
+        registrationRejected: true,
+        subscription,
+        subscriptionId: "saved-device-id",
+        subscriptionWasExisting: true,
+      });
+    const props = {
+      onOpenChange: vi.fn(),
+      prefs: {},
+      onTogglePref: vi.fn(),
+      floorModeEnabled: false,
+      onToggleFloorMode: vi.fn(),
+    };
+    const { rerender } = render(<AlertSettingsDialog {...props} open />);
+
+    await waitFor(() => expect(getWebPushStatus).toHaveBeenCalledTimes(1));
+    rerender(<AlertSettingsDialog {...props} open={false} />);
+    rerender(<AlertSettingsDialog {...props} open />);
+
+    expect(await screen.findByText(/server rejected this device’s saved notification subscription/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Restore this device" })).toBeTruthy();
+    expect(getWebPushStatus).toHaveBeenCalledTimes(2);
+  });
 });

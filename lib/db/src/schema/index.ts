@@ -30,6 +30,7 @@ export * from "./savedPremixSheets";
 export * from "./savedCheeseSheets";
 export * from "./importHistory";
 export * from "./importOperations";
+export * from "./importGold";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
 export * from "./duplicateReviewGroups";

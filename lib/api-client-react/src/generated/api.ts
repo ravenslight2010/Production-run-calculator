@@ -55,8 +55,10 @@ import type {
   CompletedHistoryList,
   CompletedRunFinalization,
   ConfirmFreezerSurplusInput,
+  ConfirmStationActivityParams,
   ConsumeInput,
   ConsumeInventoryDayStart200,
+  ConsumeInventoryDayStart409,
   ConsumeInventoryDayStartInput,
   ConsumeResult,
   CreateInventoryItemInput,
@@ -113,10 +115,16 @@ import type {
   IdentifyPhotoInput,
   IdentifyPhotoResult,
   ImportAliasList,
+  ImportGoldCasesResponse,
+  ImportGoldConfig,
+  ImportGoldExclusionRequest,
+  ImportGoldScoreRequest,
+  ImportGoldScoreResponse,
   ImportHistoryInput,
   ImportHistoryList,
   ImportHistoryResponse,
   ImportOperationApplyInput,
+  ImportOperationPreview,
   ImportOperationResponse,
   ImportOperationUndoInput,
   Incident,
@@ -142,6 +150,7 @@ import type {
   ListDistillationApplyEvidence200,
   ListDistillationApplyEvidenceParams,
   ListFinalizedOperationalReportsParams,
+  ListImportGoldCasesParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
   ListInventoryLedgerParams,
@@ -196,6 +205,8 @@ import type {
   PutSyncTodayParams,
   QcAllergenActivityResponse,
   QcAllergenReviewInput,
+  QcBrixCheckInput,
+  QcBrixTargetInput,
   QcCleaningInput,
   QcComponentCheckInput,
   QcComponentCheckResponse,
@@ -280,6 +291,8 @@ import type {
   SpecReconcileResult,
   StaffMember,
   StaffRoleUpdate,
+  StationActivityConfirmationRequest,
+  StationActivityConfirmationResponse,
   StreamSyncEventsParams,
   SubmitManualSectionEditParams,
   SubmitOperationalIntentParams,
@@ -2578,7 +2591,7 @@ export const getConsumeInventoryDayStartUrl = () => {
 }
 
 /**
- * Idempotent by production date; retries of the same date have no physical effect.
+ * Idempotent by production date; retries of the same date have no physical effect. Ambiguous prepared-mix source units reject the full transaction.
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
 export const consumeInventoryDayStart = async (consumeInventoryDayStartInput?: ConsumeInventoryDayStartInput, options?: Parameters<typeof customFetch>[1]): Promise<ConsumeInventoryDayStart200> => {
@@ -2612,7 +2625,7 @@ return customFetch<ConsumeInventoryDayStart200>(getConsumeInventoryDayStartUrl()
 
 export const getConsumeInventoryDayStartMutationKey = () => ['consumeInventoryDayStart'] as const;
 
-export const getConsumeInventoryDayStartMutationOptions = <TError = ErrorType<void>,
+export const getConsumeInventoryDayStartMutationOptions = <TError = ErrorType<void | ConsumeInventoryDayStart409>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext> => {
 
@@ -2641,13 +2654,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConsumeInventoryDayStartMutationResult = NonNullable<Awaited<ReturnType<typeof consumeInventoryDayStart>>>
     export type ConsumeInventoryDayStartMutationBody = BodyType<ConsumeInventoryDayStartInput> | undefined
-    export type ConsumeInventoryDayStartMutationError = ErrorType<void>
+    export type ConsumeInventoryDayStartMutationError = ErrorType<void | ConsumeInventoryDayStart409>
     export type ConsumeInventoryDayStartMutationVariables = {data?: BodyType<ConsumeInventoryDayStartInput>}
 
     /**
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
-export const useConsumeInventoryDayStart = <TError = ErrorType<void>,
+export const useConsumeInventoryDayStart = <TError = ErrorType<void | ConsumeInventoryDayStart409>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof consumeInventoryDayStart>>,
@@ -4141,8 +4154,8 @@ export const getGetQcTargetsUrl = (params: GetQcTargetsParams,) => {
 }
 
 /**
- * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
- * @summary Resolve explicit imported and reviewed QC weight targets
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value. Brix targets are returned separately and are manager-configured only; a missing target or tolerance is not-evaluated and never inherits weight settings.
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
  */
 export const getQcTargets = async (params: GetQcTargetsParams, options?: Parameters<typeof customFetch>[1]): Promise<QcTargetsResponse> => {
 
@@ -4213,7 +4226,7 @@ export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Resolve explicit imported and reviewed QC weight targets
+ * @summary Resolve explicit imported weight targets and separate reviewed Brix targets
  */
 
 export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
@@ -4321,6 +4334,95 @@ export const useSetQcTarget = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSetQcTargetMutationOptions(options), queryClient);
+    }
+
+export const getSetQcBrixTargetUrl = () => {
+
+
+
+
+  return `/api/qc/brix-targets`
+}
+
+/**
+ * Manager-only, append-only configuration for the canonical Brix unit. Target and tolerance are both required to configure a target, and both must be null to clear it. No weight target or default tolerance is used.
+ * @summary Add or clear an explicitly reviewed Brix target and tolerance
+ */
+export const setQcBrixTarget = async (qcBrixTargetInput: QcBrixTargetInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSetQcBrixTargetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcBrixTargetInput)
+  }
+);}
+
+
+
+
+
+export const getSetQcBrixTargetMutationKey = () => ['setQcBrixTarget'] as const;
+
+export const getSetQcBrixTargetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcBrixTarget>>, TError,SetQcBrixTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setQcBrixTarget>>, TError,SetQcBrixTargetMutationVariables, TContext> => {
+
+const mutationKey = getSetQcBrixTargetMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setQcBrixTarget>>, SetQcBrixTargetMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setQcBrixTarget(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetQcBrixTargetMutationResult = NonNullable<Awaited<ReturnType<typeof setQcBrixTarget>>>
+    export type SetQcBrixTargetMutationBody = BodyType<QcBrixTargetInput>
+    export type SetQcBrixTargetMutationError = ErrorType<void>
+    export type SetQcBrixTargetMutationVariables = {data: BodyType<QcBrixTargetInput>}
+
+    /**
+ * @summary Add or clear an explicitly reviewed Brix target and tolerance
+ */
+export const useSetQcBrixTarget = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcBrixTarget>>, TError,SetQcBrixTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setQcBrixTarget>>,
+        TError,
+        SetQcBrixTargetMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetQcBrixTargetMutationOptions(options), queryClient);
     }
 
 export const getRecordQcLotUrl = () => {
@@ -4499,6 +4601,95 @@ export const useRecordQcWeightCheck = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getRecordQcWeightCheckMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcBrixCheckUrl = () => {
+
+
+
+
+  return `/api/qc/brix-checks`
+}
+
+/**
+ * The server binds the reading to the canonical run profile, snapshots the latest manager-reviewed Brix target and tolerance, and evaluates only in the canonical Brix unit. Missing configuration is not-evaluated. Target values and outcomes are not accepted from callers. A repeated operation ID with the same reading returns the original event.
+ * @summary Record an advisory pre-run or interval Brix reading
+ */
+export const recordQcBrixCheck = async (qcBrixCheckInput: QcBrixCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcBrixCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcBrixCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcBrixCheckMutationKey = () => ['recordQcBrixCheck'] as const;
+
+export const getRecordQcBrixCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcBrixCheck>>, TError,RecordQcBrixCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcBrixCheck>>, TError,RecordQcBrixCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcBrixCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcBrixCheck>>, RecordQcBrixCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcBrixCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcBrixCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcBrixCheck>>>
+    export type RecordQcBrixCheckMutationBody = BodyType<QcBrixCheckInput>
+    export type RecordQcBrixCheckMutationError = ErrorType<void>
+    export type RecordQcBrixCheckMutationVariables = {data: BodyType<QcBrixCheckInput>}
+
+    /**
+ * @summary Record an advisory pre-run or interval Brix reading
+ */
+export const useRecordQcBrixCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcBrixCheck>>, TError,RecordQcBrixCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcBrixCheck>>,
+        TError,
+        RecordQcBrixCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcBrixCheckMutationOptions(options), queryClient);
     }
 
 export const getRecordQcComponentCheckUrl = () => {
@@ -21484,6 +21675,102 @@ export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
       return useMutation(getClaimAutoTrackEventMutationOptions(options), queryClient);
     }
 
+export const getConfirmStationActivityUrl = (params?: ConfirmStationActivityParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/station-activity?${stringifiedParams}` : `/api/sync/station-activity`
+}
+
+/**
+ * @summary Confirm activity at the Freeze Tunnel or Warehouse for the active run
+ */
+export const confirmStationActivity = async (stationActivityConfirmationRequest: StationActivityConfirmationRequest,
+    params?: ConfirmStationActivityParams, options?: Parameters<typeof customFetch>[1]): Promise<StationActivityConfirmationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<StationActivityConfirmationResponse>(getConfirmStationActivityUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(stationActivityConfirmationRequest)
+  }
+);}
+
+
+
+
+
+export const getConfirmStationActivityMutationKey = () => ['confirmStationActivity'] as const;
+
+export const getConfirmStationActivityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmStationActivity>>, TError,ConfirmStationActivityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmStationActivity>>, TError,ConfirmStationActivityMutationVariables, TContext> => {
+
+const mutationKey = getConfirmStationActivityMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmStationActivity>>, ConfirmStationActivityMutationVariables> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  confirmStationActivity(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmStationActivityMutationResult = NonNullable<Awaited<ReturnType<typeof confirmStationActivity>>>
+    export type ConfirmStationActivityMutationBody = BodyType<StationActivityConfirmationRequest>
+    export type ConfirmStationActivityMutationError = ErrorType<void>
+    export type ConfirmStationActivityMutationVariables = {data: BodyType<StationActivityConfirmationRequest>;params?: ConfirmStationActivityParams}
+
+    /**
+ * @summary Confirm activity at the Freeze Tunnel or Warehouse for the active run
+ */
+export const useConfirmStationActivity = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmStationActivity>>, TError,ConfirmStationActivityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof confirmStationActivity>>,
+        TError,
+        ConfirmStationActivityMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmStationActivityMutationOptions(options), queryClient);
+    }
+
 export const getSubmitManualSectionEditUrl = (params?: SubmitManualSectionEditParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -21783,6 +22070,656 @@ export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<type
 
 
 
+
+export const getGetImportGoldConfigUrl = () => {
+
+
+
+
+  return `/api/import-gold/config`
+}
+
+/**
+ * @summary Read manager-only import-gold feature and provider configuration
+ */
+export const getImportGoldConfig = async ( options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldConfig> => {
+
+  return customFetch<ImportGoldConfig>(getGetImportGoldConfigUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportGoldConfigQueryKey = () => {
+    return [
+    `/api/import-gold/config`
+    ] as const;
+    }
+
+
+export const getGetImportGoldConfigQueryOptions = <TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportGoldConfigQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportGoldConfig>>> = ({ signal }) => getImportGoldConfig({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetImportGoldConfigQueryResult = NonNullable<Awaited<ReturnType<typeof getImportGoldConfig>>>
+export type GetImportGoldConfigQueryError = ErrorType<void>
+
+
+export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportGoldConfig>>,
+          TError,
+          Awaited<ReturnType<typeof getImportGoldConfig>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportGoldConfig>>,
+          TError,
+          Awaited<ReturnType<typeof getImportGoldConfig>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read manager-only import-gold feature and provider configuration
+ */
+
+export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImportGoldConfig>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldConfig>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetImportGoldConfigQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListImportGoldCasesUrl = (params?: ListImportGoldCasesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/import-gold/cases?${stringifiedParams}` : `/api/import-gold/cases`
+}
+
+/**
+ * @summary List bounded, scoped import-gold cases and recent scores
+ */
+export const listImportGoldCases = async (params?: ListImportGoldCasesParams, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldCasesResponse> => {
+
+  return customFetch<ImportGoldCasesResponse>(getListImportGoldCasesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListImportGoldCasesQueryKey = (params?: ListImportGoldCasesParams,) => {
+    return [
+    `/api/import-gold/cases`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListImportGoldCasesQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportGoldCasesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportGoldCases>>> = ({ signal }) => listImportGoldCases(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListImportGoldCasesQueryResult = NonNullable<Awaited<ReturnType<typeof listImportGoldCases>>>
+export type ListImportGoldCasesQueryError = ErrorType<void>
+
+
+export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
+ params: undefined |  ListImportGoldCasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldCases>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
+ params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldCases>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
+ params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List bounded, scoped import-gold cases and recent scores
+ */
+
+export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImportGoldCases>>, TError = ErrorType<void>>(
+ params?: ListImportGoldCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListImportGoldCasesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetImportGoldCaseExclusionUrl = (id: number,) => {
+
+
+
+
+  return `/api/import-gold/cases/${id}/exclusion`
+}
+
+/**
+ * @summary Exclude or restore a case for scoring and export
+ */
+export const setImportGoldCaseExclusion = async (id: number,
+    importGoldExclusionRequest: ImportGoldExclusionRequest, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getSetImportGoldCaseExclusionUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldExclusionRequest)
+  }
+);}
+
+
+
+
+
+export const getSetImportGoldCaseExclusionMutationKey = () => ['setImportGoldCaseExclusion'] as const;
+
+export const getSetImportGoldCaseExclusionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setImportGoldCaseExclusion>>, TError,SetImportGoldCaseExclusionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setImportGoldCaseExclusion>>, TError,SetImportGoldCaseExclusionMutationVariables, TContext> => {
+
+const mutationKey = getSetImportGoldCaseExclusionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setImportGoldCaseExclusion>>, SetImportGoldCaseExclusionMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setImportGoldCaseExclusion(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetImportGoldCaseExclusionMutationResult = NonNullable<Awaited<ReturnType<typeof setImportGoldCaseExclusion>>>
+    export type SetImportGoldCaseExclusionMutationBody = BodyType<ImportGoldExclusionRequest>
+    export type SetImportGoldCaseExclusionMutationError = ErrorType<void>
+    export type SetImportGoldCaseExclusionMutationVariables = {id: number;data: BodyType<ImportGoldExclusionRequest>}
+
+    /**
+ * @summary Exclude or restore a case for scoring and export
+ */
+export const useSetImportGoldCaseExclusion = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setImportGoldCaseExclusion>>, TError,SetImportGoldCaseExclusionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setImportGoldCaseExclusion>>,
+        TError,
+        SetImportGoldCaseExclusionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetImportGoldCaseExclusionMutationOptions(options), queryClient);
+    }
+
+export const getDeleteImportGoldCaseUrl = (id: number,) => {
+
+
+
+
+  return `/api/import-gold/cases/${id}`
+}
+
+/**
+ * @summary Permanently delete a case and its score history for retention purposes
+ */
+export const deleteImportGoldCase = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteImportGoldCaseUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteImportGoldCaseMutationKey = () => ['deleteImportGoldCase'] as const;
+
+export const getDeleteImportGoldCaseMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCase>>, TError,DeleteImportGoldCaseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCase>>, TError,DeleteImportGoldCaseMutationVariables, TContext> => {
+
+const mutationKey = getDeleteImportGoldCaseMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteImportGoldCase>>, DeleteImportGoldCaseMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteImportGoldCase(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteImportGoldCaseMutationResult = NonNullable<Awaited<ReturnType<typeof deleteImportGoldCase>>>
+
+    export type DeleteImportGoldCaseMutationError = ErrorType<void>
+    export type DeleteImportGoldCaseMutationVariables = {id: number}
+
+    /**
+ * @summary Permanently delete a case and its score history for retention purposes
+ */
+export const useDeleteImportGoldCase = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCase>>, TError,DeleteImportGoldCaseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteImportGoldCase>>,
+        TError,
+        DeleteImportGoldCaseMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteImportGoldCaseMutationOptions(options), queryClient);
+    }
+
+export const getExportImportGoldCasesUrl = () => {
+
+
+
+
+  return `/api/import-gold/export.jsonl`
+}
+
+/**
+ * @summary Export up to 100 active scoped evaluation cases as JSONL
+ */
+export const exportImportGoldCases = async ( options?: Parameters<typeof customFetch>[1]): Promise<Response> => {
+
+  return customFetch<Response>(getExportImportGoldCasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportImportGoldCasesQueryKey = () => {
+    return [
+    `/api/import-gold/export.jsonl`
+    ] as const;
+    }
+
+
+export const getExportImportGoldCasesQueryOptions = <TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportImportGoldCasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportImportGoldCases>>> = ({ signal }) => exportImportGoldCases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportImportGoldCasesQueryResult = NonNullable<Awaited<ReturnType<typeof exportImportGoldCases>>>
+export type ExportImportGoldCasesQueryError = ErrorType<void>
+
+
+export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportImportGoldCases>>,
+          TError,
+          Awaited<ReturnType<typeof exportImportGoldCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportImportGoldCases>>,
+          TError,
+          Awaited<ReturnType<typeof exportImportGoldCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export up to 100 active scoped evaluation cases as JSONL
+ */
+
+export function useExportImportGoldCases<TData = Awaited<ReturnType<typeof exportImportGoldCases>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportImportGoldCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportImportGoldCasesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getScoreImportGoldCasesUrl = () => {
+
+
+
+
+  return `/api/import-gold/score`
+}
+
+/**
+ * @summary Score up to three active scoped cases with one configured provider
+ */
+export const scoreImportGoldCases = async (importGoldScoreRequest: ImportGoldScoreRequest, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldScoreResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportGoldScoreResponse>(getScoreImportGoldCasesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldScoreRequest)
+  }
+);}
+
+
+
+
+
+export const getScoreImportGoldCasesMutationKey = () => ['scoreImportGoldCases'] as const;
+
+export const getScoreImportGoldCasesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scoreImportGoldCases>>, TError,ScoreImportGoldCasesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof scoreImportGoldCases>>, TError,ScoreImportGoldCasesMutationVariables, TContext> => {
+
+const mutationKey = getScoreImportGoldCasesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof scoreImportGoldCases>>, ScoreImportGoldCasesMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  scoreImportGoldCases(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ScoreImportGoldCasesMutationResult = NonNullable<Awaited<ReturnType<typeof scoreImportGoldCases>>>
+    export type ScoreImportGoldCasesMutationBody = BodyType<ImportGoldScoreRequest>
+    export type ScoreImportGoldCasesMutationError = ErrorType<void>
+    export type ScoreImportGoldCasesMutationVariables = {data: BodyType<ImportGoldScoreRequest>}
+
+    /**
+ * @summary Score up to three active scoped cases with one configured provider
+ */
+export const useScoreImportGoldCases = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scoreImportGoldCases>>, TError,ScoreImportGoldCasesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof scoreImportGoldCases>>,
+        TError,
+        ScoreImportGoldCasesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getScoreImportGoldCasesMutationOptions(options), queryClient);
+    }
+
+export const getPreviewImportOperationUrl = () => {
+
+
+
+
+  return `/api/import-operations/preview`
+}
+
+/**
+ * Read-only review of an explicit atomic import write set. Does not learn aliases, repair data, or change stock. Pass expectedStateHash to Apply to reject stale reviews.
+ * @summary Read affected current values and the last successful scoped source Apply
+ */
+export const previewImportOperation = async (importOperationApplyInput: ImportOperationApplyInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationPreview> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportOperationPreview>(getPreviewImportOperationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importOperationApplyInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewImportOperationMutationKey = () => ['previewImportOperation'] as const;
+
+export const getPreviewImportOperationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewImportOperation>>, TError,PreviewImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewImportOperation>>, TError,PreviewImportOperationMutationVariables, TContext> => {
+
+const mutationKey = getPreviewImportOperationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewImportOperation>>, PreviewImportOperationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewImportOperation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewImportOperationMutationResult = NonNullable<Awaited<ReturnType<typeof previewImportOperation>>>
+    export type PreviewImportOperationMutationBody = BodyType<ImportOperationApplyInput>
+    export type PreviewImportOperationMutationError = ErrorType<void>
+    export type PreviewImportOperationMutationVariables = {data: BodyType<ImportOperationApplyInput>}
+
+    /**
+ * @summary Read affected current values and the last successful scoped source Apply
+ */
+export const usePreviewImportOperation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewImportOperation>>, TError,PreviewImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof previewImportOperation>>,
+        TError,
+        PreviewImportOperationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPreviewImportOperationMutationOptions(options), queryClient);
+    }
 
 export const getApplyImportOperationUrl = (operationId: string,) => {
 

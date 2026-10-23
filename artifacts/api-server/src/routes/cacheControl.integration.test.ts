@@ -256,6 +256,60 @@ describe("no-store routes never answer with 304 (conditional revalidation defeat
   });
 });
 
+describe("EventSource authentication on the assembled API", () => {
+  it("rejects query-string tokens while keeping cookie and Authorization authentication", async () => {
+    const token = signLegacyTokenForTests(MANAGER);
+    const previewOrigin = "https://preview.expo.worf.replit.dev";
+    const urlTokenRequest = new URL("/api/sync/events", baseUrl);
+    urlTokenRequest.searchParams.set("clientId", "url-token-preview-fixture");
+    urlTokenRequest.searchParams.set("token", token);
+
+    // This bounded cross-origin HTTP fixture exercises the real API stack and
+    // the same token transport a browser EventSource caller would use. Never
+    // include the synthetic credential in assertions or diagnostic output.
+    const urlTokenResponse = await fetch(urlTokenRequest, {
+      headers: {
+        Accept: "text/event-stream",
+        Origin: previewOrigin,
+      },
+    });
+    expect(urlTokenResponse.headers.get("access-control-allow-origin")).toBe(previewOrigin);
+    expect(urlTokenResponse.status).toBe(401);
+    await expect(urlTokenResponse.json()).resolves.toMatchObject({
+      error: "Unauthorized",
+      reason: "session_expired",
+    });
+
+    // Header authentication remains available to supported non-EventSource
+    // clients, and the same-origin web cookie path remains unchanged.
+    const headerController = new AbortController();
+    const headerResponse = await fetch(`${baseUrl}/api/sync/events?clientId=header-fixture`, {
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${token}`,
+        Origin: previewOrigin,
+      },
+      signal: headerController.signal,
+    });
+    expect(headerResponse.status).toBe(200);
+    expect(headerResponse.headers.get("content-type")).toContain("text/event-stream");
+    expect(headerResponse.headers.get("access-control-allow-origin")).toBe(previewOrigin);
+    headerController.abort();
+
+    const cookieController = new AbortController();
+    const cookieResponse = await fetch(`${baseUrl}/api/sync/events?clientId=cookie-fixture`, {
+      headers: {
+        Accept: "text/event-stream",
+        Cookie: `rc_auth=${token}`,
+      },
+      signal: cookieController.signal,
+    });
+    expect(cookieResponse.status).toBe(200);
+    expect(cookieResponse.headers.get("content-type")).toContain("text/event-stream");
+    cookieController.abort();
+  });
+});
+
 describe("intentional no-store exclusions", () => {
   // Non-streaming exclusions (health probe, username lookup) must stay freely
   // cacheable — derived from CACHE_CONTROL_EXCLUSIONS so a newly-added exclusion

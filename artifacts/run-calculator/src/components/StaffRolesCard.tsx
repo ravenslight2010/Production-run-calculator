@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
@@ -142,6 +142,12 @@ export default function StaffRolesCard() {
   const [approvedCode, setApprovedCode] = useState<ApproveResetResult | null>(
     null,
   );
+  const [resetDecisionMessage, setResetDecisionMessage] = useState<string | null>(
+    null,
+  );
+  const resetRequestHeadingRef = useRef<HTMLParagraphElement>(null);
+  const resetRequestActionRefs = useRef(new Map<string, HTMLButtonElement>());
+  const resetDecisionFocusRequestId = useRef<string | null>(null);
   const [inviteRole, setInviteRole] = useState("operator");
   const [inviteSecret, setInviteSecret] = useState<{ secret: string; expiresAt: string } | null>(null);
 
@@ -163,7 +169,11 @@ export default function StaffRolesCard() {
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => approvePasswordReset(id),
-    onSuccess: (result) => {
+    onSuccess: (result, requestId) => {
+      resetDecisionFocusRequestId.current = requestId;
+      setResetDecisionMessage(
+        `Password reset request for ${result.username} approved.`,
+      );
       setApprovedCode(result);
       qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
     },
@@ -171,10 +181,33 @@ export default function StaffRolesCard() {
 
   const declineMutation = useMutation({
     mutationFn: (id: string) => declinePasswordReset(id),
-    onSuccess: () => {
+    onSuccess: (_result, requestId) => {
+      const username = resetRequestsQuery.data?.find(
+        (request) => request.id === requestId,
+      )?.username;
+      resetDecisionFocusRequestId.current = requestId;
+      setResetDecisionMessage(
+        `Password reset request for ${username ?? "staff member"} declined.`,
+      );
       qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
     },
   });
+
+  useEffect(() => {
+    const requestId = resetDecisionFocusRequestId.current;
+    if (!requestId || approvedCode !== null) return;
+
+    const remainingRequests = resetRequestsQuery.data ?? [];
+    if (remainingRequests.some((request) => request.id === requestId)) return;
+
+    resetDecisionFocusRequestId.current = null;
+    const nextRequest = remainingRequests[0];
+    if (nextRequest) {
+      resetRequestActionRefs.current.get(`${nextRequest.id}:decline`)?.focus();
+    } else {
+      resetRequestHeadingRef.current?.focus();
+    }
+  }, [approvedCode, resetRequestsQuery.data]);
 
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: Role }) =>
@@ -262,15 +295,20 @@ export default function StaffRolesCard() {
         </CardTitle>
       </CardHeader>
       <CardContent className="px-4 pb-4 space-y-2">
-        {canApproveResets && (resetRequestsQuery.data ?? []).length > 0 && (
+        {canApproveResets && (
           <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+            <p
+              ref={resetRequestHeadingRef}
+              tabIndex={-1}
+              className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5"
+            >
               <ShieldCheck className="w-3.5 h-3.5" /> Password reset requests
             </p>
             {(resetRequestsQuery.data ?? []).map(
               (reqItem: PasswordResetRequestItem) => (
                 <div
                   key={reqItem.id}
+                  data-testid={`password-reset-request-${reqItem.id}`}
                   className="flex items-center justify-between gap-3 rounded-md border border-border/40 bg-background/60 px-3 py-2"
                 >
                   <div className="min-w-0">
@@ -284,6 +322,11 @@ export default function StaffRolesCard() {
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <Button
+                      ref={(element) => {
+                        const key = `${reqItem.id}:decline`;
+                        if (element) resetRequestActionRefs.current.set(key, element);
+                        else resetRequestActionRefs.current.delete(key);
+                      }}
                       size="sm"
                       variant="outline"
                       disabled={
@@ -298,6 +341,11 @@ export default function StaffRolesCard() {
                       Decline
                     </Button>
                     <Button
+                      ref={(element) => {
+                        const key = `${reqItem.id}:approve`;
+                        if (element) resetRequestActionRefs.current.set(key, element);
+                        else resetRequestActionRefs.current.delete(key);
+                      }}
                       size="sm"
                       disabled={
                         approveMutation.isPending || declineMutation.isPending
@@ -313,6 +361,21 @@ export default function StaffRolesCard() {
                   </div>
                 </div>
               ),
+            )}
+            {resetRequestsQuery.isSuccess &&
+              (resetRequestsQuery.data ?? []).length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No pending password reset requests.
+                </p>
+              )}
+            {resetDecisionMessage && (
+              <p
+                role="status"
+                data-testid="password-reset-decision-status"
+                className="text-xs text-muted-foreground"
+              >
+                {resetDecisionMessage}
+              </p>
             )}
             {approveMutation.isError && (
               <p className="text-xs text-red-500">

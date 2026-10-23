@@ -12,6 +12,7 @@ export type QcEventEventType = typeof QcEventEventType[keyof typeof QcEventEvent
 export const QcEventEventType = {
   lot: 'lot',
   weight: 'weight',
+  'brix-check': 'brix-check',
   'component-check': 'component-check',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',

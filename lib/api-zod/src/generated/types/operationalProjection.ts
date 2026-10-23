@@ -11,6 +11,7 @@ import type { OperationalProjectionFacts } from './operationalProjectionFacts';
 import type { OperationalProjectionSchedule } from './operationalProjectionSchedule';
 import type { OperationalProjectionTimers } from './operationalProjectionTimers';
 import type { OperationalProjectionVersion } from './operationalProjectionVersion';
+import type { StationActivityMap } from './stationActivityMap';
 
 /**
  * Server-owned live operational read model returned beside the canonical sync snapshot.
@@ -24,6 +25,7 @@ export interface OperationalProjection {
   /** @minimum 0 */
   calculationRevision: number;
   effectiveElapsedSec: number;
+  stationActivity: StationActivityMap | null;
   timers: OperationalProjectionTimers;
   counters: OperationalProjectionCounters;
   facts: OperationalProjectionFacts;

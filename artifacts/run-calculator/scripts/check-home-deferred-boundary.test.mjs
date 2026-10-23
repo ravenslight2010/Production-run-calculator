@@ -8,14 +8,19 @@ import {
   checkHomeDeferredSourceBoundary,
   checkHomeDeferredBoundary,
   DEFERRED_HOME_MODULE_SUFFIXES,
+  runPnpmWorkspaceList,
 } from "./check-home-deferred-boundary.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
-function sourceHome() {
+function sourceHome(sourceRoot = path.resolve(scriptDir, "../src")) {
+  const homeDirectory = path.join(sourceRoot, "pages");
   return DEFERRED_HOME_MODULE_SUFFIXES.map((suffix) => {
     const name = path.basename(suffix, ".tsx");
-    return `const load${name} = () => import("../components/${name}");`;
+    const panelPath = path.resolve(sourceRoot, suffix.replace(/^\/src\//, ""));
+    let specifier = path.relative(homeDirectory, panelPath).replaceAll("\\", "/");
+    if (!specifier.startsWith(".")) specifier = `./${specifier}`;
+    return `const load${name} = () => import("${specifier}");`;
   }).join("\n");
 }
 
@@ -47,7 +52,18 @@ function validManifest() {
   };
 }
 
-function createSourceFixture({ homeSource, helperSource }) {
+function createSourceFixture({
+  homeSource,
+  helperSource,
+  packageSource,
+  workspacePatterns = ["lib/*"],
+  packageLocations = packageSource === undefined ? [] : ["lib/home-bridge"],
+  packageNames = {},
+  packageSources = {},
+  packageExports,
+  browserPackageSource,
+  runWorkspaceList,
+}) {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "home-deferred-boundary-"));
   const sourceRoot = path.join(fixtureRoot, "src");
   const homeFilePath = path.join(sourceRoot, "pages/home.tsx");
@@ -56,22 +72,54 @@ function createSourceFixture({ homeSource, helperSource }) {
     "components/live-stations/LiveRunTabContent.tsx",
   );
   const helperFilePath = path.join(sourceRoot, "components/homeBridge.ts");
-  const deferredPanelPath = path.join(sourceRoot, "components/SetupContent.tsx");
-
   fs.mkdirSync(path.dirname(homeFilePath), { recursive: true });
   fs.mkdirSync(path.dirname(liveRunFilePath), { recursive: true });
   fs.mkdirSync(path.dirname(helperFilePath), { recursive: true });
-  fs.writeFileSync(homeFilePath, homeSource);
+  fs.writeFileSync(
+    path.join(fixtureRoot, "package.json"),
+    JSON.stringify({ name: "home-deferred-boundary-fixture", private: true }),
+  );
+  fs.writeFileSync(
+    path.join(fixtureRoot, "pnpm-workspace.yaml"),
+    `packages:\n${workspacePatterns.map((pattern) => `  - "${pattern}"`).join("\n")}\n`,
+  );
   fs.writeFileSync(liveRunFilePath, "");
   fs.writeFileSync(helperFilePath, helperSource);
-  fs.writeFileSync(deferredPanelPath, "export default function SetupContent() {}");
+  for (const suffix of DEFERRED_HOME_MODULE_SUFFIXES) {
+    const panelPath = path.resolve(sourceRoot, suffix.replace(/^\/src\//, ""));
+    fs.mkdirSync(path.dirname(panelPath), { recursive: true });
+    fs.writeFileSync(panelPath, `export default function ${path.basename(panelPath, ".tsx")}() {}`);
+  }
+  for (const packageLocation of packageLocations) {
+    const packageRoot = path.join(fixtureRoot, packageLocation);
+    fs.mkdirSync(path.join(packageRoot, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: packageNames[packageLocation] ?? "@workspace/home-bridge",
+        exports: packageExports ?? { ".": "./src/index.ts" },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "src/index.ts"),
+      packageSources[packageLocation] ?? packageSource ?? "",
+    );
+    if (browserPackageSource !== undefined) {
+      fs.writeFileSync(path.join(packageRoot, "browser.ts"), browserPackageSource);
+    }
+  }
+  const resolvedHomeSource =
+    typeof homeSource === "function" ? homeSource(sourceRoot) : homeSource;
+  fs.writeFileSync(homeFilePath, resolvedHomeSource);
 
   return {
     homeFilePath,
-    homeSource,
+    homeSource: resolvedHomeSource,
     liveRunFilePath,
     liveRunSource: "",
     sourceRoot,
+    workspaceRoot: fixtureRoot,
+    runWorkspaceList,
     cleanup: () => fs.rmSync(fixtureRoot, { recursive: true, force: true }),
   };
 }
@@ -136,7 +184,7 @@ for (const suffix of DEFERRED_HOME_MODULE_SUFFIXES) {
 
 test("source boundary rejects removal of an existing Home dynamic loader", () => {
   const homeSource = sourceHome().replace(
-    'const loadMixesTabContent = () => import("../components/MixesTabContent");',
+    'const loadMixesTabContent = () => import("../components/MixesTabContent.tsx");',
     "",
   );
 
@@ -148,6 +196,69 @@ test("source boundary rejects removal of an existing Home dynamic loader", () =>
       }),
     /Home is missing dynamic imports for deferred panel/,
   );
+});
+
+for (const [sourceName, key] of [
+  ["Home", "homeSource"],
+  ["LiveRunTabContent", "liveRunSource"],
+]) {
+  test(`source boundary rejects a computed runtime dynamic import in ${sourceName}`, () => {
+    assert.throws(
+      () =>
+        checkHomeDeferredSourceBoundary({
+          homeSource:
+            key === "homeSource"
+              ? `${sourceHome()}\nconst loadPanel = (panel) => import(panel);`
+              : sourceHome(),
+          liveRunSource:
+            key === "liveRunSource"
+              ? `const loadPanel = (panel) => import(panel);`
+              : "",
+        }),
+      new RegExp(
+        `${sourceName} has runtime dynamic import\\(s\\) with a non-literal specifier[\\s\\S]*line \\d+, column \\d+[\\s\\S]*Use a string literal or no-substitution template literal`,
+      ),
+    );
+  });
+}
+
+test("source boundary ignores TypeScript import-type syntax", () => {
+  const fixture = createSourceFixture({
+    homeSource: (sourceRoot) =>
+      `${sourceHome(sourceRoot)}\ntype UnregisteredPanel = import("../components/UnregisteredPanel").default;`,
+    helperSource: "",
+  });
+  fs.writeFileSync(
+    path.join(fixture.sourceRoot, "components/UnregisteredPanel.tsx"),
+    "export default function UnregisteredPanel() {}",
+  );
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary keeps literal package dynamic imports outside local panel inventory", () => {
+  const result = checkHomeDeferredSourceBoundary({
+    homeSource: `${sourceHome()}\nconst loadExternal = () => import("@workspace/home-bridge");`,
+    liveRunSource: "",
+  });
+  assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+});
+
+test("source boundary accepts a no-substitution template literal for a local panel", () => {
+  const homeSource = sourceHome().replace(
+    'import("../components/SetupContent")',
+    "import(`../components/SetupContent`)",
+  );
+  const result = checkHomeDeferredSourceBoundary({
+    homeSource,
+    liveRunSource: "",
+  });
+  assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
 });
 
 test("source boundary rejects a deferred panel loaded by a side-effect static import", () => {
@@ -163,7 +274,8 @@ test("source boundary rejects a deferred panel loaded by a side-effect static im
 
 test("source boundary rejects a deferred panel reached through an intermediate local import", () => {
   const fixture = createSourceFixture({
-    homeSource: `import { bridge } from "../components/homeBridge";\n${sourceHome()}`,
+    homeSource: (sourceRoot) =>
+      `import { bridge } from "../components/homeBridge";\n${sourceHome(sourceRoot)}`,
     helperSource: `import SetupContent from "./SetupContent";\nexport const bridge = SetupContent;`,
   });
 
@@ -177,9 +289,464 @@ test("source boundary rejects a deferred panel reached through an intermediate l
   }
 });
 
-test("source boundary ignores type-only and dynamic imports in intermediate modules", () => {
+test("source boundary follows a deferred panel re-exported through a local workspace package", () => {
   const fixture = createSourceFixture({
-    homeSource: `import { loadSetupContent } from "../components/homeBridge";\n${sourceHome()}`,
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: 'export { default as bridge } from "../../../src/components/SetupContent";',
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> \.\.\/lib\/home-bridge\/src\/index\.ts -> components\/SetupContent\.tsx/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary follows the browser-selected workspace package export", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    packageExports: {
+      ".": {
+        browser: "./browser.ts",
+        default: "./src/index.ts",
+      },
+    },
+    browserPackageSource:
+      'export { default as bridge } from "../../src/components/SetupContent";',
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*Import chain: Home -> \.\.\/lib\/home-bridge\/browser\.ts -> components\/SetupContent\.tsx/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary rejects a workspace package export that resolves outside its package", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    packageExports: { ".": "./../outside.ts" },
+  });
+  fs.writeFileSync(
+    path.join(fixture.workspaceRoot, "lib/outside.ts"),
+    "export const bridge = true;",
+  );
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Workspace package "@workspace\/home-bridge" export "\." escapes its package directory\./,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary rejects exports with mode-dependent source entries when NODE_ENV is unset", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    packageExports: {
+      ".": {
+        development: "./src/index.ts",
+        production: "./browser.ts",
+      },
+    },
+    browserPackageSource: "export const bridge = true;",
+  });
+  const originalNodeEnv = process.env.NODE_ENV;
+  delete process.env.NODE_ENV;
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /different entries for Vite development and production conditions/,
+    );
+  } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+    fixture.cleanup();
+  }
+});
+
+test("source boundary does not scan dynamic imports inside workspace package exports", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: [
+      'import "third-party-package";',
+      'export type { SetupContentProps } from "../../../../../../src/components/SetupContent";',
+      'export const loadSetupContent = () => import("../../../../../../src/components/SetupContent");',
+      "export const loadPanel = (panel) => import(panel);",
+      "export const bridge = true;",
+    ].join("\n"),
+    workspacePatterns: ["modules/**/packages/*"],
+    packageLocations: ["modules/team/tooling/packages/home-bridge"],
+  });
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary discovers packages under nested pnpm workspace patterns", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: [
+      'import "third-party-package";',
+      'export { default as bridge } from "../../../../../../src/components/SetupContent";',
+    ].join("\n"),
+    workspacePatterns: ["modules/**/packages/*"],
+    packageLocations: ["modules/team/tooling/packages/home-bridge"],
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home statically imports deferred Home panel[\s\S]*modules\/team\/tooling\/packages\/home-bridge\/src\/index\.ts/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary clearly rejects unresolved local workspace package names", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/missing-package";\n${sourceHome()}`,
+    helperSource: "",
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Unable to find local workspace package "@workspace\/missing-package"/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary resolves a longer workspace package name without matching its prefix", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge-extra";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource:
+      'export { default as bridge } from "../../../src/components/SetupContent";',
+    packageLocations: ["lib/home-bridge", "lib/home-bridge-extra"],
+    packageNames: {
+      "lib/home-bridge-extra": "@workspace/home-bridge-extra",
+    },
+    packageSources: {
+      "lib/home-bridge-extra": "export const bridge = true;",
+    },
+  });
+
+  try {
+    const result = checkHomeDeferredSourceBoundary(fixture);
+    assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary does not resolve an absent full workspace package name by prefix", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge-extra";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Unable to find local workspace package "@workspace\/home-bridge-extra"/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary clearly rejects ambiguous local workspace package names", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    workspacePatterns: ["modules/**/packages/*"],
+    packageLocations: [
+      "modules/one/packages/home-bridge",
+      "modules/two/packages/home-bridge",
+    ],
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Workspace package "@workspace\/home-bridge" has multiple local manifests: modules\/one\/packages\/home-bridge, modules\/two\/packages\/home-bridge/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing process failures include command context and bounded details", () => {
+  let invokedWithRoot;
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: (workspaceRoot) => {
+      invokedWithRoot = workspaceRoot;
+      return {
+        status: 1,
+        stderr:
+          "\u001b[31mhttps://user:password@example.test/error\u001b[0m " +
+          "x".repeat(5000),
+      };
+    },
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        const details = error.message.match(/Details: (.*)$/)?.[1];
+        assert.ok(details);
+        assert.equal(details.length, 400);
+        assert.match(details, /^https:\/\/\[redacted\]@example\.test\/error x+/);
+        assert.ok(!details.includes("user:password"));
+        return true;
+      },
+    );
+    assert.equal(invokedWithRoot, fixture.workspaceRoot);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing launch failures include the actionable command context", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: () => ({
+      error: Object.assign(new Error("spawn pnpm ENOENT"), { code: "ENOENT" }),
+      status: null,
+      stderr: "",
+    }),
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /Workspace root:/);
+        assert.match(
+          error.message,
+          /Action: Run the command above from the workspace root and check pnpm-workspace\.yaml\./,
+        );
+        assert.match(error.message, /Details: spawn pnpm ENOENT/);
+        return true;
+      },
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing timeouts include command context and bounded safe details", () => {
+  const timeoutMessage = "spawnSync pnpm ETIMEDOUT";
+  const timeoutStderr =
+    "\u001b[31mhttps://user:password@example.test/error\u001b[0m " +
+    "x".repeat(5000);
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: (workspaceRoot) =>
+      runPnpmWorkspaceList(workspaceRoot, (command, args, options) => {
+        assert.equal(command, "pnpm");
+        assert.deepEqual(args, [
+          "--dir",
+          workspaceRoot,
+          "--recursive",
+          "list",
+          "--json",
+          "--depth",
+          "-1",
+        ]);
+        assert.equal(options.timeout, 30_000);
+        assert.equal(options.encoding, "utf8");
+        return {
+          error: Object.assign(new Error(timeoutMessage), { code: "ETIMEDOUT" }),
+          status: null,
+          stderr: timeoutStderr,
+        };
+      }),
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        assert.match(error.message, /Failure: pnpm workspace listing timed out after 30000ms\./);
+        const details = error.message.match(/Details: (.*)$/)?.[1];
+        assert.ok(details);
+        assert.equal(details.length, 400);
+        assert.match(
+          details,
+          /^spawnSync pnpm ETIMEDOUT; https:\/\/\[redacted\]@example\.test\/error x+/,
+        );
+        assert.ok(!details.includes("user:password"));
+        return true;
+      },
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("malformed workspace listing output includes command context and root", () => {
+  let invokedWithRoot;
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: (workspaceRoot) => {
+      invokedWithRoot = workspaceRoot;
+      return { status: 0, stdout: "not-json" };
+    },
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        assert.match(error.message, /Details: Invalid pnpm workspace package listing:/);
+        return true;
+      },
+    );
+    assert.equal(invokedWithRoot, fixture.workspaceRoot);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing rejects valid JSON with an invalid package-list shape", () => {
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: () => ({ status: 0, stdout: JSON.stringify([{ name: "missing-path" }]) }),
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        assert.match(
+          error.message,
+          /Details: Invalid pnpm workspace package listing: pnpm workspace package listing contains an entry without a path\./,
+        );
+        return true;
+      },
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("workspace listing rejects package folders outside the root before reading manifests", () => {
+  const reportedFolder = path.resolve(
+    os.tmpdir(),
+    "outside-home-workspace",
+    "home-bridge",
+  );
+  const manifestReads = [];
+  let workspaceListCalls = 0;
+  const fixture = createSourceFixture({
+    homeSource: `import { bridge } from "@workspace/home-bridge";\n${sourceHome()}`,
+    helperSource: "",
+    packageSource: "export const bridge = true;",
+    runWorkspaceList: () => {
+      workspaceListCalls += 1;
+      return {
+        status: 0,
+        stdout: JSON.stringify([{ path: reportedFolder }]),
+      };
+    },
+  });
+
+  try {
+    assert.throws(
+      () =>
+        checkHomeDeferredSourceBoundary({
+          ...fixture,
+          readSource: (filePath) => {
+            if (path.basename(filePath) === "package.json") {
+              manifestReads.push(filePath);
+            }
+            return fs.readFileSync(filePath, "utf8");
+          },
+        }),
+      (error) => {
+        assert.match(error.message, /Workspace package discovery failed\./);
+        assert.match(error.message, /Command: pnpm --dir "/);
+        assert.match(error.message, /--recursive list --json --depth -1/);
+        assert.match(error.message, new RegExp(`Workspace root: ${fixture.workspaceRoot}`));
+        const details = error.message.match(/Details: (.*)$/)?.[1];
+        assert.ok(details);
+        assert.ok(details.length <= 400);
+        assert.match(details, /pnpm reported a workspace package outside the root:/);
+        assert.ok(details.includes(reportedFolder));
+        return true;
+      },
+    );
+    assert.equal(workspaceListCalls, 1);
+    assert.deepEqual(manifestReads, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary inventories helper dynamic imports and ignores import-type syntax", () => {
+  const fixture = createSourceFixture({
+    homeSource: (sourceRoot) =>
+      `import { loadSetupContent } from "../components/homeBridge";\n${sourceHome(sourceRoot).replace(
+        'const loadSetupContent = () => import("../components/SetupContent.tsx");',
+        "",
+      )}`,
     helperSource: [
       'import type { SetupContentProps } from "./SetupContent";',
       'export { type SetupContentProps } from "./SetupContent";',
@@ -190,6 +757,48 @@ test("source boundary ignores type-only and dynamic imports in intermediate modu
   try {
     const result = checkHomeDeferredSourceBoundary(fixture);
     assert.equal(result.deferredHomePanels, DEFERRED_HOME_MODULE_SUFFIXES.length);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary rejects a computed runtime dynamic import in a local helper", () => {
+  const fixture = createSourceFixture({
+    homeSource: (sourceRoot) =>
+      `import { loadPanel } from "../components/homeBridge";\n${sourceHome(sourceRoot)}`,
+    helperSource: "export const loadPanel = (panel) => import(panel);",
+  });
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /Home helper components\/homeBridge\.ts has runtime dynamic import\(s\) with a non-literal specifier[\s\S]*line 1, column \d+[\s\S]*Use a string literal or no-substitution template literal[\s\S]*Import chain: Home -> components\/homeBridge\.ts/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source boundary rejects a local dynamic panel missing from the deferred inventory", () => {
+  const fixture = createSourceFixture({
+    homeSource: (sourceRoot) =>
+      `${sourceHome(sourceRoot)}\nconst loadUnregisteredPanel = () => import("../components/UnregisteredPanel");`,
+    helperSource: "",
+  });
+  const unregisteredPanelPath = path.join(
+    fixture.sourceRoot,
+    "components/UnregisteredPanel.tsx",
+  );
+  fs.writeFileSync(
+    unregisteredPanelPath,
+    "export default function UnregisteredPanel() {}",
+  );
+
+  try {
+    assert.throws(
+      () => checkHomeDeferredSourceBoundary(fixture),
+      /local dynamic import\(s\) missing from the deferred panel inventory:[\s\S]*components\/UnregisteredPanel\.tsx/,
+    );
   } finally {
     fixture.cleanup();
   }

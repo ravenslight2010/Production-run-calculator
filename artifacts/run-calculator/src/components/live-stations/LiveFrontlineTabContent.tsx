@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef } from "react";
+import { useWatch } from "react-hook-form";
 import { Boxes } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { applyRecipeSubstitutions } from "@workspace/inventory-math";
@@ -27,7 +28,17 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
   const { v, runStatus, currentRun, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection, switchToRun } = hx;
   const { calc, elapsedBatchSec, linePhases } = useLiveRun();
+  const currentValues = useWatch({ control: form.control }) as FormValues;
   const autoAdvancedRunRef = useRef<string | null>(null);
+  const pep2StockDraftsRef = useRef<{
+    runId: string;
+    drafts: Partial<Record<"pep2" | "pep2b", { value: string; label: string }>>;
+  }>({ runId: currentRunId, drafts: {} });
+  useEffect(() => {
+    if (pep2StockDraftsRef.current.runId !== currentRunId) {
+      pep2StockDraftsRef.current = { runId: currentRunId, drafts: {} };
+    }
+  }, [currentRunId]);
   useEffect(() => {
     const nextIndex = dayState.currentIndex + 1;
     const nextRun = dayState.runs[nextIndex];
@@ -119,7 +130,7 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
         <CardContent className="px-5 pb-5">
           <p className="text-xs text-muted-foreground mb-3">Current pounds loaded at each configured applicator. Save an adjustment or fill the slot to its cap after a load or refill.</p>
           {APPLICATOR_STOCK_REGISTERS.map((register) => {
-            const values = v as unknown as Record<string, unknown>;
+            const values = currentValues as unknown as Record<string, unknown>;
             const fields = applicatorStockFields(register);
             const capacity = computeApplicatorStockCapacityLbs(values, register);
             if (capacity <= 0) return null;
@@ -132,15 +143,31 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
               : register.endsWith("b")
                 ? `Pep ${register.slice(3, 4)} additional · ${String(values[`${register.slice(0, -1)}TypeB`] ?? "").trim()}`
                 : `Pep ${register.slice(3, 4)} · ${String(values[`${register}Type`] ?? "").trim()}`;
+            const isRetainedPep2Draft = register === "pep2" || register === "pep2b";
+            const retainedDrafts = pep2StockDraftsRef.current.runId === currentRunId
+              ? pep2StockDraftsRef.current.drafts
+              : undefined;
+            const retainedDraft = isRetainedPep2Draft ? retainedDrafts?.[register] : undefined;
             return (
               <ApplicatorStockRow
-                key={register}
+                key={`${register}-${currentRunId}-${label}`}
                 label={label}
                 stockLbs={Number(values[fields.stock]) || 0}
                 capacityLbs={capacity}
                 disabled={!isLive || !!lock}
                 disabledReason={lock?.peer ? "Stock adjustments unavailable while another station is editing." : undefined}
                 testId={`stock-${register}-lbs`}
+                initialDraft={retainedDraft?.label === label ? retainedDraft.value : undefined}
+                onDraftChange={isRetainedPep2Draft ? (draft) => {
+                  if (pep2StockDraftsRef.current.runId !== currentRunId) {
+                    pep2StockDraftsRef.current = { runId: currentRunId, drafts: {} };
+                  }
+                  if (draft === undefined) {
+                    delete pep2StockDraftsRef.current.drafts[register];
+                  } else {
+                    pep2StockDraftsRef.current.drafts[register] = { value: draft, label };
+                  }
+                } : undefined}
                 onSave={(stockLbs) => setManualStock(register, stockLbs)}
               />
             );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LifeBuoy,
@@ -60,13 +60,22 @@ function IncidentRow({
   incident,
   assignees,
   initiallyExpanded = false,
+  onIncidentFocus,
+  onIncidentBlur,
+  onHeaderButtonRef,
 }: {
   incident: Incident;
   assignees: Array<{ userId: string; name: string; role: string }>;
   initiallyExpanded?: boolean;
+  onIncidentFocus: (incidentId: string) => void;
+  onIncidentBlur: (relatedTarget: EventTarget | null) => void;
+  onHeaderButtonRef: (incidentId: string, element: HTMLButtonElement | null) => void;
 }) {
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(initiallyExpanded || incident.status === "new");
+  const previousStatus = useRef(incident.status);
+  const resolveButtonRef = useRef<HTMLButtonElement>(null);
+  const headerButtonRef = useRef<HTMLButtonElement>(null);
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["incidents"] });
     void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
@@ -86,12 +95,36 @@ function IncidentRow({
   const [note, setNote] = useState("");
   const busy = review.isPending || resolve.isPending || workflow.isPending;
 
+  useEffect(() => {
+    const oldStatus = previousStatus.current;
+    previousStatus.current = incident.status;
+    if (oldStatus === "new" && incident.status === "reviewed") {
+      resolveButtonRef.current?.focus();
+    } else if (oldStatus !== "resolved" && incident.status === "resolved") {
+      headerButtonRef.current?.focus();
+    }
+  }, [incident.id, incident.status]);
+
   const isCrash = incident.source === "auto_crash";
   const ctx = incident.context ?? {};
 
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div
+      data-testid="incident-row"
+      className="rounded-lg border border-border bg-card"
+      onFocusCapture={() => onIncidentFocus(incident.id)}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        onIncidentBlur(next);
+      }}
+    >
       <button
+        ref={(element) => {
+          headerButtonRef.current = element;
+          onHeaderButtonRef(incident.id, element);
+        }}
+        data-incident-header={incident.id}
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-start gap-3 p-3 text-left"
@@ -255,7 +288,12 @@ function IncidentRow({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {incident.status === "new" && (
-              <Button size="sm" variant="outline" onClick={() => review.mutate()} disabled={busy}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => review.mutate()}
+                disabled={busy}
+              >
                 {review.isPending ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
@@ -271,7 +309,12 @@ function IncidentRow({
               </p>
             )}
             {incident.status !== "resolved" ? (
-              <Button size="sm" onClick={() => resolve.mutate()} disabled={busy}>
+              <Button
+                ref={resolveButtonRef}
+                size="sm"
+                onClick={() => resolve.mutate()}
+                disabled={busy}
+              >
                 {resolve.isPending ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
@@ -633,6 +676,9 @@ export default function IncidentsTab() {
     const match = window.location.hash.match(/^#incidents\/(.+)$/);
     return match ? decodeURIComponent(match[1]) : null;
   });
+  const incidentListHeadingRef = useRef<HTMLHeadingElement>(null);
+  const incidentHeaderButtons = useRef(new Map<string, HTMLButtonElement>());
+  const focusedIncidentId = useRef<string | null>(null);
   const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
   const { data: fieldChecks, isLoading: fieldChecksLoading, error: fieldChecksError } = useQuery({
     queryKey: ["fieldChecks", fieldFilters],
@@ -656,6 +702,17 @@ export default function IncidentsTab() {
       }),
     [incidents, status, platform, source, workflowState],
   );
+  useEffect(() => {
+    const incidentId = focusedIncidentId.current;
+    if (!incidentId) return;
+    if (filtered.some((incident) => incident.id === incidentId)) return;
+    const nextIncident = filtered[0];
+    const nextHeader = nextIncident
+      ? incidentHeaderButtons.current.get(nextIncident.id)
+      : undefined;
+    (nextHeader ?? incidentListHeadingRef.current)?.focus();
+    focusedIncidentId.current = null;
+  }, [filtered]);
 
   if (!roleLoading && !canReview) {
     return (
@@ -693,7 +750,12 @@ export default function IncidentsTab() {
         />
         {hasIncidents && <IncidentPatternsPanel disabled={isLoading} />}
         <section aria-labelledby="incident-list-heading" className="space-y-3">
-          <h2 id="incident-list-heading" className="text-sm font-semibold text-foreground">
+          <h2
+            id="incident-list-heading"
+            ref={incidentListHeadingRef}
+            tabIndex={-1}
+            className="text-sm font-semibold text-foreground"
+          >
             Incident list
           </h2>
           {hasAnyIssues && (
@@ -771,6 +833,17 @@ export default function IncidentsTab() {
               incident={incident}
               assignees={assignees}
               initiallyExpanded={incident.id === selectedIncidentId}
+              onIncidentFocus={(incidentId) => {
+                focusedIncidentId.current = incidentId;
+              }}
+              onIncidentBlur={(relatedTarget) => {
+                if (!relatedTarget || relatedTarget === document.body) return;
+                focusedIncidentId.current = null;
+              }}
+              onHeaderButtonRef={(incidentId, element) => {
+                if (element) incidentHeaderButtons.current.set(incidentId, element);
+                else incidentHeaderButtons.current.delete(incidentId);
+              }}
             />
           ))}
           </div>

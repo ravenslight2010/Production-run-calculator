@@ -11,6 +11,7 @@ import { useAccessibleDialog } from "./useAccessibleDialog";
 import AiStatusNotice from "./AiStatusNotice";
 import type { AiStatus } from "../aiStatus";
 import { WorkbookSourceCitation } from "./WorkbookSourceCitation";
+import { deriveSourceKey } from "@/savedSpecSheets";
 
 const SKIP = "";
 const CREATE = "__create__";
@@ -32,6 +33,9 @@ function importRowSource(
 export type ImportCommitRunEntry = { brand: string; flavor: string; casesPlanned: number; notes: string };
 
 export type ImportCommit = {
+  sourceKey?: string;
+  /** Learn matches only after an acknowledged save, never while previewing. */
+  onApplied?: () => void;
   date: string;
   runs: ImportCommitRunEntry[];
   createBrands: string[];
@@ -430,7 +434,7 @@ export default function ExcelImportDialog({
       skip: SKIP,
       create: CREATE,
     });
-    if (aliases.length > 0) {
+    const onApplied = () => { if (aliases.length > 0) {
       void saveImportAliases(aliases).catch(() => {
         notifyCorrectionWriteFailure({
           store: "schedule-import-aliases",
@@ -448,8 +452,9 @@ export default function ExcelImportDialog({
           toText: a.canonicalName,
         })),
       );
-    }
-    onConfirm(buildCommit());
+    } };
+    const sourceFiles = [...new Set(rows.map((row) => row.source?.file).filter((file): file is string => !!file))];
+    onConfirm({ ...buildCommit(), sourceKey: deriveSourceKey(sourceFiles), onApplied });
   }
 
   const preview = buildCommit();

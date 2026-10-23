@@ -14,3 +14,9 @@ When a retained source snapshot is saved after the atomic changes, an idempotent
 **Why:** The atomic operation can create its durable history row before the optional review snapshot is available; deduplication must not make that reference impossible to add or allow cross-scope attachment.
 
 **How to apply:** Treat later snapshot metadata as a narrowly scoped reference enrichment on the same authenticated operation, and leave the original status, summary, and operation identity unchanged.
+
+User cancellation before Apply is a review outcome, not an ambiguous operation failure.
+
+**Why:** Treating a cancelled preview as a status-less network error locked the original review behind “the earlier save may have reached the server,” even though no Apply request existed.
+
+**How to apply:** Keep cancellation separate from uncertain commit responses. Cancel must leave no pending operation, failed-commit history or exact-retry lock; an actual unconfirmed Apply must retain its existing original-ID recovery.

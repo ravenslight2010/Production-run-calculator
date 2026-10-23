@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, uniqueIndex, index, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, uniqueIndex, index, integer, serial } from "drizzle-orm/pg-core";
 
 // Sanitized, short-lived results for repeatable non-conversational AI operations.
 // The request/prompt is never stored: `operationKey` is a one-way fingerprint of
@@ -7,7 +7,7 @@ import { pgTable, text, jsonb, timestamp, uniqueIndex, index, integer } from "dr
 export const aiResultCacheTable = pgTable(
   "ai_result_cache",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     namespace: text("namespace").notNull(),
     operationKey: text("operation_key").notNull(),

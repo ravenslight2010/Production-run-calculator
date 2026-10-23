@@ -3,6 +3,8 @@ import { and, desc, eq, ilike, inArray, isNull } from "drizzle-orm";
 import { db, importHistoryTable, savedSpecSheetsTable, type ImportHistoryRow } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireAnyCapability } from "../middlewares/requireCapability";
+import { validateImportAppliedValues } from "@workspace/spec-import/import-applied-values";
+import type { ImportSnapshot } from "@workspace/spec-import/import-changes";
 
 const router: IRouter = Router();
 const MAX_ROWS = 100;
@@ -19,6 +21,8 @@ function allowedImportHistoryTypes(req: Request): string[] {
 }
 
 type ImportHistorySummary = {
+  appliedValues?: ImportSnapshot;
+  persistence?: "local-verified" | "sync-acknowledged";
   phases?: Record<string, string>;
   counts?: Record<string, number>;
   source?: Record<string, number>;
@@ -70,6 +74,8 @@ function sanitizeSummary(raw: unknown): ImportHistorySummary {
       return kind && entity && message ? [{ kind, entity, message }] : [];
     });
   return {
+    ...(validateImportAppliedValues(o.appliedValues) && ["local-verified", "sync-acknowledged"].includes(String(o.persistence))
+      ? { appliedValues: validateImportAppliedValues(o.appliedValues)!, persistence: o.persistence as "local-verified" | "sync-acknowledged" } : {}),
     phases,
     counts,
     source: metric(o.source),
@@ -157,6 +163,10 @@ router.get("/import-history", requireAnyCapability(["manage-profiles", "manage-i
     const type = String(req.query.type ?? "").trim();
     const status = String(req.query.status ?? "").trim();
     const customer = String(req.query.customer ?? "").trim();
+    const sourceKey = req.query.sourceKey;
+    if (sourceKey !== undefined && (typeof sourceKey !== "string" || sourceKey.length > MAX_TEXT || !sourceKey.trim())) {
+      res.status(400).json({ error: "Invalid source identity" }); return;
+    }
     const clauses = [eq(importHistoryTable.scope, currentScope())];
     const allowedTypes = allowedImportHistoryTypes(req);
     if (allowedTypes.length === 0) {
@@ -170,6 +180,7 @@ router.get("/import-history", requireAnyCapability(["manage-profiles", "manage-i
     clauses.push(inArray(importHistoryTable.importType, allowedTypes));
     if (type) clauses.push(eq(importHistoryTable.importType, type));
     if (status) clauses.push(eq(importHistoryTable.status, status));
+    if (typeof sourceKey === "string") clauses.push(eq(importHistoryTable.sourceKey, sourceKey));
     if (customer) clauses.push(ilike(importHistoryTable.customerScope, `%${customer.slice(0, 80)}%`));
     const rows = await db.select().from(importHistoryTable)
       .where(and(...clauses))

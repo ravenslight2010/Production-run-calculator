@@ -15,6 +15,7 @@ import {
   clearCacheMaintenanceDiagnosticsForTests,
   recordCacheMaintenance,
 } from "../lib/observability";
+import * as observability from "../lib/observability";
 import {
   beginStartup,
   markStartupFailed,
@@ -25,6 +26,7 @@ import {
   clearBackgroundOperationDiagnosticsForTests,
   runBackgroundOperation,
 } from "../lib/backgroundOperations";
+import * as backgroundOperations from "../lib/backgroundOperations";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(async () => ({
@@ -220,6 +222,160 @@ describe("GET /readyz optional AI capability", () => {
     }
     expect(JSON.stringify(body)).not.toContain("test-");
     expect(JSON.stringify(mocks.info.mock.calls)).not.toContain("test-");
+  });
+
+  it("keeps core readiness healthy when the optional import-gold evaluator is enabled but unavailable", async () => {
+    const previousEnabled = process.env.IMPORT_GOLD_LOCAL_ENABLED;
+    const previousBaseUrl = process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+    try {
+      setProviderEnv({});
+      process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+      process.env.IMPORT_GOLD_LOCAL_BASE_URL = "http://127.0.0.1:1/v1";
+      const response = await fetch(`${baseUrl}/readyz`);
+      const body = await response.json() as {
+        status: string;
+        checks: { database: string; dependencies: string };
+        capabilities: { ai: { status: string } };
+      };
+      expect(response.status).toBe(200);
+      expect(body.status).toBe("ok");
+      expect(body.checks.database).toBe("ok");
+      expect(body.checks.dependencies).toBe("warning");
+      expect(body.capabilities.ai.status).toBe("not_configured");
+    } finally {
+      if (previousEnabled === undefined) delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
+      else process.env.IMPORT_GOLD_LOCAL_ENABLED = previousEnabled;
+      if (previousBaseUrl === undefined) delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
+      else process.env.IMPORT_GOLD_LOCAL_BASE_URL = previousBaseUrl;
+    }
+  });
+});
+
+describe("GET /readyz contention behavior", () => {
+  it.each([
+    { nodeEnv: "production", enabled: "1" },
+    { nodeEnv: "development", enabled: "1" },
+    { nodeEnv: "test", enabled: "0" },
+  ])("keeps disposable instrumentation disabled for $nodeEnv with flag $enabled", async ({
+    nodeEnv,
+    enabled,
+  }) => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousInstrumentation = process.env.API_LOAD_READINESS_INSTRUMENTATION;
+    try {
+      process.env.NODE_ENV = nodeEnv;
+      process.env.API_LOAD_READINESS_INSTRUMENTATION = enabled;
+      const response = await fetch(`${baseUrl}/readyz`);
+      expect(response.status).toBe(200);
+      expect([...response.headers.keys()].some((key) => key.startsWith("x-test-readiness-")))
+        .toBe(false);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousInstrumentation === undefined) delete process.env.API_LOAD_READINESS_INSTRUMENTATION;
+      else process.env.API_LOAD_READINESS_INSTRUMENTATION = previousInstrumentation;
+    }
+  });
+
+  it("coalesces shared reads while keeping core checks independent and surviving client cancellation", async () => {
+    let releaseDiagnostics!: () => void;
+    const diagnosticsGate = new Promise<void>((resolve) => {
+      releaseDiagnostics = resolve;
+    });
+    const readCacheDiagnostics = observability.getCacheMaintenanceDiagnostics;
+    const readBackgroundDiagnostics = backgroundOperations.getBackgroundOperationDiagnostics;
+    const cacheDiagnosticsSpy = vi
+      .spyOn(observability, "getCacheMaintenanceDiagnostics")
+      .mockImplementation(async (...args) => {
+        await diagnosticsGate;
+        return readCacheDiagnostics(...args);
+      });
+    const backgroundDiagnosticsSpy = vi
+      .spyOn(backgroundOperations, "getBackgroundOperationDiagnostics")
+      .mockImplementation(async (...args) => {
+        await diagnosticsGate;
+        return readBackgroundDiagnostics(...args);
+      });
+
+    try {
+      const cancelledProbe = new AbortController();
+      const responses = [
+        fetch(`${baseUrl}/readyz`, { signal: cancelledProbe.signal }),
+        ...Array.from({ length: 7 }, () => fetch(`${baseUrl}/readyz`)),
+      ];
+      await vi.waitFor(() => {
+        expect(mocks.execute).toHaveBeenCalledTimes(16);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(cacheDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      cancelledProbe.abort();
+      await expect(responses[0]).rejects.toHaveProperty("name", "AbortError");
+      releaseDiagnostics();
+
+      const settled = await Promise.all(responses.slice(1));
+      expect(settled.map((response) => response.status)).toEqual(Array(7).fill(200));
+      expect(cacheDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      expect(mocks.execute).toHaveBeenCalledTimes(16);
+    } finally {
+      releaseDiagnostics();
+      cacheDiagnosticsSpy.mockRestore();
+      backgroundDiagnosticsSpy.mockRestore();
+    }
+  });
+
+  it("clears a rejected shared diagnostic read so the next probe can recover", async () => {
+    let releaseDiagnostics!: () => void;
+    const diagnosticsGate = new Promise<void>((resolve) => {
+      releaseDiagnostics = resolve;
+    });
+    const backgroundDiagnosticsSpy = vi
+      .spyOn(backgroundOperations, "getBackgroundOperationDiagnostics")
+      .mockImplementationOnce(async () => {
+        await diagnosticsGate;
+        throw new Error("synthetic diagnostic failure");
+      });
+
+    try {
+      const responses = Array.from({ length: 4 }, () => fetch(`${baseUrl}/readyz`));
+      await vi.waitFor(() => {
+        expect(mocks.execute).toHaveBeenCalledTimes(8);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+      releaseDiagnostics();
+
+      const failedResponses = await Promise.all(responses);
+      expect(failedResponses.map((response) => response.status)).toEqual(Array(4).fill(500));
+      expect(backgroundDiagnosticsSpy).toHaveBeenCalledTimes(1);
+
+      backgroundDiagnosticsSpy.mockRestore();
+      const recoveredResponse = await fetch(`${baseUrl}/readyz`);
+      expect(recoveredResponse.status).toBe(200);
+      expect(mocks.execute).toHaveBeenCalledTimes(10);
+    } finally {
+      releaseDiagnostics();
+      backgroundDiagnosticsSpy.mockRestore();
+    }
+  });
+
+  it("logs bounded timings for database and optional diagnostic stages", async () => {
+    const response = await fetch(`${baseUrl}/readyz`);
+
+    expect(response.status).toBe(200);
+    const healthLog = [...mocks.info.mock.calls]
+      .reverse()
+      .map(([fields]) => fields as Record<string, unknown>)
+      .find((fields) => fields.event === "health_check");
+    expect(healthLog).toMatchObject({
+      durationMs: expect.any(Number),
+      stageDurationsMs: {
+        databaseCheck: expect.any(Number),
+        optionalDiagnostics: expect.any(Number),
+      },
+    });
+    expect(JSON.stringify(healthLog)).not.toMatch(/password|secret|payload|sql|query/i);
   });
 });
 

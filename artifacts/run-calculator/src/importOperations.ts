@@ -5,6 +5,8 @@
  * own matching, pruning, redirect, and audit semantics. The server validates
  * the importer-specific payload and returns the canonical committed result.
  */
+import { compareImportSnapshots, compareImportSourceVersions, type ImportSnapshot } from "@workspace/spec-import/import-changes";
+import { requestImportSafetyReview, importReviewIdentityEpoch, ImportReviewCancelledError } from "./importSafetyReview";
 
 export type ImportOperationType = "spec" | "premix" | "cheese";
 
@@ -19,6 +21,10 @@ export type ImportOperationResult<T = unknown> = {
 export type ImportOperationSourceEvidence = {
   sourceText: string;
   parseVersion: string;
+};
+
+export type ImportGoldCapture = {
+  input: Record<string, unknown>;
 };
 
 export class ImportOperationError extends Error {
@@ -291,7 +297,7 @@ export async function retryPendingImportOperation<T = unknown>(
   return postOperation<T>(id, "apply", payload, "applied");
 }
 
-export function applyImportOperation<T>(
+export async function applyImportOperation<T>(
   operationId: string,
   payload: {
     importType: ImportOperationType;
@@ -299,10 +305,59 @@ export function applyImportOperation<T>(
     sourceLabel: string;
     changes: Record<string, unknown>;
     sourceEvidence?: ImportOperationSourceEvidence;
+    goldCapture?: ImportGoldCapture;
     expectedStateHash?: string;
     requestHash?: string;
   },
 ): Promise<ImportOperationResult<T>> {
+  // An ambiguous retry must replay its original reviewed request, never obtain
+  // a fresh state hash and silently authorize a different save.
+  const epoch = importReviewIdentityEpoch();
+  const pending = pendingPayload(operationId);
+  if (pending !== undefined) {
+    const previous = pending as typeof payload;
+    if (!sameJson({ ...previous, expectedStateHash: undefined }, { ...payload, expectedStateHash: undefined })) {
+      throw new ImportOperationError("The reviewed changes differ from the unconfirmed request. Recover the original operation before applying another review.", 409, operationId);
+    }
+    return postOperation<T>(operationId, "apply", previous, "applied");
+  }
+  if (readPending().some((item) => item.operationId !== operationId)) {
+    throw new ImportOperationError("An earlier import is still unconfirmed. Recover it before starting a new import.", 409, operationId);
+  }
+  if (typeof window !== "undefined") {
+    const response = await fetch("/api/import-operations/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const review = await response.json();
+    if (!response.ok) throw new Error(typeof review?.error === "string" ? review.error : "Could not load the current import changes. Try again. No Apply was sent.");
+    const isSnapshot = (value: unknown): value is ImportSnapshot =>
+      !!value && typeof value === "object" && !Array.isArray(value) &&
+      Object.values(value).every((array) => Array.isArray(array) && array.every((row) => row && typeof row === "object" && !Array.isArray(row)));
+    if (!/^[a-f0-9]{64}$/.test(review?.expectedStateHash) ||
+        !isSnapshot(review.before) || !isSnapshot(review.after) ||
+        !["available", "unavailable"].includes(review.baseline?.status) ||
+        typeof review.baseline?.limitation !== "string") {
+      throw new ImportOperationError("Invalid import review response. No changes were saved.");
+    }
+    const baseline = review.baseline;
+    if (baseline.status === "available" && (!isSnapshot(baseline.before) || !isSnapshot(baseline.after))) {
+      throw new ImportOperationError("Invalid source comparison. No changes were saved.");
+    }
+    if (!await requestImportSafetyReview({
+      title: `Review ${payload.importType} changes`,
+      recovery: "Server-atomic Apply. Guarded Undo is available only while affected rows still match. This review does not change inventory.",
+      changes: compareImportSnapshots(review.before, review.after),
+      baseline: {
+        status: baseline.status,
+        label: `${baseline.operationId ? `Apply ${baseline.operationId} · ${new Date(baseline.appliedAt).toLocaleString()}. ` : ""}${baseline.limitation}`,
+        changes: baseline.status === "available" ? compareImportSourceVersions(baseline.before, baseline.after) : [],
+      },
+    }, epoch)) throw new ImportReviewCancelledError();
+    payload = { ...payload, expectedStateHash: review.expectedStateHash };
+  }
   return postOperation<T>(operationId, "apply", payload, "applied");
 }
 

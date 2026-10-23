@@ -19,6 +19,7 @@ import { startWebPushAlertScheduler } from "./lib/webPush";
 import { serverJobBackgroundFailureFields, startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
 import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
+import { startIdentitySequenceHealthScheduler } from "./lib/identitySequenceHealth";
 import { db, pool } from "@workspace/db";
 import { startDatabaseCapacityCollection } from "./lib/databaseCapacity";
 import {
@@ -75,6 +76,7 @@ let stopWebPushAlertScheduler: (() => void) | undefined;
 let stopDailyRolloverScheduler: (() => void) | undefined;
 let stopAuthRetentionScheduler: (() => void) | undefined;
 let stopImportSourceRetentionScheduler: (() => void) | undefined;
+let stopIdentitySequenceHealthScheduler: (() => void) | undefined;
 let stopDatabaseCapacityCollection: (() => void) | undefined;
 let stopCapacityTelemetryHeartbeat: (() => void) | undefined;
 
@@ -123,6 +125,8 @@ async function startServer(): Promise<void> {
     stopAuthRetentionScheduler = undefined;
     stopImportSourceRetentionScheduler?.();
     stopImportSourceRetentionScheduler = undefined;
+    stopIdentitySequenceHealthScheduler?.();
+    stopIdentitySequenceHealthScheduler = undefined;
     stopDatabaseCapacityCollection?.();
     stopDatabaseCapacityCollection = undefined;
     stopCapacityTelemetryHeartbeat?.();
@@ -275,6 +279,7 @@ async function initializeStartup(startedAt: number): Promise<void> {
         );
       },
     }).stop;
+    stopIdentitySequenceHealthScheduler = startIdentitySequenceHealthScheduler().stop;
   } else {
     logger.info(
       { event: "background_auxiliary_schedulers", outcome: "disabled", reason: "managed_browser_fixture" },

@@ -32,6 +32,15 @@ const qcMocks = vi.hoisted(() => ({
         state: string;
         reason?: string;
       }>,
+      brixTargets: [] as Array<{
+        ingredientId: string;
+        ingredientName: string;
+        targetBrix: number | null;
+        toleranceBrix: number | null;
+        source: string;
+        state: string;
+        reason?: string;
+      }>,
     },
     isLoading: false,
     isError: false,
@@ -110,6 +119,18 @@ const qcMocks = vi.hoisted(() => ({
     error: null,
     isPending: false,
   },
+  brixMutation: {
+    mutateAsync: vi.fn(),
+    mutate: vi.fn(),
+    error: null,
+    isPending: false,
+  },
+  brixTargetMutation: {
+    mutateAsync: vi.fn(),
+    mutate: vi.fn(),
+    error: null,
+    isPending: false,
+  },
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
@@ -126,10 +147,12 @@ vi.mock("@workspace/api-client-react", () => ({
   useRecordQcAllergenReview: () => qcMocks.mutation,
   useRecordQcComponentCheck: () => qcMocks.mutation,
   useRecordQcCleaning: () => qcMocks.mutation,
+  useRecordQcBrixCheck: () => qcMocks.brixMutation,
   useRecordQcLot: () => qcMocks.mutation,
   useRecordQcWeightCheck: () => qcMocks.mutation,
   useRedactQcEvent: () => qcMocks.mutation,
   useSetQcTarget: () => qcMocks.mutation,
+  useSetQcBrixTarget: () => qcMocks.brixTargetMutation,
   useSignoffQcRun: () => qcMocks.mutation,
   useVerifyQcCleaning: () => qcMocks.mutation,
 }));
@@ -182,6 +205,15 @@ beforeEach(() => {
       state: string;
       reason?: string;
     }>,
+    brixTargets: [{
+      ingredientId: "flour",
+      ingredientName: "Flour",
+      targetBrix: null,
+      toleranceBrix: null,
+      source: "not-configured",
+      state: "not-evaluated",
+      reason: "No manager-reviewed Brix target is configured.",
+    }],
   };
   qcMocks.run.data = {
     runId: "run-1",
@@ -203,6 +235,14 @@ beforeEach(() => {
   };
   qcMocks.runs = {};
   qcMocks.mutation.mutate.mockClear();
+  qcMocks.mutation.error = null;
+  qcMocks.mutation.isPending = false;
+  qcMocks.brixMutation.mutate.mockClear();
+  qcMocks.brixMutation.error = null;
+  qcMocks.brixMutation.isPending = false;
+  qcMocks.brixTargetMutation.mutate.mockClear();
+  qcMocks.brixTargetMutation.error = null;
+  qcMocks.brixTargetMutation.isPending = false;
 });
 
 const stagedIngredients: QcAllergenReviewInput["stagedIngredients"] = [
@@ -737,5 +777,57 @@ describe("QC workflow UI", () => {
     renderTab(options);
     expect(screen.getByTestId("qc-weight-reminder-flour").querySelector("time")?.getAttribute("datetime"))
       .toBe(firstDueTime);
+  });
+
+  it("records a zero Brix reading with stable retry identity and no client-supplied result", () => {
+    renderTab();
+    fireEvent.click(screen.getByRole("tab", { name: "Brix" }));
+    fireEvent.change(screen.getByLabelText("Brix ingredient"), { target: { value: "flour" } });
+    expect(screen.getByTestId("qc-brix-target-status").textContent).toContain("Not evaluated");
+
+    fireEvent.change(screen.getByLabelText("Actual Brix (°Bx)"), { target: { value: "0" } });
+    fireEvent.click(screen.getByTestId("button-record-brix-check"));
+
+    expect(qcMocks.brixMutation.mutate).toHaveBeenCalledTimes(1);
+    const first = qcMocks.brixMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(first.data).toMatchObject({
+      runId: "run-1",
+      profileKey: "brand::flavor",
+      ingredientId: "flour",
+      checkType: "pre-run",
+      station: "dough",
+      actualBrix: 0,
+    });
+    expect(first.data).not.toHaveProperty("targetBrix");
+    expect(first.data).not.toHaveProperty("toleranceBrix");
+    expect(first.data).not.toHaveProperty("outcome");
+
+    qcMocks.brixMutation.error = new Error("Temporary network failure");
+    fireEvent.change(screen.getByLabelText("Brix note (optional)"), { target: { value: "Retry context" } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry or correct the input" }));
+    expect(qcMocks.brixMutation.mutate).toHaveBeenCalledTimes(2);
+    const retry = qcMocks.brixMutation.mutate.mock.calls[1]?.[0] as { data: Record<string, unknown> };
+    expect(retry.data.operationId).toBe(first.data.operationId);
+    expect(retry.data.note).toBe("Retry context");
+  });
+
+  it("lets a QC manager explicitly configure a zero Brix target and zero tolerance", () => {
+    renderTab({ canManageQc: true });
+    fireEvent.change(screen.getByLabelText("Brix target ingredient"), { target: { value: "flour" } });
+    fireEvent.change(screen.getByLabelText("Target Brix (°Bx)"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Brix tolerance (°Bx)"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Brix target review reason"), { target: { value: "Reviewed reference" } });
+    fireEvent.click(screen.getByTestId("button-save-brix-target"));
+
+    expect(qcMocks.brixTargetMutation.mutate).toHaveBeenCalledTimes(1);
+    const request = qcMocks.brixTargetMutation.mutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(request.data).toMatchObject({
+      profileKey: "brand::flavor",
+      ingredientId: "flour",
+      targetBrix: 0,
+      toleranceBrix: 0,
+      reason: "Reviewed reference",
+    });
+    expect(request.data).not.toHaveProperty("unit");
   });
 });

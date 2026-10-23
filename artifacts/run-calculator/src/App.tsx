@@ -417,6 +417,8 @@ function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
   );
 }
 
+import { ImportSafetyReviewHost } from "./components/ImportSafetyReviewHost";
+
 function App() {
   const isStationDisplay =
     new URLSearchParams(window.location.search).get("screen") !== null;
@@ -430,6 +432,7 @@ function App() {
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
+            <ImportSafetyReviewHost />
             {!isStationDisplay && <FieldVerificationObserver appBuild={WEB_BUILD_ID} />}
             <AppRoutes />
           </AuthProvider>

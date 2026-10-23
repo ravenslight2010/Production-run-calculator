@@ -9,6 +9,12 @@ Browser tests that reload the app must seed master-data names through the server
 
 **How to apply:** Prefer API/DB fixtures for saved sheets and master data. If the test only needs an existing mapping, use a stable built-in name and keep unique IDs/labels for the records under test.
 
+After reload, a mounted app shell is not proof that canonical master data has hydrated.
+
+**Why:** Deliberate startup deferral can leave recipe lists temporarily empty even after the fixture write was acknowledged; a default visibility assertion may expire before loading begins.
+
+**How to apply:** Arm a master-data response wait before navigation, verify the expected fixture slice in that response, then assert its rendered controls. Keep real bootstrap reads enabled rather than bypassing deferral or using fixed sleeps.
+
 For authenticated accessibility journeys that intentionally seed local day-state, use the browser-local date and write a complete canonical today document through authenticated `/api/sync/today` with the current reset epoch. Leave the real GET/bootstrap and normal sync-write paths enabled; do not intercept the canonical GET or broadly delete `daily_sync` rows.
 
 **Why:** Intercepting canonical reads or deleting shared day rows bypasses reset-epoch and sync reconciliation behavior, so a fixture can appear stable while the real hydration path is broken.
@@ -32,6 +38,12 @@ For sequential same-date station scenarios, remove the disposable today snapshot
 **Why:** Today-state sync is additive, and an open live stream can reapply the previous scenario after the database row is cleared, leaving stale runs selected during the next reload.
 
 **How to apply:** Clear browser storage, navigate away from the app, remove the isolated date row, seed the replacement document, then navigate back to the app.
+
+For browser matrices whose projects share one disposable database, reset test-owned operational state between projects instead of relying only on global setup.
+
+**Why:** Global setup runs once for the matrix; an earlier viewport can leave a live run in the shared fixture and make later projects start from the wrong state.
+
+**How to apply:** In each test's setup, remove only the current test's live-day fixture rows from the guarded disposable database, and keep the normal Home hydration path enabled.
 
 For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
 

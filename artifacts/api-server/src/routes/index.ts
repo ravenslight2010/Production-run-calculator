@@ -117,6 +117,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/sync/conflict-stats", "/manager-action-queue",
     "/profile-data/health-check", "/profile-data/health-workspace",
     "/ai-memory/health-check", "/background-operations/diagnostics",
+    "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
   ]),
   ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
   ...reads(["manage-inventory"], "all", "scoped", [
@@ -250,6 +251,11 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /spec-sheets", "DELETE /spec-sheets/:id", "POST /shipping-guides", "DELETE /shipping-guides/:id",
     "POST /merge-aliases", "POST /denied-merges", "DELETE /denied-merges", "POST /merged-away", "DELETE /merged-away",
     "POST /master-data/health/scan", "POST /master-data/health/repair",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-staff", [
+    "PATCH /import-gold/cases/:id/exclusion",
+    "DELETE /import-gold/cases/:id",
+    "POST /import-gold/score",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-inventory", [
     "POST /cheese-recipes", "DELETE /cheese-recipes", "POST /cycle-count-schedules", "DELETE /cycle-count-schedules",

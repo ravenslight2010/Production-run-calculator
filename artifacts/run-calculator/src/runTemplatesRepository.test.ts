@@ -10,7 +10,6 @@ import {
   replaceRunTemplates,
   saveRunTemplate,
   setRunTemplatesScope,
-  setRunTemplatesWriteTimeoutForTests,
 } from "./runTemplatesRepository";
 
 const template = (name = "Template"): RunTemplate =>
@@ -21,16 +20,10 @@ beforeEach(() => {
   localStorage.clear();
   setRunTemplatesScope("live");
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 });
 
-afterEach(async () => {
-  // Drain any in-flight optimistic flush so a previous test's request cannot
-  // leak into the next test through the module-level flush registry.
-  localStorage.clear();
-  await flushRunTemplates();
-  vi.unstubAllGlobals();
+afterEach(() => {
   vi.useRealTimers();
 });
 
@@ -74,7 +67,7 @@ describe("run template repository", () => {
   it.each(["save", "delete"] as const)(
     "bounds a hung %s write and keeps its outbox entry without retrying it",
     async (operation) => {
-      const restoreTimeout = setRunTemplatesWriteTimeoutForTests(50);
+      vi.useFakeTimers();
       const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
         new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener("abort", () => {
@@ -94,8 +87,8 @@ describe("run template repository", () => {
       }
 
       const flushing = flushRunTemplates();
+      await vi.advanceTimersByTimeAsync(30_000);
       await flushing;
-      restoreTimeout();
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0]?.[1]?.method).toBe(operation === "save" ? "POST" : "DELETE");
@@ -104,7 +97,7 @@ describe("run template repository", () => {
   );
 
   it("recovers a save committed after client timeout with a read, not a write retry", async () => {
-    const restoreTimeout = setRunTemplatesWriteTimeoutForTests(50);
+    vi.useFakeTimers();
     let serverTemplates: unknown[] = [];
     const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {
@@ -123,8 +116,8 @@ describe("run template repository", () => {
 
     saveRunTemplate(template("committed"));
     const flushing = flushRunTemplates();
+    await vi.advanceTimersByTimeAsync(30_000);
     await flushing;
-    restoreTimeout();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(JSON.parse(localStorage.getItem("run-calc-templates-outbox-v1:live")!)).toHaveLength(1);
@@ -138,7 +131,7 @@ describe("run template repository", () => {
   });
 
   it("keeps an uncommitted timed-out save queued after canonical recovery without replay", async () => {
-    const restoreTimeout = setRunTemplatesWriteTimeoutForTests(50);
+    vi.useFakeTimers();
     const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {
         return new Promise<Response>((_resolve, reject) => {
@@ -153,8 +146,8 @@ describe("run template repository", () => {
 
     saveRunTemplate(template("not committed"));
     const flushing = flushRunTemplates();
+    await vi.advanceTimersByTimeAsync(30_000);
     await flushing;
-    restoreTimeout();
     await reconcileRunTemplates();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);

@@ -533,6 +533,47 @@ export interface SourceLibraryReconciliationDiagnostics {
   mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
 }
 
+export type ImportOperationPreviewBefore = { [key: string]: unknown };
+
+export type ImportOperationPreviewAfter = { [key: string]: unknown };
+
+export type ImportOperationPreviewBaselineStatus = typeof ImportOperationPreviewBaselineStatus[keyof typeof ImportOperationPreviewBaselineStatus];
+
+
+export const ImportOperationPreviewBaselineStatus = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type ImportOperationPreviewBaselineBefore = { [key: string]: unknown };
+
+export type ImportOperationPreviewBaselineAfter = { [key: string]: unknown };
+
+export type ImportOperationPreviewBaseline = {
+  status: ImportOperationPreviewBaselineStatus;
+  operationId?: string;
+  appliedAt?: number;
+  before?: ImportOperationPreviewBaselineBefore;
+  after?: ImportOperationPreviewBaselineAfter;
+  limitation: string;
+};
+
+export interface ImportOperationPreview {
+  expectedStateHash: string;
+  before: ImportOperationPreviewBefore;
+  after: ImportOperationPreviewAfter;
+  baseline: ImportOperationPreviewBaseline;
+}
+
+export type ImportOperationApplyInputGoldCaptureInput = { [key: string]: unknown };
+
+/**
+ * Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
+ */
+export type ImportOperationApplyInputGoldCapture = {
+  input: ImportOperationApplyInputGoldCaptureInput;
+};
+
 /**
  * Exact bounded source text retained privately with a live spec Apply.
  */
@@ -574,10 +615,139 @@ export interface ImportOperationApplyInput {
      * @pattern ^[a-f0-9]{64}$
      */
   expectedStateHash?: string | null;
+  /** Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot. */
+  goldCapture?: ImportOperationApplyInputGoldCapture;
   /** Exact bounded source text retained privately with a live spec Apply. */
   sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
+}
+
+export interface ImportGoldConfig {
+  enabled: boolean;
+  localConfigured: boolean;
+  geminiConfigured: boolean;
+  retention: string;
+  persistsAcrossFactoryPurge: boolean;
+}
+
+export type ImportGoldScoreRequestProvider = typeof ImportGoldScoreRequestProvider[keyof typeof ImportGoldScoreRequestProvider];
+
+
+export const ImportGoldScoreRequestProvider = {
+  local: 'local',
+  gemini: 'gemini',
+} as const;
+
+export interface ImportGoldScoreRequest {
+  provider: ImportGoldScoreRequestProvider;
+  /**
+     * @maxItems 3
+     * @items.minimum 1
+     */
+  caseIds?: number[];
+}
+
+export interface ImportGoldExclusionRequest {
+  excluded: boolean;
+}
+
+export type ImportGoldCaseImportType = typeof ImportGoldCaseImportType[keyof typeof ImportGoldCaseImportType];
+
+
+export const ImportGoldCaseImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export type ImportGoldScoreProvider = typeof ImportGoldScoreProvider[keyof typeof ImportGoldScoreProvider];
+
+
+export const ImportGoldScoreProvider = {
+  local: 'local',
+  gemini: 'gemini',
+} as const;
+
+export type ImportGoldScoreStatus = typeof ImportGoldScoreStatus[keyof typeof ImportGoldScoreStatus];
+
+
+export const ImportGoldScoreStatus = {
+  scored: 'scored',
+  error: 'error',
+} as const;
+
+export type ImportGoldScoreFieldDiffsItem = {
+  field: string;
+  expected: unknown;
+  predicted: unknown;
+};
+
+export interface ImportGoldScore {
+  id: number;
+  provider: ImportGoldScoreProvider;
+  status: ImportGoldScoreStatus;
+  /** @nullable */
+  accuracy: number | null;
+  comparedFields: number;
+  equalFields: number;
+  /** @nullable */
+  errorCode: string | null;
+  fieldDiffs: ImportGoldScoreFieldDiffsItem[];
+  createdAt: string;
+}
+
+export interface ImportGoldCase {
+  id: number;
+  importType: ImportGoldCaseImportType;
+  sourceLabel: string;
+  excluded: boolean;
+  createdAt: string;
+  scores: ImportGoldScore[];
+}
+
+export interface ImportGoldCasesResponse {
+  cases: ImportGoldCase[];
+}
+
+export type ImportGoldScoreResponseResultsItemProvider = typeof ImportGoldScoreResponseResultsItemProvider[keyof typeof ImportGoldScoreResponseResultsItemProvider];
+
+
+export const ImportGoldScoreResponseResultsItemProvider = {
+  local: 'local',
+  gemini: 'gemini',
+} as const;
+
+export type ImportGoldScoreResponseResultsItemStatus = typeof ImportGoldScoreResponseResultsItemStatus[keyof typeof ImportGoldScoreResponseResultsItemStatus];
+
+
+export const ImportGoldScoreResponseResultsItemStatus = {
+  scored: 'scored',
+  error: 'error',
+} as const;
+
+export type ImportGoldScoreResponseResultsItemFieldDiffsItem = {
+  field: string;
+  expected: unknown;
+  predicted: unknown;
+};
+
+export type ImportGoldScoreResponseResultsItem = {
+  caseId: number;
+  provider: ImportGoldScoreResponseResultsItemProvider;
+  status: ImportGoldScoreResponseResultsItemStatus;
+  accuracy?: number;
+  comparedFields?: number;
+  equalFields?: number;
+  errorCode?: string;
+  scoreId?: number;
+  fieldDiffs?: ImportGoldScoreResponseResultsItemFieldDiffsItem[];
+};
+
+export interface ImportGoldScoreResponse {
+  results: ImportGoldScoreResponseResultsItem[];
+  scoredCount: number;
+  errorCount: number;
 }
 
 export type DistillationApplyEvidenceRecordImportType = typeof DistillationApplyEvidenceRecordImportType[keyof typeof DistillationApplyEvidenceRecordImportType];
@@ -1953,6 +2123,35 @@ export const OperationalProjectionVersion = {
   NUMBER_1: 1,
 } as const;
 
+export type StationActivityEvidenceSource = typeof StationActivityEvidenceSource[keyof typeof StationActivityEvidenceSource];
+
+
+export const StationActivityEvidenceSource = {
+  automatic: 'automatic',
+  manual: 'manual',
+  confirmed: 'confirmed',
+} as const;
+
+export interface StationActivityEvidence {
+  runId: string;
+  /** @minimum 1 */
+  eventAtServerMs: number;
+  source: StationActivityEvidenceSource;
+}
+
+/**
+ * Latest server-accepted station events for the projection's run; absent keys have no evidence.
+ */
+export interface StationActivityMap {
+  dough?: StationActivityEvidence;
+  sauce?: StationActivityEvidence;
+  press?: StationActivityEvidence;
+  frontline?: StationActivityEvidence;
+  freezeTunnel?: StationActivityEvidence;
+  packaging?: StationActivityEvidence;
+  warehouse?: StationActivityEvidence;
+}
+
 export type OperationalProjectionFactsRunStatus = typeof OperationalProjectionFactsRunStatus[keyof typeof OperationalProjectionFactsRunStatus];
 
 
@@ -2031,6 +2230,7 @@ export interface OperationalProjection {
   /** @minimum 0 */
   calculationRevision: number;
   effectiveElapsedSec: number;
+  stationActivity: StationActivityMap | null;
   timers: OperationalProjectionTimers;
   counters: OperationalProjectionCounters;
   facts: OperationalProjectionFacts;
@@ -2112,6 +2312,55 @@ export interface ManualSectionLockEvent {
   date: string;
   /** @minimum 0 */
   serverTime: number;
+}
+
+export type StationActivityConfirmationRequestStation = typeof StationActivityConfirmationRequestStation[keyof typeof StationActivityConfirmationRequestStation];
+
+
+export const StationActivityConfirmationRequestStation = {
+  freezeTunnel: 'freezeTunnel',
+  warehouse: 'warehouse',
+} as const;
+
+export interface StationActivityConfirmationRequest {
+  /**
+     * @minLength 8
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  id: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  runId: string;
+  station: StationActivityConfirmationRequestStation;
+  /** @maxLength 160 */
+  senderId: string;
+}
+
+export type StationActivityConfirmationResponseStation = typeof StationActivityConfirmationResponseStation[keyof typeof StationActivityConfirmationResponseStation];
+
+
+export const StationActivityConfirmationResponseStation = {
+  freezeTunnel: 'freezeTunnel',
+  warehouse: 'warehouse',
+} as const;
+
+export interface StationActivityConfirmationResponse {
+  ok: true;
+  duplicate: boolean;
+  runId: string;
+  station: StationActivityConfirmationResponseStation;
+  /** @minimum 1 */
+  eventAtServerMs: number;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 1 */
+  serverTime: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+  operationalProjection: OperationalProjection | null;
 }
 
 export interface SyncUnchangedResponse {
@@ -2909,6 +3158,7 @@ export type QcEventEventType = typeof QcEventEventType[keyof typeof QcEventEvent
 export const QcEventEventType = {
   lot: 'lot',
   weight: 'weight',
+  'brix-check': 'brix-check',
   'component-check': 'component-check',
   'allergen-review': 'allergen-review',
   cleaning: 'cleaning',
@@ -2982,9 +3232,48 @@ export interface QcTarget {
   overrideEventId?: number;
 }
 
+export type QcBrixTargetSource = typeof QcBrixTargetSource[keyof typeof QcBrixTargetSource];
+
+
+export const QcBrixTargetSource = {
+  'qc-override': 'qc-override',
+  'not-configured': 'not-configured',
+} as const;
+
+export type QcBrixTargetState = typeof QcBrixTargetState[keyof typeof QcBrixTargetState];
+
+
+export const QcBrixTargetState = {
+  configured: 'configured',
+  'not-evaluated': 'not-evaluated',
+} as const;
+
+export interface QcBrixTarget {
+  ingredientId: string;
+  ingredientName: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  targetBrix: number | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  toleranceBrix: number | null;
+  source: QcBrixTargetSource;
+  state: QcBrixTargetState;
+  reason?: string;
+  overrideEventId?: number;
+  targetRecordedAt?: string;
+}
+
 export interface QcTargetsResponse {
   profileKey: string;
   targets: QcTarget[];
+  brixTargets?: QcBrixTarget[];
 }
 
 /**
@@ -3029,6 +3318,87 @@ export interface QcTargetInput {
      * @maxLength 500
      */
   reason: string;
+}
+
+export interface QcBrixTargetInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  targetBrix: number | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  toleranceBrix: number | null;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+}
+
+export type QcBrixCheckInputStation = typeof QcBrixCheckInputStation[keyof typeof QcBrixCheckInputStation];
+
+
+export const QcBrixCheckInputStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export type QcBrixCheckInputCheckType = typeof QcBrixCheckInputCheckType[keyof typeof QcBrixCheckInputCheckType];
+
+
+export const QcBrixCheckInputCheckType = {
+  'pre-run': 'pre-run',
+  interval: 'interval',
+} as const;
+
+export interface QcBrixCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  station: QcBrixCheckInputStation;
+  checkType: QcBrixCheckInputCheckType;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  actualBrix: number;
+  /** @maxLength 120 */
+  instrument?: string;
+  /** @maxLength 1000 */
+  note?: string;
 }
 
 export type QcLotInputStation = typeof QcLotInputStation[keyof typeof QcLotInputStation];
@@ -3564,6 +3934,7 @@ export const QcRedactionInputFieldsItem = {
   actorId: 'actorId',
   ingredientName: 'ingredientName',
   payloadnote: 'payload.note',
+  payloadinstrument: 'payload.instrument',
   payloadlotNumber: 'payload.lotNumber',
   payloadexpectedComponents: 'payload.expectedComponents',
 } as const;
@@ -3577,7 +3948,7 @@ export interface QcRedactionInput {
   reason: string;
   /**
      * @minItems 1
-     * @maxItems 5
+     * @maxItems 6
      */
   fields: QcRedactionInputFieldsItem[];
 }
@@ -4950,11 +5321,27 @@ export interface ImportAliasList {
   aliases: ImportAlias[];
 }
 
+/**
+ * Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence.
+ */
+export type ImportHistorySummaryAppliedValues = { [key: string]: unknown };
+
+export type ImportHistorySummaryPersistence = typeof ImportHistorySummaryPersistence[keyof typeof ImportHistorySummaryPersistence];
+
+
+export const ImportHistorySummaryPersistence = {
+  'local-verified': 'local-verified',
+  'sync-acknowledged': 'sync-acknowledged',
+} as const;
+
 export type ImportHistorySummaryPhases = {[key: string]: string};
 
 export type ImportHistorySummaryCounts = {[key: string]: number};
 
 export interface ImportHistorySummary {
+  /** Bounded allowlisted applied business fields only; excludes workbook contents, citations and full profiles. Local receipts are not atomic commit evidence. */
+  appliedValues?: ImportHistorySummaryAppliedValues;
+  persistence?: ImportHistorySummaryPersistence;
   phases?: ImportHistorySummaryPhases;
   counts?: ImportHistorySummaryCounts;
   warnings?: string[];
@@ -5304,6 +5691,64 @@ export interface ProfileDataHealthApplyResult {
   summary: ProfileDataHealthApplyResultSummary;
 }
 
+export type ProfileDataHealthWorkspaceImportCoverageDetectors = { [key: string]: unknown };
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType = typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType[keyof typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType];
+
+
+export const ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+  shipping: 'shipping',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+} as const;
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus = typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus[keyof typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus];
+
+
+export const ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus = {
+  observed: 'observed',
+  'missing-evidence': 'missing-evidence',
+} as const;
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery = typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery[keyof typeof ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery];
+
+
+export const ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery = {
+  'atomic-guarded-undo': 'atomic-guarded-undo',
+  'local-or-sync-only': 'local-or-sync-only',
+} as const;
+
+export type ProfileDataHealthWorkspaceImportCoverageSourcesItem = {
+  importType: ProfileDataHealthWorkspaceImportCoverageSourcesItemImportType;
+  status: ProfileDataHealthWorkspaceImportCoverageSourcesItemStatus;
+  /** @nullable */
+  lastSuccessfulAt: number | null;
+  recognizedSource: boolean;
+  recovery: ProfileDataHealthWorkspaceImportCoverageSourcesItemRecovery;
+  /**
+     * @minimum 0
+     * @maximum 200
+     */
+  observedRecords: number;
+};
+
+export type ProfileDataHealthWorkspaceImportCoverage = {
+  /**
+     * @minimum 0
+     * @maximum 200
+     */
+  scanned: number;
+  truncated: boolean;
+  limitation: string;
+  detectors: ProfileDataHealthWorkspaceImportCoverageDetectors;
+  /** @maxItems 7 */
+  sources: ProfileDataHealthWorkspaceImportCoverageSourcesItem[];
+};
+
 export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
 
 /**
@@ -5583,6 +6028,7 @@ export interface SourceLibraryReconciliationStatus {
 }
 
 export interface ProfileDataHealthWorkspace {
+  importCoverage?: ProfileDataHealthWorkspaceImportCoverage;
   findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
@@ -8090,6 +8536,10 @@ export type ConsumeInventoryDayStart200 = {
   message?: string;
 };
 
+export type ConsumeInventoryDayStart409 = {
+  error: string;
+};
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };
@@ -8347,6 +8797,12 @@ export type SavePremixSheet200 = SavedPremixSheetList & {
 };
 
 export type ListImportHistoryParams = {
+/**
+ * Exact scoped source identity, bounded to 300 characters
+ * @minLength 1
+ * @maxLength 300
+ */
+sourceKey?: string;
 type?: ListImportHistoryType;
 status?: ListImportHistoryStatus;
 customer?: string;
@@ -8538,6 +8994,14 @@ today?: ClientTodayParameter;
 epoch?: number;
 };
 
+export type ConfirmStationActivityParams = {
+today?: ClientTodayParameter;
+/**
+ * @minimum 0
+ */
+epoch?: number;
+};
+
 export type SubmitManualSectionEditParams = {
 today?: ClientTodayParameter;
 };
@@ -8562,6 +9026,14 @@ export type ListOperationalIntentReceipts200 = {
   cursor: number;
   hasMore: boolean;
   mutations: OperationalIntentReceipt[];
+};
+
+export type ListImportGoldCasesParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
 };
 
 export type ListDistillationApplyEvidenceParams = {

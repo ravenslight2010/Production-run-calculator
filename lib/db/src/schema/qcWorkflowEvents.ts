@@ -3,14 +3,16 @@ import {
   jsonb,
   pgTable,
   text,
+  integer,
+  serial,
   timestamp,
   uniqueIndex,
-  integer,
 } from "drizzle-orm/pg-core";
 
 export type QcWorkflowEventType =
   | "lot"
   | "weight"
+  | "brix-check"
   | "component-check"
   | "allergen-review"
   | "cleaning"
@@ -27,7 +29,7 @@ export type QcWorkflowEventType =
 export const qcWorkflowEventsTable = pgTable(
   "qc_workflow_events",
   {
-    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    id: serial("id").primaryKey(),
     scope: text("scope").notNull().default("live"),
     operationId: text("operation_id").notNull(),
     recordId: text("record_id").notNull(),

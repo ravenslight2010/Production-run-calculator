@@ -36,6 +36,7 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+let untouchedIngredientId: number;
 
 const MANAGER = "surplus-manager";
 const SANDBOX_MANAGER = "surplus-sandbox";
@@ -138,6 +139,14 @@ beforeEach(async () => {
     { userId: SANDBOX_MANAGER, role: "manager" },
     { userId: OPERATOR, role: "operator" },
   ]);
+  const [ingredient] = await db.insert(inventoryItemsTable).values({
+    scope: "live", key: "ingredient:Pepperoni:lbs", category: "ingredient",
+    name: "Already charged ingredient sentinel", unit: "lbs",
+  }).returning();
+  untouchedIngredientId = ingredient.id;
+  await db.insert(inventoryLotsTable).values({
+    scope: "live", itemId: ingredient.id, qtyReceived: 100, qtyRemaining: 100,
+  });
 });
 
 async function req(
@@ -225,6 +234,11 @@ async function expectFreezerParity(expectedCases: number, expectedMovements: num
     ledgerNet: expectedCases,
     movementCount: expectedMovements,
   });
+  const ingredientLots = await db.select().from(inventoryLotsTable)
+    .where(eq(inventoryLotsTable.itemId, untouchedIngredientId));
+  expect(ingredientLots.reduce((sum, lot) => sum + lot.qtyRemaining, 0)).toBe(100);
+  expect(await db.select().from(inventoryLedgerTable)
+    .where(eq(inventoryLedgerTable.itemId, untouchedIngredientId))).toHaveLength(0);
 }
 
 async function confirm(userId: string, overrides: Record<string, unknown> = {}) {
@@ -660,7 +674,10 @@ describe("dated freezer surplus API", () => {
     const lotResponse = await confirm(MANAGER, { cases: 6 });
     const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
     const stockLots = await db.select().from(inventoryLotsTable);
-    const stockLot = stockLots.find((candidate) => candidate.scope === "live");
+    const [finishedItem] = await db.select().from(inventoryItemsTable)
+      .where(and(eq(inventoryItemsTable.scope, "live"), eq(inventoryItemsTable.key, "finished:acme:pepperoni")));
+    const stockLot = stockLots.find((candidate) =>
+      candidate.scope === "live" && candidate.itemId === finishedItem?.id);
     if (!stockLot) throw new Error("Expected the confirmed freezer inventory lot");
     await db
       .update(inventoryLotsTable)

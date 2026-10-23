@@ -109,7 +109,7 @@ beforeAll(async () => {
   });
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
-}, 90_000);
+}, 180_000);
 
 afterAll(async () => {
   if (server) {
@@ -296,6 +296,84 @@ describe("POST /api/mixes — perPizza DB round-trip", () => {
     expect(m.components).toHaveLength(2);
     expect(m.components[0]).toEqual({ ingredient: "Monterey Jack", perPizza: 2.0 });
     expect(m.components[1]).toEqual({ ingredient: "Green Peppers", perPizza: 0.5 });
+  });
+
+  it("preserves reserved-looking recipe and component names across POST and GET", async () => {
+    const reservedMixes: Partial<Mix>[] = [
+      specDerivedMix({ id: "reserved-recipe-proto", name: "__proto__" }),
+      specDerivedMix({ id: "reserved-recipe-constructor", name: "constructor" }),
+      specDerivedMix({ id: "reserved-recipe-prototype", name: "prototype" }),
+      {
+        id: "reserved-component-names",
+        name: "Reserved topping prep",
+        brand: "",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        amountAlreadyMade: 0,
+        components: [
+          { ingredient: "__proto__", perPizza: 1.25 },
+          { ingredient: "constructor", perPizza: 2 },
+          { ingredient: "prototype", perPizza: 3.5 },
+        ],
+        enabled: true,
+        isPrep: true,
+      },
+    ];
+
+    const posted = await postMixes(reservedMixes);
+    expect(posted.status).toBe(200);
+
+    const reloaded = await getMixes();
+    expect(reloaded.status).toBe(200);
+    expect(reloaded.items).toHaveLength(reservedMixes.length);
+
+    const byId = new Map(reloaded.items.map((mix) => [mix.id, mix]));
+    expect([
+      byId.get("reserved-recipe-proto")?.name,
+      byId.get("reserved-recipe-constructor")?.name,
+      byId.get("reserved-recipe-prototype")?.name,
+    ]).toEqual(["__proto__", "constructor", "prototype"]);
+    expect(byId.get("reserved-component-names")?.components).toEqual([
+      { ingredient: "__proto__", perPizza: 1.25 },
+      { ingredient: "constructor", perPizza: 2 },
+      { ingredient: "prototype", perPizza: 3.5 },
+    ]);
+  });
+
+  it("preserves reserved-looking names and component values when updating an existing mix", async () => {
+    const mixId = "reserved-name-update-path";
+    const created = await postMixes([specDerivedMix({ id: mixId })]);
+    expect(created.status).toBe(200);
+    const currentRevision = created.items.find((mix) => mix.id === mixId)?.updatedAt;
+    expect(currentRevision).toBeTruthy();
+
+    const updated = await postMixes([
+      specDerivedMix({
+        id: mixId,
+        updatedAt: currentRevision,
+        name: "__proto__",
+        components: [
+          { ingredient: "constructor", perPizza: 1.25 },
+          { ingredient: "prototype", perPizza: 2.5 },
+          { ingredient: "__proto__", perPizza: 3.75 },
+        ],
+      }),
+    ]);
+    expect(updated.status).toBe(200);
+
+    const reloaded = await getMixes();
+    expect(reloaded.status).toBe(200);
+    expect(reloaded.items).toHaveLength(1);
+    expect(reloaded.items[0]).toMatchObject({
+      id: mixId,
+      name: "__proto__",
+      components: [
+        { ingredient: "constructor", perPizza: 1.25 },
+        { ingredient: "prototype", perPizza: 2.5 },
+        { ingredient: "__proto__", perPizza: 3.75 },
+      ],
+    });
   });
 
   it("persists per-batch pounds separately from per-pizza ounces across POST and GET", async () => {

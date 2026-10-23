@@ -2,7 +2,7 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { FormProvider, useForm, useWatch } from "react-hook-form";
+import { FormProvider, useForm, useFormContext, useWatch } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeCtx } from "../../../contexts/HomeCtx";
 import { HomeTabCtx } from "../../../contexts/HomeTabCtx";
@@ -293,10 +293,78 @@ const FRONTLINE_APPLICATOR_LOCK_CASES = [
   { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
 
-function applicatorStockControls(slot: (typeof FRONTLINE_APPLICATOR_LOCK_CASES)[number]["slot"]) {
+function applicatorStockControls(slot: string) {
   const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
-  const buttons = within(input.parentElement!).getAllByRole("button") as HTMLButtonElement[];
-  return [input, ...buttons];
+  const fillToCap = within(input.parentElement!).getByRole("button", { name: "Fill to cap" }) as HTMLButtonElement;
+  return [input, fillToCap];
+}
+
+type CheeseApplicatorSlot = "app1" | "app2" | "app3" | "app4";
+
+function ApplicatorRecipeEditor({ slot, recipeLbs }: { slot: CheeseApplicatorSlot; recipeLbs: number }) {
+  const { control, setValue } = useFormContext<FormValues>();
+  const recipeField = `${slot}CheeseRecipe` as `${CheeseApplicatorSlot}CheeseRecipe`;
+  const stockField = `${slot}StockLbs` as `${CheeseApplicatorSlot}StockLbs`;
+  const stockLbs = useWatch({ control, name: stockField });
+  return (
+    <>
+      <button
+        type="button"
+        data-testid={`edit-${slot}-recipe`}
+        onClick={() => setValue(recipeField, [{ ingredient: "Mozzarella", lbs: recipeLbs }], { shouldDirty: true })}
+      >
+        Edit {slot} recipe
+      </button>
+      <button
+        type="button"
+        data-testid={`clear-${slot}-recipe`}
+        onClick={() => setValue(recipeField, [], { shouldDirty: true })}
+      >
+        Clear {slot} recipe
+      </button>
+      <output data-testid={`${slot}-stock-value`}>{stockLbs}</output>
+    </>
+  );
+}
+
+function PepperoniSetupEditor() {
+  const { control, getValues, setValue } = useFormContext<FormValues>();
+  const stockFields = [
+    "pep1StockLbs",
+    "pep1bStockLbs",
+    "pep2StockLbs",
+    "pep2bStockLbs",
+  ] as const;
+  const stockValues = useWatch({ control, name: stockFields });
+  return (
+    <>
+      <button type="button" data-testid="change-pep1-type" onClick={() => setValue("pep1Type", "Turkey Pepperoni", { shouldDirty: true })}>
+        Change Pep 1 type
+      </button>
+      <button type="button" data-testid="change-pep1-additional-type" onClick={() => setValue("pep1TypeB", "Beef Pepperoni", { shouldDirty: true })}>
+        Change Pep 1 additional type
+      </button>
+      <button type="button" data-testid="clear-pep1-additional-type" onClick={() => setValue("pep1TypeB", "", { shouldDirty: true })}>
+        Clear Pep 1 additional type
+      </button>
+      <button type="button" data-testid="change-pep2-type" onClick={() => setValue("pep2Type", "Turkey Cup Pepperoni", { shouldDirty: true })}>
+        Change Pep 2 type
+      </button>
+      <button type="button" data-testid="change-pep2-additional-type" onClick={() => setValue("pep2TypeB", "Beef Cup Pepperoni", { shouldDirty: true })}>
+        Change Pep 2 additional type
+      </button>
+      <button
+        type="button"
+        data-testid="toggle-pep1-combined"
+        onClick={() => setValue("pep1Combined", !getValues("pep1Combined"), { shouldDirty: true })}
+      >
+        Toggle combined pepperoni
+      </button>
+      {stockFields.map((field, index) => (
+        <output key={field} data-testid={field}>{stockValues[index]}</output>
+      ))}
+    </>
+  );
 }
 
 function expectSelector(
@@ -316,6 +384,7 @@ describe("live station startup", () => {
   afterEach(() => {
     cleanup();
     clearManualSectionLocks();
+    vi.useRealTimers();
   });
 
   for (const station of STATIONS) {
@@ -405,6 +474,269 @@ describe("live station startup", () => {
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );
+
+  it.each([
+    {
+      slot: "pep1",
+      section: "pep1",
+      registers: ["pep1", "pep1b"],
+      otherRegisters: ["pep2", "pep2b"],
+    },
+    {
+      slot: "pep2",
+      section: "pep2",
+      registers: ["pep2", "pep2b"],
+      otherRegisters: ["pep1", "pep1b"],
+    },
+  ] as const)(
+    "keeps $slot primary and additional stock rows scoped to their peer lock",
+    ({ slot, section, registers, otherRegisters }) => {
+      const values: FormValues = {
+        ...STATION_VALUES,
+        pep1Type: "Pepperoni",
+        pep1TypeB: "Cup Pepperoni",
+        pep2Type: "Turkey Pepperoni",
+        pep2TypeB: "Mini Cup Pepperoni",
+        pep1Combined: false,
+      };
+      claimManualSectionLock(RUN_ID, section, `peer-${slot}`, 30_000, true);
+      render(
+        <StationProviders status="running" values={values}>
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const lockedControls = registers.flatMap(applicatorStockControls);
+      const otherControls = otherRegisters.flatMap(applicatorStockControls);
+      expect(lockedControls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+      expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
+
+      act(() => {
+        releaseManualSectionLock(RUN_ID, section, `peer-${slot}`);
+      });
+
+      expect(lockedControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
+      expect(otherControls.every((control) => !(control as HTMLButtonElement).disabled)).toBe(true);
+    },
+  );
+
+  it.each([
+    { section: "pep1", registers: ["pep1", "pep1b"], otherRegisters: ["pep2", "pep2b"] },
+    { section: "pep2", registers: ["pep2", "pep2b"], otherRegisters: ["pep1", "pep1b"] },
+  ] as const)(
+    "restores $section primary and additional stock rows when its peer lease expires without remounting",
+    ({ section, registers, otherRegisters }) => {
+      vi.useFakeTimers();
+      // Expire before the running station's 1-second clock tick: only the lock
+      // notification, not a live-clock rerender, should restore these controls.
+      const leaseMs = 250;
+      expect(claimManualSectionLock(RUN_ID, section, "peer-device", leaseMs, true)).toBe(true);
+      render(
+        <StationProviders status="running" values={{
+          ...STATION_VALUES,
+          pep1Type: "Pepperoni",
+          pep1TypeB: "Cup Pepperoni",
+          pep2Type: "Turkey Pepperoni",
+          pep2TypeB: "Mini Cup Pepperoni",
+          pep1Combined: false,
+        }}>
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const lockedControls = registers.flatMap(applicatorStockControls);
+      const otherControls = otherRegisters.flatMap(applicatorStockControls);
+      for (const control of lockedControls) expect(control.disabled).toBe(true);
+      for (const control of otherControls) expect(control.disabled).toBe(false);
+
+      act(() => { vi.advanceTimersByTime(leaseMs - 1); });
+      for (const control of lockedControls) expect(control.disabled).toBe(true);
+      for (const control of otherControls) expect(control.disabled).toBe(false);
+
+      // The expiry notification runs one millisecond after the lease boundary.
+      act(() => { vi.advanceTimersByTime(2); });
+      for (const control of [...lockedControls, ...otherControls]) {
+        expect(control.isConnected).toBe(true);
+        expect(control.disabled).toBe(false);
+      }
+      expect(registers.flatMap(applicatorStockControls)).toEqual(lockedControls);
+      expect(otherRegisters.flatMap(applicatorStockControls)).toEqual(otherControls);
+    },
+  );
+
+  it("refreshes each applicator stock cap after recipe edits and uses batch weight for empty recipes", async () => {
+    render(
+      <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
+        <>
+          <LiveFrontlineTabContent />
+          {FRONTLINE_APPLICATOR_LOCK_CASES.map(({ slot }) => (
+            <ApplicatorRecipeEditor key={slot} slot={slot} recipeLbs={30 + Number(slot.slice(-1))} />
+          ))}
+        </>
+      </StationProviders>,
+    );
+
+    for (const { slot } of FRONTLINE_APPLICATOR_LOCK_CASES) {
+      const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
+      const stockRow = input.parentElement!.parentElement!;
+      const capacityLbs = (30 + Number(slot.slice(-1))) * 2;
+      expect(input.max).toBe("50");
+
+      fireEvent.click(screen.getByTestId(`edit-${slot}-recipe`));
+      await waitFor(() => expect(input.max).toBe(String(capacityLbs)));
+      expect(within(stockRow).getByText(`Capacity ${capacityLbs.toFixed(1)} lb`)).toBeTruthy();
+      fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
+      await waitFor(() => expect(screen.getByTestId(`${slot}-stock-value`).textContent).toBe(String(capacityLbs)));
+      expect(input.value).toBe(String(capacityLbs));
+
+      fireEvent.click(screen.getByTestId(`clear-${slot}-recipe`));
+      await waitFor(() => expect(input.max).toBe("50"));
+      expect(within(stockRow).getByText("Capacity 50.0 lb")).toBeTruthy();
+      fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
+      await waitFor(() => expect(screen.getByTestId(`${slot}-stock-value`).textContent).toBe("50"));
+      expect(input.value).toBe("50");
+    }
+  });
+
+  it("updates pepperoni stock rows after mounted type edits and combined-slot changes", async () => {
+    const values: FormValues = {
+      ...STATION_VALUES,
+      pep1Type: "Pepperoni",
+      pep1TypeB: "Cup Pepperoni",
+      pep2Type: "Cup Pepperoni",
+      pep2TypeB: "Mini Cup Pepperoni",
+      pep1Combined: false,
+      pep1StockLbs: 12.5,
+      pep1bStockLbs: 15.5,
+      pep2StockLbs: 22.5,
+      pep2bStockLbs: 25.5,
+    };
+    render(
+      <StationProviders status="running" values={values}>
+        <>
+          <LiveFrontlineTabContent />
+          <PepperoniSetupEditor />
+        </>
+      </StationProviders>,
+    );
+
+    expect(screen.getByText("Pep 1 · Pepperoni")).toBeTruthy();
+    expect(screen.getByText("Pep 1 additional · Cup Pepperoni")).toBeTruthy();
+    expect(screen.getByText("Pep 2 · Cup Pepperoni")).toBeTruthy();
+    expect(screen.getByText("Pep 2 additional · Mini Cup Pepperoni")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("change-pep1-type"));
+    fireEvent.click(screen.getByTestId("change-pep1-additional-type"));
+    fireEvent.click(screen.getByTestId("change-pep2-type"));
+    fireEvent.click(screen.getByTestId("change-pep2-additional-type"));
+    await waitFor(() => {
+      expect(screen.getByText("Pep 1 · Turkey Pepperoni")).toBeTruthy();
+      expect(screen.getByText("Pep 1 additional · Beef Pepperoni")).toBeTruthy();
+      expect(screen.getByText("Pep 2 · Turkey Cup Pepperoni")).toBeTruthy();
+      expect(screen.getByText("Pep 2 additional · Beef Cup Pepperoni")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("clear-pep1-additional-type"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("stock-pep1b-lbs")).toBeNull();
+      expect(screen.getByText("Pep 1 · Turkey Pepperoni")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull();
+      expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    });
+    expect(screen.getByTestId("stock-pep1-lbs")).toBeTruthy();
+    expect(screen.getByRole("spinbutton", { name: "Pep 1 · Turkey Pepperoni pounds on hand" })).toBeTruthy();
+    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
+    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
+    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
+
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    await waitFor(() => {
+      expect(screen.getByTestId("stock-pep2-lbs")).toBeTruthy();
+      expect(screen.getByTestId("stock-pep2b-lbs")).toBeTruthy();
+    });
+    expect(screen.getByRole("spinbutton", { name: "Pep 2 · Turkey Cup Pepperoni pounds on hand" })).toBeTruthy();
+    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
+    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
+  });
+
+  it("restores an unfinished Pep 2 stock draft after combined mode hides its rows", async () => {
+    const values: FormValues = {
+      ...STATION_VALUES,
+      pep1Type: "Pepperoni",
+      pep1TypeB: "Cup Pepperoni",
+      pep2Type: "Cup Pepperoni",
+      pep2TypeB: "Mini Cup Pepperoni",
+      pep1Combined: false,
+      pep1StockLbs: 12.5,
+      pep1bStockLbs: 15.5,
+      pep2StockLbs: 22.5,
+      pep2bStockLbs: 25.5,
+    };
+    render(
+      <StationProviders status="running" values={values}>
+        <>
+          <LiveFrontlineTabContent />
+          <PepperoniSetupEditor />
+        </>
+      </StationProviders>,
+    );
+
+    fireEvent.change(screen.getByTestId("stock-pep2-lbs"), { target: { value: "34.25" } });
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    await waitFor(() => expect(screen.queryByTestId("stock-pep2-lbs")).toBeNull());
+    expect(screen.queryByTestId("stock-pep2b-lbs")).toBeNull();
+    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
+    expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("15.5");
+    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
+    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
+
+    fireEvent.click(screen.getByTestId("toggle-pep1-combined"));
+    const restoredInput = await screen.findByTestId("stock-pep2-lbs") as HTMLInputElement;
+    expect(restoredInput.value).toBe("34.25");
+    expect(within(restoredInput.parentElement!).getByRole("button", { name: "Save" }).disabled).toBe(false);
+    expect(screen.getByTestId("pep1StockLbs").textContent).toBe("12.5");
+    expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("15.5");
+    expect(screen.getByTestId("pep2StockLbs").textContent).toBe("22.5");
+    expect(screen.getByTestId("pep2bStockLbs").textContent).toBe("25.5");
+
+    fireEvent.click(within(restoredInput.parentElement!).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("pep2StockLbs").textContent).toBe("34.25"));
+  });
+
+  it("keeps the fixed pepperoni cap for manual adjustments on the current visible slot", async () => {
+    const values: FormValues = {
+      ...STATION_VALUES,
+      pep1Type: "Pepperoni",
+      pep1TypeB: "",
+      pep1Combined: false,
+      pep1bStockLbs: 10,
+    };
+    render(
+      <StationProviders status="running" values={values}>
+        <>
+          <LiveFrontlineTabContent />
+          <PepperoniSetupEditor />
+        </>
+      </StationProviders>,
+    );
+
+    fireEvent.click(screen.getByTestId("change-pep1-additional-type"));
+    await waitFor(() => expect(screen.getByText("Pep 1 additional · Beef Pepperoni")).toBeTruthy());
+    const input = screen.getByTestId("stock-pep1b-lbs") as HTMLInputElement;
+    expect(input.max).toBe("50");
+    expect(within(input.parentElement!.parentElement!).getByText("Capacity 50.0 lb")).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "42.75" } });
+    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("42.75"));
+
+    fireEvent.click(within(input.parentElement!).getByRole("button", { name: "Fill to cap" }));
+    await waitFor(() => expect(screen.getByTestId("pep1bStockLbs").textContent).toBe("50"));
+    expect(input.max).toBe("50");
+  });
 
   it("keeps simultaneous peer locks scoped to their matching Frontline correction rows", () => {
     claimManualSectionLock(RUN_ID, "app1", "peer-app1", 30_000, true);
@@ -617,6 +949,57 @@ describe("live station startup", () => {
       expect(screen.getByText(label)).toBeTruthy();
       const controls = applicatorStockControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    },
+  );
+
+  it.each([
+    { slot: "pep1", registers: ["pep1", "pep1b"], otherRegisters: ["pep2", "pep2b"] },
+    { slot: "pep2", registers: ["pep2", "pep2b"], otherRegisters: ["pep1", "pep1b"] },
+  ] as const)(
+    "keeps all pepperoni stock rows usable after switching away from a peer-locked $slot run",
+    ({ slot, registers, otherRegisters }) => {
+      const values: FormValues = {
+        ...STATION_VALUES,
+        pep1Type: "Pepperoni",
+        pep1TypeB: "Cup Pepperoni",
+        pep2Type: "Turkey Pepperoni",
+        pep2TypeB: "Mini Cup Pepperoni",
+        pep1Combined: false,
+      };
+      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
+      const station = (runId: string) => (
+        <StationProviders status="running" runId={runId} values={values}>
+          <LiveFrontlineTabContent />
+        </StationProviders>
+      );
+      const { rerender } = render(station(RUN_ID));
+
+      for (const register of registers) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(true);
+        }
+      }
+      for (const register of otherRegisters) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(false);
+        }
+      }
+
+      rerender(station(SWITCHED_RUN_ID));
+
+      for (const register of [...registers, ...otherRegisters]) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(false);
+        }
+      }
+
+      // The switch must not release the peer's lock on the original run.
+      rerender(station(RUN_ID));
+      for (const register of registers) {
+        for (const control of applicatorStockControls(register)) {
+          expect(control.disabled).toBe(true);
+        }
+      }
     },
   );
 });

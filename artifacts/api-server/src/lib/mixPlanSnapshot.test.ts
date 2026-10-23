@@ -230,4 +230,77 @@ describe("computeMixPlanSnapshot", () => {
     });
     expect(plan).toEqual([]);
   });
+
+  it("preserves inherited-property ingredient names and prep totals in the snapshot response shape", () => {
+    const ingredientNames = [
+      "__proto__",
+      "constructor",
+      "toString",
+      "hasOwnProperty",
+      "valueOf",
+    ];
+    const plan = computeMixPlanSnapshot({
+      liveRuns: [],
+      scheduledRuns: [
+        {
+          date: "2026-09-12",
+          brand: "Pizza Co",
+          flavor: "Cheese",
+          values: {
+            ...cheeseRunValues,
+            app1CheeseRecipe: ingredientNames.slice(0, 4).map((ingredient) => ({
+              ingredient,
+              lbs: 1,
+            })),
+            app1OzPerPizza: 8,
+            pep1Type: "toString",
+            pep1OzPerPizza: 1,
+            pep2Type: "valueOf",
+            pep2OzPerPizza: 0.5,
+          },
+        },
+      ],
+      mixes: [
+        mix({
+          id: "reserved-ingredients",
+          name: "Reserved Ingredient Prep",
+          brand: "",
+          flavor: "",
+          isPrep: true,
+          components: ingredientNames.map((ingredient) => ({
+            ingredient,
+            perPizza: 0,
+          })),
+        }),
+      ],
+      makeDay: "2026-09-12",
+    });
+
+    // Exercise the same JSON transport boundary used by the API response.
+    const response = JSON.parse(JSON.stringify({ plan, generatedAt: 123 })) as {
+      plan: Array<{
+        date: string;
+        runs: unknown[];
+        prepMixes: Array<{
+          components: Array<{ ingredient: string; lbs: number }>;
+          totalLbs: number;
+        }>;
+      }>;
+      generatedAt: number;
+    };
+    expect(Object.keys(response)).toEqual(["plan", "generatedAt"]);
+    expect(response.generatedAt).toBe(123);
+    expect(response.plan).toHaveLength(1);
+    expect(response.plan[0].date).toBe("2026-09-12");
+    expect(response.plan[0].runs).toEqual([]);
+    expect(response.plan[0].prepMixes).toHaveLength(1);
+    expect(response.plan[0].prepMixes[0].components).toEqual([
+      { ingredient: "__proto__", lbs: 8.25 },
+      { ingredient: "constructor", lbs: 8.25 },
+      { ingredient: "toString", lbs: 12.375 },
+      { ingredient: "hasOwnProperty", lbs: 8.25 },
+      { ingredient: "valueOf", lbs: 2.0625 },
+    ]);
+    expect(response.plan[0].prepMixes[0].totalLbs).toBeCloseTo(65.065625, 8);
+  });
 });

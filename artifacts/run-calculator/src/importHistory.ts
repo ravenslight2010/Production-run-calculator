@@ -1,7 +1,11 @@
 import { inventoryClientId } from "./inventoryShared";
 import { createImportOperationId } from "./importOperations";
+import type { ImportSnapshot } from "@workspace/spec-import/import-changes";
 
 export type ImportHistorySummary = {
+  /** Applied business values only; no workbook/source text or full profiles. */
+  appliedValues?: ImportSnapshot;
+  persistence?: "local-verified" | "sync-acknowledged";
   phases?: Record<string, string>;
   counts?: Record<string, number>;
   source?: Record<string, number>;
@@ -133,13 +137,14 @@ async function postImportHistory(input: ImportHistoryRecordInput): Promise<Impor
 }
 
 export async function fetchImportHistory(filters: {
+  sourceKey?: string;
   type?: string;
   status?: string;
   customer?: string;
 } = {}): Promise<ImportHistoryItem[]> {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) if (value) qs.set(key, value);
-  const res = await fetch(`/api/import-history${qs.size ? `?${qs}` : ""}`, { headers: headers() });
+  const res = await fetch(`/api/import-history${qs.size ? `?${qs}` : ""}`, { headers: headers(), signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`List import history failed (${res.status})`);
   const out = await res.json() as { imports?: ImportHistoryItem[] };
   return out.imports ?? [];

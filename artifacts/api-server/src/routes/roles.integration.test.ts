@@ -3476,6 +3476,334 @@ describe("QC workflows", () => {
     ]));
   });
 
+  it("records advisory Brix against the canonical run and immutable reviewed target snapshot", async () => {
+    await seedQcWorkflowFixtures();
+    const brixProfileKey = "qc brand__qc flavor";
+    await db.insert(brandProfilesTable).values({
+      key: brixProfileKey,
+      scope: "live",
+      brand: "QC Brand",
+      flavor: "QC Flavor",
+      values: {
+        app1Type: "cheese",
+        app1CheeseRecipeName: "Mozzarella",
+        app1OzPerPizza: 1.25,
+        frontlineRecipeName: "Sauce",
+        sauceOzPerPizza: 2.75,
+        doughRecipeName: "Dough",
+        targetDoughballWeight: 12,
+        crustType: "Crust",
+      },
+      crustValues: { crustTargetWeight: 8 },
+    });
+    const date = facilityDate();
+    const runId = "qc-brix-run";
+    await db.delete(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, "live"),
+      eq(dailySyncTable.date, date),
+    ));
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date,
+      canonicalRevision: 3,
+      data: {
+        dayState: {
+          date,
+          runs: [{ id: runId, brand: "QC Brand", flavor: "QC Flavor" }],
+        },
+        runValues: { [runId]: {} },
+      },
+    });
+
+    const targetsUrl = `/api/qc/targets?profileKey=${encodeURIComponent(brixProfileKey)}`;
+    const initialTargets = await req(QC_OPERATOR, "GET", targetsUrl);
+    expect(initialTargets.status).toBe(200);
+    const initialTargetData = await initialTargets.json() as {
+      targets: Array<Record<string, unknown>>;
+      brixTargets: Array<Record<string, unknown>>;
+    };
+    expect(initialTargetData.targets.find((target) => target.ingredientId === "qc-mozzarella"))
+      .toMatchObject({ targetValue: 1.25, unit: "oz", toleranceValue: 0.1 });
+    expect(initialTargetData.brixTargets.find((target) => target.ingredientId === "qc-mozzarella"))
+      .toMatchObject({
+        targetBrix: null,
+        toleranceBrix: null,
+        state: "not-evaluated",
+        source: "not-configured",
+      });
+
+    const config = {
+      operationId: randomUUID(),
+      profileKey: brixProfileKey,
+      ingredientId: "qc-mozzarella",
+      targetBrix: 12.5,
+      toleranceBrix: 0.5,
+      reason: "Approved synthetic Brix reference",
+    };
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-targets", config)).status).toBe(403);
+    const savedTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", config);
+    expect(savedTarget.status).toBe(201);
+    const savedTargetEvent = (await savedTarget.json() as {
+      event: { id: number; actorId: string; runId: string | null; payload: Record<string, unknown> };
+    }).event;
+    expect(savedTargetEvent).toMatchObject({
+      actorId: QC_MANAGER,
+      runId: null,
+      payload: {
+        measurementKind: "brix",
+        targetBrix: 12.5,
+        toleranceBrix: 0.5,
+        unit: "brix",
+        active: true,
+      },
+    });
+    const replayedTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", config);
+    expect(replayedTarget.status).toBe(200);
+    expect((await replayedTarget.json() as { event: { id: number } }).event.id).toBe(savedTargetEvent.id);
+    expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      toleranceBrix: 0.25,
+    })).status).toBe(409);
+    expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      operationId: randomUUID(),
+      targetBrix: 12.5,
+      toleranceBrix: null,
+    })).status).toBe(400);
+    expect((await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      operationId: randomUUID(),
+      targetBrix: -0.1,
+    })).status).toBe(400);
+
+    const baseCheck = {
+      operationId: randomUUID(),
+      runId,
+      profileKey: brixProfileKey,
+      ingredientId: "qc-mozzarella",
+      station: "sauce",
+      checkType: "pre-run",
+      actualBrix: 13,
+      instrument: "SYNTHETIC-REFRACTOMETER",
+      note: "Inclusive upper boundary",
+    };
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      profileKey: "different__profile",
+    })).status).toBe(409);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      actualBrix: -0.01,
+    })).status).toBe(400);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      actualBrix: 100.01,
+    })).status).toBe(400);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      actualBrix: 12.5,
+      outcome: "pass",
+    })).status).toBe(400);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      actualBrix: 12.5,
+      targetBrix: 100,
+      toleranceBrix: 100,
+    })).status).toBe(400);
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      actualBrix: 12.5,
+      instrument: "I".repeat(121),
+    })).status).toBe(400);
+
+    const firstCheck = await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", baseCheck);
+    expect(firstCheck.status).toBe(201);
+    const firstEvent = (await firstCheck.json() as {
+      event: { id: number; actorId: string; payload: Record<string, unknown> };
+    }).event;
+    expect(firstEvent).toMatchObject({
+      actorId: QC_OPERATOR,
+      payload: {
+        actualBrix: 13,
+        targetBrix: 12.5,
+        toleranceBrix: 0.5,
+        targetVersion: savedTargetEvent.id,
+        targetSource: "qc-override",
+        outcome: "pass",
+        unit: "brix",
+        checkType: "pre-run",
+        instrument: "SYNTHETIC-REFRACTOMETER",
+        note: "Inclusive upper boundary",
+        runSourceKind: "current-day-canonical-settings",
+        runSourceRevision: "3",
+      },
+    });
+    const replayedCheck = await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", baseCheck);
+    expect(replayedCheck.status).toBe(200);
+    expect((await replayedCheck.json() as { event: { id: number } }).event.id).toBe(firstEvent.id);
+    const duplicateCheckCount = await db.select().from(qcWorkflowEventsTable)
+      .where(and(
+        eq(qcWorkflowEventsTable.scope, "live"),
+        eq(qcWorkflowEventsTable.operationId, baseCheck.operationId),
+      ));
+    expect(duplicateCheckCount).toHaveLength(1);
+
+    const missingTargetCheck = await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      operationId: randomUUID(),
+      ingredientId: "qc-sauce",
+      checkType: "interval",
+      actualBrix: 0,
+    });
+    expect(missingTargetCheck.status).toBe(201);
+    expect(((await missingTargetCheck.json() as { event: { payload: Record<string, unknown> } }).event.payload))
+      .toMatchObject({
+        checkType: "interval",
+        actualBrix: 0,
+        targetBrix: null,
+        toleranceBrix: null,
+        targetVersion: null,
+        outcome: "not-evaluated",
+      });
+
+    const zeroTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      operationId: randomUUID(),
+      ingredientId: "qc-sauce",
+      targetBrix: 0,
+      toleranceBrix: 0,
+      reason: "Explicit zero reference for synthetic test",
+    });
+    expect(zeroTarget.status).toBe(201);
+    const zeroReading = await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      operationId: randomUUID(),
+      ingredientId: "qc-sauce",
+      actualBrix: 0,
+      checkType: "pre-run",
+    });
+    expect(zeroReading.status).toBe(201);
+    expect(((await zeroReading.json() as {
+      event: { payload: Record<string, unknown> };
+    }).event.payload)).toMatchObject({
+      actualBrix: 0,
+      targetBrix: 0,
+      toleranceBrix: 0,
+      outcome: "pass",
+      unit: "brix",
+    });
+
+    const signoff = await req(QC_MANAGER, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(),
+      runId,
+    });
+    expect(signoff.status).toBe(201);
+    const targetAfterSignoff = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      operationId: randomUUID(),
+      targetBrix: 13,
+      toleranceBrix: 0.5,
+      reason: "Post-sign-off target review metadata",
+    });
+    expect(targetAfterSignoff.status).toBe(201);
+    const unchangedSignoff = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await unchangedSignoff.json() as { signoff: { signedOff: boolean; reopened: boolean } }).signoff))
+      .toMatchObject({ signedOff: true, reopened: false });
+
+    const changedTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      operationId: randomUUID(),
+      targetBrix: 12.5,
+      toleranceBrix: 0,
+      reason: "Newer reviewed zero-tolerance configuration",
+    });
+    expect(changedTarget.status).toBe(201);
+    const changedTargetEventId = (await changedTarget.json() as { event: { id: number } }).event.id;
+    const outsideZeroTolerance = await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      operationId: randomUUID(),
+      checkType: "interval",
+      actualBrix: 12.499,
+    });
+    expect(outsideZeroTolerance.status).toBe(201);
+    const outsideEvent = (await outsideZeroTolerance.json() as {
+      event: { id: number; payload: Record<string, unknown> };
+    }).event;
+    expect(outsideEvent.payload).toMatchObject({
+      targetBrix: 12.5,
+      toleranceBrix: 0,
+      targetVersion: changedTargetEventId,
+      outcome: "fail",
+    });
+    const reopened = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await reopened.json() as { signoff: { signedOff: boolean; reopened: boolean } }).signoff))
+      .toMatchObject({ signedOff: false, reopened: true });
+
+    const correction = await req(QC_MANAGER, "POST", `/api/qc/events/${outsideEvent.id}/corrections`, {
+      operationId: randomUUID(),
+      reason: "Correct the instrument reading",
+      replacement: { actualBrix: 12.5 },
+    });
+    expect(correction.status).toBe(201);
+    const redaction = await req(QC_MANAGER, "POST", `/api/qc/events/${outsideEvent.id}/redactions`, {
+      operationId: randomUUID(),
+      reason: "Remove the optional instrument label",
+      fields: ["payload.instrument"],
+    });
+    expect(redaction.status).toBe(201);
+    const history = await req(QC_MANAGER, "GET", `/api/qc/history?runId=${encodeURIComponent(runId)}`);
+    expect(history.status).toBe(200);
+    const historyItems = (await history.json() as {
+      items: Array<{ id: number; eventType: string; payload: Record<string, unknown>; corrected?: boolean; redactedFields?: string[] }>;
+    }).items;
+    const correctedBrix = historyItems.find((event) => event.id === outsideEvent.id);
+    expect(correctedBrix).toMatchObject({
+      eventType: "brix-check",
+      corrected: true,
+      redactedFields: ["payload.instrument"],
+      payload: {
+        actualBrix: 12.5,
+        targetBrix: 12.5,
+        toleranceBrix: 0,
+        targetVersion: changedTargetEventId,
+        outcome: "pass",
+        instrument: "[redacted]",
+      },
+    });
+    const clearedTarget = await req(QC_MANAGER, "POST", "/api/qc/brix-targets", {
+      ...config,
+      operationId: randomUUID(),
+      targetBrix: null,
+      toleranceBrix: null,
+      reason: "Clear the reviewed Brix configuration",
+    });
+    expect(clearedTarget.status).toBe(201);
+    const afterClear = await req(QC_OPERATOR, "POST", "/api/qc/brix-checks", {
+      ...baseCheck,
+      operationId: randomUUID(),
+      actualBrix: 12.5,
+    });
+    expect(afterClear.status).toBe(201);
+    expect(((await afterClear.json() as {
+      event: { payload: Record<string, unknown> };
+    }).event.payload)).toMatchObject({
+      targetBrix: null,
+      toleranceBrix: null,
+      targetVersion: null,
+      outcome: "not-evaluated",
+    });
+    const csv = await req(QC_MANAGER, "GET", `/api/qc/history.csv?runId=${encodeURIComponent(runId)}`);
+    expect(csv.status).toBe(200);
+    expect(await csv.text()).toContain("brix-check");
+    const scopeRows = await db.select().from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, "live"),
+      eq(qcWorkflowEventsTable.runId, runId),
+    ));
+    expect(scopeRows.filter((event) => event.eventType === "brix-check").length).toBeGreaterThanOrEqual(5);
+    expect(scopeRows.some((event) => event.eventType === "correction" && event.relatedEventId === String(outsideEvent.id))).toBe(true);
+    expect(scopeRows.some((event) => event.eventType === "redaction" && event.relatedEventId === String(outsideEvent.id))).toBe(true);
+  });
+
   it("reopens run sign-off after new evidence and requires independent cleaning verification", async () => {
     await seedQcWorkflowFixtures();
     expect((await req(QC_OPERATOR, "POST", "/api/qc/lots", {
@@ -3653,6 +3981,44 @@ describe("QC workflows", () => {
       reason: "Remove component identities from the history view",
       fields: ["payload.expectedComponents"],
     })).status).toBe(201);
+
+    const componentEventsBeforeSignoff = await db.select({
+      id: qcWorkflowEventsTable.id,
+    }).from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, "live"),
+      eq(qcWorkflowEventsTable.runId, runId),
+      sql`${qcWorkflowEventsTable.eventType} <> 'run-signoff'`,
+      sql`${qcWorkflowEventsTable.eventType} <> 'target-setting'`,
+    ));
+    const expectedReviewedThroughId = Math.max(
+      ...componentEventsBeforeSignoff.map((event) => event.id),
+    );
+    const componentSignoffResponse = await req(QC_MANAGER, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(),
+      runId,
+    });
+    expect(componentSignoffResponse.status).toBe(201);
+    const componentSignoff = await componentSignoffResponse.json() as {
+      event: { actorId: string; payload: { reviewedThroughId: number } };
+    };
+    expect(componentSignoff.event).toMatchObject({
+      actorId: QC_MANAGER,
+      payload: { reviewedThroughId: expectedReviewedThroughId },
+    });
+    const signedComponentRun = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await signedComponentRun.json()) as {
+      signoff: { signedOff: boolean; reopened: boolean };
+    }).signoff).toMatchObject({ signedOff: true, reopened: false });
+
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${savedData.event.id}/corrections`, {
+      operationId: randomUUID(),
+      reason: "Correct the observation after sign-off",
+      replacement: { observations: [{ componentId: "dough:0", observation: "present-mismatch" }] },
+    })).status).toBe(201);
+    const reopenedAfterCorrection = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
+    expect(((await reopenedAfterCorrection.json()) as {
+      signoff: { signedOff: boolean; reopened: boolean };
+    }).signoff).toMatchObject({ signedOff: false, reopened: true });
 
     const history = await req(QC_OPERATOR, "GET", `/api/qc/runs/${runId}`);
     const historyItems = (await history.json() as {

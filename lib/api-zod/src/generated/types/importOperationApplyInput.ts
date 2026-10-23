@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ImportOperationApplyInputChanges } from './importOperationApplyInputChanges';
+import type { ImportOperationApplyInputGoldCapture } from './importOperationApplyInputGoldCapture';
 import type { ImportOperationApplyInputSourceEvidence } from './importOperationApplyInputSourceEvidence';
 
 export interface ImportOperationApplyInput {
@@ -28,6 +29,8 @@ export interface ImportOperationApplyInput {
      * @pattern ^[a-f0-9]{64}$
      */
   expectedStateHash?: string | null;
+  /** Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot. */
+  goldCapture?: ImportOperationApplyInputGoldCapture;
   /** Exact bounded source text retained privately with a live spec Apply. */
   sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */

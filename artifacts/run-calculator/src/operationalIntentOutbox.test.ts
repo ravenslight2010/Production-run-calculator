@@ -124,6 +124,99 @@ describe("operational intent outbox", () => {
     expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 50]);
     expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 49]);
   });
+  it("adopts and caches canonical values when the selected run's section is complete", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const canonical = {
+      runValues: {
+        "run-1": { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      },
+    };
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => requests.length === 1
+          ? { outcome: "accepted", data: canonical }
+          : { outcome: "accepted" },
+      };
+    }));
+    const adopt = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopt);
+
+    const [first, second] = await Promise.all([
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 30 },
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 28 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        observedGeneration: "run-1:1",
+      }),
+    ]);
+
+    expect([first, second]).toEqual(["accepted", "accepted"]);
+    expect(requests[1]).toMatchObject({
+      baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      values: { skidsCompleted: 1, casesOnCurrentSkid: 23 },
+    });
+    expect(adopt).toHaveBeenCalledOnce();
+    expect(adopt).toHaveBeenCalledWith(
+      canonical,
+      expect.objectContaining({
+        values: { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      }),
+      "accepted",
+    );
+  });
+  it.each([
+    ["missing selected run values", { runValues: {} }],
+    ["malformed section field values", {
+      runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: "24" } },
+    }],
+  ])("does not adopt or cache canonical data with %s", async (_case, data) => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => requests.length === 1
+          ? { outcome: "accepted", data }
+          : { outcome: "accepted" },
+      };
+    }));
+    const adopt = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopt);
+
+    const [first, second] = await Promise.all([
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 30 },
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { skidsCompleted: 0, casesOnCurrentSkid: 28 },
+        baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+        observedGeneration: "run-1:1",
+      }),
+    ]);
+
+    expect([first, second]).toEqual(["accepted", "accepted"]);
+    expect(requests[1]).toMatchObject({
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 28 },
+    });
+    expect(adopt).not.toHaveBeenCalled();
+  });
   it("persists the exact correction and retains it for retry until canonical outcome", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const fetch = vi.fn()

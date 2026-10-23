@@ -13,6 +13,24 @@ export const OPERATIONAL_PROJECTION_VERSION = 1 as const;
 /** Outer line stages default (press->tunnel, tunnel->packaging), in minutes. */
 export const PRE_POST_TUNNEL_DEFAULT_MIN = 2.5 as const;
 
+export const STATION_ACTIVITY_IDS = [
+  "dough",
+  "sauce",
+  "press",
+  "frontline",
+  "freezeTunnel",
+  "packaging",
+  "warehouse",
+] as const;
+
+export type StationActivityId = (typeof STATION_ACTIVITY_IDS)[number];
+export type StationActivitySource = "automatic" | "manual" | "confirmed";
+export type StationActivityEvidence = {
+  runId: string;
+  eventAtServerMs: number;
+  source: StationActivitySource;
+};
+
 export type OperationalProjection = {
   version: typeof OPERATIONAL_PROJECTION_VERSION;
   runId: string;
@@ -21,6 +39,8 @@ export type OperationalProjection = {
   capturedAtServerMs: number;
   calculationRevision: number;
   effectiveElapsedSec: number;
+  /** Server-accepted station events, transported separately from persisted sync data. */
+  stationActivity?: Partial<Record<StationActivityId, StationActivityEvidence>> | null;
   /** Day-state-owned 3-stage line model (press/frontline, tunnel, packaging). */
   linePhases: LinePhases;
   timers: {
@@ -83,6 +103,7 @@ export function buildOperationalProjection(args: {
   schedule: AutoTrackSchedule;
   nowMs: number;
   calculationRevision?: number;
+  stationActivity?: Partial<Record<StationActivityId, StationActivityEvidence>> | null;
 }): OperationalProjection {
   const run = args.payload.dayState.runs[args.payload.dayState.currentIndex ?? 0];
   const raw = args.payload.runValues?.[args.serverCalc.runId] ?? {};
@@ -153,6 +174,7 @@ export function buildOperationalProjection(args: {
     capturedAtServerMs: args.nowMs,
     calculationRevision: args.calculationRevision ?? 0,
     effectiveElapsedSec,
+    stationActivity: args.stationActivity ?? null,
     linePhases,
     timers: {
       nextBatchInSec,

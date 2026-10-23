@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { assertImportFileBytes, assertImportPreflight, IMPORT_GRID_MAX_ROWS, IMPORT_GRID_MAX_COLUMNS, IMPORT_GRID_MAX_CELLS } from "@workspace/spec-import/import-preflight";
 import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 import type { FormValues, RunMeta } from "../types";
 import { fmtClock, fmtTime } from "../utils";
@@ -186,7 +187,22 @@ export function isNumericLikeCell(s: string): boolean {
 
 /** Parse an xlsx ArrayBuffer/Uint8Array into validated import rows + per-row errors. */
 export function parseRunWorkbook(data: ArrayBuffer | Uint8Array, sourceFile?: string): ImportParseResult {
+  assertImportFileBytes(data.byteLength, sourceFile);
   const wb = XLSX.read(data, { type: "array" });
+  if (wb.SheetNames.length > 100) throw new Error("Schedule exceeds 100 worksheets. Split the workbook.");
+  let cells = 0;
+  const grids = wb.SheetNames.map((name) => {
+    const sheet = wb.Sheets[name];
+    const range = sheet?.["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+    if (range) {
+      cells += (range.e.r + 1) * (range.e.c + 1);
+      if (range.e.r >= IMPORT_GRID_MAX_ROWS || range.e.c >= IMPORT_GRID_MAX_COLUMNS || cells > IMPORT_GRID_MAX_CELLS) {
+        throw new Error(`${sourceFile || "Schedule"} · ${name}: worksheet range exceeds import limits. Remove unused formatted ranges or split the workbook.`);
+      }
+    }
+    return { name, sourceFile, rows: sheet ? XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" }) : [] };
+  });
+  assertImportPreflight(grids, "schedule");
   return parseWorkbookObject(wb, sourceFile);
 }
 
