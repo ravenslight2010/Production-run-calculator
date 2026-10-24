@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, bigserial, bigint, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, bigint, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 export type MasterDataEntity =
   | "ingredients" | "doughRecipes" | "sauceRecipes" | "cheeseRecipes" | "mixes"
@@ -26,7 +26,7 @@ export type MasterDataReferenceFact = {
 };
 
 export const masterDataOperationsTable = pgTable("master_data_operations", {
-  sequence: bigserial("sequence", { mode: "number" }).primaryKey(),
+  sequence: bigint("sequence", { mode: "number" }).generatedByDefaultAsIdentity().primaryKey(),
   id: text("id").notNull(),
   scope: text("scope").notNull().default("live"),
   actorId: text("actor_id").notNull(),
@@ -56,3 +56,4 @@ export const masterDataUndoEpochsTable = pgTable("master_data_undo_epochs", {
   scope: text("scope").primaryKey(),
   epoch: bigint("epoch", { mode: "number" }).notNull().default(0),
 });
+

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uniqueIndex, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uniqueIndex, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -22,7 +22,7 @@ import { z } from "zod/v4";
 export const mergedAwayTable = pgTable(
   "merged_away",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
     scope: text("scope").notNull().default("live"),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -38,3 +38,4 @@ export const insertMergedAwaySchema = createInsertSchema(mergedAwayTable).omit({
 });
 export type InsertMergedAway = z.infer<typeof insertMergedAwaySchema>;
 export type MergedAway = typeof mergedAwayTable.$inferSelect;
+
