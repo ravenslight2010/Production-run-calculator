@@ -12,11 +12,14 @@ The user explicitly approved restoring development compatibility instead of
 changing production outside Publish. Earlier advice in this note to run custom
 DDL before serving was unsafe under the supported migration policy and is retired.
 
-**How to apply:** Keep legacy serial generators until a production-compatible
-Publish path is demonstrated. Repair schema source and development with approval,
-preserve rows and generator high-water marks, then recompute the actual Publish
-diff. If a required trigger/function cannot be represented by that flow, report
-the limitation rather than inventing a production DDL path.
+**How to apply:** Development and CI now run the preservation-safe
+serial-to-identity conversion before Drizzle. Keep that ordering and preserve
+rows, grants, generator high-water marks, and explicit-ID headroom when changing
+it. This does not establish production Publish compatibility: recompute and
+inspect the actual Publish diff before publishing, and never apply the helper to
+production outside the supported flow. If a required trigger/function cannot be
+represented by that flow, report the limitation rather than inventing a
+production DDL path.
 
 Do not treat Drizzle push's process exit status as proof that its SQL succeeded.
 
