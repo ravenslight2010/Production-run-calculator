@@ -154,7 +154,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --chown=node:node --from=api-migrate-smoke-builder /app/migration ./migration
 USER node
-CMD ["sh", "-c", "cd /app/migration && node node_modules/drizzle-kit/bin.cjs push --force --config ./drizzle.config.ts && node ./migrations/apply-audit-log-protection.mjs"]
+CMD ["sh", "-c", "cd /app/migration && node ./migrations/apply-serial-to-identity.mjs && node node_modules/drizzle-kit/bin.cjs push --force --config ./drizzle.config.ts && node ./migrations/apply-audit-log-protection.mjs"]
 
 ########## api-migrate: full workspace image for local/CI one-shot schema pushes ##########
 # Keep this target compatible with `pnpm --filter @workspace/db run push-force`.
@@ -187,3 +187,4 @@ RUN chown 1001:1001 /data /config
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY --from=builder /app/artifacts/run-calculator/dist/public /srv
 USER 1001:1001
+
