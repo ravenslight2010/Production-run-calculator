@@ -31,3 +31,16 @@ development mode, then archive only that stale intermediate and rerun the
 configuration check. Preserve publish identity records and validation guards.
 Do not prepare a publish or weaken source-policy validation to repair local
 metadata.
+
+An obsolete web-stage intermediate can also retain `mode: publish` from an old
+build. Do not confuse it with the actual prepared-source or expected-source
+records. When no build is active, preserve the invalid intermediate outside its
+active filename rather than rewriting its policy or regenerating publish identity.
+
+**Why:** A configuration precheck read an old-policy stage intermediate left by
+a prior build, independent of the currently prepared source. Archiving only that
+ignored intermediate removed the local obstruction without preparing a release.
+
+**How to apply:** Confirm the current validator policy, ignored status, record
+kind/path and lack of an active build first. Keep the original bytes recoverable;
+do not edit source/expected records or relax validation.
