@@ -32,15 +32,19 @@ configuration check. Preserve publish identity records and validation guards.
 Do not prepare a publish or weaken source-policy validation to repair local
 metadata.
 
-An obsolete web-stage intermediate can also retain `mode: publish` from an old
-build. Do not confuse it with the actual prepared-source or expected-source
-records. When no build is active, preserve the invalid intermediate outside its
-active filename rather than rewriting its policy or regenerating publish identity.
+An isolated task copy can inherit an obsolete web-stage intermediate with
+`mode: publish` from an old build, even though no publish/build is running.
+Do not confuse it with the actual prepared-source, expected-source, or sealed
+evidence records. Preserve the invalid intermediate outside its active filename
+rather than rewriting its policy or regenerating publish identity.
 
 **Why:** A configuration precheck read an old-policy stage intermediate left by
 a prior build, independent of the currently prepared source. Archiving only that
-ignored intermediate removed the local obstruction without preparing a release.
+ignored intermediate removed the local obstruction without preparing a release;
+the current source and scoped static checks were valid.
 
 **How to apply:** Confirm the current validator policy, ignored status, record
-kind/path and lack of an active build first. Keep the original bytes recoverable;
-do not edit source/expected records or relax validation.
+kind/path, invalidity under the current policy, and lack of an active build
+first. Keep the original bytes recoverable; do not edit prepared-source,
+expected-source, or sealed records, relax validation, or run publish preparation
+to unblock checks.

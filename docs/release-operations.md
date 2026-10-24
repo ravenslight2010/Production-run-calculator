@@ -274,8 +274,14 @@ wall-clock duration, and a sorted per-file duration table. The report is
 generated from Playwright's completed test results; a `GO` report requires
 every case declared by the
 [`full-browser-case-contract.mts`](../scripts/src/full-browser-case-contract.mts)
-contract to be enumerated and completed. The main config remains serial with
-`workers: 1`, with no retries or reduced test-match coverage. The release report
+contract to be enumerated and completed. The owner-approved
+[216-case inventory](./full-browser-inventory.md) checks exact file/title
+identities and the sole `chromium` project before runtime evidence is accepted;
+a same-count substitution is not valid coverage. Dedicated harnesses stay in
+their documented lanes, and Node/Vitest helper tests are not browser specs.
+The main config remains serial with `workers: 1`, no retries, and the existing
+90-minute hard limit (80-minute warning). A successful collection is not a
+runtime pass or a release certificate. The release report
 also records total wall-clock time and per-stage wall-clock durations so the
 scheduler's speedup can be compared with the existing per-gate timings.
 

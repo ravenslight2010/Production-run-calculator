@@ -178,8 +178,10 @@ BROWSER_TEST_INSTALL_WEBKIT=1 LIVE_AUTHORITY_CASE=webkit-tablet-landscape-full-r
 * Collection is separate: historical eight-case collection and latest selected
   desktop one-case collection PASS establish discovery only. Each actual browser
   result below additionally executed its one selected case. Default full-release
-  collection remains blocked by A37's **249 versus 172** reviewed-case mismatch;
-  it was not run as a browser suite or silently accepted by increasing the budget.
+  collection was blocked during that task by A37's **249 versus 172**
+  reviewed-case mismatch. Later owner-approved inventory maintenance is recorded
+  separately in [full-browser-inventory.md](./full-browser-inventory.md);
+  neither that reconciliation nor these collections are runtime release evidence.
 * Development preview: both managed services started and API reached ready.
   Public landing renders; unauthenticated 401s are expected. Optional identity
   sequence diagnostics reported unavailable, and the public development preview

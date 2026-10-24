@@ -13,6 +13,7 @@ import type {
 import {
   FULL_BROWSER_EXPECTED_CASES,
   assertFullBrowserCaseContract,
+  assertFullBrowserCaseIdentityContract,
 } from "../../../scripts/src/full-browser-case-contract.mjs";
 
 export { FULL_BROWSER_EXPECTED_CASES as EXPECTED_CASES };
@@ -135,7 +136,7 @@ function caseStatusLabel(status: CaseRecord["status"]): string {
   switch (status) {
     case "failed":
       return "FAILED";
-    case "timedout":
+    case "timedOut":
       return "TIMEDOUT";
     case "interrupted":
       return "INTERRUPTED";
@@ -540,7 +541,25 @@ export default class ReleaseDurationReporter implements Reporter {
   onBegin(_config: FullConfig, suite: Suite): void {
     this.startedAt = Date.now();
     const allTests = suite.allTests();
+    if (
+      _config.projects.length !== 1 ||
+      _config.projects[0]?.name !== "chromium"
+    ) {
+      throw new Error("Full browser release inventory requires only the chromium project.");
+    }
     assertFullBrowserCaseContract(allTests.length);
+    assertFullBrowserCaseIdentityContract(
+      allTests.map((testCase) => {
+        if (testCase.parent.project()?.name !== "chromium") {
+          throw new Error("Full browser release case belongs to a non-chromium project.");
+        }
+        // Playwright titlePath starts with root, project, and file suites.
+        return `${relativeFilePath(testCase.location.file)} :: ${testCase
+          .titlePath()
+          .slice(3)
+          .join(" › ")}`;
+      }),
+    );
     for (const testCase of allTests) {
       this.cases.set(testCase.id, {
         file: testCase.location.file,
