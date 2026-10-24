@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -16,7 +16,7 @@ import { z } from "zod/v4";
 // name that was corrected, toText is the canonical name that was kept. `scope`
 // isolates the sandbox account's corrections from live.
 export const aiCorrectionsTable = pgTable("ai_corrections", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   scope: text("scope").notNull().default("live"),
   domain: text("domain").notNull(),
   fromText: text("from_text").notNull(),
