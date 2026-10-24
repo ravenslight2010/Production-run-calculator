@@ -1118,6 +1118,14 @@ describe("atomic import operations", () => {
     expect(liveCases[0]?.expectedResult.mixes).toEqual([
       expect.objectContaining({ name: "Atomic Mix", batchSize: 1 }),
     ]);
+    const originalReceipt = await saved.json();
+    const concurrentRetries = await Promise.all(Array.from({ length: 4 }, () =>
+      apply("gold-capture-success-0001", { ...change("gold-captured-mix"), goldCapture })));
+    for (const response of concurrentRetries) {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(originalReceipt);
+    }
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(1);
 
     route.setImportOperationFailureHookForTest((stage) => {
       if (stage === "after-history") throw new Error("injected apply rollback");
@@ -1146,6 +1154,46 @@ describe("atomic import operations", () => {
       body: JSON.stringify({ excluded: true }),
     });
     expect(crossScopeMutation.status).toBe(404);
+  });
+
+  it("never retroactively captures an opted-out Apply on a retry", async () => {
+    const input = change("gold-opted-out-mix");
+    const first = await apply("gold-opted-out-operation-0001", input);
+    expect(first.status).toBe(200);
+    const receipt = await first.json();
+    const retry = await apply("gold-opted-out-operation-0001", {
+      ...input,
+      goldCapture: { input: { candidates: [{ name: "Synthetic review" }] } },
+    });
+    // Capture options belong to the original request hash; a changed retry is
+    // rejected rather than retroactively collecting an initially opted-out input.
+    expect(retry.status).toBe(409);
+    const unchangedRetry = await apply("gold-opted-out-operation-0001", input);
+    expect(unchangedRetry.status).toBe(200);
+    expect(await unchangedRetry.json()).toEqual(receipt);
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+  });
+
+  it("reports invalid local configuration without probing and rejects production test overrides", async () => {
+    process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+    process.env.IMPORT_GOLD_LOCAL_BASE_URL = "http://169.254.169.254/private";
+    const configResponse = await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() });
+    expect(configResponse.status).toBe(200);
+    expect(await configResponse.json()).toMatchObject({ enabled: true, localConfigured: false });
+    const scoreResponse = await fetch(`${baseUrl}/api/import-gold/score`, {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ provider: "local", providerOverride: "untrusted-http-hook" }),
+    });
+    expect(scoreResponse.status).toBe(503);
+    expect(await scoreResponse.json()).toEqual({ error: "The local evaluator is not configured" });
+    expect(await db.select().from(tables.importGoldScoresTable)).toHaveLength(0);
+    const previousNodeEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      expect(() => route.setImportGoldProviderForTest(async () => ({}))).toThrow("Test provider unavailable");
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
   });
 
   it("lists, excludes, exports, and deletes only manager-visible scoped cases", async () => {

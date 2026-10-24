@@ -99,6 +99,7 @@ app.use(
 app.use(
   "/api/profile-data/source-library-reconciliation/capture",
   express.json({ limit: "8kb" }),
+  express.urlencoded({ extended: true, limit: "8kb" }),
 );
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));

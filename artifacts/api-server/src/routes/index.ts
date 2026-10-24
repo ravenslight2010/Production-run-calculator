@@ -122,10 +122,11 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/ai-memory/health-check", "/background-operations/diagnostics",
     "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
   ]),
-  ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
+  ...reads(["manage-staff"], "all", "live-only", ["/sync/health", "/health/diagnostics"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
     "/freezer-surplus/adjustments",
+    "/freezer-surplus/confirmations/:runId/corrections",
     "/inventory/count-observations/:id", "/inventory/count-observations",
     "/inventory/quality-checks",
   ]),
@@ -137,6 +138,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ...reads(["manage-qc"], "all", "scoped", [
     "/qc/history.csv", "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
     "/qc/import-reviews", "/qc/import-reviews/:operationId",
+    "/qc/intelligence", "/qc/intelligence.csv",
   ]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
     "/import-history", "/import-operations/:operationId",

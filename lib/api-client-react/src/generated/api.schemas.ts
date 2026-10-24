@@ -2644,6 +2644,89 @@ export interface BuildInfo {
   platformIdentitySource: BuildInfoPlatformIdentitySource;
 }
 
+export type PublicHealthStatusStatus = typeof PublicHealthStatusStatus[keyof typeof PublicHealthStatusStatus];
+
+
+export const PublicHealthStatusStatus = {
+  ok: 'ok',
+  starting: 'starting',
+  degraded: 'degraded',
+} as const;
+
+export type PublicHealthStatusChecksProcess = typeof PublicHealthStatusChecksProcess[keyof typeof PublicHealthStatusChecksProcess];
+
+
+export const PublicHealthStatusChecksProcess = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type PublicHealthStatusChecksStartup = typeof PublicHealthStatusChecksStartup[keyof typeof PublicHealthStatusChecksStartup];
+
+
+export const PublicHealthStatusChecksStartup = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type PublicHealthStatusChecksDatabase = typeof PublicHealthStatusChecksDatabase[keyof typeof PublicHealthStatusChecksDatabase];
+
+
+export const PublicHealthStatusChecksDatabase = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type PublicHealthStatusChecksAuditProtection = typeof PublicHealthStatusChecksAuditProtection[keyof typeof PublicHealthStatusChecksAuditProtection];
+
+
+export const PublicHealthStatusChecksAuditProtection = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type PublicHealthStatusChecksDependencies = typeof PublicHealthStatusChecksDependencies[keyof typeof PublicHealthStatusChecksDependencies];
+
+
+export const PublicHealthStatusChecksDependencies = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type PublicHealthStatusChecksBackgroundWorkers = typeof PublicHealthStatusChecksBackgroundWorkers[keyof typeof PublicHealthStatusChecksBackgroundWorkers];
+
+
+export const PublicHealthStatusChecksBackgroundWorkers = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type PublicHealthStatusChecks = {
+  process: PublicHealthStatusChecksProcess;
+  startup: PublicHealthStatusChecksStartup;
+  database: PublicHealthStatusChecksDatabase;
+  auditProtection: PublicHealthStatusChecksAuditProtection;
+  dependencies: PublicHealthStatusChecksDependencies;
+  backgroundWorkers: PublicHealthStatusChecksBackgroundWorkers;
+};
+
+export interface PublicHealthStatus {
+  status: PublicHealthStatusStatus;
+  checks: PublicHealthStatusChecks;
+}
+
 /**
  * `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.
  */
@@ -2743,6 +2826,7 @@ export type HealthStatusCapabilitiesAiDetail = typeof HealthStatusCapabilitiesAi
 
 export const HealthStatusCapabilitiesAiDetail = {
   ai_provider_not_configured: 'ai_provider_not_configured',
+  local_model_host_unreachable: 'local_model_host_unreachable',
 } as const;
 
 /**
@@ -2781,7 +2865,7 @@ export type HealthStatusStartup = {
 export type HealthStatusDiagnostics = { [key: string]: unknown };
 
 /**
- * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ * Authorized diagnostics response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
  */
 export interface HealthStatus {
   /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */

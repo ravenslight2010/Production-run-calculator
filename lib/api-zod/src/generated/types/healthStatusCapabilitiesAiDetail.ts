@@ -11,4 +11,5 @@ export type HealthStatusCapabilitiesAiDetail = typeof HealthStatusCapabilitiesAi
 
 export const HealthStatusCapabilitiesAiDetail = {
   ai_provider_not_configured: 'ai_provider_not_configured',
+  local_model_host_unreachable: 'local_model_host_unreachable',
 } as const;

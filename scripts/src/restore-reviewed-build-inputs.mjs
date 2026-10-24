@@ -85,8 +85,7 @@ function verifyExisting(files) {
   });
 }
 
-export function restoreReviewedBuildInputs(root, encoded, expectedSha256 = REVIEWED_REPORT_SHA256) {
-  const report = decodeReviewedReport(encoded, expectedSha256);
+function materializeReviewedInputs(root, report, expectedSha256) {
   const directory = safeDirectory(root, true);
   const files = expectedFiles(directory, report, expectedSha256);
   const existing = verifyExisting(files);
@@ -94,6 +93,38 @@ export function restoreReviewedBuildInputs(root, encoded, expectedSha256 = REVIE
     if (!existing[index]) writeFileSync(file, bytes, { flag: "wx", mode: 0o600 });
     chmodSync(file, 0o600);
   });
+}
+
+export function restoreReviewedBuildInputs(root, encoded, expectedSha256 = REVIEWED_REPORT_SHA256) {
+  materializeReviewedInputs(root, decodeReviewedReport(encoded, expectedSha256), expectedSha256);
+}
+
+// Trusted offline input transport, not an arbitrary download or manifest
+// override. The CLI always uses the production pin; the explicit parameter is
+// only the same synthetic-fixture seam as decodeReviewedReport.
+export function restoreReviewedBuildInputsFromDirectory(
+  root, inputDirectory, expectedSha256 = REVIEWED_REPORT_SHA256,
+) {
+  const source = path.resolve(inputDirectory);
+  const directoryStat = lstatSync(source);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error("Reviewed input source must be a directory, not a symlink.");
+  }
+  const reportFile = path.join(source, `${REPORT_BASENAME}.json`);
+  const checksumFile = path.join(source, `${REPORT_BASENAME}.sha256`);
+  for (const [file, maximum] of [[reportFile, MAX_REPORT_BYTES], [checksumFile, 65]]) {
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maximum) {
+      throw new Error("Reviewed input source files must be bounded regular files, not symlinks.");
+    }
+  }
+  const report = readFileSync(reportFile);
+  if (!/^[a-f0-9]{64}$/.test(expectedSha256 ?? "") ||
+      createHash("sha256").update(report).digest("hex") !== expectedSha256 ||
+      !readFileSync(checksumFile).equals(Buffer.from(`${expectedSha256}\n`))) {
+    throw new Error("Reviewed directory inputs do not match the reviewed SHA-256.");
+  }
+  materializeReviewedInputs(root, report, expectedSha256);
 }
 
 export function cleanupReviewedBuildInputs(root) {
@@ -124,12 +155,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   delete process.env[INPUT_SECRET_NAME];
   try {
     if (process.argv.length === 2) restoreReviewedBuildInputs(process.cwd(), encoded);
+    else if (process.argv.length === 4 && process.argv[2] === "--from-directory") {
+      restoreReviewedBuildInputsFromDirectory(process.cwd(), process.argv[3]);
+    }
     else if (process.argv.length === 3 && process.argv[2] === "--cleanup") {
       cleanupReviewedBuildInputs(process.cwd());
-    } else throw new Error("Expected no arguments or --cleanup.");
+    } else throw new Error("Expected no arguments, --from-directory PATH, or --cleanup.");
     console.log("Reviewed CI build input verification completed.");
-  } catch (error) {
-    console.error(`Reviewed CI build inputs: ${error.message}`);
+  } catch {
+    console.error("Reviewed CI build inputs: verification failed; check protected input configuration and reviewed SHA-256.");
     process.exitCode = 1;
   }
 }

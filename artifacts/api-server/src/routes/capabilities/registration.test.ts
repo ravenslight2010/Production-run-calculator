@@ -41,6 +41,13 @@ describe("capability route registration", () => {
     expect(readAuthorizationInventory).toEqual(expect.arrayContaining([
       expect.objectContaining({
         method: "GET",
+        path: "/health/diagnostics",
+        capabilities: ["manage-staff"],
+        capabilityMatch: "all",
+        scope: "live-only",
+      }),
+      expect.objectContaining({
+        method: "GET",
         path: "/import-history",
         capabilities: ["manage-profiles", "manage-inventory"],
         capabilityMatch: "any",

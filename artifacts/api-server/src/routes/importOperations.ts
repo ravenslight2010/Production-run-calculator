@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { fetchImportGoldLocal, isImportGoldLocalConfigured } from "../lib/importGoldEndpoint";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
@@ -81,6 +82,7 @@ export function setImportOperationFailureHookForTest(hook?: (stage: string) => v
 }
 /** Test seam: automated tests must never call a real evaluator provider. */
 export function setImportGoldProviderForTest(override?: GoldProviderTestOverride): void {
+  if (process.env.NODE_ENV !== "test") throw new Error("Test provider unavailable");
   goldProviderTestOverride = override;
 }
 function fail(stage: string): void {
@@ -285,13 +287,7 @@ function outputShape(value: unknown): unknown {
 
 async function requestLocalGoldPrediction(input: Record<string, unknown>, importType: string, expected: Record<string, unknown>): Promise<Record<string, unknown>> {
   const base = process.env.IMPORT_GOLD_LOCAL_BASE_URL ?? "http://127.0.0.1:11434/v1";
-  let endpoint: URL;
-  try { endpoint = new URL(base); } catch { throw new Error("provider_unavailable"); }
-  if (endpoint.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(endpoint.hostname)) {
-    throw new Error("provider_unavailable");
-  }
-  endpoint.pathname = `${endpoint.pathname.replace(/\/+$/u, "")}/chat/completions`;
-  const response = await fetch(endpoint, {
+  const response = await fetchImportGoldLocal(base, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -992,7 +988,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
 router.get("/import-gold/config", requireCapability("manage-staff"), (_req, res) => {
   res.json({
     enabled: importGoldEnabled(),
-    localConfigured: importGoldEnabled() && (process.env.IMPORT_GOLD_LOCAL_ENABLED === "true" || !!process.env.IMPORT_GOLD_LOCAL_BASE_URL),
+    localConfigured: importGoldEnabled() && isImportGoldLocalConfigured(),
     geminiConfigured: importGoldEnabled() && isGeminiProviderConfigured(),
     retention: "Cases remain until a manager deletes them; exclusion only removes them from scoring and export. Source-use and retention approval are required before enablement.",
     persistsAcrossFactoryPurge: true,
@@ -1090,7 +1086,7 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
   ) {
     res.status(400).json({ error: "Invalid score request" }); return;
   }
-  if (provider === "local" && process.env.IMPORT_GOLD_LOCAL_ENABLED !== "true" && !process.env.IMPORT_GOLD_LOCAL_BASE_URL) {
+  if (provider === "local" && !isImportGoldLocalConfigured()) {
     res.status(503).json({ error: "The local evaluator is not configured" }); return;
   }
   if (provider === "gemini" && !isGeminiProviderConfigured()) {
@@ -1106,7 +1102,7 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
   const results = [];
   for (const goldCase of eligible) {
     try {
-      const predictionCandidate = goldProviderTestOverride
+      const predictionCandidate = process.env.NODE_ENV === "test" && goldProviderTestOverride
         ? await goldProviderTestOverride(provider, goldCase.evaluatedInput, goldCase.importType)
         : provider === "local"
           ? await requestLocalGoldPrediction(goldCase.evaluatedInput, goldCase.importType, goldCase.expectedResult)

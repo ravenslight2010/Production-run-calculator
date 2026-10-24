@@ -383,35 +383,27 @@ paths:
     get:
       operationId: healthCheck
       tags: [health]
-      summary: Health check
+      summary: Public compatibility readiness probe
       description: >-
-        Reports core API readiness and optional capability degradation.
+        Returns only coarse gate statuses, never operational diagnostics.
         Startup completion, database reachability, and required audit-log
         protection are hard readiness gates. An unavailable AI credential or
         degraded background workers are reported as warnings and do not by
-        themselves make the core API unready. The AI signal reports credential
-        configuration only; it does not probe the remote provider.
-        Scheduled-evaluation diagnostics report sample availability separately
-        from the last measured queue state, report the exact duplicate-bucket
-        group count, and include a bounded inventory with status, attempt-state,
-        lease-validity, and keep/review candidate counts. No rows are automatically
-        designated safe to remove; any cleanup requires a separate owner-approved,
-        audited transaction. They also report an aggregate duplicate-group trend
-        with first and latest counts and their change over the bounded sample
-        window; unavailable samples do not produce a trend.
+        themselves make the core API unready. Detailed diagnostics require a
+        live-scope session with manage-staff at /health/diagnostics.
       responses:
         "200":
           description: Core API is ready; optional AI or background work may be degraded.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                $ref: "#/components/schemas/PublicHealthStatus"
         "503":
           description: Startup, database, or required audit-log protection is not ready.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                $ref: "#/components/schemas/PublicHealthStatus"
 
   /readyz:
     get:
@@ -421,27 +413,50 @@ paths:
       description: >-
         Canonical readiness probe. Returns 503 only while startup, database,
         or required audit-log protection is not ready. AI credential and
-        background-worker degradation are non-blocking warnings. Scheduled-evaluation
-        diagnostics distinguish pending, available, and unavailable
-        samples from queue backlog warnings and include bounded duplicate-bucket
-        status, attempt-state, lease-validity, and keep/review candidate counts.
-        No rows are automatically designated safe to remove; any cleanup
-        requires a separate owner-approved, audited transaction. They also
-        include an aggregate duplicate-group trend with first and latest counts
-        and their change over the bounded sample window.
+        background-worker degradation are non-blocking warnings. Only coarse
+        gate statuses are public. Detailed diagnostics require a live-scope
+        session with manage-staff at /health/diagnostics.
       responses:
         "200":
           description: Core API is ready; optional capabilities may be degraded.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                $ref: "#/components/schemas/PublicHealthStatus"
         "503":
           description: Startup, database, or required audit-log protection is not ready.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                $ref: "#/components/schemas/PublicHealthStatus"
+
+  /health/diagnostics:
+    get:
+      operationId: getHealthDiagnostics
+      tags: [health]
+      summary: Manager operational readiness diagnostics
+      description: >-
+        Requires an authenticated live-scope session with manage-staff.
+        Available during startup. Returns bounded operational diagnostics,
+        configuration signals (not provider reachability), and startup state.
+        Optional diagnostic sampling failures are warnings, not core outages.
+        A 200 response does not mean every optional worker is healthy.
+        Queue samples and duplicate trends are read-only and never authorize cleanup.
+      responses:
+        "200":
+          description: Core API ready; optional diagnostics may be degraded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+        "503":
+          description: A core readiness gate failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+        "401":
+          description: Authentication required.
+        "403":
+          description: Live scope and manage-staff required.
 
   /auth/sign-up:
     post:
@@ -8318,10 +8333,28 @@ components:
           pattern: '^[A-Za-z0-9._:-]{1,128}$'
         platformIdentitySource: { type: string, enum: [runtime-reported, unavailable] }
 
+    PublicHealthStatus:
+      type: object
+      additionalProperties: false
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ok, starting, degraded] }
+        checks:
+          type: object
+          additionalProperties: false
+          required: [process, startup, database, auditProtection, dependencies, backgroundWorkers]
+          properties:
+            process: { type: string, enum: [ok, warning, error, pending] }
+            startup: { type: string, enum: [ok, warning, error, pending] }
+            database: { type: string, enum: [ok, warning, error, pending] }
+            auditProtection: { type: string, enum: [ok, warning, error, pending] }
+            dependencies: { type: string, enum: [ok, warning, error, pending] }
+            backgroundWorkers: { type: string, enum: [ok, warning, error, pending] }
+
     HealthStatus:
       type: object
       description: >-
-        Readiness response. HTTP 200 means startup, database, and required
+        Authorized diagnostics response. HTTP 200 means startup, database, and required
         audit protection are ready, even when optional checks report warnings.
         HTTP 503 is reserved for a failed core readiness gate.
       properties:
@@ -8355,7 +8388,7 @@ components:
               required: [status]
               properties:
                 status: { type: string, enum: [configured, not_configured, pending] }
-                detail: { type: string, enum: [ai_provider_not_configured] }
+                detail: { type: string, enum: [ai_provider_not_configured, local_model_host_unreachable] }
         startup:
           type: object
           properties:

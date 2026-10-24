@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { performance } from "node:perf_hooks";
-import { GetBuildInfoResponse, HealthCheckResponse } from "@workspace/api-zod";
+import { GetBuildInfoResponse, GetHealthDiagnosticsResponse } from "@workspace/api-zod";
 import { getBuildInfo } from "../lib/buildInfo";
 import { isGeminiProviderConfigured } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
@@ -19,6 +19,8 @@ import {
 } from "../lib/backgroundOperations";
 import { getScheduledEvaluationQueueDiagnostics } from "../lib/serverJobs";
 import { getSyncOutboxLagDiagnostics } from "../lib/syncOutbox";
+import { requireAuth } from "../middlewares/requireAuth";
+import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -191,7 +193,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     // (OpenAI-compatible local backend) also satisfies the check; an unrelated
     // OPENAI_API_KEY is intentionally NOT accepted. When a local host is
     // configured, an optional strict probe (LOCAL_AI_STRICT_READINESS=true)
-    // can fail readiness if the model server is unreachable.
+    // reports dependency degradation if unreachable, but never blocks core readiness.
     const aiConfigured =
       isGeminiProviderConfigured() || Boolean(process.env.LOCAL_AI_BASE_URL);
     checks.dependencies = aiConfigured
@@ -221,12 +223,20 @@ async function readiness(req: Request, res: Response): Promise<void> {
       cacheMaintenance,
       scheduledEvaluationQueue,
       syncOutboxLag,
-    } = await readSharedReadinessDiagnostics();
+    } = await readSharedReadinessDiagnostics().catch(() => ({
+      // Optional diagnostic storage must not take core operational traffic down.
+      // Do not return or log the raw rejection (it may contain SQL or credentials).
+      backgroundOperationDiagnostics: undefined,
+      cacheMaintenance: undefined,
+      scheduledEvaluationQueue: { sampleAvailability: "unavailable" as const, status: "warning" as const },
+      syncOutboxLag: { status: "warning" as const },
+    }));
     res.locals.cacheMaintenanceDiagnostics = cacheMaintenance;
     optionalDiagnosticsDurationMs = boundedDurationMs(
       performance.now() - optionalDiagnosticsStartedAt,
     );
-    const backgroundOperationsWarning = backgroundOperationsDegraded(backgroundOperationDiagnostics);
+    const backgroundOperationsWarning = backgroundOperationDiagnostics === undefined ||
+      backgroundOperationsDegraded(backgroundOperationDiagnostics);
     const scheduledQueueUnavailable = scheduledEvaluationQueue.sampleAvailability === "unavailable";
     checks.backgroundWorkers = backgroundOperationsWarning || scheduledQueueUnavailable ||
       syncOutboxLag.status === "warning" ||
@@ -291,9 +301,21 @@ async function readiness(req: Request, res: Response): Promise<void> {
     "health check completed",
   );
   attachReadinessTestMetrics(res);
+  res.setHeader("Cache-Control", "no-store");
+
+  // Fixed public allowlist on every alias and both success/failure paths.
+  // Keep coarse gate statuses for existing startup/monitoring consumers, but
+  // never expose operational names, samples, timestamps, or provider config.
+  if (req.route.path !== "/health/diagnostics") {
+    res.status(coreReady ? 200 : 503).json({
+      status: coreReady ? "ok" : startup.phase === "starting" ? "starting" : "degraded",
+      checks: flatChecks,
+    });
+    return;
+  }
 
   if (coreReady) {
-    res.json(HealthCheckResponse.parse({
+    res.json(GetHealthDiagnosticsResponse.parse({
       status: "ok",
       checks: flatChecks,
       capabilities,
@@ -322,8 +344,13 @@ async function readiness(req: Request, res: Response): Promise<void> {
 // Liveness is intentionally independent of the database, AI provider, and
 // startup work. It answers whether the Node process can accept a probe.
 router.get("/livez", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
   res.json({ status: "ok", probe: "liveness" });
 });
+
+// Mounted before startupGate so an authorized operator can diagnose startup
+// failures too. These process-wide diagnostics are not sandbox-scoped data.
+router.get("/health/diagnostics", requireAuth, requireLiveScope, requireCapability("manage-staff"), readiness);
 
 // /healthz remains a compatibility alias for existing local checks and clients.
 // / is the API-base probe used by some platform routers; it is health-only and

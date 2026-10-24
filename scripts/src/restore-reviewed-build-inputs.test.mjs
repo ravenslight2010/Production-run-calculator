@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   cleanupReviewedBuildInputs, decodeReviewedReport, INPUT_SECRET_NAME,
   REPORT_BASENAME, REPORT_DIRECTORY, restoreReviewedBuildInputs,
+  restoreReviewedBuildInputsFromDirectory,
 } from "./restore-reviewed-build-inputs.mjs";
 
 const fixture = Buffer.from('{"fixture":"synthetic reviewed report"}\n');
@@ -105,4 +106,84 @@ test("workflow isolates secrets from PR code and retains all browser cases", () 
   const config = readFileSync(new URL("../../artifacts/run-calculator/playwright.docker-caddy.config.ts", import.meta.url), "utf8");
   assert.match(config, /chromium/);
   assert.match(config, /webkit/);
+});
+
+function inputDirectory(t) {
+  const source = temporaryRoot(t);
+  writeFileSync(path.join(source, `${REPORT_BASENAME}.json`), fixture);
+  writeFileSync(path.join(source, `${REPORT_BASENAME}.sha256`), `${hash}\n`);
+  return source;
+}
+
+test("offline directory delivery preserves exact bytes and restrictive modes, without needing a secret", (t) => {
+  const root = temporaryRoot(t);
+  const source = inputDirectory(t);
+  restoreReviewedBuildInputsFromDirectory(root, source, hash);
+  restoreReviewedBuildInputsFromDirectory(root, source, hash);
+  const report = path.join(root, REPORT_DIRECTORY, `${REPORT_BASENAME}.json`);
+  assert.deepEqual(readFileSync(report), fixture);
+  assert.equal(lstatSync(report).mode & 0o777, 0o600);
+  assert.deepEqual(readFileSync(report.replace(/json$/, "sha256")), Buffer.from(`${hash}\n`));
+});
+
+for (const variation of ["report", "checksum", "oversized", "symlink"]) {
+  test(`offline directory rejects ${variation} before materializing any input`, (t) => {
+    const root = temporaryRoot(t);
+    const source = inputDirectory(t);
+    const file = path.join(source, `${REPORT_BASENAME}.${variation === "checksum" ? "sha256" : "json"}`);
+    if (variation === "symlink") {
+      rmSync(file);
+      symlinkSync(path.join(source, `${REPORT_BASENAME}.sha256`), file);
+    } else if (variation === "oversized") writeFileSync(file, Buffer.alloc(1024 * 1024 + 1));
+    else writeFileSync(file, "not approved");
+    assert.throws(() => restoreReviewedBuildInputsFromDirectory(root, source, hash));
+    assert.equal(existsSync(path.join(root, "attached_assets")), false);
+  });
+}
+
+test("offline CLI cannot override the production pin or expose source paths and contents", (t) => {
+  const root = temporaryRoot(t);
+  const source = inputDirectory(t);
+  const cli = fileURLToPath(new URL("./restore-reviewed-build-inputs.mjs", import.meta.url));
+  for (const input of [source, path.join(source, "private-missing-directory")]) {
+    const result = spawnSync(process.execPath, [cli, "--from-directory", input], {
+      cwd: root, encoding: "utf8",
+      env: { ...process.env, REVIEWED_REPORT_SHA256: hash },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /reviewed SHA-256/);
+    assert.ok(!`${result.stdout}${result.stderr}`.includes(source));
+    assert.ok(!`${result.stdout}${result.stderr}`.includes(fixture.toString()));
+  }
+});
+
+test("all newly wired CI consumers keep private delivery main-only, with no lost checks", () => {
+  const consumers = [
+    ["ci.yml", ["typecheck", "reduced-motion-browser", "test-db", "build"]],
+    ["department-navigation.yml", ["department-navigation"]],
+    ["release-check.yml", ["release-check-standard", "release-check-full"]],
+  ];
+  const guard = "github.ref == 'refs/heads/main' && github.event_name != 'pull_request'";
+  for (const [file, jobs] of consumers) {
+    const workflow = readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(workflow, /pull_request_target/);
+    for (const job of jobs) {
+      const section = workflow.match(new RegExp(`^  ${job}:\\n[\\s\\S]*?(?=^  [a-zA-Z][\\w-]*:|$(?![\\s\\S]))`, "m"))?.[0];
+      assert.ok(section, `${file}/${job} must remain present`);
+      assert.ok(section.includes(`environment: \${{ ${guard} && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}`));
+      const restore = section.indexOf("      - name: Restore protected main build inputs");
+      assert.ok(restore >= 0);
+      const nextStep = section.indexOf("\n      - ", restore + 1);
+      const step = section.slice(restore, nextStep < 0 ? undefined : nextStep);
+      assert.ok(step.includes(`if: ${guard}`));
+      assert.ok(step.includes("SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}"));
+      assert.match(step, /run: node scripts\/src\/restore-reviewed-build-inputs\.mjs(?:\n|$)/);
+      assert.match(section, /if: always\(\) && steps\.reviewed-inputs\.outcome != 'skipped'\s+run: node scripts\/src\/restore-reviewed-build-inputs\.mjs --cleanup/);
+      assert.equal(section.match(/secrets\.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64/g)?.length, 1);
+      const header = section.slice(0, section.indexOf("    steps:"));
+      if (job === "release-check-full")
+        assert.match(header, /if:.*github\.event_name.*workflow_dispatch.*inputs\.run_full/);
+      else assert.ok(!header.includes("\n    if:"), "existing job must not be disabled for PRs");
+    }
+  }
 });

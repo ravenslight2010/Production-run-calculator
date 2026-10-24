@@ -12,7 +12,7 @@ import type { HealthStatusStartup } from './healthStatusStartup';
 import type { HealthStatusStatus } from './healthStatusStatus';
 
 /**
- * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ * Authorized diagnostics response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
  */
 export interface HealthStatus {
   /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */

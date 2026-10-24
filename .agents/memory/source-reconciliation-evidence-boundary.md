@@ -143,3 +143,16 @@ fabricate or publish source evidence, and do not claim a verified app-build
 revision when the fingerprint inputs are not in the committed tree. Reconcile
 the source policy or evidence location only with explicit owner approval before
 release use.
+
+The owner approved restricted CI/build delivery of the two required runtime
+audit inputs on 2026-10-24, rather than restoring them to tracked Git source.
+This does not authorize public-history downloading, secret rotation, broader
+PR-code access, or changes to the protected-main delivery boundary.
+
+**Why:** Builds need exact approved bytes without reversing the intentional
+cleanup of operational evidence from the branch.
+
+**How to apply:** Keep the inputs outside tracked source, preserve exact-byte
+verification and honest source-only identity when Git binding is unavailable.
+Resolve an incompatible PR-data requirement explicitly; do not infer approval
+to expose protected inputs or weaken release checks.

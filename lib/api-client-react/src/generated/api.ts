@@ -231,6 +231,7 @@ import type {
   ProductionSheetPhotoInput,
   ProductionSheetPhotoResult,
   ProfileDataHealthApplyResult,
+  PublicHealthStatus,
   PutSyncToday200,
   PutSyncTodayParams,
   QcAllergenActivityResponse,
@@ -1882,12 +1883,12 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider. Scheduled-evaluation diagnostics report sample availability separately from the last measured queue state, report the exact duplicate-bucket group count, and include a bounded inventory with status, attempt-state, lease-validity, and keep/review candidate counts. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. They also report an aggregate duplicate-group trend with first and latest counts and their change over the bounded sample window; unavailable samples do not produce a trend.
- * @summary Health check
+ * Returns only coarse gate statuses, never operational diagnostics. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Public compatibility readiness probe
  */
-export const healthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
+export const healthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<PublicHealthStatus> => {
 
-  return customFetch<HealthStatus>(getHealthCheckUrl(),
+  return customFetch<PublicHealthStatus>(getHealthCheckUrl(),
   {
     ...options,
     method: 'GET'
@@ -1907,7 +1908,7 @@ export const getHealthCheckQueryKey = () => {
     }
 
 
-export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1926,10 +1927,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type HealthCheckQueryResult = NonNullable<Awaited<ReturnType<typeof healthCheck>>>
-export type HealthCheckQueryError = ErrorType<HealthStatus>
+export type HealthCheckQueryError = ErrorType<PublicHealthStatus>
 
 
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof healthCheck>>,
@@ -1939,7 +1940,7 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof healthCheck>>,
@@ -1949,15 +1950,15 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Health check
+ * @summary Public compatibility readiness probe
  */
 
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -1984,12 +1985,12 @@ export const getReadinessCheckUrl = () => {
 }
 
 /**
- * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Scheduled-evaluation diagnostics distinguish pending, available, and unavailable samples from queue backlog warnings and include bounded duplicate-bucket status, attempt-state, lease-validity, and keep/review candidate counts. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. They also include an aggregate duplicate-group trend with first and latest counts and their change over the bounded sample window.
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Only coarse gate statuses are public. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
  * @summary Core API readiness
  */
-export const readinessCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
+export const readinessCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<PublicHealthStatus> => {
 
-  return customFetch<HealthStatus>(getReadinessCheckUrl(),
+  return customFetch<PublicHealthStatus>(getReadinessCheckUrl(),
   {
     ...options,
     method: 'GET'
@@ -2009,7 +2010,7 @@ export const getReadinessCheckQueryKey = () => {
     }
 
 
-export const getReadinessCheckQueryOptions = <TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getReadinessCheckQueryOptions = <TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -2028,10 +2029,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ReadinessCheckQueryResult = NonNullable<Awaited<ReturnType<typeof readinessCheck>>>
-export type ReadinessCheckQueryError = ErrorType<HealthStatus>
+export type ReadinessCheckQueryError = ErrorType<PublicHealthStatus>
 
 
-export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof readinessCheck>>,
@@ -2041,7 +2042,7 @@ export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessChe
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof readinessCheck>>,
@@ -2051,7 +2052,7 @@ export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessChe
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -2059,12 +2060,114 @@ export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessChe
  * @summary Core API readiness
  */
 
-export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<PublicHealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getReadinessCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetHealthDiagnosticsUrl = () => {
+
+
+
+
+  return `/api/health/diagnostics`
+}
+
+/**
+ * Requires an authenticated live-scope session with manage-staff. Available during startup. Returns bounded operational diagnostics, configuration signals (not provider reachability), and startup state. Optional diagnostic sampling failures are warnings, not core outages. A 200 response does not mean every optional worker is healthy. Queue samples and duplicate trends are read-only and never authorize cleanup.
+ * @summary Manager operational readiness diagnostics
+ */
+export const getHealthDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
+
+  return customFetch<HealthStatus>(getGetHealthDiagnosticsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHealthDiagnosticsQueryKey = () => {
+    return [
+    `/api/health/diagnostics`
+    ] as const;
+    }
+
+
+export const getGetHealthDiagnosticsQueryOptions = <TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHealthDiagnosticsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthDiagnostics>>> = ({ signal }) => getHealthDiagnostics({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHealthDiagnosticsQueryResult = NonNullable<Awaited<ReturnType<typeof getHealthDiagnostics>>>
+export type GetHealthDiagnosticsQueryError = ErrorType<void | HealthStatus>
+
+
+export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHealthDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getHealthDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHealthDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getHealthDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Manager operational readiness diagnostics
+ */
+
+export function useGetHealthDiagnostics<TData = Awaited<ReturnType<typeof getHealthDiagnostics>>, TError = ErrorType<void | HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetHealthDiagnosticsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

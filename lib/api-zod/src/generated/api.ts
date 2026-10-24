@@ -1482,11 +1482,11 @@ export const GetBuildInfoResponse = zod.object({
 })
 
 /**
- * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider. Scheduled-evaluation diagnostics report sample availability separately from the last measured queue state, report the exact duplicate-bucket group count, and include a bounded inventory with status, attempt-state, lease-validity, and keep/review candidate counts. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. They also report an aggregate duplicate-group trend with first and latest counts and their change over the bounded sample window; unavailable samples do not produce a trend.
- * @summary Health check
+ * Returns only coarse gate statuses, never operational diagnostics. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
+ * @summary Public compatibility readiness probe
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "status": zod.enum(['ok', 'starting', 'degraded']),
   "checks": zod.object({
   "process": zod.enum(['ok', 'warning', 'error', 'pending']),
   "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
@@ -1494,29 +1494,30 @@ export const HealthCheckResponse = zod.object({
   "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
   "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
   "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
-}).catchall(zod.enum(['ok', 'warning', 'error', 'pending'])).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
-  "capabilities": zod.object({
-  "ai": zod.object({
-  "status": zod.enum(['configured', 'not_configured', 'pending']),
-  "detail": zod.enum(['ai_provider_not_configured']).optional()
-}).describe('AI credential configuration, not remote provider reachability.')
-}),
-  "startup": zod.object({
-  "phase": zod.enum(['starting', 'ready', 'failed']),
-  "stage": zod.string().nullable(),
-  "durationMs": zod.number(),
-  "errorCode": zod.string().optional()
-}).optional(),
-  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with counts by status, attempt state, lease validity, and keep/review disposition. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs. The duplicateGroupTrend summary contains only aggregate firstCount, latestCount, change, and direction values. Direction is insufficient_samples before two observations and unavailable when no current sample is available; unavailable trend counts are null.'),
-  "correlationId": zod.string(),
-  "timestamp": zod.coerce.date()
-}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
+})
+})
 
 /**
- * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Scheduled-evaluation diagnostics distinguish pending, available, and unavailable samples from queue backlog warnings and include bounded duplicate-bucket status, attempt-state, lease-validity, and keep/review candidate counts. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. They also include an aggregate duplicate-group trend with first and latest counts and their change over the bounded sample window.
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Only coarse gate statuses are public. Detailed diagnostics require a live-scope session with manage-staff at /health/diagnostics.
  * @summary Core API readiness
  */
 export const ReadinessCheckResponse = zod.object({
+  "status": zod.enum(['ok', 'starting', 'degraded']),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+})
+})
+
+/**
+ * Requires an authenticated live-scope session with manage-staff. Available during startup. Returns bounded operational diagnostics, configuration signals (not provider reachability), and startup state. Optional diagnostic sampling failures are warnings, not core outages. A 200 response does not mean every optional worker is healthy. Queue samples and duplicate trends are read-only and never authorize cleanup.
+ * @summary Manager operational readiness diagnostics
+ */
+export const GetHealthDiagnosticsResponse = zod.object({
   "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
   "checks": zod.object({
   "process": zod.enum(['ok', 'warning', 'error', 'pending']),
@@ -1529,7 +1530,7 @@ export const ReadinessCheckResponse = zod.object({
   "capabilities": zod.object({
   "ai": zod.object({
   "status": zod.enum(['configured', 'not_configured', 'pending']),
-  "detail": zod.enum(['ai_provider_not_configured']).optional()
+  "detail": zod.enum(['ai_provider_not_configured', 'local_model_host_unreachable']).optional()
 }).describe('AI credential configuration, not remote provider reachability.')
 }),
   "startup": zod.object({
@@ -1541,7 +1542,7 @@ export const ReadinessCheckResponse = zod.object({
   "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with counts by status, attempt state, lease validity, and keep/review disposition. No rows are automatically designated safe to remove; any cleanup requires a separate owner-approved, audited transaction. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs. The duplicateGroupTrend summary contains only aggregate firstCount, latestCount, change, and direction values. Direction is insufficient_samples before two observations and unavailable when no current sample is available; unavailable trend counts are null.'),
   "correlationId": zod.string(),
   "timestamp": zod.coerce.date()
-}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
+}).describe('Authorized diagnostics response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
 
 /**
  * Creates a new username + password account. Requires a facility access code (configured server-side out of band and shared only with legitimate staff) — sign-up is otherwise closed to the public internet. The very first account ever created becomes a manager; all later accounts default to operator.

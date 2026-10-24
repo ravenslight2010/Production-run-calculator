@@ -14,6 +14,7 @@ concurrency:
 jobs:
   department-navigation:
     name: Desktop and phone department journey
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'docker-caddy-reviewed-inputs' || 'unprivileged-ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -60,6 +61,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Restore protected main build inputs
+        id: reviewed-inputs
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64: ${{ secrets.SOURCE_LIBRARY_RECONCILIATION_GZIP_BASE64 }}
+        run: node scripts/src/restore-reviewed-build-inputs.mjs
       - name: Initialize machine-readable test report
         run: node scripts/src/test-results.mjs init
 
@@ -186,3 +193,6 @@ jobs:
           path: test-evidence/test-results.json
           if-no-files-found: error
           retention-days: 14
+      - name: Clean protected build inputs
+        if: always() && steps.reviewed-inputs.outcome != 'skipped'
+        run: node scripts/src/restore-reviewed-build-inputs.mjs --cleanup
