@@ -4,7 +4,6 @@ import {
   timestamp,
   jsonb,
   integer,
-  serial,
   index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -21,7 +20,7 @@ import { z } from "zod/v4";
 export const syncConflictLogsTable = pgTable(
   "sync_conflict_logs",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
     scope: text("scope").notNull().default("live"),
     date: text("date").notNull(), // YYYY-MM-DD (the day the sync occurred)
     fieldsWithConflicts: jsonb("fields_with_conflicts")
@@ -58,3 +57,4 @@ export const insertSyncConflictLogSchema = createInsertSchema(
 
 export type InsertSyncConflictLog = z.infer<typeof insertSyncConflictLogSchema>;
 export type SyncConflictLog = typeof syncConflictLogsTable.$inferSelect;
+
