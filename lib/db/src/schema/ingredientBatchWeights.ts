@@ -1,4 +1,4 @@
-import { pgTable, text, doublePrecision, timestamp, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, doublePrecision, timestamp, integer } from "drizzle-orm/pg-core";
 
 // Learned per-ingredient batch weights. Mixes and cheese recipes carry their
 // own batch weight (the sum of their recipe rows), but plain ingredients
@@ -11,7 +11,7 @@ import { pgTable, text, doublePrecision, timestamp, serial } from "drizzle-orm/p
 // Matching is case-insensitive on name (done in the route/clients). `scope`
 // isolates the sandbox account's learned weights from live.
 export const ingredientBatchWeightsTable = pgTable("ingredient_batch_weights", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   scope: text("scope").notNull().default("live"),
   name: text("name").notNull(),
   lbs: doublePrecision("lbs").notNull(),
@@ -20,3 +20,4 @@ export const ingredientBatchWeightsTable = pgTable("ingredient_batch_weights", {
 });
 
 export type IngredientBatchWeight = typeof ingredientBatchWeightsTable.$inferSelect;
+

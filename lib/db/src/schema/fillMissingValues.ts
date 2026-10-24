@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -14,7 +14,7 @@ import { z } from "zod/v4";
 // same shape the AI suggestion endpoint returns, so clients coerce identically.
 // `scope` isolates the sandbox account's learned values from live.
 export const fillMissingValuesTable = pgTable("fill_missing_values", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   scope: text("scope").notNull().default("live"),
   brand: text("brand").notNull(),
   flavor: text("flavor").notNull(),
@@ -31,3 +31,4 @@ export const insertFillMissingValueSchema = createInsertSchema(fillMissingValues
 });
 export type InsertFillMissingValue = z.infer<typeof insertFillMissingValueSchema>;
 export type FillMissingValue = typeof fillMissingValuesTable.$inferSelect;
+

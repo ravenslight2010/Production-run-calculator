@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -15,7 +15,7 @@ import { z } from "zod/v4";
 // imported flavor under different brands can resolve differently; it is null for
 // brand aliases. `scope` isolates the sandbox account's aliases from live.
 export const importAliasesTable = pgTable("import_aliases", {
-  id: serial("id").primaryKey(),
+  id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   scope: text("scope").notNull().default("live"),
   type: text("type").notNull(), // "brand" | "flavor"
   externalName: text("external_name").notNull(),
@@ -32,3 +32,4 @@ export const insertImportAliasSchema = createInsertSchema(importAliasesTable).om
 });
 export type InsertImportAlias = z.infer<typeof insertImportAliasSchema>;
 export type ImportAlias = typeof importAliasesTable.$inferSelect;
+

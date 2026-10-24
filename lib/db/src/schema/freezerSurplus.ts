@@ -2,7 +2,6 @@ import {
   boolean,
   integer,
   jsonb,
-  serial,
   pgTable,
   text,
   timestamp,
@@ -67,7 +66,7 @@ export const freezerSurplusAllocationsTable = pgTable(
 export const freezerSurplusAdjustmentsTable = pgTable(
   "freezer_surplus_adjustments",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
     scope: text("scope").notNull().default("live"),
     eventId: text("event_id").notNull(),
     lotId: text("lot_id").notNull(),
@@ -96,6 +95,7 @@ export const freezerSurplusConfirmationsTable = pgTable(
     runDate: text("run_date").notNull(),
     brand: text("brand").notNull(),
     flavor: text("flavor").notNull().default(""),
+    productKey: text("product_key").notNull(),
     cases: integer("cases").notNull(),
     productionDate: text("production_date"),
     lotId: text("lot_id"),
@@ -120,7 +120,7 @@ export type FreezerSurplusConfirmationRow =
 export const freezerSurplusDecisionCorrectionsTable = pgTable(
   "freezer_surplus_decision_corrections",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
     scope: text("scope").notNull(),
     eventId: text("event_id").notNull(),
     confirmationId: text("confirmation_id").notNull(),
