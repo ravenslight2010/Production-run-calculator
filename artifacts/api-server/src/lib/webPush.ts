@@ -633,6 +633,9 @@ export function startWebPushAlertScheduler(options: {
             ...(transition.sampleTiming
               ? { queryDurationsMs: transition.sampleTiming.queryDurationsMs }
               : {}),
+            ...(transition.sampleTiming?.databasePhases
+              ? { databasePhaseVersion: 1, databasePhases: transition.sampleTiming.databasePhases }
+              : {}),
           }, "Scheduled evaluation queue monitor sample was slow");
         }
         logScheduledEvaluationQueueTransitions(transition);
@@ -647,6 +650,9 @@ export function startWebPushAlertScheduler(options: {
           failureReason: classifyBackgroundFailure(error, { assumeDatabase: true }),
           durationMs: readError?.totalDurationMs ?? boundedDurationMs(monotonicNow() - startedAt),
           ...(readError ? { queryDurationMs: readError.queryDurationMs } : {}),
+          ...(readError?.databasePhase
+            ? { databasePhaseVersion: 1, databasePhase: readError.databasePhase }
+            : {}),
         }, "Scheduled evaluation queue monitor sample unavailable");
         monitorUnavailable = true;
       })

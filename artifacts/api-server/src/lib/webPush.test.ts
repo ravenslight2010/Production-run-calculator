@@ -251,11 +251,18 @@ describe("server web-push alert candidates", () => {
     clearScheduledEvaluationQueueMonitorForTests();
     const { logger } = await import("../lib/logger");
     vi.mocked(logger.warn).mockClear();
+    const databasePhase = {
+      version: 1 as const, stage: "duplicate_group_scan" as const, coverage: "complete" as const,
+      phase: "post_checkout" as const, outcome: "query_timeout" as const,
+      observedFrom: "2026-10-25T00:00:00.000Z", observedUntil: "2026-10-25T00:00:00.125Z",
+      elapsedMs: 80, acquisitionMs: 20, postCheckoutMs: 60, timeoutOverrunMs: null,
+    };
     const sampleQueue = vi.fn().mockRejectedValue(new ScheduledEvaluationQueueReadError(
       "duplicate_group_scan",
       80,
       125,
       Object.assign(new Error("private query details"), { code: "57014" }),
+      databasePhase,
     ));
     const scheduler = startWebPushAlertScheduler({
       enqueue: async () => ({ examined: 0, enqueued: 0 }),
@@ -273,6 +280,8 @@ describe("server web-push alert candidates", () => {
           failureReason: "database-timeout",
           durationMs: 125,
           queryDurationMs: 80,
+          databasePhaseVersion: 1,
+          databasePhase,
         }),
         expect.any(String),
       );

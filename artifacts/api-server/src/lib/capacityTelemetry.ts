@@ -2,6 +2,7 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { Pool, PoolClient } from "pg";
 import type { Logger } from "pino";
 import { logger } from "./logger";
+import { startDatabasePhaseCheckout } from "./databasePhaseTelemetry";
 
 const MAX_SAMPLES = 2_048;
 const MAX_COUNTER_VALUE = Number.MAX_SAFE_INTEGER;
@@ -30,6 +31,8 @@ type Distribution = {
 };
 
 type CapacitySnapshot = {
+  observedFrom: string;
+  observedUntil: string;
   windowMs: number;
   counters: Record<string, number>;
   distributions: Record<string, {
@@ -55,7 +58,7 @@ eventLoopDelayHistogram.enable();
 let windowStartedAt = Date.now();
 let lastReportAt = windowStartedAt;
 let latestPool = { total: 0, idle: 0, waiting: 0 };
-let installedPool: Pool | undefined;
+const installedPools = new WeakSet<Pool>();
 let legacyObservationStartedAt = windowStartedAt;
 const legacySyncBuckets = new Map<number, { accepted: number; rejected: number }>();
 
@@ -271,14 +274,17 @@ function poolSnapshot(pool: Pool): void {
 }
 
 export function installPoolTelemetry(pool: Pool): void {
-  if (installedPool === pool) return;
-  installedPool = pool;
+  if (installedPools.has(pool)) return;
+  installedPools.add(pool);
   const originalConnect = pool.connect.bind(pool);
   pool.connect = ((callback?: (err: Error | undefined, client: PoolClient | undefined, release: (releaseError?: Error | boolean) => void) => void) => {
     const startedAt = performance.now();
+    const phaseCheckout = startDatabasePhaseCheckout(pool.options?.connectionTimeoutMillis);
     if (callback) {
       return originalConnect((error, client, release) => {
+        phaseCheckout(error);
         observe("db.pool.acquisition_ms", performance.now() - startedAt);
+        if (error) increment("db.pool.acquisition_error.count");
         poolSnapshot(pool);
         maybeReport();
         callback(error, client, release);
@@ -286,12 +292,14 @@ export function installPoolTelemetry(pool: Pool): void {
     }
     return originalConnect().then(
       (client) => {
+        phaseCheckout();
         observe("db.pool.acquisition_ms", performance.now() - startedAt);
         poolSnapshot(pool);
         maybeReport();
         return client;
       },
       (error) => {
+        phaseCheckout(error);
         increment("db.pool.acquisition_error.count");
         observe("db.pool.acquisition_ms", performance.now() - startedAt);
         poolSnapshot(pool);
@@ -317,6 +325,8 @@ export function capacityTelemetrySnapshot(now = Date.now()): CapacitySnapshot {
   const eventLoopDelay = eventLoopDelayDistribution();
   if (eventLoopDelay) result[EVENT_LOOP_DELAY_DISTRIBUTION] = eventLoopDelay;
   return {
+    observedFrom: new Date(windowStartedAt).toISOString(),
+    observedUntil: new Date(now).toISOString(),
     windowMs: Math.max(0, now - windowStartedAt),
     counters: Object.fromEntries(counters),
     distributions: result,

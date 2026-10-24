@@ -27,6 +27,7 @@ import {
   reportCapacityTelemetry,
 } from "./lib/capacityTelemetry";
 import { getBuildInfo } from "./lib/buildInfo";
+import { stopDatabasePhaseObservations } from "./lib/databasePhaseTelemetry";
 import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
 import {
@@ -132,6 +133,9 @@ async function startServer(): Promise<void> {
     stopCapacityTelemetryHeartbeat?.();
     stopCapacityTelemetryHeartbeat = undefined;
     stopSyncOutboxFanout();
+    // Ends diagnostics only; never aborts work, releases clients, or changes leases.
+    stopDatabasePhaseObservations();
+    reportCapacityTelemetry(logger);
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
