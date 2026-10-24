@@ -220,7 +220,7 @@ describe("run template repository", () => {
             // The server may finish its transaction after the browser aborts.
             serverTemplates = submitted;
             reject(new DOMException("Client stopped waiting", "AbortError"));
-          }, { once: true });
+          });
         });
       }
       return Promise.resolve(response(serverTemplates));
@@ -244,7 +244,7 @@ describe("run template repository", () => {
         return new Promise<Response>((_resolve, reject) => {
           init.signal?.addEventListener("abort", () => {
             reject(new DOMException("Client stopped waiting", "AbortError"));
-          }, { once: true });
+          });
         });
       }
       return Promise.resolve(response([]));
