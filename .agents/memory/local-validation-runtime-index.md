@@ -3,6 +3,12 @@ name: Local validation runtime index
 description: Pointers for the release runner, pinned Node, local browser transport and test certificates.
 ---
 
+A prepared-source regeneration may leave a separate old-policy web-stage identity active in an inherited workspace. A Vite config-loader check can therefore still reject the record even after source preparation succeeds.
+
+**Why:** The loader consumes stage metadata independently; refreshing the expected-source record alone did not resolve an inherited policy-version mismatch.
+
+**How to apply:** Identify which generated record the failing consumer actually reads. Preserve stale ignored stage metadata outside its active filename when no build is running, then confirm the focused loader check. Do not loosen identity validation, fabricate a live-source match, or publish to fix local validation.
+
 In Replit, `playwright install --with-deps` fails when it tries to use apt; install
 browser binaries without `--with-deps` and provision any missing host libraries through
 Nix. Keep `--with-deps` for Ubuntu-hosted GitHub Actions runners.
