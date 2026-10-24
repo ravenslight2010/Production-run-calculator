@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   DURATION_REGRESSION_MIN_INCREASE_MS,
@@ -100,35 +101,38 @@ assert.throws(
   "coverage drift must fail with the discovered and configured case counts",
 );
 
-const discoveryJson = execFileSync(
-  "pnpm",
-  [
-    "--filter",
-    "@workspace/run-calculator",
-    "exec",
-    "playwright",
-    "test",
-    "--config",
-    "playwright.config.ts",
-    "--list",
-    "--reporter=json",
-  ],
-  {
-    cwd: repositoryRoot,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      // Discovery must not inherit a caller's request to build/start servers.
-      RELEASE_BROWSER_LOCAL_SERVERS: "0",
-      PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18082",
-      PLAYWRIGHT_API_BASE_URL: "http://127.0.0.1:18081",
+function discoverBrowserConfig(config: string): string {
+  return execFileSync(
+    "pnpm",
+    [
+      "--filter",
+      "@workspace/run-calculator",
+      "exec",
+      "playwright",
+      "test",
+      "--config",
+      config,
+      "--list",
+      "--reporter=json",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        // Discovery must not inherit a caller's request to build/start servers.
+        RELEASE_BROWSER_LOCAL_SERVERS: "0",
+        PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18082",
+        PLAYWRIGHT_API_BASE_URL: "http://127.0.0.1:18081",
+      },
+      timeout: 60_000,
+      maxBuffer: 30 * 1024 * 1024,
     },
-    timeout: 60_000,
-    maxBuffer: 30 * 1024 * 1024,
-  },
-);
+  );
+}
+const discoveryJson = discoverBrowserConfig("playwright.config.ts");
 const discoveryReport = JSON.parse(discoveryJson) as {
-  config: { projects: Array<{ name: string }> };
+  config: { projects: Array<{ name: string }>; webServer?: unknown };
   errors: Array<{ message: string }>;
   suites: PlaywrightListSuite[];
 };
@@ -157,6 +161,36 @@ assert.ok(
 );
 assert.doesNotThrow(() =>
   assertFullBrowserCaseIdentityContract(discoveredIdentities),
+);
+
+// The standalone debug harness deliberately has broader lane ownership than
+// default Chromium. Freeze its own complete project/file/title identity set,
+// captured before narrowing the file matcher (not the default release count).
+// JSON.parse must consume all stdout: slicing off helper diagnostics would hide
+// the Node test execution that this regression is meant to catch.
+const debugReport = JSON.parse(
+  discoverBrowserConfig("playwright.release-debug.config.ts"),
+) as typeof discoveryReport;
+assert.deepEqual(debugReport.errors, []);
+assert.equal(
+  debugReport.config.webServer ?? null,
+  null,
+  "standalone discovery must not configure build/server commands",
+);
+assert.deepEqual(
+  debugReport.config.projects.map((project) => project.name),
+  ["chromium"],
+);
+const debugIdentities = collectPlaywrightCaseIdentities(debugReport.suites);
+assert.equal(debugIdentities.length, new Set(debugIdentities).size);
+assert.ok(
+  debugIdentities.every((identity) => identity.includes(".spec.ts :: ")),
+  "standalone discovery must not collect Node/Vitest helper files",
+);
+assert.equal(
+  createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
+  "4de725cd89e5874ca2be37d171ce284f3f260ada8847637dcb6e2c3b5fa2a3cf",
+  "standalone Chromium project/file/title identities changed; review its own lane selections, not the default suite count",
 );
 
 const addedIdentity =

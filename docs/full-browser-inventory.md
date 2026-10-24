@@ -196,3 +196,82 @@ The existing serial worker, zero retries, 80-minute warning and 90-minute hard
 budget stay intact. Adding intended cases does not demonstrate that they fit
 that budget. Preserve existing retained runtime reports; do not rewrite them
 to manufacture a 216-case result.
+
+## Standalone discovery boundary maintenance — 2026-10-24
+
+This is separate from the approved default inventory and runtime release check.
+The maintenance agent inventoried all **57** `playwright*config.ts` files in
+`artifacts/run-calculator` at base revision
+`df2b972bf819ebbb8694966810f8b450225da6a1`. Of the 56 dedicated configs, only
+`playwright.release-debug.config.ts` lacked an explicit `testMatch`.
+The other 55 dedicated configs and the default already selected explicit files
+or globs (including project-specific selections). They were not changed.
+In particular, `playwright.import-review-timing.config.ts` intentionally selects
+`import-review-timing.browser.ts`; a blanket `.spec.ts` conversion of every
+config would lose that coverage.
+
+### Reproduction and repair
+
+Bounded read-only collection at approximately 01:14 UTC used:
+
+```sh
+RELEASE_RUNNER_LOCK_WAIT_SECONDS=60 bash scripts/src/run-release-node.sh \
+  env RELEASE_BROWSER_LOCAL_SERVERS=0 \
+  PLAYWRIGHT_BASE_URL=http://127.0.0.1:18082 \
+  PLAYWRIGHT_API_BASE_URL=http://127.0.0.1:18081 \
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/false \
+  timeout 60s pnpm --filter @workspace/run-calculator exec playwright test \
+  --config playwright.release-debug.config.ts --list --reporter=json
+```
+
+Before repair, stdout began with the two passing Node-test diagnostics from
+`qc-date-code-browser-diagnostics.test.mjs` and was therefore not valid JSON.
+The subsequent report had zero collection errors and **264** browser identities,
+all in project `chromium`. A temporary parser separated that diagnostic prefix
+only to retain the pre-repair browser identity baseline; the regression does
+not accept or strip any prefix.
+
+The repair adds `testMatch: "**/*.spec.ts"` only to release-debug. Its existing
+ignore list, grep, project, global setup and reporters remain unchanged.
+The regression extends `e2e/release-duration-reporter.unit.mts`, already run by
+the scripts package's `test:release-evidence` command. It parses the entire JSON
+stdout, checks errors and project names, rejects configured server commands,
+requires browser-spec filenames and unique identities, and compares the SHA-256
+of the complete sorted file/title identity array:
+`4de725cd89e5874ca2be37d171ce284f3f260ada8847637dcb6e2c3b5fa2a3cf`.
+That fingerprint is for release-debug's own 264 identities, not a new default
+contract or a runtime result. Legitimate future identity changes require review
+of that standalone selection before updating the fingerprint.
+
+Each discovery subprocess has a 60-second timeout, explicit local origins and
+`RELEASE_BROWSER_LOCAL_SERVERS=0`, regardless of inherited caller settings.
+`--list` does not execute global setup or browser hooks. No builds, services,
+database setup, browser installs or runtime suites were launched.
+The dedicated authority configs and their selectors are unchanged; their
+previous runtime evidence was not replaced or rerun.
+
+### Verification and failure ledger
+
+Evidence is local Linux development test metadata only, not production data.
+Temporary raw collection stayed outside the repository; retained evidence here
+contains only filenames, selection metadata and an identity fingerprint, with
+no account records, requests, credentials or connection strings.
+
+| Check / observation | Result and disposition |
+| --- | --- |
+| Pre-repair helper execution during release-debug collection | Reproduced; fixed by the browser-only matcher |
+| Real-config discovery/reporter regression | PASS: clean JSON, exact 264 standalone identities and unchanged 216 default identities |
+| Added no-server assertion initially expected `undefined` | Playwright serializes the absent server as `null`; assertion now accepts either absent representation, still rejects any configured server |
+| Initial root `CI=true pnpm run typecheck` | Failed at `Invalid prepared build-source record.`; inherited ignored web-stage marker had obsolete `production-source-v3` |
+| Safe local marker repair | No build process active; archived the stale stage marker byte-for-byte under ignored `.local/build-identity/archived-stages/`; publish/prepared/sealed records untouched |
+| Repeated root typecheck after repair | PASS, including API, calculator, scripts and mockup packages |
+| Final focused checks | PASS: updated discovery/reporter regression, explicit-file strict TypeScript check of the debug config and regression, and `git diff --check` |
+| Source-policy lookup initially named nonexistent `source-fingerprint.mjs` | Corrected via the actual import in `build-source-identity.mjs`: `build-source-files.mjs`; no source change |
+
+Desktop Chromium, phone, tablet portrait/landscape, WebKit/Safari and physical
+Android Chrome/iOS Safari/PWA runtime verification are **NOT RUN**: this work
+changes collection only and makes no runtime compatibility claim. App screenshots
+and workflow restarts are not applicable: no application runtime code or service
+commands changed. Release certification, publishing and production writes remain
+out of scope. The separately owned full-browser runtime verification already
+covers the next release step; no overlapping follow-up is proposed.
