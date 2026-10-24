@@ -11,8 +11,8 @@ export const savedSpecSheetsTable = pgTable("saved_spec_sheets", {
   id: integer("id").generatedByDefaultAsIdentity().primaryKey(),
   scope: text("scope").notNull().default("live"),
   label: text("label").notNull(),
-  // Stable per-file identity (normalized uploaded filename) so retention keeps
-  // the two most recent versions of EACH distinct spec sheet, not just two overall.
+  // Stable per-file identity (normalized uploaded filename) so retention keeps the
+  // two most recent versions of EACH distinct spec sheet, not just two overall.
   // Nullable: older/mobile clients that don't send one share a single legacy bucket.
   sourceKey: text("source_key"),
   // SHA-256 content fingerprint of the uploaded file bytes (per-file hashes

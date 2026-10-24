@@ -95,7 +95,6 @@ export const freezerSurplusConfirmationsTable = pgTable(
     runDate: text("run_date").notNull(),
     brand: text("brand").notNull(),
     flavor: text("flavor").notNull().default(""),
-    productKey: text("product_key").notNull(),
     cases: integer("cases").notNull(),
     productionDate: text("production_date"),
     lotId: text("lot_id"),
