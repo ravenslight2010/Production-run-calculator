@@ -1201,8 +1201,8 @@ importers:
         specifier: ^2.29.1
         version: 2.30.0
       openai:
-        specifier: ^7.15.0
-        version: 7.38.0(ws@8.22.0)(zod@4.6.7)
+        specifier: ^7.42.0
+        version: 7.42.0(google-auth-library@10.9.1)(ws@8.22.0)(zod@4.6.7)
       p-limit:
         specifier: ^7.3.3
         version: 7.3.3
@@ -4810,13 +4810,14 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
-  openai@7.38.0:
-    resolution: {integrity: sha512-Ef+YyIeoiisZLP/tV4F4/RieJAl4OEJTyJg6gV0AXOb0T9CDkvYJoU224OY5CTmQ4zDJeku4jEHjz2b3/6Ndhw==}
+  openai@7.42.0:
+    resolution: {integrity: sha512-RziM2bxp1k24mTLtunije+OOCGRC+qtK0YNYPWkrTdKJLJ65WYW+rPYxlLbnBzU4WwINFCFa0OjCgbsX+fif/w==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
       '@smithy/hash-node': '>=4.3.0 <5'
       '@smithy/signature-v4': '>=5.4.0 <6'
+      google-auth-library: '>=9.15.1 <11'
       undici: ^6.27.0
       ws: ^8.21.0
       zod: ^3.25 || ^4.0
@@ -4826,6 +4827,8 @@ packages:
       '@smithy/hash-node':
         optional: true
       '@smithy/signature-v4':
+        optional: true
+      google-auth-library:
         optional: true
       undici:
         optional: true
@@ -9173,8 +9176,9 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@7.38.0(ws@8.22.0)(zod@4.6.7):
+  openai@7.42.0(google-auth-library@10.9.1)(ws@8.22.0)(zod@4.6.7):
     optionalDependencies:
+      google-auth-library: 10.9.1
       ws: 8.22.0
       zod: 4.6.7
 
