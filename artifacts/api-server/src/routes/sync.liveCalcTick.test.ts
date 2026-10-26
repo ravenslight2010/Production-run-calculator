@@ -8,6 +8,23 @@ function dayState(runs: Array<{ id: string; startedAt?: number; endedAt?: number
 }
 
 describe("shouldEmitLiveCalcTick", () => {
+  it.each([undefined, 0, 2, 99])("ticks the later active lifecycle without trusting index %s", (currentIndex) => {
+    const data = {
+      dayState: {
+        currentIndex,
+        runs: [
+          { id: "old", startedAt: 100, endedAt: 200 },
+          { id: "live", startedAt: 1_000 },
+          { id: "pending" },
+        ],
+      },
+      runValues: { live: { approxLineSpeed: 90 } },
+    };
+    expect(shouldEmitLiveCalcTick(data, 6_000, 0)).toBe(true);
+    expect(shouldEmitSetupCalcTick(data, 6_000, 0)).toBe(true);
+    expect(shouldEmitSetupCalcTick({ ...data, runValues: { old: {} } }, 6_000, 0)).toBe(false);
+  });
+
   it("emits when the current run is active (started, not ended)", () => {
     const data = dayState([{ id: "r1", startedAt: 1000 }]);
     expect(shouldEmitLiveCalcTick(data, 6_000, 0, TICK_MS)).toBe(true);

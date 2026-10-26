@@ -105,7 +105,11 @@ export function buildOperationalProjection(args: {
   calculationRevision?: number;
   stationActivity?: Partial<Record<StationActivityId, StationActivityEvidence>> | null;
 }): OperationalProjection {
-  const run = args.payload.dayState.runs[args.payload.dayState.currentIndex ?? 0];
+  const run = args.payload.dayState.runs.find((entry) => entry.id === args.serverCalc.runId);
+  if (!run || args.schedule.runId !== run.id
+    || args.schedule.generation !== `${run.id}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`) {
+    throw new Error("Operational projection requires matching run, calculation, and schedule identities");
+  }
   const raw = args.payload.runValues?.[args.serverCalc.runId] ?? {};
   const progress = args.payload.packagingProgress?.[args.serverCalc.runId] ?? {};
   const v = applyTemporaryOverrides({ ...raw, ...progress }) as Record<string, unknown>;

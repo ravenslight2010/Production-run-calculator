@@ -93,6 +93,12 @@ describe("shouldUseServerCalc (freshness-window adoption)", () => {
     })).toBe(true);
   });
 
+  it("rejects a receipt from the future rather than treating it as indefinitely fresh", () => {
+    expect(shouldUseServerCalc({
+      online: true, syncConnected: true, receipt: fresh, nowMs: fresh.capturedAt - 1,
+    })).toBe(false);
+  });
+
   it("honors an explicit windowMs override", () => {
     expect(shouldUseServerCalc({
       online: true, syncConnected: true, receipt: fresh, nowMs: 95_000, windowMs: 4_000,

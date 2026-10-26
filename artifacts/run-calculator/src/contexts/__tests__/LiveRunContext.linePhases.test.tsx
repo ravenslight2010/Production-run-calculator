@@ -64,6 +64,7 @@ function projectionFor(options: {
 }): OperationalProjection {
   return {
     runId: RUN_ID,
+    lifecycleGeneration: `${RUN_ID}:${fakeRun.startedAt}`,
     capturedAtServerMs: options.capturedAtMs ?? NOW_MS - 2_000,
     effectiveElapsedSec: 60,
     facts: { runStatus: options.runStatus ?? "running" },
@@ -146,6 +147,27 @@ describe("LiveRunProvider — line-phase model adoption", () => {
     vi.useRealTimers();
     cleanup();
   });
+
+  it.each(["expired-projection", "expired-receipt", "future-projection", "old-generation", "other-run"])(
+    "rejects %s instead of retaining stale station timers",
+    (reason) => {
+      const projection = projectionFor({
+        capturedAtMs: reason === "expired-projection" ? NOW_MS - 10_001
+          : reason === "future-projection" ? NOW_MS + 1 : NOW_MS - 2_000,
+      });
+      if (reason === "old-generation") projection.lifecycleGeneration = `${RUN_ID}:0`;
+      if (reason === "other-run") projection.runId = "previous-run";
+      render(
+        <TestProvider currentRun={fakeRun}
+          operationalSnapshotReceipt={reason === "expired-receipt"
+            ? { ...freshReceipt, capturedAt: NOW_MS - 10_001 } : freshReceipt}
+          operationalProjection={projection}>
+          <Probe probeRef={phaseProbe} />
+        </TestProvider>,
+      );
+      expect(phaseProbe.current?.stage1.remainMs).toBe(90_000);
+    },
+  );
 
   it("keeps confirmed paused occupancy instead of stale pre-wake local occupancy", () => {
     const occupancy = {
@@ -256,7 +278,7 @@ describe("LiveRunProvider — line-phase model adoption", () => {
       <TestProvider
         operationalSnapshotReceipt={freshReceipt}
         operationalProjection={projectionFor({ runStatus: "running" })}
-        currentRun={{ ...fakeRun, pausedAt: NOW_MS - 60_000 }}
+        currentRun={{ ...fakeRun, startedAt: NOW_MS - 120_000, pausedAt: NOW_MS - 60_000 }}
         runStatus="paused"
       >
         <Probe probeRef={phaseProbe} />

@@ -109,7 +109,8 @@ import {
   computeAutoTrackSchedule,
   computeAutoTrackElapsedMs,
   buildOperationalProjection,
-  computeServerCalc,
+  computeSharedServerCalc,
+  selectCanonicalLiveRun,
   applyTemporaryOverrides,
   type AutoTrackSchedule,
   type AutoTrackScheduleInput,
@@ -441,8 +442,9 @@ export function buildAutoTrackSchedule(
   calcResult: ServerCalcResult | null,
   nowMs = Date.now(),
 ): AutoTrackSchedule | null {
-  const run = payload?.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
-  if (!run || typeof run.id !== "string" || run.autoTrackDisabled === true || !calcResult) return null;
+  const run = selectCanonicalLiveRun(payload?.dayState?.runs);
+  if (!run || typeof run.id !== "string" || run.autoTrackDisabled === true
+    || !calcResult || calcResult.runId !== run.id) return null;
   const runId = run.id;
   const rawValues = payload?.runValues?.[runId];
   if (!rawValues || typeof rawValues !== "object") return null;
@@ -515,7 +517,7 @@ function computeServerLiveState(
       if (cacheKey && serverCalcCache.has(cacheKey)) {
         serverCalc = serverCalcCache.get(cacheKey)!;
       } else {
-        serverCalc = computeServerCalc(payload as Parameters<typeof computeServerCalc>[0], [], nowMs);
+        serverCalc = computeSharedServerCalc(payload as Parameters<typeof computeSharedServerCalc>[0], [], nowMs);
         if (cacheKey && serverCalc) {
           serverCalcCache.set(cacheKey, serverCalc);
           // Evict old entries when cache is full

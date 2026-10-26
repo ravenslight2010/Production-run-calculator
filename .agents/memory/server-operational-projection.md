@@ -34,3 +34,16 @@ even though the operator has adopted the accepted physical totals.
 **How to apply:** Keep ordinary setup/recovery stamps separate from command
 baselines. Preserve the server generation guard and review evidence; never
 weaken that guard or silently retry a rejected event with a different identity.
+
+## Shared display versus explicit calculation targets
+
+Shared station read models must choose a run from canonical lifecycle facts.
+Device selection is not canonical. Explicit per-run calculations must retain
+their independent target, including historical and bounded drain targets.
+
+**Why:** Replacing every calculation target with the active run would fix shared
+displays but corrupt historical reports and drain tracking for another run.
+
+**How to apply:** Keep shared lifecycle selection separate from explicit-target
+calculation. Bind the projection and due schedule to the same run and lifecycle
+generation; reject stale client projections before using any of their timers.

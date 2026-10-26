@@ -4606,6 +4606,66 @@ describe("/sync snapshot conditionals", () => {
     expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
   });
 
+  it("projects the later canonical active run without a device selection across full and unchanged reads", async () => {
+    const now = Date.now();
+    const payload = {
+      dayState: {
+        date: DATE,
+        runs: [
+          { id: "display-old", subTab: "crusts", startedAt: now - 900_000, endedAt: now - 90_000 },
+          { id: "display-live", subTab: "crusts", startedAt: now - 30_000 },
+          { id: "display-next" },
+        ],
+      },
+      runValues: {
+        "display-old": { casesNeeded: 100, approxLineSpeed: 30, pizzasPerCase: 6, freezerTime: 12 },
+        "display-live": {
+          casesNeeded: 200, approxLineSpeed: 90, pizzasPerCase: 12, freezerTime: 7,
+          casesPerSkid: 40, sauceOzPerPizza: 2, sauceBarrelLbs: 50,
+          tempFreezerTime: 9, app1Type: "Cheese", app1OzPerPizza: 3, app1BatchLbs: 25,
+        },
+      },
+      packagingProgress: { "display-live": { skidsCompleted: 1, casesOnCurrentSkid: 3 } },
+      runValuesUpdatedAt: { "display-old": 1, "display-live": 1 },
+    };
+    const { computeServerCalc } = await import("@workspace/live-calc");
+    const { buildAutoTrackSchedule } = await import("./sync");
+    // An old result must not be paired with the new active run's settings.
+    expect(buildAutoTrackSchedule(payload, computeServerCalc(payload, [], now), now)).toBeNull();
+    await seedCanonicalSync(DATE, payload);
+    const read = async (snapshotId?: string) => {
+      const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}${snapshotId ? `&snapshot=${snapshotId}` : ""}`,
+        { headers: authHeaders() });
+      expect(response.ok).toBe(true);
+      const body = await response.json() as {
+        dayState: { currentIndex?: number };
+        operationalProjection: import("@workspace/live-calc").OperationalProjection;
+        unchanged?: boolean;
+        snapshotId?: string;
+      };
+      return { ...body, responseSnapshotId: response.headers.get("X-Sync-Snapshot") };
+    };
+    const full = await read();
+    expect(full.dayState.currentIndex).toBeUndefined();
+    expect(full.operationalProjection.calc).toMatchObject({ ppm: 90, casesCompleted: 43 });
+    expect(full.operationalProjection.due).toMatchObject({ runId: "display-live" });
+    expect(full.operationalProjection).toMatchObject({
+      runId: "display-live", facts: { runStatus: "running" },
+      lifecycleGeneration: full.operationalProjection.due.generation,
+    });
+    expect(full.operationalProjection.effectiveElapsedSec).toBeGreaterThanOrEqual(30);
+    expect(full.operationalProjection.effectiveElapsedSec).toBeLessThan(60);
+    expect(full.responseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+    const unchanged = await read(full.responseSnapshotId!);
+    expect(unchanged.unchanged).toBe(true);
+    expect(unchanged.snapshotId).toBe(full.responseSnapshotId);
+    expect(unchanged.operationalProjection.runId).toBe("display-live");
+    expect(unchanged.operationalProjection.due.runId).toBe("display-live");
+    // Both read forms are transport-only: no selection or projection is saved.
+    const [stored] = await db.select().from(dailySyncTable).where(eq(dailySyncTable.date, DATE));
+    expect(stored.data).toEqual(payload);
+  });
+
   it("returns nonzero draining occupancy from an unchanged read of an ended run", async () => {
     const now = Date.now();
     const startedAt = now - 10 * 60_000;
@@ -6608,20 +6668,22 @@ describe("/sync/events — active-run calc tick", () => {
   // The server re-emits the server-computed calc on a low cadence while a run
   // is active. Uses LIVE_CALC_TICK_MS so the test does not wait on the 15s
   // default heartbeat.
-  it("pushes a calcTick frame with serverCalc for the active run", async () => {
+  it("pushes a calcTick frame for the later active lifecycle without currentIndex", async () => {
     const date = "2030-03-13";
     process.env.LIVE_CALC_TICK_MS = "2000";
-    await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({
-        senderId: "calc-tick-writer",
-        payload: {
-          dayState: { runs: [{ id: "active-run", brand: "Acme", flavor: "Pep", startedAt: 1000 }] },
-          runValues: { "active-run": { casesNeeded: 240 } },
-          runValuesUpdatedAt: { "active-run": 1 },
-        },
-      }),
+    // Already-accepted canonical lifecycle: generic sync cannot create Start/End
+    // facts, so seed through the disposable fixture rather than a legacy PUT.
+    await seedCanonicalSync(date, {
+      dayState: { runs: [
+        { id: "ended-run", brand: "Acme", flavor: "Cheese", startedAt: 500, endedAt: 900 },
+        { id: "active-run", brand: "Acme", flavor: "Pep", subTab: "crusts", startedAt: 1000 },
+        { id: "pending-run", brand: "Acme", flavor: "Next" },
+      ] },
+      runValues: {
+        "ended-run": { casesNeeded: 100, approxLineSpeed: 30, pizzasPerCase: 6 },
+        "active-run": { casesNeeded: 240, approxLineSpeed: 90, pizzasPerCase: 12 },
+      },
+      runValuesUpdatedAt: { "ended-run": 1, "active-run": 1 },
     });
 
     const ctrl = new AbortController();
@@ -6657,6 +6719,11 @@ describe("/sync/events — active-run calc tick", () => {
     expect(tickFrame).toBeDefined();
     const serverCalc = tickFrame!.serverCalc as { runId?: string } | null | undefined;
     expect(serverCalc?.runId).toBe("active-run");
+    expect(tickFrame!.serverCalc).toMatchObject({ calc: { ppm: 90 } });
+    expect(tickFrame!.autoTrackSchedule).toMatchObject({ runId: "active-run" });
+    expect(tickFrame!.operationalProjection).toMatchObject({
+      runId: "active-run", facts: { runStatus: "running" },
+    });
     expect(typeof (tickFrame!.serverTime as number | undefined)).toBe("number");
   });
 });

@@ -231,7 +231,19 @@ export function LiveRunProvider({
     receipt: operationalSnapshotReceipt,
   });
   const confirmedProjection =
-    operationalDisplayState === "confirmed" && operationalProjection?.runId === currentRunId
+    operationalDisplayState === "confirmed"
+      && operationalProjection?.runId === currentRunId
+      && operationalProjection.lifecycleGeneration === `${currentRunId}:${currentRun?.metaUpdatedAt ?? currentRun?.startedAt ?? 0}`
+      && operationalProjection.facts.runStatus === runStatus
+      && shouldUseServerCalc({
+        online: operationalOnline,
+        syncConnected: operationalSyncConnected,
+        receipt: operationalSnapshotReceipt,
+        nowMs: nowTime.getTime() + serverClockOffsetMs,
+      })
+      && Number.isFinite(operationalProjection.capturedAtServerMs)
+      && nowTime.getTime() + serverClockOffsetMs >= operationalProjection.capturedAtServerMs
+      && nowTime.getTime() + serverClockOffsetMs - operationalProjection.capturedAtServerMs <= LIVE_CALC_STALE_MS
       ? operationalProjection
       : null;
   // This is a display-only rebase between server frames. It never writes a
@@ -264,6 +276,7 @@ export function LiveRunProvider({
   // computeCalc — never a blank UI.
   const adoptServerCalc =
     operationalServerCalc != null &&
+    (!operationalProjection || confirmedProjection != null) &&
     currentRunId === currentRun?.id &&
     operationalSnapshotReceipt?.runId === currentRunId &&
     shouldUseServerCalc({
