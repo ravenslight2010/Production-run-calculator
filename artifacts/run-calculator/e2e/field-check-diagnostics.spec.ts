@@ -17,22 +17,58 @@ test.beforeAll(async ({ playwright }) => {
 });
 test.afterAll(async () => { await fixtures?.cleanup(); });
 
-test("manager sees safe sync categories and performance sources from isolated API evidence", async ({ page, request }, testInfo) => {
+test("manager sees safe sync categories and performance sources from isolated API evidence", async ({ page, request, browserName }, testInfo) => {
   let browserPhase = "setup";
+  let reloading = false;
+  const reloadNetworkDiagnostics: Array<{ phase: string; route: string }> = [];
+  const { reloadNetworkPath } = await import("./field-check-browser-diagnostics.mjs");
+  const networkCategory = (error: { name: string; message: string }) =>
+    reloadNetworkPath(error, { engine: browserName, reloading, origin: new URL(page.url()).origin });
+  const finishManagerReload = async () => {
+    // Probe explicitly: query-cache reuse, 304s and startup polling jitter must
+    // not be mistaken for failed connectivity or satisfy a fresh-read check.
+    const reads = await page.evaluate(async () => Promise.all(
+      ["/api/incidents", "/api/factory-data"].map(async (route) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        try {
+          const response = await fetch(route, { cache: "no-store", signal: controller.signal });
+          return { route, status: response.status, json: response.headers.get("content-type")?.includes("application/json") };
+        } finally { clearTimeout(timer); }
+      }),
+    ));
+    expect(reads).toEqual([
+      { route: "/api/incidents", status: 200, json: true },
+      { route: "/api/factory-data", status: 200, json: true },
+    ]);
+    reloading = false;
+  };
   const uncaughtPageErrors: Array<{ phase: string; name: string; message: string }> = [];
   const consoleErrorPhases: string[] = [];
   page.on("pageerror", (error) => {
-    const message = error.message
+    const route = networkCategory(error);
+    if (route) {
+      reloadNetworkDiagnostics.push({ phase: browserPhase, route });
+      return;
+    }
+    const message = `${error.name}: ${error.message}`
       .replace(/https?:\/\/\S+/gi, "[url]")
       .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
       .replace(/\b(token|secret|password)\b\s*[:=]\s*\S+/gi, "$1=[redacted]")
       .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[id]")
       .replace(/\s+/g, " ")
       .slice(0, 220);
-    uncaughtPageErrors.push({ phase: browserPhase, name: error.name.slice(0, 80), message });
+    uncaughtPageErrors.push({ phase: browserPhase, name: "unclassified browser error", message });
   });
   page.on("console", (message) => {
-    if (message.type() === "error") consoleErrorPhases.push(browserPhase);
+    if (message.type() !== "error") return;
+    const match = message.text().match(/^Fetch API cannot load (https?):\/(\/\S+ due to access control checks\.)$/);
+    const route = match && networkCategory({ name: `Fetch API cannot load ${match[1]}`, message: match[2] });
+    if (route) {
+      reloadNetworkDiagnostics.push({ phase: browserPhase, route });
+      return;
+    }
+    consoleErrorPhases.push(browserPhase);
   });
   const account = await fixtures.createAccount({
     username: uniqueTestId("field_diagnostics"), password: "TestPass123!",
@@ -208,6 +244,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
   expect(JSON.parse((await page.evaluate((key) => localStorage.getItem(key), historyKey)) ?? "null"))
     .toEqual([historyRows[1]]);
   expect(await page.evaluate((key) => localStorage.getItem(key), unrelatedKey)).toBe(unrelatedRaw);
+  reloading = true;
   await page.reload();
   await expect(page.getByTestId("shared-records-status"))
     .toContainText("Saved record on this device. Date: 2026-10-21.");
@@ -217,6 +254,7 @@ test("manager sees safe sync categories and performance sources from isolated AP
 
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Reported issues" }).click();
+  await finishManagerReload();
   const failures = page.getByLabel("Actionable field-check failures");
   await expect(failures).toBeVisible();
   await expect(page.getByText(incidentData.correlationId, { exact: true }).first()).toBeVisible();
@@ -387,11 +425,13 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await filters.getByRole("button", { name: "Clear field filters" }).click();
   await expect(population).toContainText("Unfiltered:");
   await expect(failures).toBeVisible();
+  reloading = true;
   await page.reload();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Reported issues" }).click();
   await expect(page.getByTestId("field-evidence-population")).toContainText("Unfiltered:");
+  await finishManagerReload();
   await expect(page.locator("html")).toHaveJSProperty("scrollWidth", await page.evaluate(() => innerWidth));
   const restricted = await fixtures.createAccount({
     username: uniqueTestId("field_no_review"), password: "TestPass123!",
@@ -415,4 +455,12 @@ test("manager sees safe sync categories and performance sources from isolated AP
     "restricted-manager-view",
   ]);
   expect(consoleErrorPhases.filter((phase) => !expectedErrorPhases.has(phase))).toEqual([]);
+  await testInfo.attach("bounded-reload-network-diagnostics", {
+    contentType: "application/json",
+    body: Buffer.from(JSON.stringify({
+      kind: "synthetic-isolated-browser-evidence",
+      diagnostics: reloadNetworkDiagnostics,
+      interpretation: "WPE network-console messages during explicit reloads; cause not established. Fresh successful reads of both routes were required after every manager reload.",
+    })),
+  });
 });

@@ -2884,14 +2884,26 @@ test.describe("PWA update handoff", () => {
     const server = await startVersionedServer({
       old: fixture.oldDir,
       new: fixture.newDir,
-    }, fixture.staleHomeChunk);
+    }, fixture.staleHomeChunk, {
+      sessionRecovery: true,
+      safeSessionSnapshot: true,
+    });
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
     try {
-      server.armStaleAssetFailure();
-      await page.goto(server.baseUrl);
-      await expect.poll(() => server.staleAssetRequestCount()).toBe(1);
+      // Manual recovery must satisfy the same authenticated, idle-work safety
+      // contract as automatic recovery; an unidentified session must stay put.
+      await page.context().addCookies([{
+        name: "rc_auth",
+        value: "disposable-fixture-session",
+        url: server.baseUrl,
+        httpOnly: true,
+        sameSite: "Lax",
+      }]);
+      await startOldBuildThenTriggerStaleAssetFailure(page, server, fixture.staleHomeChunk);
+      await expect.poll(() => server.sessionRecoveryRequests().acceptedMeResponses)
+        .toBeGreaterThan(0);
 
       await expect(page.getByRole("button", { name: "Update and reload" })).toBeVisible({
         timeout: 20_000,
