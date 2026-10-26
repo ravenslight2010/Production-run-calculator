@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   readCachedProfileBlobs, reconcileLegacyProfileReads, setProfileCacheIdentity,
 } from "./profileCache";
-import { retireMatchingLegacyArray, retainedSharedRecordEvidence, withoutArchivedSyncHistory, LEGACY_SYNC_HISTORY_REVIEW_PREFIX } from "./sharedRecordMigration";
+import {
+  retireMatchingLegacyArray, retainedSharedRecordEvidence, removeRetainedSharedRecord,
+  withoutArchivedSyncHistory, LEGACY_SYNC_HISTORY_REVIEW_PREFIX,
+} from "./sharedRecordMigration";
 import { DEFAULT_VALUES, type SyncPayload } from "./types";
 import { loadPendingSyncIntent, savePendingSyncIntent } from "./syncPendingIntent";
 import { applyResetWipe } from "./adapters/browserResetPersistence";
@@ -72,12 +75,75 @@ describe("shared record migration and recovery", () => {
     expect(localStorage.getItem("run-calc-templates:live")).toBeNull();
     expect(localStorage.getItem("run-calc-completed-history-cache.live")).toBeNull();
   });
-  it("shows only current-owner or manager-review legacy metadata, not another account's queue", () => {
+  it("does not offer template outboxes or another account's queue as retained local records", () => {
     localStorage.setItem("run-calc-templates-outbox-v1:live:other", "[{}]");
     localStorage.setItem("run-calc-templates-outbox-v1:live", "[{}]");
     expect(retainedSharedRecordEvidence("live:authenticated-facility:owner", false)).toEqual([]);
-    expect(retainedSharedRecordEvidence("live:authenticated-facility:owner", true))
-      .toEqual([expect.objectContaining({ key: "run-calc-templates-outbox-v1:live" })]);
+    expect(retainedSharedRecordEvidence("live:authenticated-facility:owner", true)).toEqual([]);
+  });
+  it("summarizes the two local history copies and removes only the explicitly selected copy", () => {
+    const history = '[{"date":"2026-01-01","runs":[],"runValues":{},"private":"do not display"}]';
+    const liveCache = '[{"id":"server-copy","private":"also not displayed"}]';
+    localStorage.setItem("run-calc-history", history);
+    localStorage.setItem("run-calc-completed-history-cache.live", liveCache);
+    localStorage.setItem("run-calc-completed-history-outbox.live", '[{"pending":true}]');
+    localStorage.setItem("run-calculator:operational-intent-outbox:v1:owner", '[{"pending":true}]');
+    localStorage.setItem("run-calc-day", '{"date":"2026-01-01","runs":[{"id":"active-run"}]}');
+    const evidence = retainedSharedRecordEvidence("live:authenticated-facility:owner", true);
+    const selected = evidence.find((item) => item.key === "run-calc-history")!;
+    expect(selected).toMatchObject({
+      kind: "Older device history",
+      summary: "Saved record on this device. Date: 2026-01-01.",
+      canRemove: true,
+      recordIndex: 0,
+      recordCount: 1,
+    });
+    expect(JSON.stringify(evidence)).not.toContain("do not display");
+    expect(JSON.stringify(evidence)).not.toContain("also not displayed");
+    expect(removeRetainedSharedRecord("live:authenticated-facility:owner", false, selected)).toBe(false);
+    expect(removeRetainedSharedRecord("live:authenticated-facility:owner", true, selected)).toBe(true);
+    expect(localStorage.getItem("run-calc-history")).toBeNull();
+    expect(localStorage.getItem("run-calc-completed-history-cache.live")).toBe(liveCache);
+    expect(localStorage.getItem("run-calc-completed-history-outbox.live")).toBe('[{"pending":true}]');
+    expect(localStorage.getItem("run-calculator:operational-intent-outbox:v1:owner")).toBe('[{"pending":true}]');
+    expect(localStorage.getItem("run-calc-day")).toBe('{"date":"2026-01-01","runs":[{"id":"active-run"}]}');
+  });
+  it("refuses removal if the reviewed local copy changes before confirmation", () => {
+    localStorage.setItem("run-calc-history", '[{"date":"2026-01-01","runs":[],"runValues":{},"old":true}]');
+    const selected = retainedSharedRecordEvidence("live:authenticated-facility:owner", true)[0];
+    expect(selected.canRemove).toBe(true);
+    localStorage.setItem("run-calc-history", '[{"date":"2026-01-02","runs":[],"runValues":{},"newer":true}]');
+    expect(removeRetainedSharedRecord("live:authenticated-facility:owner", true, selected)).toBe(false);
+    expect(localStorage.getItem("run-calc-history")).toBe('[{"date":"2026-01-02","runs":[],"runValues":{},"newer":true}]');
+  });
+  it("removes only one clearly dated history record and preserves its neighboring record", () => {
+    const remaining = { date: "2026-01-02", runs: [], runValues: {}, private: "keep" };
+    localStorage.setItem("run-calc-history", JSON.stringify([
+      { date: "2026-01-01", runs: [], runValues: {}, private: "remove only this item" },
+      remaining,
+    ]));
+    const evidence = retainedSharedRecordEvidence("live:authenticated-facility:owner", true);
+    const selected = evidence.find((item) => item.recordIndex === 0)!;
+    expect(evidence).toHaveLength(2);
+    expect(selected.summary).toBe("Item 1 of 2 on this device. Date: 2026-01-01.");
+    expect(removeRetainedSharedRecord("live:authenticated-facility:owner", true, selected)).toBe(true);
+    expect(JSON.parse(localStorage.getItem("run-calc-history")!)).toEqual([remaining]);
+    expect(retainedSharedRecordEvidence("live:authenticated-facility:owner", true)[0]?.summary)
+      .toBe("Saved record on this device. Date: 2026-01-02.");
+  });
+  it("keeps undated or unreadable retained records protected from removal", () => {
+    localStorage.setItem("run-calc-history", '[{"private":"no safe date"}]');
+    const [undated] = retainedSharedRecordEvidence("live:authenticated-facility:owner", true);
+    expect(undated.canRemove).toBe(false);
+    expect(undated.summary).toContain("The date could not be verified");
+    expect(removeRetainedSharedRecord("live:authenticated-facility:owner", true, undated)).toBe(false);
+    expect(localStorage.getItem("run-calc-history")).toBe('[{"private":"no safe date"}]');
+
+    localStorage.setItem("run-calc-history", '{"private":"not an array"}');
+    const [unreadable] = retainedSharedRecordEvidence("live:authenticated-facility:owner", true);
+    expect(unreadable.canRemove).toBe(false);
+    expect(unreadable.summary).toContain("could not be safely separated");
+    expect(localStorage.getItem("run-calc-history")).toBe('{"private":"not an array"}');
   });
   it("strips archives from legacy replay while durably preserving unresolved owned history for review", () => {
     const payload = {

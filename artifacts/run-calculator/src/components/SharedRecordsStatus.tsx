@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useSyncExternalStore } from "react";
+import { useEffect, useReducer, useState, useSyncExternalStore } from "react";
 import { useAuth } from "../useAuth";
 import { getProfileCacheVersion, profileReadStatus, subscribeProfileCache } from "../profileCache";
 import { reconcileProfilesFromServer, pendingProfileWriteCount, profileRecoveryIsMemoryOnly } from "../profileServerSync";
@@ -11,7 +11,7 @@ import {
   completedHistoryStatus, COMPLETED_HISTORY_OUTBOX_EVENT,
   flushCompletedHistoryOutbox, hydrateCompletedHistory, pendingCompletedHistoryCount,
 } from "../completedHistorySync";
-import { retainedSharedRecordEvidence } from "../sharedRecordMigration";
+import { retainedSharedRecordEvidence, removeRetainedSharedRecord } from "../sharedRecordMigration";
 
 /** Separate empty server results from unavailable cold reads. Recovery commands
  * and unresolved migration evidence are never presented as canonical history. */
@@ -20,6 +20,7 @@ export function SharedRecordsStatus() {
   useSyncExternalStore(subscribeProfileCache, getProfileCacheVersion);
   useSyncExternalStore(subscribeRunTemplates, runTemplatesVersion);
   const [, update] = useReducer((n) => n + 1, 0);
+  const [reviewError, setReviewError] = useState("");
   useEffect(() => {
     window.addEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, update);
     return () => window.removeEventListener(COMPLETED_HISTORY_OUTBOX_EVENT, update);
@@ -58,20 +59,26 @@ export function SharedRecordsStatus() {
       They remain on this device for this account until acknowledged. Conflicting edits require review.
     </p>}
     {evidence.length > 0 && <details className="mt-2">
-      <summary>{evidence.length} retained record source{evidence.length === 1 ? "" : "s"} need review</summary>
-      <p>These records are not a shared directory or authoritative history. Unverified ownership,
-        differing values, and immutable conflicts are preserved without automatic upload.</p>
-      <ul>{evidence.map((item) => <li key={item.key}>{item.kind}: {item.key}</li>)}</ul>
-      <button type="button" className="mt-2 underline" onClick={() => {
-        const payload = {
-          provenance: "local-unresolved-review-evidence-not-authoritative",
-          records: evidence.map(({ key, kind }) => ({ key, kind, raw: localStorage.getItem(key) })),
-        };
-        const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
-        const link = document.createElement("a");
-        link.href = url; link.download = "retained-record-review.json"; link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 0);
-      }}>Download retained records for review</button>
+      <summary>{evidence.length} saved local item{evidence.length === 1 ? "" : "s"} to review</summary>
+      <p className="mt-2">These are saved copies from this device, not a list of confirmed shared records. They were not uploaded automatically because their owner or history is unclear. Pending work and conflict records stay protected.</p>
+      <ul className="mt-2 space-y-3">
+        {evidence.map((item) => <li key={`${item.key}:${item.recordIndex ?? "unreadable"}`} className="rounded border border-border p-3">
+          <p className="font-medium">{item.kind}</p>
+          <p>{item.summary}</p>
+          <p className="text-muted-foreground">Removing this copy affects only this device. It does not delete the facility’s shared records, but this may be the only offline copy here.</p>
+          {item.canRemove ? <button type="button" className="mt-2 underline" onClick={() => {
+            if (!window.confirm(`Permanently remove only this saved item: ${item.summary} This cannot be undone here. Shared facility data will not be changed.`)) return;
+            const removed = removeRetainedSharedRecord(identity, me.capabilities.includes("manage-profiles"), item);
+            if (removed) {
+              setReviewError("");
+              update();
+            } else {
+              setReviewError("This saved copy changed or could not be removed. Nothing else was removed; refresh the review and try again.");
+            }
+          }}>Remove this saved copy from this device</button> : <p className="mt-2 text-muted-foreground">{item.removeBlockedReason}</p>}
+        </li>)}
+      </ul>
+      {reviewError && <p role="alert" className="mt-2">{reviewError}</p>}
     </details>}
   </aside>;
 }

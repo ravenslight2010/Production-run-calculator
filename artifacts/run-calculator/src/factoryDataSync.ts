@@ -263,7 +263,18 @@ export function hydrateFromServer(data: FactoryDataMap): void {
   if (receipt) appliedReadOrder = receipt.order;
   });
 }
-export type LegacyDirectoryReview = { source: string; key: string; value: unknown; problem?: string };
+export type LegacyDirectoryReview = {
+  id: string;
+  source: string;
+  sourceRaw: string;
+  key: string;
+  value: unknown;
+  queueIndex?: number;
+  problem?: string;
+  canApply: boolean;
+  canRemove: boolean;
+  removeBlockedReason?: string;
+};
 /** Explicit review, never a bootstrap source or an automatically deliverable queue. */
 export function legacyDirectoryReviews(): LegacyDirectoryReview[] {
   const reviews: LegacyDirectoryReview[] = [];
@@ -276,18 +287,51 @@ export function legacyDirectoryReviews(): LegacyDirectoryReview[] {
         : source?.startsWith(UNOWNED_REVIEW_PREFIX) ? UNOWNED_REVIEW_PREFIX : null;
       if (!source || !matchedPrefix) continue;
       const key = source.slice(matchedPrefix.length);
+      const sourceRaw = localStorage.getItem(source);
+      if (sourceRaw === null) continue;
       try {
-        const value = JSON.parse(localStorage.getItem(source) ?? "null");
-        if (legacyReviewKeys.has(key)) reviews.push({ source, key, value,
+        const value = JSON.parse(sourceRaw);
+        if (legacyReviewKeys.has(key)) reviews.push({ id: `${source}:${key}`, source, sourceRaw, key, value,
+          canApply: true, canRemove: true,
           ...(!validValue(key, value) ? { problem: "Unrecognized saved format. Retained for manual review; not safe to apply." } : {}) });
-      } catch { reviews.push({ source, key, value: null, problem: "Unreadable saved format. Retained for manual review; not safe to apply." }); }
+      } catch { reviews.push({ id: `${source}:${key}`, source, sourceRaw, key, value: null,
+        canApply: false, canRemove: true, problem: "Unreadable saved format. Retained for manual review; not safe to apply." }); }
     }
-    let queue: unknown = [];
-    try { queue = JSON.parse(localStorage.getItem(LEGACY_QUEUE) ?? "[]"); }
-    catch { /* Preserve unreadable queued evidence without hiding independent legacy settings. */ }
-    if (Array.isArray(queue)) for (const op of queue) {
+    const queueRaw = localStorage.getItem(LEGACY_QUEUE);
+    let queue: unknown;
+    let queueReadable = false;
+    try {
+      queue = JSON.parse(queueRaw ?? "[]");
+      queueReadable = Array.isArray(queue);
+    } catch {}
+    if (queueRaw !== null && !queueReadable) {
+      // Preserve and identify malformed queue evidence, but do not offer an
+      // action that could remove unknown queued commands.
+      reviews.push({
+        id: `${LEGACY_QUEUE}:unreadable`, source: LEGACY_QUEUE, sourceRaw: queueRaw,
+        key: LEGACY_QUEUE, value: null, canApply: false, canRemove: false,
+        removeBlockedReason: "This saved list may contain unsent work and is protected from removal.",
+        problem: "This saved edit list cannot be read. It is preserved; ask a manager for help before changing browser data.",
+      });
+    }
+    if (queueReadable && Array.isArray(queue)) {
+      const malformedItems = queue.filter((op) =>
+        !op || !allKeys.has(op.key) || !validValue(op.key, op.value));
+      if (malformedItems.length) reviews.push({
+        id: `${LEGACY_QUEUE}:unreadable-items`, source: LEGACY_QUEUE, sourceRaw: queueRaw ?? "[]",
+        key: LEGACY_QUEUE, value: null, canApply: false, canRemove: false,
+        removeBlockedReason: "This saved list may contain unsent work and is protected from removal.",
+        problem: `${malformedItems.length} item${malformedItems.length === 1 ? "" : "s"} in this saved edit list could not be identified. The list is preserved; ask a manager for help before changing browser data.`,
+      });
+      for (const [queueIndex, op] of queue.entries()) {
       if (op && allKeys.has(op.key) && validValue(op.key, op.value)) {
-        reviews.push({ source: LEGACY_QUEUE, key: op.key, value: op.value });
+        reviews.push({
+          id: `${LEGACY_QUEUE}:${queueIndex}:${op.key}`,
+          source: LEGACY_QUEUE, sourceRaw: queueRaw ?? "[]", key: op.key, value: op.value,
+          queueIndex, canApply: true, canRemove: false,
+          removeBlockedReason: "This saved edit may not have been sent to the facility yet. Apply it or leave it saved; it cannot be discarded from this review.",
+        });
+      }
       }
     }
     for (const key of legacyReviewKeys) {
@@ -295,21 +339,44 @@ export function legacyDirectoryReviews(): LegacyDirectoryReview[] {
       if (raw === null) continue;
       try {
         const value = JSON.parse(raw);
-        reviews.push({ source: key, key, value,
+        reviews.push({ id: `${key}:${key}`, source: key, sourceRaw: raw, key, value, canApply: true, canRemove: true,
           ...(!validValue(key, value) ? { problem: "Unrecognized saved format. Retained for manual review; not safe to apply." } : {}) });
-      } catch { reviews.push({ source: key, key, value: null, problem: "Unreadable saved format. Retained for manual review; not safe to apply." }); }
+      } catch { reviews.push({ id: `${key}:${key}`, source: key, sourceRaw: raw, key, value: null,
+        canApply: false, canRemove: true, problem: "Unreadable saved format. Retained for manual review; not safe to apply." }); }
     }
     const flatFlavors = localStorage.getItem("run-calc-flavors");
     if (flatFlavors !== null) reviews.push({ source: "run-calc-flavors", key: "run-calc-brand-flavors",
-      value: flatFlavors, problem: "Legacy flavors have no brand assignment. Retained for manual review; assign them to brands in Manage Lists before discarding this copy." });
+      id: "run-calc-flavors:run-calc-brand-flavors", sourceRaw: flatFlavors,
+      value: flatFlavors, canApply: false, canRemove: true,
+      problem: "Legacy flavors have no brand assignment. Retained for manual review; assign them to brands in Manage Lists before discarding this copy." });
   } catch { /* Keep malformed evidence intact; never guess its intent. */ }
   return reviews;
 }
+
+function removeReviewedLegacySource(review: LegacyDirectoryReview): boolean {
+  const currentRaw = localStorage.getItem(review.source);
+  if (currentRaw === null || currentRaw !== review.sourceRaw) return false;
+  if (review.source === LEGACY_QUEUE) {
+    if (review.queueIndex === undefined) return false;
+    const entries: unknown = JSON.parse(currentRaw);
+    if (!Array.isArray(entries)) return false;
+    const selected = entries[review.queueIndex] as FactoryQueueOp | undefined;
+    if (!selected || selected.key !== review.key
+      || JSON.stringify(selected.value) !== JSON.stringify(review.value)) return false;
+    const remaining = entries.filter((_, index) => index !== review.queueIndex);
+    if (remaining.length) localStorage.setItem(review.source, JSON.stringify(remaining));
+    else localStorage.removeItem(review.source);
+    return localStorage.getItem(review.source) === (remaining.length ? JSON.stringify(remaining) : null);
+  }
+  localStorage.removeItem(review.source);
+  return localStorage.getItem(review.source) === null;
+}
+
 export async function resolveLegacyDirectoryReview(review: LegacyDirectoryReview, apply: boolean): Promise<boolean> {
   const epoch = scopeEpoch;
   if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return false;
-  if (!legacyDirectoryReviews().some((item) => item.source === review.source && item.key === review.key
-    && JSON.stringify(item.value) === JSON.stringify(review.value))) return false;
+  if (!legacyDirectoryReviews().some((item) => item.id === review.id && item.sourceRaw === review.sourceRaw
+    && item.key === review.key && (apply ? item.canApply : item.canRemove))) return false;
   try {
     if (apply) {
       if (review.problem || !validValue(review.key, review.value)) return false;
@@ -324,11 +391,7 @@ export async function resolveLegacyDirectoryReview(review: LegacyDirectoryReview
   } catch { return false; }
   if (epoch !== scopeEpoch) return false;
   try {
-    if (review.source === LEGACY_QUEUE) {
-      const entries = JSON.parse(localStorage.getItem(LEGACY_QUEUE) ?? "[]") as FactoryQueueOp[];
-      localStorage.setItem(LEGACY_QUEUE, JSON.stringify(entries.filter((op) =>
-        !(op.key === review.key && JSON.stringify(op.value) === JSON.stringify(review.value)))));
-    } else localStorage.removeItem(review.source);
+    if (!removeReviewedLegacySource(review)) return false;
     setFactoryDirectoryStatus("ready");
     return true;
   } catch { return false; }

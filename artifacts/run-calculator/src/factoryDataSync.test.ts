@@ -118,7 +118,7 @@ describe("memory directory and scoped durable commands", () => {
     expect(localStorage.getItem(SHIPPER_KEY)).toBe(raw);
     expect(pending()).toHaveLength(1);
   });
-  it("does not hide legacy settings behind unreadable unowned queue evidence or omit legacy conflict records", () => {
+  it("does not hide legacy settings behind unreadable unowned queue evidence or omit legacy conflict records", async () => {
     const queueRaw = "unreadable fixture queue";
     const stopsRaw = '["Custom fixture stop"]';
     const conflictRaw = '{"brands":["Retired fixture brand"]}';
@@ -132,6 +132,35 @@ describe("memory directory and scoped durable commands", () => {
     expect(localStorage.getItem("run-calc-fkv-queue-v1")).toBe(queueRaw);
     expect(localStorage.getItem(STOP_REASONS_KEY)).toBe(stopsRaw);
     expect(localStorage.getItem("run-calc-deleted-items")).toBe(conflictRaw);
+    const unreadable = legacyDirectoryReviews().find((review) => review.source === "run-calc-fkv-queue-v1")!;
+    expect(unreadable).toMatchObject({ canRemove: false, problem: expect.any(String) });
+    expect(await resolveLegacyDirectoryReview(unreadable, false)).toBe(false);
+    expect(localStorage.getItem("run-calc-fkv-queue-v1")).toBe(queueRaw);
+  });
+  it("protects unowned pending entries from removal and applies only the selected duplicate", async () => {
+    const raw = JSON.stringify([
+      { key: BRANDS_KEY, value: ["Legacy"], updatedAt: 10, g: 1 },
+      { key: BRANDS_KEY, value: ["Legacy"], updatedAt: 11, g: 2 },
+    ]);
+    localStorage.setItem("run-calc-fkv-queue-v1", raw);
+    const reviews = legacyDirectoryReviews().filter((review) => review.source === "run-calc-fkv-queue-v1");
+    expect(reviews).toHaveLength(2);
+    expect(reviews[0].id).not.toBe(reviews[1].id);
+    expect(reviews[0]).toMatchObject({ canApply: true, canRemove: false });
+    expect(await resolveLegacyDirectoryReview(reviews[0], false)).toBe(false);
+    expect(localStorage.getItem("run-calc-fkv-queue-v1")).toBe(raw);
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => ack(init)));
+    expect(await resolveLegacyDirectoryReview(reviews[0], true)).toBe(true);
+    expect(JSON.parse(localStorage.getItem("run-calc-fkv-queue-v1")!)).toEqual([JSON.parse(raw)[1]]);
+    expect(await resolveLegacyDirectoryReview(reviews[1], false)).toBe(false);
+  });
+  it("does not remove a legacy edit if its saved bytes changed after review", async () => {
+    const raw = '["Reviewed copy"]';
+    localStorage.setItem(STOP_REASONS_KEY, raw);
+    const review = legacyDirectoryReviews().find((item) => item.key === STOP_REASONS_KEY)!;
+    localStorage.setItem(STOP_REASONS_KEY, '["Newer local copy"]');
+    expect(await resolveLegacyDirectoryReview(review, false)).toBe(false);
+    expect(localStorage.getItem(STOP_REASONS_KEY)).toBe('["Newer local copy"]');
   });
   it("rejects an old read receipt even if identity changes after fetch resolves", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ data: {} })));
@@ -327,7 +356,7 @@ describe("memory directory and scoped durable commands", () => {
     await resolveLegacyDirectoryReview(legacyDirectoryReviews()[0], true);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(JSON.parse(directoryRaw(BRANDS_KEY)!)).toEqual(["Unowned"]);
-    expect(JSON.parse(localStorage.getItem("run-calc-fkv-queue-v1")!)).toEqual([]);
+    expect(localStorage.getItem("run-calc-fkv-queue-v1")).toBeNull();
   });
   it("never changes production recovery, device preferences or unrelated queues during migration", async () => {
     const excluded = ["run-calc-day", "run-calc-run-x", "run-calc-history", "run-calc-templates",

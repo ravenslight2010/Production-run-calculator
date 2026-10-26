@@ -43,6 +43,44 @@ function renderIncidents() {
   );
 }
 
+function incidentWithHttpStatus(status: number): Incident {
+  return {
+    id: `incident-${status}`,
+    source: "auto_crash",
+    reporterId: null,
+    reporterName: "Staff",
+    reporterRole: "manager",
+    screen: "/",
+    appPlatform: "web",
+    appVersion: "build-a",
+    context: {
+      errorMessage: `API ${status}`,
+      correlationId: `incident-reference-${status}`,
+      requestOperationCategory: status === 403 ? "other" : "sync",
+      requestRoute: status === 403 ? "other" : "sync_manual_section",
+      requestOutcome: "http_client_error",
+      requestHttpStatus: status,
+      ...(status === 400 ? { requestReasonCode: "SYNC_VALIDATION_FAILED" } : {}),
+      requestObservedAt: "2026-10-26T11:00:00.000Z",
+      requestElapsedMs: 150,
+      requestBackgroundInvolvement: "not_observed",
+    },
+    diagnosis: null,
+    workaround: null,
+    recurrence: null,
+    status: "new",
+    createdAt: new Date().toISOString(),
+    reviewedAt: null,
+    resolvedAt: null,
+    priority: "normal",
+    workflowState: "new",
+    assigneeId: null,
+    assigneeName: null,
+    notes: [],
+    activity: [],
+  };
+}
+
 afterEach(() => {
   cleanup();
   mocks.fetchIncidents.mockReset();
@@ -109,5 +147,44 @@ describe("manager incident cancellation guidance", () => {
     expect(screen.queryByRole("button", { name: "Mark reviewed" })).toBeNull();
     fireEvent.click(header);
     expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeTruthy();
+  });
+
+  it("explains sync validation rejections without suggesting an unchanged retry", async () => {
+    mocks.fetchIncidents.mockResolvedValue([incidentWithHttpStatus(400)]);
+    mocks.fetchFieldChecks.mockResolvedValue({ checks: [], actionableCount: 0, overallStatus: "healthy" });
+    mocks.fetchIncidentAssignees.mockResolvedValue([]);
+
+    renderIncidents();
+
+    expect(await screen.findByText(/This sync update did not pass a validation check/)).toBeTruthy();
+    expect(screen.getByText("Support code:").parentElement?.textContent).toContain("SYNC_VALIDATION_FAILED");
+    expect(screen.getByText(/Do not retry the unchanged action/)).toBeTruthy();
+    expect(screen.getByText(/App activity:/).parentElement?.textContent).toContain("Syncing saved changes");
+    expect(screen.getByText(/Observed by this browser at/)).toBeTruthy();
+    expect(screen.getByText(/The browser wait is not server processing time/)).toBeTruthy();
+  });
+
+  async function assertPlainLanguageStatus(status: number, expectedSummary: string) {
+    const incident = incidentWithHttpStatus(status);
+    mocks.fetchIncidents.mockResolvedValue([incident]);
+    mocks.fetchFieldChecks.mockResolvedValue({ checks: [], actionableCount: 0, overallStatus: "healthy" });
+    mocks.fetchIncidentAssignees.mockResolvedValue([]);
+
+    renderIncidents();
+
+    expect(await screen.findByRole("button", { name: /Auto-captured crash/i })).toBeTruthy();
+    expect(screen.getByText(new RegExp(expectedSummary))).toBeTruthy();
+    expect(screen.queryByText(/retry once/i)).toBeNull();
+    expect(screen.getByText("Incident reference:").parentElement?.textContent)
+      .toContain(`incident-reference-${status}`);
+  }
+
+  it("explains a 403 permission denial in plain language", async () => {
+    await assertPlainLanguageStatus(403, "This request was denied because this account does not currently have permission");
+    expect(screen.getByText(/support route: not identified in the available diagnostics/)).toBeTruthy();
+  });
+
+  it("explains a 409 conflict in plain language", async () => {
+    await assertPlainLanguageStatus(409, "The shared value changed before this save reached the server");
   });
 });

@@ -56,6 +56,38 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+function requestOperationLabel(value?: string): string {
+  switch (value) {
+    case "authentication": return "Checking account access";
+    case "sync": return "Syncing saved changes";
+    case "other": return "Using another app function";
+    default: return value?.replaceAll("_", " ") || "App activity not recorded";
+  }
+}
+
+function requestOutcomeLabel(value?: string): string {
+  switch (value) {
+    case "http_client_error": return "the server rejected the request";
+    case "http_server_error": return "the server reported an error";
+    case "authentication_rejected": return "account access was rejected";
+    case "timeout": return "no reply arrived before the app stopped waiting";
+    case "cancelled": return "the request stopped before a reply arrived";
+    case "transport_failure": return "the network request could not reach the server";
+    case "offline_failure": return "the browser reported no connection";
+    default: return value?.replaceAll("_", " ") || "the result was not recorded";
+  }
+}
+
+function diagnosticDetailLabel(value?: string): string {
+  return value?.replaceAll("_", " ").replaceAll("-", " ") || "not recorded";
+}
+
+function supportRouteLabel(value?: string): string {
+  return value === "other"
+    ? "not identified in the available diagnostics"
+    : diagnosticDetailLabel(value);
+}
+
 function IncidentRow({
   incident,
   assignees,
@@ -107,6 +139,23 @@ function IncidentRow({
 
   const isCrash = incident.source === "auto_crash";
   const ctx = incident.context ?? {};
+  const plainLanguageSummary = ctx.requestHttpStatus === 403
+    ? "This request was denied because this account does not currently have permission. Ask a manager to check access before trying again."
+    : ctx.requestHttpStatus === 409
+      ? "The shared value changed before this save reached the server. Compare it with the current run and resolve the difference before retrying."
+      : ctx.requestHttpStatus === 400 || ctx.requestHttpStatus === 422
+        ? ctx.requestOperationCategory === "sync"
+          ? "This sync update did not pass a validation check. Review the current values and run state, keep your draft, and do not retry it unchanged."
+          : "The app rejected this action because some information did not pass a validation check. Review it before trying again."
+      : ctx.requestOutcome === "cancelled"
+        ? "The browser stopped waiting before a reply arrived. This does not show whether the server accepted the request."
+        : ctx.requestOutcome === "timeout"
+          ? "The browser gave up waiting for a reply. The measured wait can include time when the app was in the background; it is not server processing time."
+          : ctx.requestOutcome === "transport_failure" || ctx.requestOutcome === "offline_failure"
+            ? "The app could not get a network reply. Check the connection, then retry retained work once while online."
+            : /stale_deployment_asset|failed to fetch dynamically imported module/i.test(ctx.errorMessage ?? "")
+              ? "This browser could not load a code file for its app version. Use the guarded update action only when no work is active or unsaved; do not clear browser data."
+              : null;
 
   return (
     <div
@@ -192,6 +241,12 @@ function IncidentRow({
               </p>
             </div>
           )}
+          {plainLanguageSummary && (
+            <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-2">
+              <p className="text-xs font-semibold text-foreground">In plain language</p>
+              <p className="mt-1 text-sm text-muted-foreground">{plainLanguageSummary}</p>
+            </div>
+          )}
           {incident.recurrence && (
             <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 w-fit">
               <History className="w-3.5 h-3.5" />
@@ -212,39 +267,41 @@ function IncidentRow({
             {ctx.requestOperationCategory && ctx.requestOutcome && (
               <>
                 <p className="mt-1">
-                  <span className="font-semibold text-foreground">Request:</span>{" "}
-                  {ctx.requestOperationCategory} · {ctx.requestOutcome.replaceAll("_", " ")}
+                  <span className="font-semibold text-foreground">App activity:</span>{" "}
+                  {requestOperationLabel(ctx.requestOperationCategory)} · {requestOutcomeLabel(ctx.requestOutcome)}
                   {ctx.requestHttpStatus ? ` · HTTP ${ctx.requestHttpStatus}` : ""}
-                  {ctx.requestRoute ? ` · ${ctx.requestRoute.replaceAll("_", " ")}` : ""}
+                  {ctx.requestRoute ? ` · support route: ${supportRouteLabel(ctx.requestRoute)}` : ""}
                 </p>
                 {ctx.requestReasonCode && (
                   <p className="mt-1">
-                    <span className="font-semibold text-foreground">Reason code:</span>{" "}
+                    <span className="font-semibold text-foreground">Support code:</span>{" "}
                     <code>{ctx.requestReasonCode}</code>
                   </p>
                 )}
                 {ctx.requestObservedAt && (
                   <p className="mt-1">
-                    Browser-observed at {new Date(ctx.requestObservedAt).toLocaleString()}
+                    Observed by this browser at {new Date(ctx.requestObservedAt).toLocaleString()}
                     {typeof ctx.requestElapsedMs === "number"
-                      ? ` · elapsed request lifetime ${ctx.requestElapsedMs === 10_000_000 ? "at least " : ""}${Math.round(ctx.requestElapsedMs)} ms`
+                      ? ` · browser waited ${ctx.requestElapsedMs === 10_000_000 ? "at least " : ""}${Math.round(ctx.requestElapsedMs)} ms`
                       : ""}
                   </p>
                 )}
                 <p className="mt-1">
                   {ctx.requestBackgroundInvolvement === "observed"
-                    ? "A background/hidden transition was observed during the request."
+                    ? "The app was in the background while waiting; the phone operating system may also have paused it."
                     : ctx.requestBackgroundInvolvement === "not_observed"
-                      ? "No browser-hidden transition was observed; OS suspension is unknown."
-                      : "Background involvement is unknown."}
-                  {" "}Elapsed request lifetime is not server processing time.
+                      ? "No background change was detected; the operating-system pause state is unknown."
+                      : "It is unknown whether the app or operating system paused in the background."}
+                  {" "}The browser wait is not server processing time.
                 </p>
               </>
             )}
             <p className="mt-1">
-              {ctx.action ?? "unknown action"} · {ctx.outcome ?? "unknown outcome"} · retry {ctx.retryCount ?? 0} ·
-              {" "}{ctx.connectivity ?? "unknown connection"} · {ctx.syncState ?? "unknown sync"} ·
-              {" "}{ctx.browserFamily ?? incident.appPlatform}/{ctx.deviceClass ?? "unknown device"} · build {incident.appVersion ?? "unknown"}
+              <span className="font-semibold text-foreground">Extra details for support:</span>{" "}
+              {diagnosticDetailLabel(ctx.action)} · {diagnosticDetailLabel(ctx.outcome)} · {ctx.retryCount ?? 0} automatic retries ·
+              {" "}{diagnosticDetailLabel(ctx.connectivity)} connection · {diagnosticDetailLabel(ctx.syncState)} sync status ·
+              {" "}{diagnosticDetailLabel(ctx.browserFamily ?? incident.appPlatform)} on {diagnosticDetailLabel(ctx.deviceClass)} ·
+              {" "}build reference {incident.appVersion ?? "not recorded"}
             </p>
             <p className="mt-1">
               {ctx.requestOutcome === "cancelled"
