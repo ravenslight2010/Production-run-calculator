@@ -96,6 +96,18 @@ export type ReadAuthorization = {
   scope: "scoped" | "live-only";
 };
 
+export type ReadAuthorizationExemption = {
+  method: "GET";
+  path: string;
+  module: string;
+  reason: string;
+};
+
+export type ReadAuthorizationValidationOptions = {
+  inventory?: readonly ReadAuthorization[];
+  exemptions?: readonly ReadAuthorizationExemption[];
+};
+
 const reads = (
   capabilities: readonly Capability[],
   capabilityMatch: ReadAuthorization["capabilityMatch"],
@@ -500,10 +512,27 @@ export function validateMutationAuthorizationInventory(
  */
 export function validateReadAuthorizationInventory(
   router: { stack: unknown[] },
+  options: ReadAuthorizationValidationOptions = {},
 ): void {
+  const inventory = options.inventory ?? readAuthorizationInventory;
+  const exemptions = options.exemptions ?? [];
   const byRoute = new Map<string, ReadAuthorization[]>();
-  for (const entry of readAuthorizationInventory) {
+  for (const entry of inventory) {
     byRoute.set(entry.path, [...(byRoute.get(entry.path) ?? []), entry]);
+  }
+
+  const registeredGetRoutes = new Set<string>();
+  const matchedInventoryRoutes = new Set<string>();
+  const exemptedPaths = new Map<string, ReadAuthorizationExemption>();
+  for (const exemption of exemptions) {
+    const key = `${exemption.method} ${exemption.path}`;
+    if (!exemption.module.trim() || !exemption.reason.trim()) {
+      throw new Error(`read authorization exemption ${key} must document its module and reason`);
+    }
+    if (exemptedPaths.has(key)) {
+      throw new Error(`duplicate read authorization exemption for ${key}`);
+    }
+    exemptedPaths.set(key, exemption);
   }
 
   const validateStack = (stack: readonly unknown[], owner: string): void => {
@@ -518,6 +547,16 @@ export function validateReadAuthorizationInventory(
       const methods = layer.route.methods;
       if (!methods.get && !methods._all && !methods.all) continue;
       const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+      for (const path of paths) {
+        const exemptionKey = `GET ${path}`;
+        registeredGetRoutes.add(exemptionKey);
+        if (exemptedPaths.has(exemptionKey)) {
+          const exemption = exemptedPaths.get(exemptionKey)!;
+          throw new Error(
+            `read authorization exemption for ${exemptionKey} (${exemption.module}) is stale; remove it now that the route is mounted`,
+          );
+        }
+      }
       const capabilityMiddleware = layer.route.stack
         .map(({ handle }) => ({
           capabilities: getRequiredCapabilities(handle),
@@ -549,9 +588,25 @@ export function validateReadAuthorizationInventory(
         if (!matches) {
           throw new Error(`${owner} protected read GET ${path} does not match its inventory authorization middleware`);
         }
+        matchedInventoryRoutes.add(`GET ${path}`);
       }
     }
   };
 
   validateStack(router.stack, "assembled API router");
+
+  for (const entry of inventory) {
+    const key = `${entry.method} ${entry.path}`;
+    if (!registeredGetRoutes.has(key)) {
+      if (exemptedPaths.has(key)) continue;
+      throw new Error(
+        `declared protected read ${key} is not registered in the assembled API router`,
+      );
+    }
+    if (!matchedInventoryRoutes.has(key)) {
+      throw new Error(
+        `declared protected read ${key} is not registered with its inventory authorization middleware`,
+      );
+    }
+  }
 }
