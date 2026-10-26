@@ -83,3 +83,4 @@ Thumbs.db
 # Local audit originals are excluded by managed checkpoints; retain curated
 # source-bound handoffs under docs/evidence rather than blocking task rebases.
 /.local/evidence/workbook-import-audit/
+/.local/evidence/break-planning/
