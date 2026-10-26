@@ -1,7 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 // These describe client-observed boundaries, never PostgreSQL execution time.
-export const DATABASE_PHASE_STAGES = ["status_aggregate", "duplicate_group_scan"] as const;
+export const DATABASE_PHASE_STAGES = [
+  "status_aggregate", "duplicate_group_scan",
+  "outbox_scope_list", "outbox_cursor_read", "outbox_events_read",
+] as const;
 const OUTCOMES = [
   "success", "cancelled", "checkout_timeout", "connection_timeout",
   "connection_failed", "acquisition_failed", "query_timeout", "failed", "shutdown", "unknown",
@@ -126,7 +129,7 @@ function finish(
   return evidence;
 }
 
-/** Observe exactly one existing queue-stage operation, without changing its result/error. */
+/** Observe exactly one existing database read, without changing its result/error. */
 export async function observeDatabasePhase<T>(
   stage: Stage,
   operation: () => PromiseLike<T> | T,

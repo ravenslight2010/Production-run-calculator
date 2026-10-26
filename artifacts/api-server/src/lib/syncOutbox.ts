@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 import { isManualSection, type ManualSection } from "@workspace/sync-contract";
 import type { Scope } from "./requestScope";
 import { logger } from "./logger";
+import { createOutboxDatabaseObserver } from "./outboxDatabaseTelemetry";
 import {
   boundedDurationMs,
   classifyBackgroundFailure,
@@ -327,6 +328,13 @@ export function startSyncOutboxListener(
   let drainRequested = false;
   let retryDelayMs = 500;
   const drainBackoff = createBackgroundOperationBackoff({ jitter: true });
+  const observeRead = createOutboxDatabaseObserver((databasePhase) => {
+    logger.info({
+      event: "background_database_phase",
+      sampling: "outbox-stage-category-first-per-minute",
+      databasePhase,
+    }, "sampled outbox database phase");
+  }, () => stopped);
   const cursors = processCursors;
   const observeListenerLag = (
     scope: string,
@@ -352,10 +360,10 @@ export function startSyncOutboxListener(
   async function drainScope(scope: string): Promise<void> {
     let cursor = cursors.get(scope) ?? 0;
     for (;;) {
-      const stateResult = await pool.query<{ cursor: string | number }>(
+      const stateResult = await observeRead("outbox_cursor_read", () => pool.query<{ cursor: string | number }>(
         "SELECT cursor FROM sync_outbox_cursors WHERE scope = $1",
         [scope],
-      );
+      ));
       const latest = Number(stateResult.rows[0]?.cursor ?? 0);
       if (!Number.isSafeInteger(latest) || latest < cursor) {
         throw new Error("Invalid sync outbox cursor state");
@@ -365,7 +373,7 @@ export function startSyncOutboxListener(
         return;
       }
 
-      const result = await pool.query<{
+      const result = await observeRead("outbox_events_read", () => pool.query<{
         scope: string;
         cursor: string | number;
         kind: string;
@@ -380,7 +388,7 @@ export function startSyncOutboxListener(
          ORDER BY cursor ASC
          LIMIT $3`,
         [scope, cursor, BATCH_SIZE],
-      );
+      ));
       const rows = result.rows;
       const firstCursor = Number(rows[0]?.cursor);
       if (rows.length === 0 || firstCursor !== cursor + 1) {
@@ -431,19 +439,19 @@ export function startSyncOutboxListener(
     try {
       await runBackgroundOperation("sync-outbox-drain", async () => {
         failureStage = "scope-list";
-        const result = await pool.query<{ scope: string }>(
+        const result = await observeRead("outbox_scope_list", () => pool.query<{ scope: string }>(
           "SELECT scope FROM sync_outbox_cursors ORDER BY scope ASC",
-        );
+        ));
         for (const { scope } of result.rows) {
           if (stopped) return;
           if (!cursors.has(scope)) {
             // A process starts with no connected SSE clients. Seed the cursor for
             // pre-existing scopes; new scopes first encountered later start at 0.
             failureStage = "cursor-seed";
-            const current = await pool.query<{ cursor: string | number }>(
+            const current = await observeRead("outbox_cursor_read", () => pool.query<{ cursor: string | number }>(
               "SELECT cursor FROM sync_outbox_cursors WHERE scope = $1",
               [scope],
-            );
+            ));
             cursors.set(scope, Number(current.rows[0]?.cursor ?? 0));
             continue;
           }

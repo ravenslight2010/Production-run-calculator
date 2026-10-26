@@ -1,4 +1,4 @@
-# Prospective queue database phase evidence
+# Prospective database phase evidence
 
 ## Authority and scope
 
@@ -11,9 +11,11 @@ to a serving build. The existing
 [published-runtime investigation](published-runtime-reliability-2026-10-24.md)
 is historical evidence, not evidence that this instrumentation works in production.
 
-The new scope is the scheduled-evaluation queue monitor's two existing database stages:
+The original scope is the scheduled-evaluation queue monitor's two existing database stages:
 `status_aggregate` and `duplicate_group_scan`. Each stage already awaits a single
-Drizzle read. No SQL, query implementation, pool settings, deadlines, retry policy,
+Drizzle read. The [October 26 investigation](production-stalls-2026-10-26.md)
+extends observation to existing outbox drain reads; it does not authorize Publish.
+No SQL, query implementation, pool settings, deadlines, retry policy,
 backoff, job transitions, cancellation, leases, idempotency or single-claim effects
 change. Other worker/provider failures remain unattributed; this does not claim
 phase coverage of arbitrary job handlers or external push delivery.
@@ -21,14 +23,14 @@ phase coverage of arbitrary job handlers or external push delivery.
 ## Contract, version 1
 
 Dedicated Pino event: `background_database_phase`. Its `databasePhase` member contains
-only the following allowlisted fields. The operation is always a queue-monitor read;
+only the following allowlisted fields. The operation is a queue-monitor or outbox drain read;
 there are no job/run/scope/user identifiers, SQL, parameters, raw errors, error codes,
 provider bodies, or dynamically constructed metric labels.
 
 | Field | Meaning |
 | --- | --- |
 | `version` | Exactly `1`. |
-| `stage` | `status_aggregate` or `duplicate_group_scan`. |
+| `stage` | `status_aggregate`, `duplicate_group_scan`, `outbox_scope_list`, `outbox_cursor_read`, or `outbox_events_read`. |
 | `coverage` | `complete`, `unobserved`, `multiple_checkouts`, `incomplete`, or `shutdown`. |
 | `phase` | `acquisition`, `post_checkout`, or `unknown`. On success, the last observed phase, not a failure attribution. |
 | `outcome` | `success`, `cancelled`, `checkout_timeout`, `connection_timeout`, `connection_failed`, `acquisition_failed`, `query_timeout`, `failed`, `shutdown`, or `unknown`. |
@@ -76,6 +78,25 @@ under its existing shutdown, lease and effect rules.
 Existing slow/unavailable queue events carry the new evidence when available,
 marked `databasePhaseVersion: 1`. Success also emits the dedicated event, so
 failure-only logs do not become a misleading latency population.
+
+### Sampled outbox reads
+
+Outbox observations surround only the drain's existing scope-list, cursor
+(including seed), and event-batch SQL reads. They do not surround delivery
+callbacks, canonical gap reconciliation, LISTEN/reconnect, registration, or
+retention cleanup. A successful read followed by a failed delivery therefore
+remains a successful read, not a fabricated database failure.
+
+Each listener emits at most one sample per stage/category in a rolling 60-second
+interval. Categories are success below 900 ms, success at least 900 ms, and
+non-success. This is at most nine records per minute per listener, with nine
+fixed in-memory sampling keys and no new timers. The 900 ms cutoff selects
+diagnostic samples only; it is not a new timeout, SLO, or retry threshold.
+The log envelope marks `sampling: outbox-stage-category-first-per-minute`.
+Sampling does not alter the evidence contract. The offline summary accepts the
+additional fixed stage values, but its record counts are sampled observations,
+not operation counts, failure rates, or comparable queue/outbox populations.
+Shutdown/late completions cannot emit outbox records after the listener stops.
 
 ## Offline summary
 

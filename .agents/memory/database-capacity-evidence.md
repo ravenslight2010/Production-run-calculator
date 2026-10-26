@@ -27,4 +27,15 @@ deployment callbacks.
 declaring telemetry unavailable. Keep provider/primary connection-phase history
 and authenticated SQL permissions as separate, precisely owned access gaps.
 
+Before declaring primary capacity or build fields missing from a log record,
+inspect the bounded nested `database` and `build` objects, not only top-level
+numeric fields. Keep the projection allowlisted rather than printing raw logs.
+
+**Why:** A projection can omit available evidence when it assumes every field is
+top-level. Missing projected values do not establish missing source observations.
+
+**How to apply:** Verify the record shape locally before interpreting an absent
+summary value. Correct the evidence conclusion explicitly when a projection was
+incomplete; retain sampling and build-attribution limitations.
+
 **How to apply:** Use the application's own connection, identify whether it reaches a recovery replica, and label unavailable readings explicitly. Keep provider reserves and Autoscale instance counts unknown unless independently measured; never infer instance count from hostnames, process IDs, or pool/backend counts. Keep the sample-window freshness check for sampled evidence and add independent source-age checks for manual values, preserving fresh groups when another source timestamp is missing or stale. Treat missing reason codes and wait-event counts on pre-update samples as expected history; verify allowlisted codes and count bounds on new samples without retrying the query or logging raw errors. Retain only bounded counts and build identity, not connection strings, role names, query text, or operational rows.
