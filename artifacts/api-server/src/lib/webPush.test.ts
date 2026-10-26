@@ -19,7 +19,10 @@ vi.mock("@workspace/db", () => ({
   dailySyncTable: { scope: { name: "scope" }, date: { name: "date" } },
   usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
 }));
-vi.mock("@workspace/live-calc", () => ({ computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed }));
+vi.mock("@workspace/live-calc", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@workspace/live-calc")>(),
+  computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed,
+}));
 vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
 vi.mock("./serverJobs", async (importOriginal) => {

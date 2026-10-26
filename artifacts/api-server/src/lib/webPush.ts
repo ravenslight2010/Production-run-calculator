@@ -11,7 +11,7 @@ import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
   dailySyncTable, scheduledAlertRecordsTable,
 } from "@workspace/db";
-import { computeServerCalc } from "@workspace/live-calc";
+import { computeServerCalc, selectCanonicalLiveRun } from "@workspace/live-calc";
 import { logger } from "./logger";
 import type { Scope } from "./requestScope";
 import { getUserCapabilities } from "./roles";
@@ -162,27 +162,37 @@ function runKey(runId: string, generation = 0): string {
   return createHash("sha256").update(`${runId}:${generation}`).digest("hex").slice(0, 24);
 }
 
+function activeAlertContext(p: SyncData, nowMs: number) {
+  const run = selectCanonicalLiveRun(p?.dayState?.runs);
+  if (!run || typeof run.id !== "string" || !number(run.startedAt)
+    || number(run.pausedAt) || number(run.endedAt)) return null;
+  const values = p.runValues?.[run.id];
+  if (!values) return null;
+  try {
+    // Explicitly target the lifecycle winner, not a legacy device selection.
+    const result = computeServerCalc({
+      ...p, dayState: { runs: [run], currentIndex: 0 },
+    } as Parameters<typeof computeServerCalc>[0], [], nowMs);
+    if (!result?.calc || result.runId !== run.id || result.calc.ppm <= 0) return null;
+    return {
+      run, values, calc: result.calc,
+      key: runKey(run.id, number(run.startedAt) || number(run.metaUpdatedAt)),
+    };
+  } catch { return null; }
+}
+
 // This operates only on the server's canonical daily_sync blob. A paused run
 // cannot emit timing alerts; reset/new run ids yield new stable alert ids.
 export function alertCandidates(data: unknown, date: string, nowMs = Date.now()): Candidate[] {
-  const p = data as SyncData;
-  const run = p?.dayState?.runs?.[p.dayState.currentIndex ?? 0];
-  if (!run || typeof run.id !== "string") return [];
-  const id = run.id;
-  const v = p.runValues?.[id];
-  if (!v) return [];
-  const started = number(run.startedAt), paused = number(run.pausedAt), ended = number(run.endedAt);
+  const context = activeAlertContext(data as SyncData, nowMs);
+  if (!context) return [];
+  const { run, values: v, calc, key } = context;
+  const started = number(run.startedAt), paused = number(run.pausedAt);
   // Do not put client-controlled run ids (which can contain operational
   // labels) in the push payload. The digest is stable but fixed-size.
-  const prefix = `${date}:${runKey(id, started || number(run.metaUpdatedAt))}`;
+  const prefix = `${date}:${key}`;
   const out: Candidate[] = [];
-  if (ended > 0) return out;
-  if (!started || paused) return out;
-  let result: ReturnType<typeof computeServerCalc>;
-  try { result = computeServerCalc(p as Parameters<typeof computeServerCalc>[0], [], nowMs); } catch { return out; }
-  if (!result?.calc || result.runId !== id || result.calc.ppm <= 0) return out;
-  const calc = result.calc;
-  if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) out.push({ id: `${prefix}:fifteen-min`, kind: "fifteenMin" });
+  if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) out.push({ id: `${prefix}:fifteen-min`, kind: "fifteenMin", armKey: key });
   if (calc.adjustedTimeSec <= 0 && nowMs - started >= 60_000) out.push({ id: `${prefix}:run-complete`, kind: "runComplete" });
   if (run.autoTrackDisabled === true && !calc.pressDone && calc.timePerBatchSec > 0) {
     // Shared auto-track timing excludes pauses/closed stoppages and therefore
@@ -232,14 +242,9 @@ export function pendingFreezerArms(data: unknown, nowMs: number): string[] {
   return result;
 }
 
-function fifteenArm(data: unknown, nowMs: number): string | null {
-  const p = data as SyncData;
-  const run = p?.dayState?.runs?.[p.dayState.currentIndex ?? 0];
-  if (!run || typeof run.id !== "string" || !number(run.startedAt) || number(run.pausedAt) || number(run.endedAt)) return null;
-  try {
-    const calc = computeServerCalc(p as Parameters<typeof computeServerCalc>[0], [], nowMs)?.calc;
-    return calc && calc.ppm > 0 && calc.adjustedTimeSec > 900 ? runKey(run.id, number(run.startedAt) || number(run.metaUpdatedAt)) : null;
-  } catch { return null; }
+export function fifteenArm(data: unknown, nowMs: number): string | null {
+  const context = activeAlertContext(data as SyncData, nowMs);
+  return context && context.calc.adjustedTimeSec > 900 ? context.key : null;
 }
 
 type DeliveryStatus = "no-subscriptions" | "vapid-unconfigured" | "delivered" | "failed";
@@ -421,10 +426,9 @@ export async function runWebPushAlerts(
         continue;
       }
       if (candidate.kind !== "fifteenMin") { filtered.push(candidate); continue; }
-      const run = (row.data as SyncData).dayState?.runs?.[(row.data as SyncData).dayState?.currentIndex ?? 0];
-      if (!run || typeof run.id !== "string") continue;
+      if (!candidate.armKey) continue;
       const [armed] = await db.select({ runKey: webPushAlertArmsTable.runKey }).from(webPushAlertArmsTable)
-        .where(and(eq(webPushAlertArmsTable.scope, row.scope), eq(webPushAlertArmsTable.runKey, runKey(run.id, number(run.startedAt) || number(run.metaUpdatedAt))), eq(webPushAlertArmsTable.alertKind, "fifteenMin")));
+        .where(and(eq(webPushAlertArmsTable.scope, row.scope), eq(webPushAlertArmsTable.runKey, candidate.armKey), eq(webPushAlertArmsTable.alertKind, "fifteenMin")));
       if (armed) filtered.push(candidate);
     }
     candidates += filtered.length;
