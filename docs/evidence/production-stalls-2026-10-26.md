@@ -215,6 +215,11 @@ phase distinction and waiter cleanup, not reproduction of the production cause.
   advanced, reset, or migrated. Owner: database/migration maintainer; reconcile
   migration-backed identity expectations and development schema under explicit
   schema/migration safeguards. Do not weaken this check to make startup look clean.
+  Development follow-up: the owner approved strict serial-contract enforcement
+  without changing saved generators. See
+  [development verification](development-generator-health-2026-10-26.md) for the
+  passing read-only result, disposable ID-safety tests, and remaining boundaries.
+  This does not resolve or attribute the production stalls.
 - Existing development master-data scan reports one error in each scope and
   additional warnings. Only aggregate scan counts were inspected; records were
   not exported or edited. Owner: authorized data-health manager; review scoped

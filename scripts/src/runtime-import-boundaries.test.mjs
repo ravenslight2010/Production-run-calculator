@@ -18,11 +18,13 @@ const environment = {
   NODE_ENV: "production",
 };
 
-test("runtime identity targets exactly match the approved migration", () => {
+test("runtime serial targets retain the historical inventory plus reviewed schema additions", () => {
   const sql = readFileSync(path.join(root, "lib/db/migrations/0003_serial_to_identity.sql"), "utf8");
   const expected = [...sql.matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/gu)]
     .map(([, tableName, columnName]) => ({ tableName, columnName }));
   assert.equal(expected.length, 37);
+  expected.push({ tableName: "freezer_surplus_decision_corrections", columnName: "id" });
+  expected.sort((a, b) => a.tableName.localeCompare(b.tableName));
   assert.deepEqual(IDENTITY_SEQUENCE_TARGETS, expected);
   assert(Object.isFrozen(IDENTITY_SEQUENCE_TARGETS));
   assert(IDENTITY_SEQUENCE_TARGETS.every(Object.isFrozen));

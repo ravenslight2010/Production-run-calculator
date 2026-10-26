@@ -35,6 +35,38 @@ repair, reruns, existing IDs, advanced empty-table counters, and audit grants.
 The forward-conversion SQL/helper remain historical rehearsal inputs only;
 they are not part of normal development or publishing commands.
 
+## Read-only generator health contract
+
+The health diagnostic checks the **current serial schema**, not the historical
+identity-conversion rehearsal. Its `identity-*` module/CLI/event names remain
+unchanged for compatibility. The owner approved this diagnostic-only correction
+on 2026-10-26; no saved generator or schema conversion is authorized by it.
+
+Each of the fixed 38 targets must be a non-null integer, not an identity, with
+an automatically owned, non-cycling sequence. Its default must be exactly
+`nextval` of that same owned sequence, and its increment must be positive.
+Missing targets, detached ownership, constants, other sequence defaults,
+expressions around `nextval`, and identity columns fail closed. This is not a
+serial-or-identity fallback or an environment-dependent exception.
+
+The runtime inventory covers the original 37 columns plus the newer
+`freezer_surplus_decision_corrections.id`. Schema-source coverage tests require
+every current serial column; historical conversion/repair inventories remain
+unchanged.
+
+Only after validating metadata does the diagnostic compare the sequence's
+unconsumed next value (`last_value` plus the increment only when `is_called`)
+against `MAX(column)`. A value at or below the saved maximum is drift.
+It uses a bounded `BEGIN READ ONLY` transaction, rolls back on success and
+failure, and never calls `nextval` or `setval`. Samples are observations, not
+allocation reservations or a guarantee against concurrent imports. Explicit-ID
+writers remain responsible for authorized generator reconciliation.
+
+The disposable regression also verifies the supported serial contract, malformed
+metadata rejection, read-only enforcement, unchanged rows/counters, import drift
+and recovery, and future default allocation above imported IDs. No shared
+generator is advanced or reset by these tests.
+
 The retained forward helper resets counters from `MAX(column)`, not from the
 old generator's state. It can therefore rewind populated or empty advanced
 counters and discard explicit sequence grants. Its corrected empty-table
