@@ -35,7 +35,7 @@
 - [Stale workspace links](isolated-env-stale-workspace-links.md) — isolated installs may miss workspace links; run pnpm install and typecheck:libs before changing code.
 - [Temp substitutions](temp-substitutions.md) — day-state swap/add/remove overlays must affect both totals and consumption keys through shared inventory math.
 - [Sandbox scope](sandbox-scope-isolation.md) + [auto-refresh](sandbox-auto-refresh.md) — gate global tables; stale sandbox login triggers one live reset.
-- [Sandbox network](codeexecution-network-globals.md) — keep fetch calls inside impure functions.
+- [CodeExecution globals](codeexecution-network-globals.md) — network calls stay impure; do not assume full Node globals.
 - [Warehouse staging](warehouse-staging-checklist.md) — synced per-run staged items mirror substitutions and resets across web/mobile.
 - [Draining-run selection](draining-run-selection.md) — filter eligibility before latest end time; web must not reuse lastEndedRun.
 - [Workbook workflow safety](workbook-workflow-safety-index.md) — sequential multi-file reads, premix review, reload/cold-start diagnosis, shipping mapping and generation guards.
