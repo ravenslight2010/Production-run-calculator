@@ -296,7 +296,12 @@ test("real API/web producers, finalized PWA and bundled public getter share one 
       try {
         const response = await fetch(`${url}/api/readyz`, { signal: AbortSignal.timeout(500) });
         const body = await response.json();
-        if (response.status === 503 && body.startup?.errorCode === "database_schema_failed") {
+        // Public readiness intentionally omits private startup diagnostics.
+        // "starting" is not sufficient: require the terminal degraded state
+        // after our rejecting DB fixture has failed startup.
+        if (response.status === 503 && body.status === "degraded" &&
+            body.checks?.startup === "error" && body.checks?.database === "pending") {
+          assert.deepEqual(Object.keys(body).sort(), ["checks", "status"]);
           degraded = true;
           break;
         }

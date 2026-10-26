@@ -15,6 +15,18 @@ An isolated task copy's expected source record can lag behind a newer owner-cont
 
 **How to apply:** Preserve the failed checkout comparison and never synthesize an expected record from the runtime response. Compare official prepared/sealed build identities separately when verifying artifact-level telemetry availability; do not treat that narrower proof as exact Git provenance, a checkout-source-match receipt, or release approval.
 
+Keep sealed-source agreement, runtime platform labels, and official publication
+status as separate facts even when the serving artifact matches official logs.
+
+**Why:** A ready public app matched preparation/sealing logs for an officially
+failed build while aggregate deployment metadata reported success. Those facts
+did not reveal the internal platform promotion/status transition.
+
+**How to apply:** Preserve the failed status and unknown Git provenance. A seal
+precedes publication and cannot certify platform success; ask the platform
+operator for internal status history rather than rewriting identity or
+republishing an older task copy.
+
 Deployment-log responses can contain serialized log text despite an array-shaped documented contract. Platform severity filters may also omit application Pino error/warning records that appear under an info-level query.
 
 **Why:** A scoped runtime investigation encountered both behaviors; treating an empty severity-filtered response as absence of application failures would have reversed its conclusion.
