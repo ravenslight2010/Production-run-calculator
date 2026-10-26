@@ -162,10 +162,10 @@ import {
 import {
   calculateDayTimeline,
   defaultDayBreaks,
-  estimatedRunDurationSec,
   isValidLocalTime,
   normalizeDayBreaks,
 } from "../dayTimeline";
+import { buildProgressAwareTimelineRuns } from "../timelineProgress";
 import {
   fmtElapsed,
   fmtTime,
@@ -544,6 +544,8 @@ import ManagerAttentionDialog, {
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { TouchSelect } from "../components/TouchOptionPicker";
+import { DialogLayerProvider } from "../components/ui/dialog";
+import { RunEstimateBasis } from "../components/RunEstimateBasis";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
@@ -19285,6 +19287,7 @@ export default function Home() {
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
+          <DialogLayerProvider value={80}>
           <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScheduleDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md flex flex-col`} onClick={e => e.stopPropagation()}>
               {scheduleView === "list" ? (
@@ -19698,15 +19701,27 @@ export default function Home() {
                           </div>
                         ))}
                         {(() => {
+                          const nowMs = Date.now();
                           const preview = calculateDayTimeline({
                             date: scheduleEditorDate || todayStr(),
                             productionStartTime,
-                            runs: scheduleEditorRuns.map(run => ({
-                              run: { id: run.id, brand: run.brand, flavor: run.flavor },
-                              durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
-                            })),
+                            runs: buildProgressAwareTimelineRuns(scheduleEditorRuns.map(run => ({
+                              subTab: scheduleEditorLoadedRunsRef.current.find(loaded => loaded.id === run.id)?.subTab,
+                              ...(scheduleEditorDate === todayStr() ? dayState.runs.find(actual => actual.id === run.id) : {}),
+                              id: run.id, brand: run.brand, flavor: run.flavor,
+                            })), run => {
+                              const progress = scheduleEditorDate === todayStr()
+                                ? run.id === currentRunId ? form.getValues() : loadRunValues(run.id)
+                                : undefined;
+                              return {
+                                ...scheduleEditorRunValues[run.id],
+                                ...(progress ? { skidsCompleted: progress.skidsCompleted, casesOnCurrentSkid: progress.casesOnCurrentSkid } : {}),
+                                casesNeeded: scheduleEditorRuns.find(draft => draft.id === run.id)?.casesNeeded,
+                              };
+                            }, nowMs, scheduleEditorDate === todayStr()),
                             breaks: scheduleEditorBreaks,
-                            nowMs: Date.now(),
+                            nowMs,
+                            isToday: scheduleEditorDate === todayStr(),
                           });
                           return (
                             <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
@@ -19720,6 +19735,14 @@ export default function Home() {
                               {preview.projectedFinishMs && (
                                 <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
                               )}
+                              {preview.incomplete && <p className="text-amber-400">Incomplete projection — no dependable day finish. Resolve missing inputs or pending/unassigned breaks.</p>}
+                              <p className="mt-1">Projected finish means packaging clear. Recorded run ends remain actual, even if product is still draining. Upcoming runs are sequential through freezer/line transit; actual overlapping runs keep their timestamps. Each placed break adds 30 min. Pending breaks add no time and never pause production automatically.</p>
+                              {preview.runs.map((item, i) => (
+                                <div key={item.runId} className="mt-2">
+                                  <span>Run {i + 1}: {item.startMs ? fmtClock(item.startMs) : "unknown"} → {item.finishMs ? fmtClock(item.finishMs) : "unknown"}</span>
+                                  <RunEstimateBasis estimate={item.estimate} />
+                                </div>
+                              ))}
                             </div>
                           );
                         })()}
@@ -20127,6 +20150,7 @@ export default function Home() {
               ) : null}
             </div>
           </div>
+          </DialogLayerProvider>
         )}
 
 

@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page, type Request } from "@playwright/test";
 import { Client } from "pg";
+import { cancelledDocumentMessage } from "./breakPlanningEvidence";
 import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
@@ -563,7 +564,7 @@ async function seedPendingRun(page: Page): Promise<string> {
   return runId;
 }
 
-async function seedBreakSchedule(): Promise<{
+async function seedBreakSchedule(completeInputs = false): Promise<{
   runIds: [string, string];
   deletedRunId: string;
 }> {
@@ -592,8 +593,8 @@ async function seedBreakSchedule(): Promise<{
           dayState: {
             date,
             runs: [
-              { id: runIds[0], brand: "Break E2E One", flavor: "Morning", casesNeeded: 0 },
-              { id: runIds[1], brand: "Break E2E Two", flavor: "Afternoon", casesNeeded: 0 },
+              { id: runIds[0], brand: "Break E2E One", flavor: "Morning", casesNeeded: 0, ...(completeInputs ? { subTab: "crusts" } : {}) },
+              { id: runIds[1], brand: "Break E2E Two", flavor: "Afternoon", casesNeeded: 0, ...(completeInputs ? { subTab: "crusts" } : {}) },
             ],
             currentIndex: 0,
             resetAt: 0,
@@ -604,8 +605,8 @@ async function seedBreakSchedule(): Promise<{
             ],
           },
           runValues: {
-            [runIds[0]]: { casesNeeded: 0, pizzasPerCase: 12, approxLineSpeed: 10 },
-            [runIds[1]]: { casesNeeded: 0, pizzasPerCase: 12, approxLineSpeed: 10 },
+            [runIds[0]]: { casesNeeded: completeInputs ? 100 : 0, pizzasPerCase: 12, approxLineSpeed: completeInputs ? 40 : 10, ...(completeInputs ? { freezerTime: 15 } : {}) },
+            [runIds[1]]: { casesNeeded: completeInputs ? 100 : 0, pizzasPerCase: 12, approxLineSpeed: completeInputs ? 40 : 10, ...(completeInputs ? { freezerTime: 15 } : {}) },
           },
           runValuesUpdatedAt: { [runIds[0]]: now, [runIds[1]]: now },
         }),
@@ -1073,6 +1074,312 @@ test.describe("accessibility smoke", () => {
     await expect(operatorTimeline).toContainText("Break 3 · 30 min");
     await expect(operatorPage.getByTestId("schedule-breaks")).toHaveCount(0);
     await operatorPage.close();
+  });
+
+  test("touch break planning opens above Schedule and retains the saved draft", async ({ page }) => {
+    const errors: string[] = [];
+    const failedResponses: string[] = [];
+    const knownManagerDiagnostics404: string[] = [];
+    const knownManagerDiagnosticsConsole: string[] = [];
+    const unexpectedRequestFailures: string[] = [];
+    const expectedNavigationAborts: string[] = [];
+    const expectedWebKitNavigationMessages: string[] = [];
+    const inFlight = new Set<Request>();
+    const navigationRequests = new WeakSet<Request>();
+    const navigationPaths = new Set<string>();
+    const successfulOrigins = new Set<string>();
+    let requestPhase = "post-auth journey";
+    // Track requests from the first document, including those started before
+    // auth hydration; otherwise a later reload cannot identify their aborts.
+    page.on("request", request => inFlight.add(request));
+    page.on("requestfinished", request => inFlight.delete(request));
+    page.on("response", response => {
+      if (response.ok()) successfulOrigins.add(new URL(response.url()).origin);
+    });
+    await signUp(page);
+    await seedBreakSchedule(true);
+    await page.clock.setFixedTime(new Date());
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    // Start diagnostics after signup/bootstrap and the fixture-backed reload so
+    // expected pre-auth 401s are not misclassified as failures in this journey.
+    const markNavigation = () => {
+      for (const request of inFlight) {
+        navigationRequests.add(request);
+        navigationPaths.add(new URL(request.url()).pathname);
+      }
+    };
+    page.on("pageerror", error => errors.push(error.message));
+    page.on("console", message => {
+      if (message.type() === "error") {
+        const source = message.location().url;
+        const pathname = source ? new URL(source).pathname : "";
+        const text = message.text();
+        const cancelledPath = cancelledDocumentMessage({
+          webkit: test.info().project.name.endsWith("webkit"),
+          text, successfulOrigins, navigationPaths,
+          duringReload: requestPhase === "persistence reload",
+        });
+        if (
+          pathname === "/api/background-operations/diagnostics"
+          && text.includes("404 (Not Found)")
+        ) {
+          knownManagerDiagnosticsConsole.push(`${text} [${pathname}]`);
+        } else if (cancelledPath) {
+          expectedWebKitNavigationMessages.push(`cancelled document: ${cancelledPath}`);
+        } else {
+          errors.push(`${text}${pathname ? ` [${pathname}]` : ""}`);
+        }
+      }
+    });
+    page.on("response", response => {
+      const pathname = new URL(response.url()).pathname;
+      const record = `${response.status()} ${response.request().method()} ${pathname}`;
+      if (
+        response.status() === 404
+        && response.request().method() === "GET"
+        && pathname === "/api/background-operations/diagnostics"
+      ) {
+        // Confirmed pre-existing manager diagnostics route is not mounted.
+        // Retain it as a separate finding; it is not a Schedule test success.
+        knownManagerDiagnostics404.push(record);
+      } else if (response.status() >= 400) {
+        failedResponses.push(record);
+      }
+    });
+    page.on("requestfailed", request => {
+      const pathname = new URL(request.url()).pathname;
+      const code = request.failure()?.errorText ?? "unknown";
+      const record = `${request.method()} ${pathname} ${code}`;
+      const expectedAbort =
+        ["net::ERR_ABORTED", "Load request cancelled"].includes(code)
+        && (
+          ((requestPhase === "persistence reload" || navigationRequests.has(request)) && (
+            (request.method() === "GET" && pathname === "/api/sync/events")
+            || (pathname === "/api/factory-data" && ["GET", "PUT"].includes(request.method()))
+          ))
+          || (requestPhase === "summary navigation"
+            && request.method() === "GET"
+            && pathname === "/api/sync/events")
+        );
+      if (expectedAbort) {
+        expectedNavigationAborts.push(`${requestPhase}: ${record}`);
+      } else {
+        unexpectedRequestFailures.push(`${requestPhase}: ${record}`);
+      }
+      inFlight.delete(request);
+    });
+    const openEditor = async () => {
+      await page.getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      await page.getByTestId("schedule-today-card").getByRole("button", { name: "Edit", exact: true }).click();
+      const editor = page.getByRole("dialog", { name: /Plan for/ });
+      const toggle = editor.getByTestId("schedule-break-toggle");
+      if (await toggle.isVisible()) await toggle.click();
+      return editor;
+    };
+    const editor = await openEditor();
+    const scheduleLayer = await editor.evaluate(node => getComputedStyle(node.parentElement!).zIndex);
+    const choose = async (slot: number, value: string, label: string) => {
+      const control = editor.getByLabel(`Break ${slot} placement`, { exact: true });
+      if (await control.evaluate(node => node.tagName === "SELECT")) {
+        await control.selectOption(value);
+      } else {
+        await control.click();
+        await page.getByRole("dialog", { name: `Break ${slot} placement`, exact: true }).getByRole("option", { name: label, exact: true }).click();
+      }
+    };
+    for (const slot of [1, 2, 3]) {
+      const trigger = editor.getByLabel(`Break ${slot} placement`, { exact: true });
+      const touch = await trigger.evaluate(node => node.tagName === "BUTTON");
+      if (touch) {
+        await trigger.click();
+        const picker = page.getByRole("dialog", { name: `Break ${slot} placement`, exact: true });
+        const option = picker.getByRole("option", { name: "After a run", exact: true });
+        await expect(option).toBeVisible();
+        if (
+          slot === 1
+          && process.env.BREAK_REPRODUCE_ORIGINAL_LAYER === "1"
+          && test.info().project.name === "android-touch"
+        ) {
+          // Controlled reproduction of the original z-50 portal against the
+          // real z-70 Schedule, not a claim about a customer's physical phone.
+          await picker.evaluate(node => {
+            (node as HTMLElement).setAttribute("data-break-layer-probe", "break-1-picker");
+            const overlay = node.previousElementSibling as HTMLElement | null;
+            if (overlay) overlay.setAttribute("data-break-layer-probe", "break-1-overlay");
+          });
+          const layerSheet = await page.addStyleTag({ content: `
+            [role="dialog"][aria-labelledby][data-state="open"][data-break-layer-probe="break-1-picker"] {
+              z-index: 50 !important; transition: none !important;
+            }
+            [data-state="open"][data-break-layer-probe="break-1-overlay"] {
+              z-index: 50 !important; transition: none !important;
+            }
+          ` });
+          expect(await picker.evaluate(node => getComputedStyle(node).zIndex)).toBe("50");
+          expect(scheduleLayer).toBe("70");
+          await page.screenshot({ path: "../../.local/evidence/break-planning/original-layer-emulation.png" });
+          await layerSheet.evaluate(style => {
+            style.textContent = `
+              [role="dialog"][aria-labelledby][data-state="open"][data-break-layer-probe="break-1-picker"] {
+                z-index: 80 !important; transition: none !important;
+              }
+              [data-state="open"][data-break-layer-probe="break-1-overlay"] {
+                z-index: 80 !important; transition: none !important;
+              }
+            `;
+          });
+          await expect.poll(() => picker.evaluate(node => getComputedStyle(node).zIndex)).toBe("80");
+          await page.screenshot({ path: "../../.local/evidence/break-planning/repaired-layer-emulation.png" });
+        }
+        await expect.poll(() => option.evaluate((node) => {
+          const box = node.getBoundingClientRect();
+          return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        })).toBe(true);
+        await option.click();
+        await expect(picker).toBeHidden();
+        await editor.getByRole("button", { name: `Break ${slot} run`, exact: true }).click();
+        await page.getByRole("dialog", { name: `Break ${slot} run`, exact: true })
+          .getByRole("option", { name: /Run 1 —/ }).click();
+        await trigger.click();
+        await page.keyboard.press("Escape");
+        await expect(trigger).toBeFocused();
+        await expect(trigger).toHaveText(/After a run/);
+        await trigger.click();
+        await page.getByRole("dialog", { name: `Break ${slot} placement`, exact: true })
+          .getByRole("button", { name: "Cancel", exact: true }).click();
+      } else {
+        await trigger.selectOption("after-run");
+        await editor.getByLabel(`Break ${slot} run`, { exact: true }).selectOption({ index: 1 });
+      }
+      await choose(slot, "at-time", "At a clock time");
+      await editor.getByLabel(`Break ${slot} time`).fill("23:00");
+      await choose(slot, "off", "Not scheduled");
+      await expect(editor.getByLabel(`Break ${slot} time`)).toBeDisabled();
+      await choose(slot, "after-run", "After a run");
+    }
+    await choose(2, "at-time", "At a clock time");
+    await choose(3, "off", "Not scheduled");
+    const preview = await editor.getByTestId("schedule-break-preview").innerText();
+    const projectedFinish = preview.match(/day finish ([^\n]+)/)?.[1];
+    expect(projectedFinish).toBeTruthy();
+    const saved = page.waitForResponse((response) => response.url().includes("/api/sync/today") && response.request().method() === "PUT");
+    await editor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    expect((await saved).ok()).toBe(true);
+    requestPhase = "persistence reload";
+    markNavigation();
+    await page.reload({ waitUntil: "load" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    requestPhase = "post-auth journey";
+    const reopened = await openEditor();
+    const touch = await reopened.getByLabel("Break 1 placement", { exact: true }).evaluate(node => node.tagName === "BUTTON");
+    if (touch) {
+      await expect(reopened.getByLabel("Break 1 placement", { exact: true })).toHaveText(/After a run/);
+      await expect(reopened.getByLabel("Break 1 run", { exact: true })).toHaveText(/Run 1/);
+      await expect(reopened.getByLabel("Break 2 placement", { exact: true })).toHaveText(/At a clock time/);
+      await expect(reopened.getByLabel("Break 3 placement", { exact: true })).toHaveText(/Not scheduled/);
+    } else {
+      await expect(reopened.getByLabel("Break 1 placement", { exact: true })).toHaveValue("after-run");
+      await expect(reopened.getByLabel("Break 2 placement", { exact: true })).toHaveValue("at-time");
+      await expect(reopened.getByLabel("Break 3 placement", { exact: true })).toHaveValue("off");
+    }
+    await expect(reopened.getByLabel("Break 2 time")).toHaveValue("23:00");
+    await expect.poll(() => reopened.getByTestId("schedule-break-preview").innerText()).toBe(preview);
+    await choose(1, "off", "Not scheduled");
+    await reopened.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("dialog", { name: "Scheduled Days", exact: true }).getByRole("button", { name: /Close/ }).click();
+    const cancelled = await openEditor();
+    if (touch) await expect(cancelled.getByLabel("Break 1 placement", { exact: true })).toHaveText(/After a run/);
+    else await expect(cancelled.getByLabel("Break 1 placement", { exact: true })).toHaveValue("after-run");
+    await cancelled.getByRole("button", { name: "Close schedule editor", exact: true }).click();
+    requestPhase = "summary navigation";
+    markNavigation();
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page.getByTestId("day-timeline")).toContainText(projectedFinish!);
+    requestPhase = "post-auth journey";
+    if (test.info().project.name === "android-touch") {
+      await page.getByTestId("day-timeline").screenshot({ path: "../../.local/evidence/break-planning/break-summary.png" });
+    }
+
+    console.log("known out-of-scope manager diagnostics 404s:", {
+      responses: knownManagerDiagnostics404,
+      console: knownManagerDiagnosticsConsole,
+      expectedNavigationAborts,
+      expectedWebKitNavigationMessages,
+    });
+    expect(knownManagerDiagnostics404.every(value => value === "404 GET /api/background-operations/diagnostics")).toBe(true);
+    expect({ errors, failedResponses, unexpectedRequestFailures }).toEqual({
+      errors: [],
+      failedResponses: [],
+      unexpectedRequestFailures: [],
+    });
+  });
+
+  test("break planning enlarged-text keyboard controls", async ({ page }) => {
+    await signUp(page);
+    await seedBreakSchedule();
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe("32px");
+
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await page.getByTestId("schedule-today-card").getByRole("button", { name: "Edit", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: /Plan for/ });
+    const toggle = editor.getByTestId("schedule-break-toggle");
+    if (await toggle.isVisible()) await toggle.click();
+    const trigger = editor.getByLabel("Break 1 placement", { exact: true });
+    await expect(trigger).toBeVisible();
+
+    if (await trigger.evaluate(node => node.tagName === "BUTTON")) {
+      await trigger.press("Enter");
+      console.log("enlarged keyboard modal state after Enter:", await page.evaluate(() => ({
+        activeTag: document.activeElement?.tagName,
+        activeLabel: document.activeElement?.getAttribute("aria-label"),
+        url: location.pathname,
+        dialogs: [...document.querySelectorAll('[role="dialog"]')].map(node => ({
+          state: node.getAttribute("data-state"),
+          hidden: node.getAttribute("aria-hidden"),
+          label: node.getAttribute("aria-label"),
+          labelledBy: node.getAttribute("aria-labelledby"),
+        })),
+      })));
+      await expect(page.getByRole("dialog", { name: "Break 1 placement", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(trigger).toBeFocused();
+    } else {
+      const next = editor.getByLabel("Break 1 run", { exact: true });
+      await trigger.press("Tab");
+      console.log("enlarged keyboard focus after Tab:", await page.evaluate(() => ({
+        activeTag: document.activeElement?.tagName,
+        activeLabel: document.activeElement?.getAttribute("aria-label"),
+        url: location.pathname,
+        dialogs: [...document.querySelectorAll('[role="dialog"]')].map(node => ({
+          state: node.getAttribute("data-state"),
+          hidden: node.getAttribute("aria-hidden"),
+          label: node.getAttribute("aria-label"),
+          labelledBy: node.getAttribute("aria-labelledby"),
+        })),
+      })));
+      await expect(next).toBeFocused();
+    }
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
   test("Android-sized PWA schedule editor exposes the break planner and preserves placements", async ({

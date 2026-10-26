@@ -154,3 +154,4 @@
 - [Deployment log fallback](deployment-log-fallback.md) — if revision-scoped runtime logs are unavailable, verify the live build first and use only a time-bounded current-serving log query.
 - [Workflow configuration side effects](workflow-configuration-side-effects.md) — after updating an individual workflow, inspect whether the aggregate Project workflow picked it up.
 - [Metadata maintenance hosts](metadata-maintenance-supported-hosts.md) — metadata append is approved on Linux, macOS, and bounded Windows x64; require native identity and kernel locking.
+- [Day timeline estimates](day-timeline-estimate-policy.md) — distinguish actual ends from packaging-clear forecasts; keep unknown durations and unplaced breaks explicit.

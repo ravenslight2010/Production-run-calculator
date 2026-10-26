@@ -1,6 +1,6 @@
 ---
 name: Playwright offline EventSource behavior
-description: Deterministic browser tests for connectivity transitions when Chromium keeps existing SSE streams open
+description: Deterministic connectivity tests and bounded classification of old-document fetch cancellations during browser navigation
 ---
 
 Headless Chromium's browser-context offline flag may update `navigator.onLine`
@@ -35,3 +35,21 @@ connectivity path.
 the failing route before the outage, observe the rejected request, remove the
 route, and use real connectivity transitions before asserting the recovered
 request and connected state.
+
+## Old-document cancellation messages
+
+WebKit may describe cancelled old-document fetches during reload as access-control
+errors, while its request-failure event says `Load request cancelled`; Chromium
+commonly says `net::ERR_ABORTED`. Do not infer a CORS-policy defect from that console
+phrase alone, and do not suppress access-control errors globally.
+
+**Why:** An authorized save/reload journey reached its persisted-state assertions,
+but strict final console checks failed on fetches cancelled with the old document.
+The API and page may use different local origins, so matching only the page host
+also misclassifies otherwise correlated cancellation evidence.
+
+**How to apply:** Track requests before initial hydration, record navigation phases
+and observed successful API origins, retain sanitized exact paths, and independently
+check save responses and persistence. Classify only known navigation cancellations;
+unknown origins/paths and genuine failed writes remain failures. Preserve failed
+command outcomes even when a later cheap regression check validates a fixture fix.
