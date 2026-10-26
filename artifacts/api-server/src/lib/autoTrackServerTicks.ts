@@ -22,6 +22,7 @@ import {
   rearmWallClockTimers,
   tickWallClock,
   type AutoTrackSchedule,
+  type Calc,
   type WallClockChannel,
   type WallClockBookkeeping,
 } from "@workspace/live-calc";
@@ -112,14 +113,74 @@ function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anc
   ];
 }
 
+function selectTrackingRun(
+  payload: Payload,
+  nowMs: number,
+  options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean },
+): { run: Record<string, unknown>; index: number } | null {
+  const runs = payload.dayState?.runs ?? [];
+  const active: Array<{ run: Record<string, unknown>; index: number; startedAt: number }> = [];
+  const drains: Array<{ run: Record<string, unknown>; index: number; lifecycleAt: number }> = [];
+
+  runs.forEach((run, index) => {
+    if (typeof run.id !== "string" || number(run.startedAt) <= 0) return;
+    const values = payload.runValues?.[run.id];
+    if (!values) return;
+    const endedAt = number(run.endedAt);
+    if (endedAt > 0) {
+      const freezerTime = number(values.freezerTime);
+      if (
+        options.allowEndedDrain === true
+        && freezerTime > 0
+        && nowMs < endedAt + freezerTime * 60_000
+      ) drains.push({ run, index, lifecycleAt: endedAt });
+      return;
+    }
+
+    const pausedAt = number(run.pausedAt);
+    if (pausedAt > 0) {
+      if (
+        options.allowPausedPackagingDrain === true
+        && pausedPackagingDrain(run, values, nowMs).active
+      ) drains.push({ run, index, lifecycleAt: pausedAt });
+      return;
+    }
+    active.push({ run, index, startedAt: number(run.startedAt) });
+  });
+
+  // The selected tab is device-local and is deliberately absent from canonical
+  // sync snapshots. A started run's server-issued lifecycle is the authority
+  // for background tracking; prefer the newest if legacy state has competing
+  // active rows, with run order as a deterministic tie-breaker.
+  const activeRun = active.sort((a, b) => b.startedAt - a.startedAt || b.index - a.index)[0];
+  if (activeRun) return { run: activeRun.run, index: activeRun.index };
+
+  // With no running lifecycle, continue only an eligible pause/end freezer
+  // drain. Filter by its own window before choosing the most recent one.
+  const drainingRun = drains.sort((a, b) => b.lifecycleAt - a.lifecycleAt || b.index - a.index)[0];
+  return drainingRun ? { run: drainingRun.run, index: drainingRun.index } : null;
+}
+
 function schedule(
   payload: Payload,
   nowMs: number,
   options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean } = {},
-): { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null {
-  const result = computeServerCalc(payload as never, [], nowMs);
-  const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
-  if (!result || !run || typeof run.id !== "string") return null;
+): {
+  schedule: AutoTrackSchedule;
+  values: Record<string, unknown>;
+  ppm: number;
+  run: Record<string, unknown>;
+  calc: Calc;
+} | null {
+  const selected = selectTrackingRun(payload, nowMs, options);
+  if (!selected) return null;
+  const run = selected.run;
+  const selectedPayload = {
+    ...payload,
+    dayState: { ...payload.dayState, currentIndex: selected.index },
+  };
+  const result = computeServerCalc(selectedPayload as never, [], nowMs);
+  if (!result || typeof run.id !== "string") return null;
   // Date rows are client-local (and can legitimately be tomorrow in UTC), so
   // eligibility is lifecycle based rather than server-date based. Conversely,
   // an abandoned old running register must never restart net claims.
@@ -159,6 +220,8 @@ function schedule(
     }),
     values,
     ppm: result.calc.ppm,
+    run,
+    calc: result.calc,
   };
 }
 
@@ -171,7 +234,7 @@ export function buildNetSecondServerClaims(
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
   const built = schedule(payload, nowMs);
   if (!built) return [];
-  const { schedule: plan, values, ppm } = built;
+  const { schedule: plan, values, ppm, calc } = built;
   const baseUpdatedAt = number(payload.runValuesUpdatedAt?.[plan.runId]);
   const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
   return plan.entries.flatMap((entry) => {
@@ -180,11 +243,10 @@ export function buildNetSecondServerClaims(
       const onHand = number(values.sauceStockBarrels);
       const anchor = number(values.sauceStockAnchorNetSec);
       const correctionGeneration = Math.max(0, number(values.sauceStockCorrectionGeneration));
-      const calc = computeServerCalc(payload as never, [], nowMs)?.calc;
       const cadence = computeSauceStockStepSeconds(
         values.sauceOzPerPizza,
         ppm,
-        Number(calc?.sauceEffBarrel) || 0,
+        Number(calc.sauceEffBarrel) || 0,
       );
       const prior = coordination?.["sauce-stock"];
       const initialize = values.sauceStockInitialized !== true;
@@ -357,9 +419,9 @@ export function buildWallClockServerClaims(
     allowEndedDrain: true,
     allowPausedPackagingDrain: true,
   });
-  const run = payload.dayState?.runs?.[payload.dayState?.currentIndex ?? 0];
+  const run = built?.run;
   if (!built || !run || number(run.startedAt) <= 0) return null;
-  const { schedule: plan, values } = built;
+  const { schedule: plan, values, calc } = built;
   const endedAt = number(run.endedAt);
   const drainActive = endedAt > 0
     && number(values.freezerTime) > 0
@@ -372,7 +434,6 @@ export function buildWallClockServerClaims(
       ? "paused"
       : "running";
   const old = payload.autoTrackServerState?.wallClockBookkeeping?.[plan.runId] ?? {};
-  const calc = computeServerCalc(payload as never, [], nowMs)!.calc;
   const timing = getAutoTrackTiming(calc.ppm, number(values.pizzasPerCase), calc.perTray, calc.perBatch, {
     spinSec: number(values.mixerLowSec) + number(values.mixerHighSec),
     hopperSec: number(values.hopperSec),

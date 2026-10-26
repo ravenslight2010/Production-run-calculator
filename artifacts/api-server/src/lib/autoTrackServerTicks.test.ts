@@ -97,7 +97,10 @@ describe("server auto-track claim builders", () => {
     next.dayState.runs.push({
       id: "run-b", subTab: "crusts", startedAt: NOW + 140_000, metaUpdatedAt: NOW + 140_000,
     });
-    next.dayState.currentIndex = 1;
+    // The selected tab is device-local and is not part of canonical sync data.
+    // Server tracking must follow the started lifecycle rather than defaulting
+    // to the first, now-ended run.
+    delete next.dayState.currentIndex;
     next.runValues["run-b"] = {
       ...next.runValues[RUN],
       app1BatchesMade: 0, app1StockLbs: 0, app1StockConsumedLbs: 0,
@@ -110,6 +113,7 @@ describe("server auto-track claim builders", () => {
     expect(buildNetSecondServerClaims(paused, NOW + 220_000)).toEqual([]);
     const claims = buildNetSecondServerClaims(next, NOW + 220_000);
     expect(claims.every(({ runId }) => runId === "run-b")).toBe(true);
+    expect(buildWallClockServerClaims(next, NOW + 220_000)?.runId).toBe("run-b");
     const batchB = claims.find(({ channel }) => channel === "app1-batch")!;
     expect(batchB).toBeDefined();
     expect(applyAutoTrackClaim(next, pendingA, NOW + 220_000).outcome).not.toBe("accepted");
