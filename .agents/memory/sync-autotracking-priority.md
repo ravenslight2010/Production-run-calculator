@@ -15,7 +15,7 @@ Canonical wake recovery may run independently of best-effort background refreshe
 
 **How to apply:** Keep single ownership and write/adoption barriers for recovery itself. Treat ordinary refresh concurrency separately, and distinguish duplicate signals within one wake from a genuinely later sleep/offline boundary.
 
-The user reports that a phone/PWA repeatedly attempts sync after waking, and a manual refresh only partly settles it. Screenshots showed queued changes and HTTP 200 acknowledgements alongside stale-base recovery that retained a server conflict; the recovery copy was unavailable. This is symptom evidence, not an established cause.
+The user reports that a phone/PWA repeatedly attempts sync after waking, and a manual refresh only partly settles it. Screenshots showed queued changes and HTTP 200 acknowledgements alongside stale-base recovery that retained a server conflict; the recovery copy was unavailable. A later screenshot showed a network failure and two timeouts, including overlapping app requests while backgrounded. Those elapsed times are client-side waits, not server processing durations. This is symptom evidence, not an established cause.
 
 **Why:** A successful request acknowledgement does not prove that the wake queue converged or that a retained conflict was safely resolved.
 
