@@ -14,3 +14,9 @@ Canonical wake recovery may run independently of best-effort background refreshe
 **Why:** The approved speed objective preserves canonical acknowledgement and conflict fences, but unrelated slow master-data reads must not determine operational recovery latency. Faster polling or weaker acknowledgement would hide the problem rather than solve it.
 
 **How to apply:** Keep single ownership and write/adoption barriers for recovery itself. Treat ordinary refresh concurrency separately, and distinguish duplicate signals within one wake from a genuinely later sleep/offline boundary.
+
+The user reports that a phone/PWA repeatedly attempts sync after waking, and a manual refresh only partly settles it. Screenshots showed queued changes and HTTP 200 acknowledgements alongside stale-base recovery that retained a server conflict; the recovery copy was unavailable. This is symptom evidence, not an established cause.
+
+**Why:** A successful request acknowledgement does not prove that the wake queue converged or that a retained conflict was safely resolved.
+
+**How to apply:** Reproduce wake, reconnect, and refresh sequences; trace bounded queue/send/ack/recovery/conflict events; verify that the system settles without losing, duplicating, or silently overwriting operational changes.
