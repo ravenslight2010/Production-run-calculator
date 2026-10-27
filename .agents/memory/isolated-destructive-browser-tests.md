@@ -9,15 +9,20 @@ overridden `search_path` is not sufficient isolation for this project:
 `drizzle-kit push` introspects `public`, reports no changes, and leaves the
 isolated schema empty.
 
+The owner confirms that Replit's development database is separate from published
+production. It is still shared development data, not a disposable test database.
+
 **Why:** The browser-testing environment shares the user's development database,
 and active clients may be writing the live day. Briefly deleting and restoring
 that row can still lose concurrent edits.
 
-**How to apply:** Create a uniquely named temporary database, run the normal
-schema push against its URL, start temporary API/web endpoints using that URL,
-run Playwright there, then terminate its connections and drop the database in a
-cleanup trap. Keep connection URLs out of logs. Verify no temporary database or
-listener remains afterward.
+**How to apply:** Treat development and published production as separate, but
+do not use the shared development database for destructive tests. Create a
+uniquely named temporary database, run the normal schema push against its URL,
+start temporary API/web endpoints using that URL, run Playwright there, then
+terminate its connections and drop the database in a cleanup trap. Keep
+connection URLs out of logs. Verify no temporary database or listener remains
+afterward.
 
 For browser suites that only need to inspect layout or exercise a newly created
 test account, do not inherit a shared configuration with destructive global
