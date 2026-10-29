@@ -22,3 +22,15 @@ completion or recover the lost exit status.
 unchanged budgets up front. After interruption, label the attempt incomplete,
 preserve surviving artifacts, and give any fresh run a separate evidence path.
 Never invent a final result or use an incomplete attempt as a timing baseline.
+
+Browser progress is diagnostic, not resumable certification. A fresh attempt
+must not inherit earlier case passes, including when only verification inputs
+changed and the production source is identical.
+
+**Why:** The owner authorized interruption diagnostics independently of the
+unresolved release work; preserving a partial run does not authorize rerunning
+certification or reconciling the reviewed case inventory.
+
+**How to apply:** Keep tooling verification on fake lifecycle/filesystem events.
+Report an existing inventory mismatch honestly to its release owner instead of
+changing inventory or budgets to make the persistence task pass.

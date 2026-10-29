@@ -1,5 +1,13 @@
 # Full browser runtime certification attempt — NO-GO
 
+## Reusable interruption diagnostics
+
+Future full-browser attempts automatically retain private, metadata-only startup
+and reporter checkpoints. See [browser attempt progress](../browser-attempt-progress.md)
+for storage, failure handling, identity binding, and interpretation.
+This capability does not resume, reclassify, or complete any attempt documented
+below, and its fixture checks are not another certification run.
+
 ## Scope and authorization
 
 The owner explicitly authorized standard/full release verification on the

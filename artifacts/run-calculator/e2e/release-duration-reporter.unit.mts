@@ -233,6 +233,8 @@ assert.throws(
 // Exercise the reporter entry point, not just the contract helper: a same-count
 // replacement or wrong project must fail before any runtime evidence is accepted.
 type BeginArgs = Parameters<ReleaseDurationReporter["onBegin"]>;
+// These are inventory/list-contract tests, not verification attempts.
+process.argv.push("--list");
 const reporterConfig = { projects: [{ name: "chromium" }] } as BeginArgs[0];
 function reporterSuite(identities: readonly string[], projectName = "chromium") {
   return {
@@ -278,6 +280,7 @@ assert.throws(
     ),
   /non-chromium project/,
 );
+process.argv.splice(process.argv.lastIndexOf("--list"), 1);
 
 const report = formatFullBrowserReport(
   [

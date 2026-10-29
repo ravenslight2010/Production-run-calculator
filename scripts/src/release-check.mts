@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { startBrowserAttempt } from "./browser-attempt-progress.mjs";
 import { existsSync } from "node:fs";
 import { assessmentRevision, captureReleaseIdentity, isAssessmentRevision, isDeploymentRevision, isEvidenceRevision, isSourceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
@@ -3675,9 +3676,26 @@ export function runStep(
 }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
+    let attemptEnvironment: Record<string, string> = {};
+    if (step.label === FULL_BROWSER_GATE_LABEL) {
+      try {
+        const attemptId = startBrowserAttempt({
+          root: rootDir,
+          runnerBudgets: {
+            timeoutMs: step.timeoutMs ?? null,
+            warningMs: step.warningMs ?? null,
+          },
+        });
+        attemptEnvironment = { RELEASE_BROWSER_ATTEMPT_ID: attemptId };
+      } catch {
+        console.error("Browser attempt startup persistence failed; no browser run started.");
+        resolve({ exitCode: 1, elapsedMs: Date.now() - startedAt, status: "INFRASTRUCTURE ERROR" });
+        return;
+      }
+    }
     const child = spawn(step.command ?? "pnpm", step.args, {
       cwd: rootDir,
-      env: { ...process.env, ...step.env },
+      env: { ...process.env, ...step.env, ...attemptEnvironment },
       detached: process.platform !== "win32",
       stdio: options.logPath ? ["ignore", "pipe", "pipe"] : "inherit",
     });

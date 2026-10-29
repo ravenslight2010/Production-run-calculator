@@ -22,6 +22,15 @@ while (($#)); do
 done
 readonly PLAYWRIGHT_CONFIG
 
+# Keep diagnostic progress outside Playwright's output/temporary directories.
+# Listing the inventory is not an execution attempt.
+if [[ "$PLAYWRIGHT_CONFIG" == "playwright.config.ts" &&
+      " ${playwright_args[*]} " != *" --list "* &&
+      -z "${RELEASE_BROWSER_ATTEMPT_ID:-}" ]]; then
+  RELEASE_BROWSER_ATTEMPT_ID="$(node scripts/src/browser-attempt-progress.mjs)"
+  export RELEASE_BROWSER_ATTEMPT_ID
+fi
+
 choose_local_port() {
   python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
 }

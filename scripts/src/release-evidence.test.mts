@@ -2434,6 +2434,40 @@ async function run(): Promise<void> {
   });
   assert.equal(timedOut.exitCode, 124);
   assert.equal(timedOut.status, "INFRASTRUCTURE TIMEOUT");
+  const startupFixtureRoot = await mkdtemp(join(tmpdir(), "browser-attempt-startup-"));
+  let startupAttemptPath: string | undefined;
+  try {
+    // This is a fake process, not Playwright or a certification run. It fails
+    // before any reporter starts, exercising the real gate startup boundary.
+    const startup = await runStep({
+      label: "full browser E2E suite",
+      command: process.execPath,
+      args: ["-e", "console.log(process.env.RELEASE_BROWSER_ATTEMPT_ID); process.exit(2);"],
+      timeoutMs: 120_000,
+      warningMs: 90_000,
+    }, { logPath: join(startupFixtureRoot, "private.log"), deferLog: true });
+    assert.equal(startup.exitCode, 2);
+    assert.equal(startup.status, "FAIL");
+    const attemptId = startup.output!.trim();
+    assert.match(attemptId, /^[a-f0-9-]{36}$/);
+    startupAttemptPath = fileURLToPath(new URL(
+      `../../.local/browser-verification-attempts/${attemptId}/`, import.meta.url,
+    ));
+    const manifest = JSON.parse(await readFile(resolve(startupAttemptPath, "start.json"), "utf8"));
+    assert.equal(manifest.coverage, "INCOMPLETE");
+    assert.equal(manifest.phase, "startup");
+    assert.equal(manifest.result, null, "a child exit must not invent a Playwright result");
+    assert.deepEqual(manifest.originalRunnerBudgets, {
+      timeoutMs: 120_000, warningMs: 90_000,
+    });
+    assert.deepEqual(manifest.identity, captureReleaseIdentity(
+      fileURLToPath(new URL("../../", import.meta.url)),
+    ));
+    assert.equal((await readdir(startupAttemptPath)).includes("progress.json"), false);
+  } finally {
+    if (startupAttemptPath) await rm(startupAttemptPath, { recursive: true, force: true });
+    await rm(startupFixtureRoot, { recursive: true, force: true });
+  }
   const descendantRoot = await mkdtemp(join(tmpdir(), "release-timeout-tree-"));
   const descendantMarker = join(descendantRoot, "leaked-descendant");
   try {
