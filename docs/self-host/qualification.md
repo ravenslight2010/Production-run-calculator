@@ -46,8 +46,9 @@ No Docker daemon, PowerShell or physical target devices available locally.
 | Authoritative workspace typecheck | PASS | `CI=true pnpm run typecheck`, after installing missing ShellCheck 0.11.0; exited 0 |
 | Changed Node module syntax | PASS | Executed through focused tests |
 | Repository workflow policy + actionlint | PASS | `pnpm run check:workflows`; all 15 workflows valid after repairs below |
-| PowerShell parser / native ACL behavior | NOT RUN locally | New Windows CI parses launcher; ACL/runtime still requires actual host rehearsal |
-| Docker Compose config | NOT RUN locally | New Linux CI validates config; local static checks do not substitute for Docker |
+| PowerShell parser | PASS in Windows CI | Launcher parses on windows-latest; not executed against real host/ACLs |
+| Native Windows ACL/runtime behavior | NOT RUN | Requires actual host rehearsal |
+| Docker Compose config | PASS in Linux CI | `docker compose config --quiet`; services NOT started |
 | Fresh install, import and empty-state safety | NOT RUN | Needs disposable intended-host DB, representative approved import files and first-manager flow |
 | Normal restart with WAN disconnected | NOT RUN | Cache container images/models, disconnect WAN only, verify app/AI/login/imports/live sync with LAN intact |
 | Midnight reset: local day / no clients / offline clients / DST | NOT RUN | Inspect actual reset ownership and emit authenticated completion receipt; setting TZ alone is not evidence |
@@ -59,7 +60,8 @@ No Docker daemon, PowerShell or physical target devices available locally.
 | Automatic scheduling/staging/switch/rollback | MISSING | No scheduler/updater enabled; implement after actual receipts/backups and rehearsal |
 | DB + config + CA backups, restore and off-host copy | MISSING | Implement and restore-test against disposable DB before real data |
 | Main/Replit conflict reconciliation | BLOCKED | Two-file three-way conflict; final PR is draft, not merge-ready; no merge performed |
-| Final PR CI | PENDING at local handoff | Inspect actual workflow runs after push; do not infer green from these local checks |
+| Self-host foundation CI | PASS on code commit | Windows/Linux contracts, Windows parser, Linux Compose config; run 40817896685 |
+| Full final PR CI / mergeability | BLOCKED | Draft has two-file merge conflicts; docs-only tip has no full CI run. CodeRabbit skipped, not a test pass |
 
 ### Failure ledger (including repaired findings)
 
@@ -117,6 +119,21 @@ No Docker daemon, PowerShell or physical target devices available locally.
     when including the existing large codex-fixes log. No write executed. Moved
     the new entry into the topic-specific `.agents/memory/windows-lan-self-hosting.md`
     instead of rewriting the large unrelated log. **RESOLVED** via smaller payload.
+
+14. **Replit advanced during the task** to
+    `1bac34a4acf7f916d858e6e072540e9df361e26b`: four commits / 142 paths
+    since the initial source snapshot. Recorded changed scopes, not imported
+    unreviewed into the tested candidate. Status: **BLOCKED before merge**;
+    owner maintainer + agent, next action approved feature-branch-only integration
+    of latest Replit and main, resolve conflicts, rerun checks.
+15. **Initial remote-verification fetch lacked a tracking refspec** for the new
+    feature branch; verification failed before index alignment. Re-fetched with
+    explicit refs, verified all 12 published files byte-for-byte, aligned only the
+    agent-owned local branch/index without discarding working files. **RESOLVED**.
+
+CI evidence: [Self-host foundation run 40817896685](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/40817896685).
+Both Windows/Linux jobs succeeded on code commit
+`1f110f4b2e2af839a8d2f39f3b7d6d75df54b51c`; no Docker services started.
 
 **Decision: NO-GO for production, NO-GO for automatic updates, draft PR only.**
 Passing unit/type checks is not permission to merge, publish or operate real data.

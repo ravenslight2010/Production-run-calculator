@@ -101,3 +101,23 @@ without regressing Replit's identity/epoch fences, run the retained regression
 suite and CI, review the inherited 282-commit application/source-library diff,
 then require the remaining self-host qualification gates. This audit does not
 approve a schema migration, protected source-library export, release or deployment.
+
+## Final verification: branch movement during this task
+
+Re-fetch confirmed main unchanged at the recorded tip. Replit advanced by four
+commits during implementation to `1bac34a4acf7f916d858e6e072540e9df361e26b`
+(142 changed paths, including browser evidence/binary snapshots, operational
+sync/autotracking, local provider safeguards and release-tooling changes).
+The other 24 pre-existing heads did not move in the final remote-head comparison.
+The integration branch is deliberately still pinned to the initial Replit
+snapshot; these new changes are **not included or covered by its local check
+results**. Do not overwrite them or describe this as latest-Replit reconciled.
+Feature-branch-only integration of the new Replit commits and main conflict
+resolution, followed by revalidation, remains required before merge readiness.
+
+Published code commit `1f110f4b2e2af839a8d2f39f3b7d6d75df54b51c` passed
+[Self-host foundation CI](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/40817896685):
+45 pure tests on each of Windows/Linux, Windows PowerShell parse, Linux Docker
+Compose configuration validation. This is not a Windows Docker runtime test.
+The later documentation-only tip has no full PR CI run; GitHub reports the draft
+PR as non-mergeable due to the documented source conflicts.
