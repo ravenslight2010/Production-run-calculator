@@ -218,6 +218,33 @@ Changing source or verification inputs during a run invalidates completion.
 No local result can satisfy published readiness/reconciliation, produce
 production GO, or pass the retained-release verifier.
 
+To check an existing report against the current checkout **without rerunning
+tests**, use:
+
+```sh
+pnpm run release:verify:local
+pnpm run release:verify:local -- --full
+# An earlier attempt in a private child directory:
+pnpm run release:verify:local -- --evidence-dir .local/release-check/my-attempt
+```
+
+The verifier reads only `local-check-report.md` from the selected local
+directory (the same defaults and `RELEASE_EVIDENCE_DIR` override as above).
+It checks local-only scope, both current fingerprints and the combined revision,
+the exact ordered standard/full check identities, permitted statuses, and
+completeness. Exit 0 requires a complete local PASS; stale, malformed, mismatched,
+failed, and incomplete reports exit nonzero. Unsafe paths, symlinked directories
+or files, non-regular files, invalid UTF-8, and reports larger than 256 KiB
+are rejected. It does not create directories, rewrite reports, read raw logs,
+resume checks, contact production, or run browser suites.
+
+This is a metadata-consistency check, not a signature or proof against someone
+rewriting the entire report. A successful read still means production decision,
+published readiness, and production reconciliation are **NOT ASSESSED**.
+It cannot certify a release or issue production GO. Published verification
+continues to reject local reports. Only `--full` and `--evidence-dir` are
+supported consumer options; runner fixture overrides are rejected.
+
 `--evidence-dir` (or `RELEASE_EVIDENCE_DIR`) must select a child of
 `.local/release-check`; select a new directory to preserve earlier attempts.
 Local mode does not support resume, retained-release verification, published

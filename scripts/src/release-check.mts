@@ -71,7 +71,7 @@ import {
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
 import { preparePublishedEvidence } from "./prepare-published-evidence.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
-import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory } from "./local-release-evidence.mts";
+import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory, readLocalReleaseReport, verifyLocalReleaseReport } from "./local-release-evidence.mts";
 import {
   BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
   parseFullBrowserTestCounts,
@@ -2402,6 +2402,7 @@ function printHelp(): void {
     "  pnpm run release:check:full  Standard gates plus full browser E2E",
     "  pnpm run release:check:local  Private local-only checks; never release approval",
     "  pnpm run release:check:local -- --full  Local full checks with unchanged browser limits",
+    "  pnpm run release:verify:local [-- --full]  Read saved local report; never rerun checks or approve release",
   );
   console.log(
     "  pnpm run release:check:typescript-7-promotion  Fail-closed TypeScript 7 promotion gates, including editor service proof",
@@ -4539,6 +4540,30 @@ async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
     process.exit(0);
+  }
+
+  if (process.argv.includes("--verify-local-report")) {
+    const args = process.argv.slice(2).filter((argument) => argument !== "--");
+    for (let index = 0; index < args.length; index++) {
+      const argument = args[index];
+      if (argument === "--evidence-dir" && args[index + 1] && !args[index + 1]!.startsWith("--")) {
+        index++;
+      } else if (!["--local-only", "--verify-local-report", "--full"].includes(argument!)) {
+        throw new Error("Local report verification supports only --full and --evidence-dir.");
+      }
+    }
+    if (!localOnly || fixtureSteps !== undefined ||
+        new Set(args.filter((arg) => arg.startsWith("--"))).size !== args.filter((arg) => arg.startsWith("--")).length) {
+      throw new Error("Local report verification requires local-only scope, unique options, and the real check inventory.");
+    }
+    verifyLocalReleaseReport(await readLocalReleaseReport(rootDir, releaseEvidenceDir), {
+      identity: captureReleaseIdentity(rootDir), full: fullRun,
+      expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+    });
+    console.log("Local report: PASS — complete and current for this checkout and check set.");
+    console.log("Production decision, published readiness, and production reconciliation: NOT ASSESSED.");
+    console.log("No checks were rerun. Local metadata is not authenticated release approval.");
+    return;
   }
 
   if (localOnly && process.argv.some((argument) =>

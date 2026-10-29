@@ -1,5 +1,6 @@
 import { resolve, relative, sep } from "node:path";
-import { lstat, mkdir, chmod } from "node:fs/promises";
+import { lstat, mkdir, chmod, open } from "node:fs/promises";
+import { constants } from "node:fs";
 import { assessmentRevision } from "./release-source-identity.mjs";
 import type { ReleaseStepResult } from "./release-check.mts";
 
@@ -41,6 +42,78 @@ export async function prepareLocalReleaseDirectory(root: string, destination: st
   await chmod(destination, 0o700);
 }
 
+const MAX_LOCAL_REPORT_BYTES = 256 * 1024;
+const LOCAL_STATUSES = [
+  "PASS", "FAIL", "INFRASTRUCTURE TIMEOUT", "INFRASTRUCTURE ERROR", "BLOCKED", "NOT REACHED",
+] as const;
+
+/** Read metadata only, never create directories, follow links, or read raw logs. */
+export async function readLocalReleaseReport(root: string, destination: string): Promise<string> {
+  destination = localReleaseEvidenceDirectory(root, false, destination);
+  try {
+    let current = resolve(root);
+    for (const part of relative(root, destination).split(sep)) {
+      current = resolve(current, part);
+      const entry = await lstat(current);
+      if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error();
+    }
+    const filename = resolve(destination, "local-check-report.md");
+    const entry = await lstat(filename);
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error();
+    const file = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile() || stat.size > MAX_LOCAL_REPORT_BYTES) throw new Error();
+      const bytes = Buffer.alloc(MAX_LOCAL_REPORT_BYTES + 1);
+      let size = 0;
+      while (size < bytes.length) {
+        const { bytesRead } = await file.read(bytes, size, bytes.length - size, null);
+        if (!bytesRead) break;
+        size += bytesRead;
+      }
+      if (size > MAX_LOCAL_REPORT_BYTES) throw new Error();
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size));
+    } finally {
+      await file.close();
+    }
+  } catch {
+    throw new Error("Local report is missing, unreadable, oversized, or uses an unsafe path.");
+  }
+}
+
+/** A local PASS is metadata consistency, not authentication or production approval. */
+export function verifyLocalReleaseReport(text: string, options: {
+  identity: LocalReleaseIdentity;
+  full: boolean;
+  expectedLabels: readonly string[];
+}): void {
+  if (Buffer.byteLength(text) > MAX_LOCAL_REPORT_BYTES) throw new Error("Local report is oversized.");
+  const lines = text.split("\n");
+  const captured = lines[3]?.replace(/^Captured: /, "");
+  if (!captured || !Number.isFinite(Date.parse(captured)) ||
+      new Date(captured).toISOString() !== captured) {
+    throw new Error("Local report has an invalid capture time.");
+  }
+  const outcome = lines[10]?.replace(/^Local result: /, "");
+  if (!["PASS", "FAIL", "INCOMPLETE"].includes(outcome ?? "")) {
+    throw new Error("Local report has an invalid result.");
+  }
+  const results = options.expectedLabels.map((label, index): ReleaseStepResult => {
+    const status = LOCAL_STATUSES.find((value) => lines[18 + index] === `- ${value} ${label}`);
+    if (!status) throw new Error("Local report requires exact check identities and permitted statuses.");
+    return { label, status, elapsedMs: 0 };
+  });
+  const canonical = formatLocalReleaseReport({
+    ...options, results, completed: outcome !== "INCOMPLETE",
+  }).replace(/^Captured: .+$/m, `Captured: ${captured}`);
+  if (text !== canonical) {
+    throw new Error("Local report is malformed, stale, or mismatched with this checkout/check set.");
+  }
+  if (outcome !== "PASS") {
+    throw new Error(`Local report is ${outcome}; a complete local PASS is required.`);
+  }
+}
+
 export function formatLocalReleaseReport(options: {
   identity: LocalReleaseIdentity;
   full: boolean;
@@ -59,7 +132,7 @@ export function formatLocalReleaseReport(options: {
     new Set(expectedLabels).size !== expectedLabels.length ||
     new Set(results.map((result) => result.label)).size !== results.length ||
     results.some((result) => !expectedLabels.includes(result.label)) ||
-    expectedLabels.some((label) => !/^[A-Za-z0-9 ()/.:_-]{1,160}$/.test(label))
+    expectedLabels.some((label) => !/^[A-Za-z0-9 ()/.:;_-]{1,160}$/.test(label))
   ) throw new Error("Local evidence requires exact, unique check identities.");
   const passed = options.completed && results.length === expectedLabels.length &&
     results.every((result) => result.status === "PASS");

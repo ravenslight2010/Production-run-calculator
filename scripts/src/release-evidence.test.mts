@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureReleaseIdentity } from "./release-source-identity.mjs";
-import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory } from "./local-release-evidence.mts";
+import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory, readLocalReleaseReport, verifyLocalReleaseReport } from "./local-release-evidence.mts";
 import {
   discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
 } from "./check-routine-node-version.mjs";
@@ -3919,6 +3919,45 @@ async function verifyLocalOnlyContract(): Promise<void> {
     identity: { ...identity, verificationFingerprintSha256: "0".repeat(64) },
     full: false, expectedLabels: [label], results: [pass], completed: true,
   }), /fingerprints/);
+  const verification = { identity, full: false, expectedLabels: [label] };
+  verifyLocalReleaseReport(formatted, verification);
+  const malformedReports = [
+    "", "{}", formatted.slice(0, -1), formatted + "extra\n",
+    formatted.replace("Scope: local-only", "Scope: release"),
+    formatted.replace("Production decision: NOT ASSESSED", "Production decision: GO"),
+    formatted.replace("Published readiness: NOT ASSESSED", "Published readiness: PASS"),
+    formatted.replace("Production reconciliation: NOT ASSESSED", "Production reconciliation: PASS"),
+    formatted.replace("Captured: ", "Captured: invalid"),
+    formatted.replace("- PASS ", "- SKIP "),
+    formatted.replace(`- PASS ${label}`, `- PASS ${label}\n- PASS ${label}`),
+    formatted.replace(`- PASS ${label}\n`, ""),
+    formatted.replace(label, "different check"),
+    formatted.replace(identity.sourceFingerprintSha256, "0".repeat(64)),
+    formatted.replace(identity.verificationFingerprintSha256, "0".repeat(64)),
+    formatted.replace(identity.sourcePolicy, "unknown-policy"),
+    formatted.replace(identity.revision, "test-sha256:" + "0".repeat(64)),
+    "x".repeat(256 * 1024 + 1),
+  ];
+  for (const report of malformedReports) assert.throws(() => verifyLocalReleaseReport(report, verification));
+  assert.throws(() => verifyLocalReleaseReport(formatted, { ...verification, full: true }));
+  assert.throws(() => verifyLocalReleaseReport(formatted, { ...verification, expectedLabels: [label, "missing check"] }));
+  const second = { label: "second check", status: "PASS" as const, elapsedMs: 0 };
+  const twoChecks = formatLocalReleaseReport({
+    ...verification, expectedLabels: [label, second.label], results: [pass, second], completed: true,
+  });
+  assert.throws(() => verifyLocalReleaseReport(twoChecks, {
+    ...verification, expectedLabels: [second.label, label],
+  }));
+  for (const status of ["FAIL", "INFRASTRUCTURE TIMEOUT", "INFRASTRUCTURE ERROR", "BLOCKED", "NOT REACHED"] as const) {
+    const failedReport = formatLocalReleaseReport({
+      ...verification, results: [{ ...pass, status }], completed: true,
+    });
+    assert.throws(() => verifyLocalReleaseReport(failedReport, verification), /is FAIL/);
+  }
+  for (const results of [[], [pass]]) {
+    const partial = formatLocalReleaseReport({ ...verification, results, completed: false });
+    assert.throws(() => verifyLocalReleaseReport(partial, verification), /INCOMPLETE/);
+  }
   for (const dir of ["release-evidence", "release-evidence-full", ".local/release-check", "../escape"]) {
     assert.throws(() => localReleaseEvidenceDirectory(projectRoot, false, dir), /child directory/);
   }
@@ -4006,6 +4045,51 @@ async function verifyLocalOnlyContract(): Promise<void> {
       assert.equal(step.env?.E2E_APPROVED_DESTRUCTIVE_MODE, "1");
     }
     assert.ok(!plan.some((step) => /source-library.*reconciliation|signing-key.*preflight/i.test(step.label)));
+    // Exercise the real read-only CLI with the real inventory, not the runner's
+    // fixture override. Metadata fixtures are not evidence that the checks ran.
+    for (const full of [false, true]) {
+      const labels = plan.map((step) => step.label).filter((item) => full ||
+        !["full browser E2E suite", releaseCheck.FULL_RESPONSIVE_WEBKIT_GATE_LABEL].includes(item));
+      const reportOptions = {
+        identity, full, expectedLabels: labels,
+        results: labels.map((item) => ({ label: item, status: "PASS" as const, elapsedMs: 0 })),
+        completed: true,
+      };
+      const report = formatLocalReleaseReport(reportOptions);
+      const filename = join(root, "local-check-report.md");
+      await writeFile(filename, report);
+      const before = await readdir(root);
+      const flags = ["--local-only", "--verify-local-report", ...(full ? ["--full"] : [])];
+      const verified = invoke(flags, { RELEASE_CHECK_FIXTURE_STEPS: undefined });
+      assert.equal(verified.status, 0, verified.stderr);
+      const forwarded = invoke([...flags, "--"], { RELEASE_CHECK_FIXTURE_STEPS: undefined });
+      assert.equal(forwarded.status, 0, forwarded.stderr);
+      assert.match(verified.stdout, /No checks were rerun/);
+      assert.match(verified.stdout, /production reconciliation: NOT ASSESSED/);
+      assert.doesNotMatch(verified.stdout + verified.stderr, /PRIVATE_PROBE_PAYLOAD|Release check started|Local-only verification started/);
+      assert.equal(await readFile(filename, "utf8"), report);
+      assert.deepEqual(await readdir(root), before);
+      assert.equal(await readLocalReleaseReport(projectRoot, root), report);
+      for (const invalidReport of [
+        report.replace(identity.verificationFingerprintSha256, "0".repeat(64)),
+        formatLocalReleaseReport({ ...reportOptions, completed: false, results: [] }),
+        formatLocalReleaseReport({ ...reportOptions, results: reportOptions.results.map((item, index) =>
+          index === 0 ? { ...item, status: "FAIL" as const } : item) }),
+        report.replace("Scope: local-only", "Scope: PRIVATE_PROBE_PAYLOAD"),
+      ]) {
+        await writeFile(filename, invalidReport);
+        const rejected = invoke(flags, { RELEASE_CHECK_FIXTURE_STEPS: undefined });
+        assert.equal(rejected.status, 1, rejected.stderr);
+        assert.doesNotMatch(rejected.stdout + rejected.stderr, /PRIVATE_PROBE_PAYLOAD/);
+      }
+      await writeFile(filename, report);
+      assert.equal(invoke(flags).status, 1, "fixture override cannot shrink verification inventory");
+      for (const unsafe of ["--verify-evidence", "--resume", "--unknown", "--full", "--evidence-dir"]) {
+        const rejected = invoke([...flags, unsafe], { RELEASE_CHECK_FIXTURE_STEPS: undefined });
+        // --full once is a valid mode selection, but now the standard report mismatches.
+        assert.equal(rejected.status, 1, rejected.stderr);
+      }
+    }
     const falseBrowserPass = invoke(["--local-only", "--full"], {
       RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify([{ ...probe, label: "full browser E2E suite" }]),
     });
@@ -4032,6 +4116,20 @@ async function verifyLocalOnlyContract(): Promise<void> {
     assert.equal((await stat(join(root, "local-check-report.md"))).mode & 0o777, 0o600);
     await symlink(privateRoot, join(root, "link"));
     await assert.rejects(prepareLocalReleaseDirectory(projectRoot, join(root, "link", "child")), /symlinks/);
+    await assert.rejects(readLocalReleaseReport(projectRoot, join(root, "link")), /unsafe path/);
+    await assert.rejects(readLocalReleaseReport(projectRoot, privateRoot), /missing/);
+    await assert.rejects(readLocalReleaseReport(projectRoot, join(projectRoot, "release-evidence")), /child directory/);
+    const privateReport = join(privateRoot, "local-check-report.md");
+    await symlink(join(root, "local-check-report.md"), privateReport);
+    await assert.rejects(readLocalReleaseReport(projectRoot, privateRoot), /unsafe path/);
+    await rm(privateReport);
+    await mkdir(privateReport);
+    await assert.rejects(readLocalReleaseReport(projectRoot, privateRoot), /unsafe path/);
+    await rm(privateReport, { recursive: true });
+    await writeFile(privateReport, "x".repeat(256 * 1024 + 1));
+    await assert.rejects(readLocalReleaseReport(projectRoot, privateRoot), /oversized/);
+    await writeFile(privateReport, Buffer.from([0xff]));
+    await assert.rejects(readLocalReleaseReport(projectRoot, privateRoot), /unreadable/);
   } finally {
     process.umask(originalUmask);
     await rm(root, { recursive: true, force: true });
@@ -4041,4 +4139,4 @@ async function verifyLocalOnlyContract(): Promise<void> {
 
 verifyReadinessEvidenceValidation();
 await verifyLocalOnlyContract();
-await run();
+if (!process.argv.includes("--local-contract-only")) await run();

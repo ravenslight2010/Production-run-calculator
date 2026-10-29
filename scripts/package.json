@@ -96,6 +96,7 @@
     "test:local-ai": "tsx --test ./src/check-local-ai.test.mts",
     "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
+    "check:local-release-report": "tsx ./src/release-check.mts --local-only --verify-local-report",
     "test:release-handoff": "tsx ./src/release-evidence-handoff.test.mts",
     "check:typescript-7": "tsx ./src/compare-typescript-7.mts",
     "check:typescript-7:promotion": "TYPESCRIPT_7_PROMOTION=1 tsx ./src/compare-typescript-7.mts",
