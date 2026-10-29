@@ -229,6 +229,47 @@ do not attach them as sanitized release proof.
 This tooling does not close or waive the failed certification in
 `docs/evidence/full-browser-runtime-certification-2026-10-24.md`.
 
+#### Compare two saved local reports
+
+From the workspace root, use the pinned runner:
+
+```sh
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run compare:local-release -- ../.local/release-check/before/local-check-report.md ../.local/release-check/after/local-check-report.md
+```
+
+The command reads exactly two reports and prints a sanitized comparison; it does
+not run checks, inspect current source, write evidence, retry, or access production.
+Save attempts in separate `--evidence-dir` directories before comparing them;
+the default report path is overwritten by a later run. Paths in the example are
+relative to the package directory (`scripts`), hence the `../` prefixes.
+Absolute report paths also work.
+
+Exact, case-sensitive check identities form the union of both reports. With matching
+verification fingerprints and completed attempts, PASS to FAIL is **newly failing**,
+FAIL to PASS is **recovered**, and identical PASS/FAIL statuses are **unchanged**.
+Changed source fingerprints are allowed and both source and verification fingerprints
+are displayed for both inputs. Changed verification inputs make shared checks
+**not comparable**: a source change can also change verification inputs, since the
+verification fingerprint includes implementation files as well as tests/policies.
+This intentionally prevents attributing apparent improvements to code alone.
+
+Standard/full differences are explicitly flagged; only shared checks can be compared.
+Added/removed checks, missing results (`NOT REACHED`), blocked/infrastructure statuses,
+and any pair involving an INCOMPLETE attempt are **not comparable**, never recovered.
+An incomplete attempt conservatively prevents comparison even of its recorded checks.
+The comparison operates at the saved report's check-label granularity; it does not
+invent individual browser case results absent from that report.
+
+Inputs must match the current sanitized local report contract exactly, including
+consistent fingerprints, authority fields, unique identities and overall result.
+Unsupported/invalid reports, final-file symlinks, non-regular files, invalid UTF-8,
+files over 1 MiB, and reports over 2000 checks fail with a generic error, without
+echoing paths or contents. Exit 0 means the comparison succeeded, **not** that checks
+passed; exit 1 means input/usage failure. Output omits raw logs, payloads and paths.
+Reports are not signed: structural validation is not proof of authenticity.
+This is optional local analysis only and cannot issue production GO, satisfy published
+readiness/reconciliation, or change certification outcomes.
+
 ```bash
 pnpm run release:check
 pnpm --filter @workspace/scripts run check:release-evidence

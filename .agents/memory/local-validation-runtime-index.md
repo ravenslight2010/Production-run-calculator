@@ -30,6 +30,9 @@ explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwri
 - [Loopback probes](release-runner-loopback-probes.md) — bypass only local readiness probes, not TLS guards.
 - [Browser routing](local-browser-suite-routing.md) — offline installs and scoped loopback exceptions.
 - [Test CA subjects](openssl-test-ca-subject-uniqueness.md) — certificate subjects must be unique per fixture.
+- [Local PostgreSQL](local-postgres-socket-dir.md), [ARM64](local-arm64-toolchain.md), [disposable DB](disposable-database-test-startup.md) — use private sockets; wait for test schemas.
+- [WebKit GIO TLS](webkit-gio-tls-runtime.md), [IPv6 loopback](ipv6-loopback-test-environment.md) — keep trust enabled; load Nix TLS modules and fence unsupported IPv6 probes.
+- [WebKit push tests](local-browser-suite-routing.md) — WPE can hang on push APIs; use active registrations and clearly scoped empty-subscription fixtures.
 
 ## Workspace-wide typecheck failures
 
