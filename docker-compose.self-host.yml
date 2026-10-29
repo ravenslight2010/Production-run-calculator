@@ -1,0 +1,94 @@
+# Windows/WSL2 qualification candidate. Separate project: never reuse Replit data.
+# Use scripts/self-host/Start-SelfHost.ps1; do NOT combine with base Compose.
+name: runcalc-selfhost
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: runcalc
+      POSTGRES_USER: runcalc_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Use the self-host initializer}
+    volumes: ["db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runcalc_user -d runcalc"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+  # Explicit first-install action ONLY; never a dependency of normal startup.
+  # Existing push-force is unsuitable for automatic customer upgrades.
+  migrate:
+    profiles: [initialize]
+    build: {context: ., target: api-migrate}
+    env_file: ${SELF_HOST_ENV_FILE:?Use the self-host launcher}
+    user: node
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+  api:
+    build: {context: ., target: api}
+    env_file: ${SELF_HOST_ENV_FILE:?Use the self-host launcher}
+    restart: unless-stopped
+    user: node
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      db: {condition: service_healthy}
+    expose: ["5000"]
+    # AI is advisory: neither a cold model nor a failed download blocks core.
+  web:
+    build: {context: ., target: web}
+    restart: unless-stopped
+    user: "1001:1001"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Choose a LAN hostname}
+    depends_on:
+      api: {condition: service_started}
+      caddy-storage-init: {condition: service_completed_successfully}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./docker/Caddyfile.self-host:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+  caddy-storage-init:
+    image: caddy:2-alpine
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 1001:1001 /data /config"]
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    volumes: ["caddy-data:/data", "caddy-config:/config"]
+  ollama:
+    image: ollama/ollama:0.34.4
+    restart: unless-stopped
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes: ["ollama-models:/root/.ollama"]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    # No host port: clients access AI through authenticated application APIs.
+  ollama-pull:
+    profiles: [prepare-ai]
+    depends_on:
+      ollama: {condition: service_healthy}
+    image: ollama/ollama:0.34.4
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['ollama pull "${LOCAL_MODEL_FULL:-qwen3:4b}" && ollama pull "${LOCAL_MODEL_CHEAP:-qwen3:4b}"']
+    restart: "no"
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+  ollama-models:

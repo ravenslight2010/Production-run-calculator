@@ -1,0 +1,54 @@
+name: Self-host foundation
+on:
+  pull_request:
+    paths:
+      - 'scripts/self-host/**'
+      - 'docker-compose.self-host.yml'
+      - 'docker/Caddyfile.self-host'
+      - '.github/workflows/self-host-foundation.yml'
+  push:
+    branches: [main, feat/windows-lan-self-hosting]
+    paths:
+      - 'scripts/self-host/**'
+      - 'docker-compose.self-host.yml'
+      - 'docker/Caddyfile.self-host'
+      - '.github/workflows/self-host-foundation.yml'
+concurrency:
+  group: self-host-foundation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  safety-contract:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Exercise pure safety contracts (no credentials or production DB)
+        run: node --test scripts/self-host/self-host.test.mjs
+      - name: Parse Windows launcher without executing it
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/self-host/Start-SelfHost.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { $errors | Format-List; exit 1 }
+      - name: Validate isolated Compose configuration (does not start services)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          state="$(mktemp -d)"
+          trap 'rm -rf "$state"' EXIT
+          node scripts/self-host/config.mjs "$state" runcalc.test.lan America/Chicago testmanager
+          export SELF_HOST_ENV_FILE="$state/self-host.env"
+          docker compose --env-file "$SELF_HOST_ENV_FILE" -f docker-compose.self-host.yml config --quiet
