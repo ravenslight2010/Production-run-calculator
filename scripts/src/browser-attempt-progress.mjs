@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync,
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync,
   renameSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assessmentRevision, captureReleaseIdentity, sourceRevision } from "./release-source-identity.mjs";
+import { cleanupBrowserAttempts, writeBrowserAttemptOwner } from "./browser-attempt-retention.mjs";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_CASES = 2_000;
@@ -76,6 +77,15 @@ export function startBrowserAttempt({
   runnerBudgets = { timeoutMs: null, warningMs: null },
   now = Date.now,
 }) {
+  // Standing owner approval: automatic 30-day cleanup, never a prerequisite for
+  // diagnostics. Keep stdout reserved for the shell's new attempt identifier.
+  try {
+    const cleanup = cleanupBrowserAttempts({ root, now: now() });
+    if (cleanup.deletedFiles || cleanup.failures.length || cleanup.truncated || cleanup.deferredAttempts)
+      console.error(`Browser retention: ${cleanup.deletedFiles} files removed; ${cleanup.failures.length} cleanup failures; ${cleanup.deferredAttempts} deferred; inventory truncated: ${cleanup.truncated}.`);
+  } catch {
+    console.error("Browser retention unavailable; existing evidence preserved, startup will still require durable storage.");
+  }
   const attemptId = randomUUID();
   const directory = resolve(storage(root), attemptId);
   const originalBudgets = {
@@ -101,6 +111,7 @@ export function startBrowserAttempt({
     mkdirSync(storage(root), { recursive: true, mode: 0o700 });
     mkdirSync(directory, { mode: 0o700 });
     durableNew(resolve(directory, "start.json"), encode(start));
+    writeBrowserAttemptOwner(directory);
   } catch {
     // If storage is unavailable before the first durable byte, don't run tests.
     // Do not include raw filesystem errors/paths in public output.
@@ -127,6 +138,9 @@ export function claimBrowserAttempt({
         state.phase !== "startup" || (state.lane ?? "chromium-full") !== safeLane(lane) ||
         !sameIdentity(state.identity, identity))
       throw new Error("Invalid browser attempt.");
+    writeBrowserAttemptOwner(directory, true);
+    if (existsSync(resolve(directory, "cleanup.json")))
+      throw new Error("Attempt already claimed for cleanup.");
     durableNew(resolve(directory, "reporter-claim"), "claimed\n");
   } catch {
     throw new Error("Browser attempt is stale, already claimed, or unavailable.");
