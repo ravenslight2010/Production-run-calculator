@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureReleaseIdentity } from "./release-source-identity.mjs";
+import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory } from "./local-release-evidence.mts";
 import {
   discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
 } from "./check-routine-node-version.mjs";
@@ -3867,5 +3868,143 @@ async function run(): Promise<void> {
   );
 }
 
+async function verifyLocalOnlyContract(): Promise<void> {
+  const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const identity = captureReleaseIdentity(projectRoot);
+  const label = "local contract probe";
+  const pass = { label, status: "PASS" as const, elapsedMs: 1 };
+  const formatted = formatLocalReleaseReport({
+    identity, full: false, expectedLabels: [label], results: [pass], completed: true,
+  });
+  assert.match(formatted, /^Scope: local-only$/m);
+  assert.match(formatted, /^Local result: PASS$/m);
+  assert.match(formatted, /^Production decision: NOT ASSESSED$/m);
+  assert.doesNotMatch(formatted, /^Decision: GO$/m);
+  assert.throws(() => releaseCheck.validateReleaseReport(formatted, { currentRevision: identity.revision }), /missing|invalid|malformed/i);
+  assert.throws(() => formatLocalReleaseReport({
+    identity: { ...identity, verificationFingerprintSha256: "0".repeat(64) },
+    full: false, expectedLabels: [label], results: [pass], completed: true,
+  }), /fingerprints/);
+  for (const dir of ["release-evidence", "release-evidence-full", ".local/release-check", "../escape"]) {
+    assert.throws(() => localReleaseEvidenceDirectory(projectRoot, false, dir), /child directory/);
+  }
+  const localBase = resolve(projectRoot, ".local/release-check");
+  await mkdir(localBase, { recursive: true });
+  const root = await mkdtemp(join(localBase, "contract-"));
+  const originalUmask = process.umask();
+  try {
+    const probe = {
+      label, command: process.execPath,
+      args: ["-e", "console.log('PRIVATE_PROBE_PAYLOAD')"], stage: "prerequisites",
+    };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env, CI: "true", NODE_ENV: "test",
+      RELEASE_EVIDENCE_DIR: root,
+      RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify([
+        probe,
+        ...[...new Set([
+          releaseCheck.SOURCE_LIBRARY_RECONCILIATION_STEP.label,
+          releaseCheck.SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP.label,
+          releaseCheck.SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.label,
+          releaseCheck.SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+          "operational report signing-key rotation preflight",
+        ])].map((excluded) => ({
+          ...probe, label: excluded, command: "/must-not-run-production-gate", args: [excluded],
+        })),
+      ]),
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "",
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT: "",
+      SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF: "",
+      SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: "development",
+      READINESS_EVIDENCE_DEPLOYMENT_ID: "",
+      READINESS_EVIDENCE_DEPLOYED_REVISION: "",
+    };
+    const invoke = (args: string[], overrides: NodeJS.ProcessEnv = {}) => spawnSync(
+      process.execPath,
+      ["--import", "tsx", fileURLToPath(new URL("./release-check.mts", import.meta.url)), ...args],
+      { cwd: fileURLToPath(new URL("../", import.meta.url)), env: { ...env, ...overrides }, encoding: "utf8", timeout: 60_000 },
+    );
+    for (const full of [false, true]) {
+      const flags = full ? ["--full"] : [];
+      const blocked = invoke([...flags, "--readiness-deployment-id", "", "--deployed-revision", ""]);
+      assert.equal(blocked.error, undefined);
+      assert.equal(blocked.status, 1, blocked.stderr);
+      assert.match(blocked.stderr, /no release gates were run/);
+      assert.doesNotMatch(blocked.stdout, /PRIVATE_PROBE_PAYLOAD/);
+      const local = invoke(["--local-only", ...flags]);
+      assert.equal(local.error, undefined);
+      assert.equal(local.status, 0, local.stderr);
+      assert.doesNotMatch(local.stdout + local.stderr, /PRIVATE_PROBE_PAYLOAD/);
+      const report = await readFile(join(root, "local-check-report.md"), "utf8");
+      assert.match(report, /^Scope: local-only$/m);
+      assert.match(report, /^Local result: PASS$/m);
+      assert.match(report, new RegExp(`^Assessed revision: ${identity.revision}$`, "m"));
+      assert.match(report, /^Published readiness: NOT ASSESSED$/m);
+      assert.match(report, /^Production reconciliation: NOT ASSESSED$/m);
+      assert.doesNotMatch(report, /preflight|source-library reconciliation/i);
+      assert.match(report, new RegExp(`^Check set: ${full ? "full" : "standard"}$`, "m"));
+      assert.throws(() => releaseCheck.validateReleaseReport(report, { currentRevision: identity.revision }), /missing|invalid|malformed/i);
+    }
+    // Inspect the real full local plan without starting any gates. The same
+    // scripts enforce exact case inventories and disposable DB isolation.
+    const planProbe = spawnSync(process.execPath, [
+      "--import", "tsx", "--input-type=module", "-e",
+      `const m = await import(${JSON.stringify(new URL("./release-check.mts", import.meta.url).href)}); console.log(JSON.stringify(m.RELEASE_CHECK_STEPS));`,
+      "--", "--local-only", "--full",
+    ], {
+      cwd: fileURLToPath(new URL("../", import.meta.url)),
+      env: { ...env, RELEASE_CHECK_FIXTURE_STEPS: undefined }, encoding: "utf8", timeout: 60_000,
+    });
+    assert.equal(planProbe.status, 0, planProbe.stderr);
+    const plan = JSON.parse(planProbe.stdout) as Array<{
+      label: string; args: string[]; env?: Record<string, string>;
+      timeoutMs?: number; warningMs?: number; concurrencyLimit?: number;
+    }>;
+    const fullBrowser = plan.find((step) => step.label === "full browser E2E suite");
+    assert.ok(fullBrowser);
+    assert.equal(fullBrowser.timeoutMs, 90 * 60_000);
+    assert.equal(fullBrowser.warningMs, 80 * 60_000);
+    assert.ok(fullBrowser.args.includes("--playwright-config=playwright.config.ts"));
+    assert.ok(plan.find((step) => step.label === releaseCheck.FULL_RESPONSIVE_WEBKIT_GATE_LABEL));
+    for (const step of plan.filter((step) => step.args.includes("scripts/src/run-isolated-browser-suite.sh"))) {
+      assert.equal(step.concurrencyLimit, 1);
+      assert.equal(step.env?.E2E_TEST_DB, "1");
+      assert.equal(step.env?.E2E_APPROVED_DESTRUCTIVE_MODE, "1");
+    }
+    assert.ok(!plan.some((step) => /source-library.*reconciliation|signing-key.*preflight/i.test(step.label)));
+    const falseBrowserPass = invoke(["--local-only", "--full"], {
+      RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify([{ ...probe, label: "full browser E2E suite" }]),
+    });
+    assert.equal(falseBrowserPass.status, 1, "a zero exit without current complete browser evidence must fail");
+    assert.match(await readFile(join(root, "local-check-report.md"), "utf8"), /INFRASTRUCTURE ERROR full browser E2E suite/);
+    const failed = invoke(["--local-only"], {
+      RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify([{ ...probe, command: "/nonexistent-local-check-prerequisite" }]),
+    });
+    assert.equal(failed.status, 1);
+    assert.match(await readFile(join(root, "local-check-report.md"), "utf8"), /INFRASTRUCTURE ERROR local contract probe/);
+    assert.match(await readFile(join(root, "local-check-report.md"), "utf8"), /^Local result: FAIL$/m);
+    for (const option of ["--resume", "--verify-evidence", "--prepare-published-evidence", "--typescript-7-promotion"]) {
+      const invalid = invoke(["--local-only", option]);
+      assert.equal(invalid.status, 1);
+      assert.match(invalid.stderr, /Local-only checks do not support/);
+    }
+    const escape = invoke(["--local-only", "--evidence-dir", "release-evidence"]);
+    assert.equal(escape.status, 1);
+    assert.match(escape.stderr, /child directory/);
+    const privateRoot = join(root, "private");
+    await prepareLocalReleaseDirectory(projectRoot, privateRoot);
+    const { stat } = await import("node:fs/promises");
+    assert.equal((await stat(privateRoot)).mode & 0o777, 0o700);
+    assert.equal((await stat(join(root, "local-check-report.md"))).mode & 0o777, 0o600);
+    await symlink(privateRoot, join(root, "link"));
+    await assert.rejects(prepareLocalReleaseDirectory(projectRoot, join(root, "link", "child")), /symlinks/);
+  } finally {
+    process.umask(originalUmask);
+    await rm(root, { recursive: true, force: true });
+  }
+  console.log("Local-only release CLI/report contracts passed.");
+}
+
 verifyReadinessEvidenceValidation();
+await verifyLocalOnlyContract();
 await run();

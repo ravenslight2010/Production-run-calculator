@@ -195,6 +195,40 @@ evidence directory.
 
 ## Release commands
 
+### Local-only evidence
+
+Use `pnpm run release:check:local` without a matching published build, or add
+`-- --full` for the local full check set. This explicitly opts into local
+evidence, not publishing or release approval. Standard/full commands remain
+strict: missing required published identity still blocks before their gates.
+
+Local mode reuses the exact check commands, browser case identities, serial
+browser stages, disposable-database fences, and full-browser 80-minute warning /
+90-minute timeout. It omits production source-library reconciliation (including
+import/preflight/fixture gates) and the production signing-key preflight.
+Published readiness is not assessed. Other missing prerequisites fail or block
+the affected checks explicitly; independent checks can continue.
+
+Reports live at `.local/release-check/standard/local-check-report.md` or
+`.local/release-check/full/local-check-report.md`. They bind results to both
+source and verification fingerprints and the combined assessed revision.
+Local results are `PASS`, `FAIL`, or `INCOMPLETE`; production decision,
+published readiness, and production reconciliation are always **NOT ASSESSED**.
+Changing source or verification inputs during a run invalidates completion.
+No local result can satisfy published readiness/reconciliation, produce
+production GO, or pass the retained-release verifier.
+
+`--evidence-dir` (or `RELEASE_EVIDENCE_DIR`) must select a child of
+`.local/release-check`; select a new directory to preserve earlier attempts.
+Local mode does not support resume, retained-release verification, published
+evidence preparation, deployment/source-library arguments, or TypeScript
+promotion. Raw child output is not streamed to the console. Logs, traces, and
+payloads stay in the owner-only directory with private new-file permissions;
+do not attach them as sanitized release proof.
+
+This tooling does not close or waive the failed certification in
+`docs/evidence/full-browser-runtime-certification-2026-10-24.md`.
+
 ```bash
 pnpm run release:check
 pnpm --filter @workspace/scripts run check:release-evidence

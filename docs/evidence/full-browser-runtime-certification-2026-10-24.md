@@ -238,3 +238,11 @@ This is a completed, bounded verification-attempt record with unresolved
 certification blockers, not successful release certification. Required failed,
 skipped and missing checks have not been waived, moved to unrelated tasks or
 presented as passing. Both the browser-executed and repaired revisions are NO-GO.
+
+## Separate local-evidence tooling
+
+`pnpm run release:check:local` (optionally `-- --full`) now permits local-scoped
+checks without matching published evidence. Its private, fingerprint-bound
+report cannot establish production readiness or satisfy published reconciliation.
+This capability does not rerun, repair, waive, or close any failure in this
+certification record; the NO-GO decision above is unchanged.

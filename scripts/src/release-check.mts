@@ -70,6 +70,7 @@ import {
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
 import { preparePublishedEvidence } from "./prepare-published-evidence.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory } from "./local-release-evidence.mts";
 import {
   BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
   parseFullBrowserTestCounts,
@@ -329,6 +330,7 @@ const STATEFUL_RELEASE_LOCK_DIR =
   "/tmp/run-calculator-release-stateful-gates.lock";
 const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
 const fullRun = process.argv.includes("--full");
+const localOnly = process.argv.includes("--local-only");
 const typescript7Promotion = process.argv.includes(
   "--typescript-7-promotion",
 );
@@ -440,7 +442,9 @@ export function resolveReleaseEvidenceDir(
   return configuredDir ?? defaultReleaseEvidenceDir(mode);
 }
 
-const releaseEvidenceDir = resolveReleaseEvidenceDir(
+const releaseEvidenceDir = localOnly
+  ? localReleaseEvidenceDirectory(rootDir, fullRun, evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR)
+  : resolveReleaseEvidenceDir(
   releaseMode,
   evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR,
 );
@@ -1700,9 +1704,9 @@ export function sourceLibraryReconciliationPreflightEnabled(
 }
 
 const requiresProductionSourceLibraryReconciliation =
-  sourceLibraryReconciliationRequired();
+  !localOnly && sourceLibraryReconciliationRequired();
 const importsProductionSourceLibraryReconciliation =
-  sourceLibraryEvidenceInput !== undefined;
+  !localOnly && sourceLibraryEvidenceInput !== undefined;
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
@@ -2182,6 +2186,19 @@ if (fixtureSteps !== undefined) {
   }
 }
 
+// Local checks reuse the exact commands, case inventories, timeout budgets and
+// disposable database fences. No published or production-only gate is run.
+if (localOnly) {
+  const excluded = new Set([
+    REPORT_KEY_ROTATION_PREFLIGHT_LABEL,
+    SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+    SOURCE_LIBRARY_RECONCILIATION_STEP.label,
+    SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP.label,
+    SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.label,
+  ]);
+  steps.splice(0, steps.length, ...steps.filter((step) => !excluded.has(step.label)));
+}
+
 /**
  * The production release stages are ordered for readable logs, but most
  * release domains are valid to evaluate even when another domain fails.
@@ -2382,6 +2399,8 @@ function printHelp(): void {
   console.log("  pnpm run release:check       Safe standard release gates");
   console.log(
     "  pnpm run release:check:full  Standard gates plus full browser E2E",
+    "  pnpm run release:check:local  Private local-only checks; never release approval",
+    "  pnpm run release:check:local -- --full  Local full checks with unchanged browser limits",
   );
   console.log(
     "  pnpm run release:check:typescript-7-promotion  Fail-closed TypeScript 7 promotion gates, including editor service proof",
@@ -3646,6 +3665,7 @@ export function runStep(
     signal?: AbortSignal;
     deferLog?: boolean;
     onOutput?: (text: string) => void;
+    privateOutput?: boolean;
   } = {},
 ): Promise<{
   exitCode: number;
@@ -3666,7 +3686,7 @@ export function runStep(
     const capture = (chunk: Buffer): void => {
       const text = chunk.toString();
       capturedOutput += text;
-      process.stdout.write(text);
+      if (!options.privateOutput) process.stdout.write(text);
       options.onOutput?.(text);
       if (options.logPath && !options.deferLog) {
         logWrite = logWrite.then(() => appendFile(options.logPath!, text));
@@ -4503,6 +4523,12 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (localOnly && process.argv.some((argument) =>
+    ["--resume", "--verify-evidence", "--prepare-published-evidence", "--typescript-7-promotion"]
+      .includes(argument) || /^--(?:published-|source-library-|readiness-|deployed-revision)/.test(argument))) {
+    throw new Error("Local-only checks do not support resume, published evidence, release verification, or promotion options.");
+  }
+
   if (process.argv.includes("--prepare-published-evidence")) {
     if ((releaseMode !== "standard" && releaseMode !== "full") ||
         process.argv.includes("--verify-evidence")) {
@@ -4578,9 +4604,10 @@ async function main(): Promise<void> {
     }
   }
   await assertApiIntegrationTestShardInventory();
+  const localIdentity = localOnly ? captureReleaseIdentity(rootDir) : undefined;
   let revision: string;
   try {
-    revision = await currentRevision();
+    revision = localIdentity?.revision ?? await currentRevision();
   } catch (error) {
     console.error(
       `Could not determine current revision: ${
@@ -4629,7 +4656,7 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
-  console.log(`Release check started (${releaseMode} mode).`);
+  console.log(`${localOnly ? "Local-only verification" : "Release check"} started (${releaseMode} check set).`);
   const releaseRunStartedAt = Date.now();
   let sourceLibraryRevision: string;
   try {
@@ -4657,7 +4684,13 @@ async function main(): Promise<void> {
   const checkpointPath = resolve(evidenceRoot, "release-check-state.json");
   const checkpointReportPath = resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT);
   const logPath = resolve(evidenceRoot, "release-check.log");
-  await mkdir(evidenceRoot, { recursive: true });
+  if (localOnly) {
+    // Private per-run parent also protects nested browser traces and payloads.
+    await prepareLocalReleaseDirectory(rootDir, evidenceRoot);
+    process.umask(0o077);
+  } else {
+    await mkdir(evidenceRoot, { recursive: true });
+  }
   if (fullRun && browserMainCountSummaryPath) {
     await rm(browserMainCountSummaryPath, { force: true });
   }
@@ -4728,6 +4761,17 @@ async function main(): Promise<void> {
   let releaseStatefulLock: (() => Promise<void>) | undefined;
   let checkpointWrite = Promise.resolve();
   const persistCheckpoint = (): Promise<void> => {
+    if (localIdentity) {
+      checkpointWrite = checkpointWrite.then(() => writeFile(
+        resolve(evidenceRoot, "local-check-report.md"),
+        formatLocalReleaseReport({
+          identity: localIdentity, full: fullRun,
+          expectedLabels: steps.map((step) => step.label), results, completed: false,
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      ));
+      return checkpointWrite;
+    }
     checkpointWrite = checkpointWrite.then(() =>
       writeCheckpoint(checkpointPath, {
         revision,
@@ -4746,6 +4790,7 @@ async function main(): Promise<void> {
     return checkpointWrite;
   };
   const interruptionController = new AbortController();
+  if (localOnly) await persistCheckpoint();
   let interruptedBySignal = false;
   const handleSignal = (signal: NodeJS.Signals): void => {
     if (interruptedBySignal) return;
@@ -4910,7 +4955,7 @@ async function main(): Promise<void> {
             const isSourceLibraryStep =
               step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL ||
               step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label;
-            const effectiveStep =
+            let effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
               step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
@@ -4946,17 +4991,47 @@ async function main(): Promise<void> {
                     },
                   }
                 : step;
+            if (localOnly) {
+              effectiveStep = {
+                ...effectiveStep,
+                env: { ...effectiveStep.env, RELEASE_REVISION: revision },
+              };
+            }
+            const localBrowserEvidence = !localOnly ? undefined
+              : step.label === FULL_BROWSER_GATE_LABEL ? fullBrowserReportPath
+              : step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL ? responsiveWebKitEvidencePath
+              : step.label === "browser WebKit smoke" ? webkitBrowserEvidencePath
+              : undefined;
             let result: ReleaseStepResult & { passed: boolean };
             try {
+              // Reporters can leave their previous retained file unchanged on
+              // incomplete coverage. Never accept that file as this attempt.
+              if (localBrowserEvidence) await rm(localBrowserEvidence, { force: true });
               const { exitCode, elapsedMs, status, output } = await runStep(
                 effectiveStep,
                 {
                   logPath,
                   signal: interruptionController.signal,
                   deferLog: true,
+                  privateOutput: localOnly,
                 },
               );
               stageLogs.set(step.label, output ?? "");
+              if (localBrowserEvidence && status === "PASS") {
+                const bytes = await readFile(localBrowserEvidence);
+                if (step.label === FULL_BROWSER_GATE_LABEL) {
+                  validateFullBrowserReport(bytes.toString("utf8"), {
+                    currentRevision: revision, requirePass: true,
+                  });
+                } else {
+                  validateWebKitBrowserEvidence(bytes, {
+                    currentRevision: revision, requirePass: true,
+                    ...(step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
+                      ? { expectedCaseIdentities: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES }
+                      : {}),
+                  });
+                }
+              }
               result = {
                 label: step.label,
                 passed: exitCode === 0,
@@ -5136,13 +5211,28 @@ async function main(): Promise<void> {
   }
 
   try {
-    await writeTestResultsStepSidecar(results);
+    if (!localOnly) await writeTestResultsStepSidecar(results);
   } catch {
     // The optional summary sidecar must not change release-gate behavior.
   }
 
   if (isAssessmentRevision(revision) && captureReleaseIdentity(rootDir).revision !== revision) {
     throw new Error("Production source or verification inputs changed during the release run; rerun against a stable source snapshot.");
+  }
+  if (localIdentity) {
+    await writeFile(
+      resolve(evidenceRoot, "local-check-report.md"),
+      formatLocalReleaseReport({
+        identity: localIdentity, full: fullRun,
+        expectedLabels: steps.map((step) => step.label), results, completed: true,
+      }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    const passed = results.length === steps.length && results.every((result) => result.status === "PASS");
+    console.log(`Local-only verification: ${passed ? "PASS" : "FAIL"}. Production readiness NOT ASSESSED.`);
+    console.log(`Private local report: ${resolve(evidenceRoot, "local-check-report.md")}`);
+    process.exitCode = passed ? 0 : 1;
+    return;
   }
   console.log("\nRelease check summary:");
   for (const result of results) {

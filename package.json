@@ -40,6 +40,7 @@
     "release:evidence-handoff": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-evidence-handoff.mts",
     "release:check": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts",
     "release:check:full": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full",
+    "release:check:local": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --local-only",
     "release:check:typescript-7-promotion": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --typescript-7-promotion",
     "typecheck:libs": "node ./node_modules/typescript/bin/tsc --build",
     "typecheck": "pnpm run check:shell-inventory && pnpm run check:typescript-api-v6 && pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
