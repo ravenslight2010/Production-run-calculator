@@ -10,6 +10,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { Client } from "pg";
 import {
+  AuthorizedBrowserFixtures,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
@@ -168,7 +169,7 @@ function localDate(): string {
 }
 
 async function seedRunningSwitchoverRun(
-  request: APIRequestContext,
+  _request: APIRequestContext,
   token: string,
   runId: string,
   nextRunId: string,
@@ -249,33 +250,15 @@ async function seedRunningSwitchoverRun(
     await db.end().catch(() => {});
   }
 
-  // Seed the fixture through the sync API so the server publishes the
-  // canonical baseline/projection to the new browser session. Directly
-  // inserting daily_sync bypasses that handoff and can leave the UI
-  // provisional even though the row is visible in PostgreSQL.
-  const headers = { Cookie: `rc_auth=${token}` };
-  const epochResponse = await request.get(`${API_BASE}/api/sync/reset-epoch`, {
-    headers,
+  // Started/counter facts are server-owned. Initialize this disposable
+  // canonical snapshot through the existing isolated-fixture boundary, not
+  // an ordinary client PUT that must continue rejecting operational facts.
+  await authorizedFixtures.seedCanonicalTodaySnapshot({
+    token,
+    senderId: uniqueTestId("warehouse-switchover-seed"),
+    date,
+    payload,
   });
-  expect(
-    epochResponse.ok(),
-    `Warehouse switchover reset epoch failed (${epochResponse.status()})`,
-  ).toBe(true);
-  const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
-  const seedResponse = await request.put(
-    `${API_BASE}/api/sync/today?today=${date}&epoch=${epoch}`,
-    {
-      headers,
-      data: {
-        senderId: uniqueTestId("warehouse-switchover-seed"),
-        payload,
-      },
-    },
-  );
-  expect(
-    seedResponse.ok(),
-    `Warehouse switchover sync seed failed (${seedResponse.status()})`,
-  ).toBe(true);
 
   return { date, runId, nextRunId };
 }
@@ -379,9 +362,11 @@ const managerUsername = uniqueTestId("warehouse_manager");
 const staffUsername = uniqueTestId("warehouse_staff");
 let managerToken = "";
 let staffToken = "";
+let authorizedFixtures: AuthorizedBrowserFixtures;
 
-test.beforeAll(async ({ request }) => {
+test.beforeAll(async ({ request, playwright }) => {
   await requireIsolatedTestDatabase("warehouse coverage browser check");
+  authorizedFixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
@@ -396,13 +381,18 @@ test.beforeAll(async ({ request }) => {
 
 
 test.afterAll(async () => {
-  if (!process.env.DATABASE_URL) return;
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
-    await db.connect();
-    await cleanupTestUsers(db, testUsernames);
+    await authorizedFixtures?.cleanup();
   } finally {
-    await db.end().catch(() => {});
+    if (process.env.DATABASE_URL) {
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      try {
+        await db.connect();
+        await cleanupTestUsers(db, testUsernames);
+      } finally {
+        await db.end().catch(() => {});
+      }
+    }
   }
 });
 

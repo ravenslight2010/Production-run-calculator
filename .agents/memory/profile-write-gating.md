@@ -22,3 +22,16 @@ Durable policy for clients:
   truth. Non-403 failures still retry.
 - Non-managers keep in-memory healing benefits; only persistence is skipped —
   a manager device performs the durable heal.
+
+## Product supply-mode defaults
+
+The owner confirmed that a pizza profile's Dough/Crust default belongs on the
+server with the rest of the profile, not only on the device.
+
+**Why:** It determines the product's normal supply mode; treating it as navigation
+breaks consistent setup on another browser.
+
+**How to apply:** Capability-gate changes like other profile edits, preserve recipe
+fields and scoped cache ownership, and keep the mode of an existing run distinct
+from a profile default. Do not replace shared-default regression checks with
+device-local-only expectations.

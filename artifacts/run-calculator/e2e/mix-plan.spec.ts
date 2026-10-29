@@ -4220,6 +4220,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
       await stopBtn2.click();
       await waitForLocalRunEnded(page, runId2);
+      await waitForCanonicalRunField(runId2, "endedAt");
 
       // ── Full page reload ──────────────────────────────────────────────────────
       // This exercises the localStorage → loadDayState() → React hydration path.

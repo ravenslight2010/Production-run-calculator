@@ -8,6 +8,14 @@ full-release certification, physical-device evidence, or published-app evidence.
 The release-maintenance agent owns the reconciliation; the release owner owns
 authorization and prerequisites for the later runtime release check.
 
+On 2026-10-27, the owner separately approved replacing the one
+`Frontline App on-hand stock survives off-tab work, adjustment, pause, and reload`
+identity with
+`Frontline App1 batch supply survives off-tab work, adjustment, pause, and reload`.
+The reviewed total remains 216. This follows the current whole-batch UI and
+retains off-tab server depletion, manual adjustment, pause, and reload coverage;
+the replaced case's direct fractional-pound edit is no longer exposed by the UI.
+
 The exact default identities are the file and complete title path strings in
 [`full-browser-case-contract.mts`](../scripts/src/full-browser-case-contract.mts).
 Every one belongs to project **`chromium`**, selected by
@@ -56,7 +64,7 @@ existence alone is not a reason to remove default Chromium app regressions.
 | `ignored-match-filter.spec.ts` | 1 | Category/brand fences and restore; master-data matching |
 | `import-gold-lab-responsive.spec.ts` | 1 | Review-panel layout only, not source capture; Import Gold UI / compatibility |
 | `line-map-responsive.spec.ts` | 1 | Station cards; Line Map |
-| `live-sauce-dough-phone.spec.ts` | 1 | Peer stock edits/reload; Sauce |
+| `live-sauce-dough-phone.spec.ts` | 1 | Frontline App1 batch supply, server depletion, correction, and reload |
 | `manager-attention.spec.ts` | 7 | Keyboard/focus, counts, contrast, denied staff access; management/accessibility |
 | `merge-alias-retarget.spec.ts` | 7 | Scoped aliases, confirmations, ignore persistence, cross-manager sharing; master-data matching |
 | `merge-ignore-undo.spec.ts` | 1 | Scoped flavor-ignore Undo; master-data matching |

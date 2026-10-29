@@ -38,3 +38,12 @@ installer processes, causing workflow failures unrelated to application code.
 
 **How to apply:** Inspect process ancestry, stop only the confirmed recursive
 installer tree, repair tool provisioning and then restore affected workflows.
+
+Inline probes must not rely on stdin surviving the provisioning wrapper.
+
+**Why:** A heredoc-fed Node probe exited successfully without executing its
+script after npm-based provisioning consumed or detached stdin.
+
+**How to apply:** Pass inline scripts through `--eval`, or use a script file,
+and require an explicit result marker rather than treating exit zero as proof
+that the probe ran.

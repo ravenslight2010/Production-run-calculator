@@ -156,8 +156,13 @@ describe("SSE sync baseline gate", () => {
       hasLocalUserEdit: false,
     })).toBe(true);
     expect(source).toContain("const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;");
-    expect(source).toContain("applyRolloverEpoch(msg.resetEpoch)");
-    expect(source).toContain("applyResetWipe(msg.resetEpoch)");
+    expect(source).toContain("adoptClientResetEpoch(msg.resetEpoch, msg.rollover === true)");
+    expect(source).toContain("function adoptClientResetEpoch(epoch: number, rollover = false): boolean");
+    expect(source).toContain("cancelPendingSyncWritesForReset();");
+    expect(source).toContain("foregroundSyncBarrierRef.current = true;");
+    expect(source).toContain("syncPushQueueRef.current.reset();");
+    expect(source).toContain("applyRolloverEpoch(epoch)");
+    expect(source).toContain("applyResetWipe(epoch)");
     expect(source).not.toContain("checkDateRollover");
     expect(source).not.toContain("/api/sync/${newDate}");
   });

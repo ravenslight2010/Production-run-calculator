@@ -7,8 +7,17 @@ const labels = {
   offline: "Offline", failed: "Update failed", confirmed: "Update complete",
 };
 
-export function AppUpdateControl({ state, check, update, cancelUpdate }: {
+export function AppUpdateControl({
+  state,
+  check,
+  update,
+  cancelUpdate,
+  autoReloadSafe,
+  autoReloadIdle,
+}: {
   state: UpdateState; check: () => void; update: () => void; cancelUpdate: () => void;
+  autoReloadSafe?: boolean;
+  autoReloadIdle?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const busy = state.phase === "checking" || state.phase === "waiting" || state.phase === "updating";
@@ -28,6 +37,8 @@ export function AppUpdateControl({ state, check, update, cancelUpdate }: {
       className="relative z-10 max-h-[calc(100dvh-5rem)] w-full overflow-y-auto overscroll-contain border-b border-border/80 bg-background text-foreground"
       aria-label="App updates"
       data-testid="app-update-control"
+      data-update-reload-safe={autoReloadSafe === undefined ? undefined : String(autoReloadSafe)}
+      data-update-reload-idle={autoReloadIdle === undefined ? undefined : String(autoReloadIdle)}
     >
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:px-4">
         <button

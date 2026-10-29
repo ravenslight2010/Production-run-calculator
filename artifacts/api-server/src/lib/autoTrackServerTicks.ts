@@ -49,7 +49,13 @@ type Payload = {
     wallClockBookkeeping?: Record<string, Record<string, unknown>>;
     netOwnership?: Record<string, Record<string, { generation?: string; sequence?: number; updatedAt?: number }>>;
   };
-  doughTimerControls?: Record<string, { generation?: string; pausedAt?: number; resumeAt?: number; updatedAt?: number }>;
+  doughTimerControls?: Record<string, {
+    generation?: string;
+    pausedAt?: number;
+    resumeAt?: number;
+    updatedAt?: number;
+    controlRevision?: number;
+  }>;
 };
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
 const DEFAULT_OUTER_STAGE_MIN = 2.5;

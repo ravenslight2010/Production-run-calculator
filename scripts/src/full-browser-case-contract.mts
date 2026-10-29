@@ -74,7 +74,7 @@ export const FULL_BROWSER_EXPECTED_CASE_IDENTITIES: readonly string[] = [
   "artifacts/run-calculator/e2e/home-navigation-reload.spec.ts :: Home navigation persistence › restores a non-Run tab after reload",
   "artifacts/run-calculator/e2e/home-navigation-reload.spec.ts :: Home navigation persistence › unwinds tab history on browser back before leaving the app",
   "artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts :: Dough and Sauce phone quick checks share line-speed feedback across tab switches",
-  "artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts :: Frontline App on-hand stock survives off-tab work, adjustment, pause, and reload",
+  "artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts :: Frontline App1 batch supply survives off-tab work, adjustment, pause, and reload",
   "artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts :: Sauce and Dough live cards work at a phone viewport",
   "artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts :: Sauce automatic supply stays accurate after the final partial unit",
   "artifacts/run-calculator/e2e/management-performance.spec.ts :: captures authenticated initial load and deferred staff visit budgets",

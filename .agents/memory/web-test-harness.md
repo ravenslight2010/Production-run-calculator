@@ -5,6 +5,22 @@ description: How the web artifact's Vitest suite is wired, and the contention ru
 
 # Run-calculator web Vitest harness
 
+## Browser trace response-body formats
+
+Handle both `_file` and `_sha1` response-body references when inspecting
+Playwright trace archives; check archive members before resolving either.
+An empty inline `text` does not override a referenced body: use non-empty
+inline text or resolve the archive reference. This also applies to request bodies.
+
+**Why:** The available trace recorder used `_file` in network content metadata.
+It can also emit `text: ""` alongside that reference, so testing only whether
+the `text` property exists hides the actual payload.
+An older `_sha1`-only inspection silently skipped all captured API responses,
+which could be mistaken for missing browser evidence.
+
+**How to apply:** Inspect the network schema first, then extract only the
+needed sanitized facts. Do not dump request headers, cookies, or entire bodies.
+
 ## Contention is the enemy, not logic
 Validation runs alongside the development workflows, which can starve Vitest.
 Concurrent workers have previously caused "Failed to start forks worker"

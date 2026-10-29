@@ -1437,13 +1437,24 @@ async function run(): Promise<void> {
     "the full-only responsive WebKit gate timeout must remain fixed at 20 minutes",
   );
   assert.deepEqual(
-    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args.slice(1),
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args.slice(1, 4),
     [
       "--playwright-config=playwright.compatibility.config.ts",
       "--project=phone-webkit",
       "--project=tablet-webkit",
     ],
     "the full compatibility gate must select only the phone and tablet WebKit projects",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args[4],
+    "--output",
+    "responsive WebKit must use an isolated artifact directory",
+  );
+  assert.ok(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args[5]?.endsWith(
+      "/browser-compatibility/test-results",
+    ),
+    "responsive WebKit artifacts must stay inside the release evidence directory",
   );
   assert.ok(
     FULL_RESPONSIVE_WEBKIT_GATE_STEP.env?.PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH?.endsWith(

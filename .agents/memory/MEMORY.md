@@ -104,6 +104,7 @@
 - [Recipe row unit provenance](recipe-row-unit-provenance.md) — unit labels describe raw values only and must follow the selected row set through merges.
 - [Shared recipe refresh](shared-master-data-refresh.md) + [Mix Plan snapshots](mix-plan-snapshot-refresh.md) — invalidate canonical views after shared edits and run-value changes.
 - [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely; keep overlays and app-shell panels clear of fixed tabs on short screens.
+- [QC badge placement](qc-badge-normal-flow.md) — keep review counts visible in normal flow; fixed status overlays can obscure tablet content.
 - [Embedded report controls](web-form-button-submit-reload.md) — test manager filters inside Home’s surrounding form; Apply and Enter must not submit or reset the page.
 - [Case-based input validity](case-based-production-input-validity.md) — without positive pizzas-per-case, suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.

@@ -188,6 +188,70 @@ describe("Gemini-backed chat completions", () => {
     }]);
   });
 
+  it("does not advance for a 400 naming a different Gemini model", async () => {
+    sdk.generateContent.mockRejectedValueOnce(Object.assign(
+      new Error("Model gemini-3.5-flash is not supported."),
+      { status: 400 },
+    ));
+
+    await expect(openai.chat.completions.create({
+      ...baseParams,
+      model: "gemini-3.6-flash",
+    })).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    expect(sdk.generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-3.6-flash",
+    ]);
+  });
+
+  it.each([
+    { status: 400, message: "Model gemini-3.6-flash is not supported." },
+    { status: 400, message: "Unsupported model: gemini-3.6-flash" },
+    { response: { status: 400, data: { error: { message: "Model 'gemini-3.6-flash' is not available." } } } },
+    { status: 404, message: "Model fixture-model is no longer available." },
+  ])("advances the existing ladder for a confirmed unavailable model (%j)", async (details) => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
+    const selectedModel = details.status === 404 ? "fixture-model" : "gemini-3.6-flash";
+    sdk.generateContent
+      .mockRejectedValueOnce(Object.assign(new Error(), details))
+      .mockResolvedValueOnce({ text: "Recovered answer" });
+
+    const response = await openai.chat.completions.create({
+      ...baseParams,
+      model: selectedModel,
+    });
+    expect(response).toMatchObject({
+      model: "gemini-3.5-flash",
+      choices: [{ message: { content: "Recovered answer" } }],
+    });
+    expect(sdk.generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      selectedModel, "gemini-3.5-flash",
+    ]);
+    expect(metrics.map(({ fallbackTrigger, retryCount }) => ({ fallbackTrigger, retryCount })))
+      .toEqual([
+        { fallbackTrigger: null, retryCount: 0 },
+        { fallbackTrigger: "retired_model", retryCount: 0 },
+      ]);
+  });
+
+  it.each([
+    { status: 400, message: "Invalid argument: responseMimeType must be application/json" },
+    { status: 400, message: "Thinking budget is not supported for model gemini-3.6-flash." },
+    { status: 400, message: "Model gemini-3.6-flash is not supported with responseMimeType text/plain." },
+    { status: 400, message: "Unsupported model parameter: thinkingBudget" },
+    { status: 400, message: "Model gemini-3.6-flash does not support this input type." },
+    { status: 400, message: "Model is not supported." },
+    { status: 400, response: { data: null } },
+    { status: 401, message: "Model gemini-3.6-flash is not supported." },
+    { status: 403, message: "Model gemini-3.6-flash is not supported." },
+    { status: 404, message: "Route not found." },
+  ])("does not retry or advance for ordinary validation/auth/route failures (%j)", async (details) => {
+    sdk.generateContent.mockRejectedValueOnce(Object.assign(new Error(), details));
+    await expect(openai.chat.completions.create(baseParams))
+      .rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    expect(sdk.generateContent).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a retried primary followed by fallback recovery against the SDK calls", async () => {
     const metrics: GeminiRequestMetrics[] = [];
     setGeminiMetricsObserver((sample) => metrics.push(sample));
@@ -349,8 +413,12 @@ describe("Gemini-backed chat completions", () => {
     expect(sdk.generateContent.mock.calls).toHaveLength(0);
   });
 
-  it("tries the configured fallback when the primary stream fails before yielding output", async () => {
-    const providerFailure = Object.assign(new Error("Service unavailable"), { status: 503 });
+  it.each([
+    { status: 503, message: "Service unavailable" },
+    { status: 400, message: "Model gemini-3.6-flash is not supported." },
+  ])("tries the configured fallback when the primary stream fails before yielding output (%j)", async (details) => {
+    const providerFailure = Object.assign(new Error(details.message), { status: details.status });
+    const selectedModel = details.status === 400 ? "gemini-3.6-flash" : "fixture-model";
     sdk.generateContentStream
       .mockResolvedValueOnce(failingStreamBeforeOutput(providerFailure))
       .mockResolvedValueOnce((async function* () {
@@ -360,13 +428,14 @@ describe("Gemini-backed chat completions", () => {
 
     const response = await openai.chat.completions.create({
       ...baseParams,
+      model: selectedModel,
       stream: true,
     });
     const chunks: Array<{ choices: Array<{ delta: { content: string | null } }> }> = [];
     for await (const chunk of response) chunks.push(chunk);
 
     expect(sdk.generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
-      "fixture-model",
+      selectedModel,
       "gemini-3.5-flash",
     ]);
     expect(chunks).toEqual([
@@ -376,14 +445,19 @@ describe("Gemini-backed chat completions", () => {
     expect(chunks.map((chunk) => chunk.choices[0]?.delta.content).join("")).toBe("Recovered answer");
   });
 
-  it("propagates a primary stream failure after output without switching models or replaying chunks", async () => {
-    const providerFailure = Object.assign(new Error("Service unavailable"), { status: 503 });
+  it.each([
+    { status: 503, message: "Service unavailable" },
+    { status: 400, message: "Model gemini-3.6-flash is not supported." },
+  ])("propagates a primary stream failure after output without switching models or replaying chunks (%j)", async (details) => {
+    const providerFailure = Object.assign(new Error(details.message), { status: details.status });
+    const selectedModel = details.status === 400 ? "gemini-3.6-flash" : "fixture-model";
     sdk.generateContentStream.mockResolvedValueOnce(
       failingStreamAfterOutput("Partial answer", providerFailure),
     );
 
     const response = await openai.chat.completions.create({
       ...baseParams,
+      model: selectedModel,
       stream: true,
     });
     const chunks: Array<{ choices: Array<{ delta: { content: string | null } }> }> = [];
@@ -393,7 +467,7 @@ describe("Gemini-backed chat completions", () => {
     }).rejects.toMatchObject({ name: "GeminiProviderUnavailableError" });
 
     expect(sdk.generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
-      "fixture-model",
+      selectedModel,
     ]);
     expect(chunks).toEqual([
       { choices: [{ delta: { content: "Partial answer" } }] },

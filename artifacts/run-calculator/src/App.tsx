@@ -421,7 +421,9 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       <AppUpdateControl state={updateState}
         check={() => void coordinator.check()}
         update={() => void coordinator.requestUpdate()}
-        cancelUpdate={() => coordinator.cancelQueuedUpdate()} />
+        cancelUpdate={() => coordinator.cancelQueuedUpdate()}
+        autoReloadSafe={calculatorSafe}
+        autoReloadIdle={updateIdle} />
       {children}
     </AppUpdateContext.Provider>
   );

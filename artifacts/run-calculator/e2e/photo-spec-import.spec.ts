@@ -34,6 +34,17 @@ const EDITED_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}SauceReviewed`;
 const RAW_CHEESE_RECIPE = `ZZZ${FIXTURE_SUFFIX}Cheese`;
 const EDITED_CHEESE_RECIPE = `ZZZ${FIXTURE_SUFFIX}CheeseReviewed`;
 
+function photographedRecipeSource(
+  kind: "dough" | "sauce" | "cheese",
+  name: string,
+  ingredients: string,
+): string {
+  // Exercise the structured-AI review branch with unstructured OCR prose.
+  // A Brand/Flavor-only TSV now correctly takes the deterministic fast path,
+  // so it cannot stand in for the named recipe/ingredients mocked below.
+  return `A photographed pizza spec and ${kind} recipe for customer ${RAW_BRAND}, product ${RAW_FLAVOR}, identifies the recipe as ${name} and lists these batch weights: ${ingredients}. The product is packed at 12 pizzas per case and uses a 12-inch die.`;
+}
+
 // A tiny valid PNG is enough to exercise browser image preparation before the
 // intercepted vision request. The source files get distinct names so thumbnail
 // add/remove/retake behavior stays visible to the user.
@@ -43,6 +54,67 @@ const PNG = Buffer.from(
 );
 
 type MasterDataSnapshot = Record<string, unknown>;
+
+async function confirmSpecSafetyReview(page: Page): Promise<void> {
+  const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
+  const apply = review.getByRole("button", { name: /^Apply \d+ items?$/ });
+  const updatedNotice =
+    "Nothing was saved. The current recipe library changed this review; check the updated changes below and confirm again.";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const safety = page.getByTestId("dialog-import-safety-review");
+    await expect.poll(async () => {
+      if (await safety.isVisible()) return "ready";
+      // The refreshed comparison deliberately disables Apply until its
+      // acknowledgment is checked below. Do not wait for an enabled button
+      // before making the very acknowledgment that enables it.
+      if (await review.getByText(updatedNotice, { exact: true }).isVisible()) return "updated";
+      return "waiting";
+    }, { timeout: 20_000 }).not.toBe("waiting");
+    if (!await safety.isVisible()) {
+      // A new server comparison must retain the edited details, while requiring
+      // a fresh acknowledgment. Do not reconstruct edits that the app lost.
+      await expect(review).toContainText("Step 2 of 2 — details");
+      const poundsConfirmations = review.getByRole("button", {
+        name: /^Confirm .+ row values are pounds$/i,
+      });
+      for (let index = 0; index < await poundsConfirmations.count(); index += 1) {
+        const confirmation = poundsConfirmations.nth(index);
+        if (await confirmation.getAttribute("aria-pressed") !== "true") {
+          await confirmation.click();
+        }
+      }
+      const confirmation = review.getByTestId("spec-import-destructive-confirmation");
+      if (await confirmation.isVisible()) await confirmation.check();
+      await expect(apply).toBeEnabled();
+      await apply.click();
+    }
+    await expect(safety).toBeVisible();
+    await expect(safety).toContainText("Factory recipe & profile changes");
+    const applied = page.waitForResponse(
+      (response) =>
+        /\/api\/import-operations\/[^/]+\/apply$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "POST",
+      { timeout: 20_000 },
+    );
+    await safety.getByTestId("button-import-safety-confirm").click();
+    const response = await applied;
+    await expect(safety).toBeHidden();
+    if (response.status() === 409 && attempt === 0) {
+      // Exercise the visible recovery flow, never bypass a stale-state fence
+      // or replay an unconfirmed request with a fresh server hash.
+      expect(await response.json()).toMatchObject({ error: "STALE_REVIEWED_STATE" });
+      await expect(review).toContainText(
+        "Nothing was saved because the server data changed during review.",
+      );
+      const refresh = review.getByRole("button", { name: /^Apply \d+ items?$/ });
+      await expect(refresh).toBeEnabled();
+      await refresh.click();
+      continue;
+    }
+    expect(response.status()).toBe(200);
+    return;
+  }
+}
 
 async function dismissWelcome(page: Page): Promise<void> {
   await dismissOnboardingIfPresent(page, { visibilityTimeout: 5_000 });
@@ -196,7 +268,7 @@ test("keeps photographed pages editable and canceling review leaves master data 
         // Keep the deterministic downstream workbook in one grid/chunk. The
         // photo count is exercised by this request; chunk fan-out and pacing
         // belong to the workbook-import tests.
-        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
+        workbookText: photographedRecipeSource("dough", RAW_RECIPE, "Flour 50 lb"),
         generatedAt: Date.now(),
         note: "Two photographed pages transcribed for review.",
       }),
@@ -336,7 +408,7 @@ test("applies photographed review edits to the authenticated profile and recipe 
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
+        workbookText: photographedRecipeSource("dough", RAW_RECIPE, "Flour 50 lb"),
         generatedAt: Date.now(),
         note: "Two photographed pages transcribed for review.",
       }),
@@ -406,27 +478,7 @@ test("applies photographed review edits to the authenticated profile and recipe 
     { timeout: 15_000 },
   );
   await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  // The commit path recomputes the authoritative diff. If another master-data
-  // refresh changes that diff while the dialog is open, the safe behavior is to
-  // reopen step 1 and require the manager to review it again rather than apply
-  // stale decisions. Complete that deliberate re-confirmation when exercised.
-  await expect.poll(async () => {
-    if (!await review.isVisible().catch(() => false)) return "hidden";
-    return (await review.textContent()) ?? "";
-  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
-  if (
-    await review.isVisible().catch(() => false) &&
-    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
-  ) {
-    await review.getByLabel(`Brand for ${RAW_BRAND} ${RAW_FLAVOR}`).fill(EDITED_BRAND);
-    await review.getByRole("button", { name: "Next", exact: true }).click();
-    await review.getByLabel(`Name for recipe ${RAW_RECIPE}`).fill(EDITED_RECIPE);
-    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
-    if (await destructiveConfirmation.isVisible().catch(() => false)) {
-      await destructiveConfirmation.check();
-    }
-    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  }
+  await confirmSpecSafetyReview(page);
   await expect(review).toBeHidden({ timeout: 20_000 });
   const savedSpecSheets = await savedSpecSheetsResponse;
   expect(savedSpecSheets.status()).toBe(200);
@@ -566,7 +618,7 @@ test("persists every ingredient from a photographed multi-ingredient dough recip
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_MULTI_DOUGH_RECIPE}`,
+        workbookText: photographedRecipeSource("dough", RAW_MULTI_DOUGH_RECIPE, `High Gluten Flour 50 lb; ${PHOTO_DOUGH_WATER} 29.5 lb; Olive Oil 1.25 lb`),
         generatedAt: Date.now(),
         note: "Two photographed dough pages transcribed for review.",
       }),
@@ -639,23 +691,7 @@ test("persists every ingredient from a photographed multi-ingredient dough recip
   await doughRecipeInput.fill(EDITED_MULTI_DOUGH_RECIPE);
 
   await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  await expect.poll(async () => {
-    if (!await review.isVisible().catch(() => false)) return "hidden";
-    return (await review.textContent()) ?? "";
-  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
-  if (
-    await review.isVisible().catch(() => false) &&
-    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
-  ) {
-    await doughBrandInput.fill(EDITED_BRAND);
-    await review.getByRole("button", { name: "Next", exact: true }).click();
-    await doughRecipeInput.fill(EDITED_MULTI_DOUGH_RECIPE);
-    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
-    if (await destructiveConfirmation.isVisible().catch(() => false)) {
-      await destructiveConfirmation.check();
-    }
-    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  }
+  await confirmSpecSafetyReview(page);
   await expect(review).toBeHidden({ timeout: 20_000 });
 
   expect(imageRequestCount).toBe(1);
@@ -726,7 +762,7 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_SAUCE_RECIPE}`,
+        workbookText: photographedRecipeSource("sauce", RAW_SAUCE_RECIPE, "Tomato Sauce 25 lb; Garlic Puree 3.5 lb; Olive Oil 1.25 lb"),
         generatedAt: Date.now(),
         note: "Two photographed sauce pages transcribed for review.",
       }),
@@ -800,23 +836,7 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
   await sauceRecipeInput.fill(EDITED_SAUCE_RECIPE);
 
   await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  await expect.poll(async () => {
-    if (!await review.isVisible().catch(() => false)) return "hidden";
-    return (await review.textContent()) ?? "";
-  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
-  if (
-    await review.isVisible().catch(() => false) &&
-    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
-  ) {
-    await sauceBrandInput.fill(EDITED_BRAND);
-    await review.getByRole("button", { name: "Next", exact: true }).click();
-    await sauceRecipeInput.fill(EDITED_SAUCE_RECIPE);
-    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
-    if (await destructiveConfirmation.isVisible().catch(() => false)) {
-      await destructiveConfirmation.check();
-    }
-    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  }
+  await confirmSpecSafetyReview(page);
   await expect(review).toBeHidden({ timeout: 20_000 });
 
   expect(imageRequestCount).toBe(1);
@@ -887,7 +907,7 @@ test("persists every ingredient from a photographed multi-ingredient cheese reci
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        workbookText: `Brand\tFlavor\tRecipe\n${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_CHEESE_RECIPE}`,
+        workbookText: photographedRecipeSource("cheese", RAW_CHEESE_RECIPE, "Mozzarella 18.5 lb; Provolone 7.25 lb; Parmesan 2.75 lb"),
         generatedAt: Date.now(),
         note: "Two photographed cheese pages transcribed for review.",
       }),
@@ -960,23 +980,7 @@ test("persists every ingredient from a photographed multi-ingredient cheese reci
   await cheeseRecipeInput.fill(EDITED_CHEESE_RECIPE);
 
   await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  await expect.poll(async () => {
-    if (!await review.isVisible().catch(() => false)) return "hidden";
-    return (await review.textContent()) ?? "";
-  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
-  if (
-    await review.isVisible().catch(() => false) &&
-    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
-  ) {
-    await cheeseBrandInput.fill(EDITED_BRAND);
-    await review.getByRole("button", { name: "Next", exact: true }).click();
-    await cheeseRecipeInput.fill(EDITED_CHEESE_RECIPE);
-    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
-    if (await destructiveConfirmation.isVisible().catch(() => false)) {
-      await destructiveConfirmation.check();
-    }
-    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
-  }
+  await confirmSpecSafetyReview(page);
   await expect(review).toBeHidden({ timeout: 20_000 });
 
   expect(imageRequestCount).toBe(1);
@@ -1010,12 +1014,12 @@ test("persists every ingredient from a photographed multi-ingredient cheese reci
   }, { timeout: 20_000 }).toEqual({
     name: EDITED_CHEESE_RECIPE,
     components: [
-      // Photographed regular specs provide per-pizza ounces. The cheese pool
-      // persists those as blend shares while reserving batch pounds for the
-      // manager's curated batch-weight entry.
-      { ingredient: "Mozzarella", lbs: 0, sharePct: 64.91 },
-      { ingredient: "Provolone", lbs: 0, sharePct: 25.44 },
-      { ingredient: "Parmesan", lbs: 0, sharePct: 9.65 },
+      // This fixture labels the amounts as batch pounds and confirms that unit
+      // in the safety review. Preserve those pounds while retaining the
+      // derived blend shares.
+      { ingredient: "Mozzarella", lbs: 18.5, sharePct: 64.91 },
+      { ingredient: "Provolone", lbs: 7.25, sharePct: 25.44 },
+      { ingredient: "Parmesan", lbs: 2.75, sharePct: 9.65 },
     ],
   });
 });

@@ -22,6 +22,7 @@ const API_BASE =
   process.env.PLAYWRIGHT_API_BASE_URL ??
   process.env.PLAYWRIGHT_BASE_URL ??
   `https://${process.env.REPLIT_DEV_DOMAIN}`;
+test.use({ timezoneId: "America/Chicago" });
 
 type ChunkManifest = {
   chunks?: Record<string, { modules?: string[] }>;
@@ -39,12 +40,12 @@ let authorizedFixtures: AuthorizedBrowserFixtures | undefined;
 const MIN_RUN_CONTROL_TARGET_CSS_PX = 44;
 
 function localDate(): string {
-  const now = new Date();
-  return [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("-");
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 async function readRunStartedAt(page: Page, runId: string): Promise<number | null> {
@@ -151,6 +152,8 @@ async function createStartupFixture(options: {
     senderId: `run-startup-${suffix}`,
     date: fixtureDate,
     payload: {
+      syncVersion: 1,
+      completeness: "complete",
       dayState: {
         date: fixtureDate,
         runs: [
@@ -164,6 +167,7 @@ async function createStartupFixture(options: {
           },
         ],
         currentIndex: 0,
+        currentRunId: runOne,
         resetAt: 0,
         substitutions: [],
         substitutionLog: [],
@@ -402,6 +406,16 @@ test("Run controls work before delayed optional station panels finish loading", 
     const nextRunTarget = await expectRunControlTarget(page, nextRun, "next-run control");
     await expectReachableInViewport(page, nextRun, "run switch");
     await expect(completedCases).toHaveText("0");
+    await expect.poll(
+      async () => {
+        const localStartedAt = await readRunStartedAt(page, runOne);
+        const canonical = await readCanonicalRunState(page, fixtureDate!, runOne);
+        return typeof localStartedAt === "number" && canonical?.startedAt === localStartedAt
+          ? localStartedAt
+          : null;
+      },
+      { timeout: 20_000, intervals: [250, 500, 1_000] },
+    ).toEqual(expect.any(Number));
     const startedAtBeforeRelease = await readRunStartedAt(page, runOne);
     expect(startedAtBeforeRelease).toEqual(expect.any(Number));
     const casesNeededBeforeRelease = await targetCases.inputValue();

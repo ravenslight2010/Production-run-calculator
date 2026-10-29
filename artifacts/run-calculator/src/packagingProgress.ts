@@ -176,6 +176,44 @@ export function reconcilePackagingProgress(
   return { merged, acceptedRemoteIds, rejectedRemoteIds };
 }
 
+export function reconcilePackagingProgressSnapshot(args: {
+  local: Record<string, PackagingProgress>;
+  remote: Record<string, PackagingProgress> | undefined;
+  acceptRemoteDay: boolean;
+  resetBoundaryChanged: boolean;
+}): PackagingProgressReconcileResult {
+  const localBase = args.acceptRemoteDay && args.resetBoundaryChanged
+    ? {}
+    : args.local;
+  const result = reconcilePackagingProgress(
+    localBase,
+    args.acceptRemoteDay ? args.remote : undefined,
+  );
+  if (!args.acceptRemoteDay || !args.remote) return result;
+
+  // The server snapshot is canonical. A client and server can persist
+  // automatic progress in the same millisecond, producing an equal register
+  // version with different counters. In that tie, retain the canonical
+  // snapshot; manual corrections remain protected by their higher generation.
+  for (const [runId, raw] of Object.entries(args.remote)) {
+    const candidate = normalizePackagingProgress(raw);
+    const current = result.merged[runId];
+    if (!candidate || !current || comparePackagingProgress(candidate, current) !== 0) {
+      continue;
+    }
+    const sameProgress =
+      candidate.skidsCompleted === current.skidsCompleted &&
+      candidate.casesOnCurrentSkid === current.casesOnCurrentSkid &&
+      candidate.manualOverrideUntil === current.manualOverrideUntil;
+    if (!sameProgress) {
+      result.merged[runId] = candidate;
+      result.acceptedRemoteIds.add(runId);
+      result.rejectedRemoteIds.delete(runId);
+    }
+  }
+  return result;
+}
+
 export function overlayPackagingProgress(
   values: FormValues,
   progress: PackagingProgress | undefined,

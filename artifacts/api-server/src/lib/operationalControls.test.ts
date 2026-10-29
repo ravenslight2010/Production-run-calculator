@@ -14,9 +14,42 @@ describe("canonical run controls", () => {
     expect(result.outcome).toBe("accepted");
     expect(result.data.doughTimerControls.run).toEqual({
       generation: "run:101", pausedAt: 200, resumeAt: 60200, updatedAt: 200,
+      controlRevision: 5,
     });
     expect(result.data.dayState.runs[0].metaUpdatedAt).toBe(101);
-    expect(applyOperationalIntent(state(), intent, 200, 5).outcome).toBe("conflicted");
+    expect(applyOperationalIntent(state(), intent, 200, 5).outcome).toBe("accepted");
+  });
+  it("rebases a Dough timer over counter revisions but fences older competing controls", () => {
+    const intent = { ...command({ kind: "dough-timer", paused: true, durationMs: 60000 }), baseRevision: 4 };
+    const afterCounterWrites = applyOperationalIntent(state(), intent, 200, 7);
+    expect(afterCounterWrites).toMatchObject({
+      outcome: "accepted",
+      data: { doughTimerControls: { run: { controlRevision: 8 } } },
+    });
+
+    const staleCompetingControl = {
+      ...intent,
+      id: "control:stale",
+      control: { kind: "dough-timer" as const, paused: false },
+    };
+    expect(applyOperationalIntent(afterCounterWrites.data, staleCompetingControl, 250, 8).outcome)
+      .toBe("conflicted");
+
+    expect(applyOperationalIntent(state(), {
+      ...intent,
+      id: "control:stale-generation",
+      observedGeneration: "run:100",
+    }, 250, 7).outcome).toBe("conflicted");
+    expect(applyOperationalIntent(state(), {
+      ...intent,
+      id: "control:future-revision",
+      baseRevision: 8,
+    }, 250, 7).outcome).toBe("conflicted");
+    expect(applyOperationalIntent(state(), {
+      ...intent,
+      id: "control:missing-base",
+      baseRevision: undefined,
+    }, 250, 7).outcome).toBe("conflicted");
   });
   it("changes auto mode through a revision-bound intent, not client stamps", () => {
     const intent = command({ kind: "auto-track", enabled: false });

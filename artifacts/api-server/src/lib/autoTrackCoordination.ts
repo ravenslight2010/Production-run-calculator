@@ -373,6 +373,41 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+const SERVER_OWNED_AUTO_TRACK_CHANNEL = /^(?:app[1-4]-(?:batch|stock)|sauce-barrel|sauce-stock)$/;
+
+export function attachServerOwnedAutoTrackClaim(
+  data: Record<string, unknown>,
+  claim: Pick<AutoTrackClaim, "runId" | "channel" | "generation" | "sequence">,
+  updatedAt: number,
+): Record<string, unknown> {
+  if (!SERVER_OWNED_AUTO_TRACK_CHANNEL.test(claim.channel)) return data;
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
+    throw new Error("Accepted server-owned auto-track claims require a positive timestamp");
+  }
+
+  const previous = object(data.autoTrackServerState);
+  const ownership = object(previous.netOwnership);
+  const runOwnership = object(ownership[claim.runId]);
+  return {
+    ...data,
+    autoTrackServerState: {
+      ...previous,
+      version: 1,
+      netOwnership: {
+        ...ownership,
+        [claim.runId]: {
+          ...runOwnership,
+          [claim.channel]: {
+            generation: claim.generation,
+            sequence: claim.sequence,
+            updatedAt,
+          },
+        },
+      },
+    },
+  };
+}
+
 export function applyAutoTrackClaim(
   stored: unknown,
   claim: AutoTrackClaim,

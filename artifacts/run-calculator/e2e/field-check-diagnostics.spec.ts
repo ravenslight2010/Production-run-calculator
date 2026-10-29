@@ -19,6 +19,9 @@ test.afterAll(async () => { await fixtures?.cleanup(); });
 
 test("manager sees safe sync categories and performance sources from isolated API evidence", async ({ page, request, browserName }, testInfo) => {
   let browserPhase = "setup";
+  // Relative-age labels are not the observation-retention invariant. Keep Date
+  // fixed while real timers and the export/recovery requests continue normally.
+  await page.clock.setFixedTime(Date.now());
   let reloading = false;
   const reloadNetworkDiagnostics: Array<{ phase: string; route: string }> = [];
   const { reloadNetworkPath } = await import("./field-check-browser-diagnostics.mjs");
@@ -251,7 +254,6 @@ test("manager sees safe sync categories and performance sources from isolated AP
   await expect(page.getByTestId("shared-records-status"))
     .not.toContainText("2026-10-20");
   expect(await page.evaluate((key) => localStorage.getItem(key), unrelatedKey)).toBe(unrelatedRaw);
-
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Reported issues" }).click();
   await finishManagerReload();

@@ -8,6 +8,7 @@ import {
   uniqueTestId,
 } from "./isolation";
 import { signUpAndHandleOnboarding } from "./onboarding";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 
 const PASSWORD = "GuardedUndoE2E-Only-73!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -101,35 +102,100 @@ function utcToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const guardedLiveSeedState = new Map<string, {
+  createdRow: boolean;
+  hadDayState: boolean;
+}>();
+
+function guardedLiveSeedKey(date: string, runId: string): string {
+  return `${date}:${runId}`;
+}
+
 async function seedOwnedLiveRun(date: string, runId: string): Promise<void> {
   const db = new Client({ connectionString: requireIsolatedTestDatabase("guarded Undo live-input fixture") });
+  const key = guardedLiveSeedKey(date, runId);
   try {
     await db.connect();
-    const existing = await db.query<{ data: Record<string, unknown> }>(
-      "SELECT data FROM daily_sync WHERE scope = 'live' AND date = $1",
+    await db.query("BEGIN");
+    const inserted = await db.query(
+      `INSERT INTO daily_sync (date, scope, data, updated_at)
+       VALUES ($1, 'live', '{}'::jsonb, NOW())
+       ON CONFLICT (date, scope) DO NOTHING
+       RETURNING date`,
       [date],
     );
-    if (existing.rows.length) {
-      const runs = ((existing.rows[0].data.dayState as { runs?: Array<{ id?: string }> } | undefined)?.runs ?? []);
-      if (runs.length !== 1 || !runs[0].id?.startsWith("guardedlive_")) {
-        throw new Error("Refusing to replace a daily row not exclusively owned by guarded-Undo browser fixtures.");
-      }
-      await db.query("DELETE FROM daily_sync WHERE scope = 'live' AND date = $1", [date]);
-    }
-    await db.query(
-      `INSERT INTO daily_sync (date, scope, data, updated_at)
-       VALUES ($1, 'live', $2::jsonb, NOW())`,
-      [date, JSON.stringify({
-        dayState: {
-          date,
-          runs: [{ id: runId, brand: "Guarded Undo Fixture", flavor: "Live input check", casesNeeded: 21 }],
-          currentIndex: 0,
-          resetAt: 0,
-        },
-        runValues: { [runId]: { casesNeeded: 21, casesPerSkid: 12 } },
-        runValuesUpdatedAt: { [runId]: Date.now() },
-      })],
+    const existing = await db.query<{ data: Record<string, unknown> }>(
+      "SELECT data FROM daily_sync WHERE scope = 'live' AND date = $1 FOR UPDATE",
+      [date],
     );
+    if (!existing.rows.length) {
+      throw new Error("Guarded-Undo fixture row disappeared while being locked.");
+    }
+    const originalData = existing.rows[0].data;
+    const hadDayState = Object.prototype.hasOwnProperty.call(originalData, "dayState");
+    const originalDayState = originalData.dayState;
+    if (
+      originalDayState !== undefined
+      && (!originalDayState || typeof originalDayState !== "object" || Array.isArray(originalDayState))
+    ) {
+      throw new Error("Refusing to merge a guarded-Undo fixture into malformed day-state.");
+    }
+    const dayState = (originalDayState ?? {}) as {
+      date?: string;
+      runs?: Array<{ id?: string }>;
+      currentIndex?: number;
+      resetAt?: number;
+      [key: string]: unknown;
+    };
+    if (dayState.runs !== undefined && !Array.isArray(dayState.runs)) {
+      throw new Error("Refusing to merge a guarded-Undo fixture into malformed run entries.");
+    }
+    const runs = dayState.runs ?? [];
+    if (runs.some((run) => run.id === runId)) {
+      throw new Error("Refusing to seed a duplicate guarded-Undo fixture run.");
+    }
+    const asRecord = (value: unknown, label: string): Record<string, unknown> => {
+      if (value === undefined) return {};
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`Refusing to merge malformed ${label} fixture state.`);
+      }
+      return value as Record<string, unknown>;
+    };
+    const nextData = structuredClone(originalData);
+    nextData.dayState = {
+      ...dayState,
+      date,
+      runs: [
+        ...runs,
+        { id: runId, brand: "Guarded Undo Fixture", flavor: "Live input check", casesNeeded: 21 },
+      ],
+      currentIndex: Number.isSafeInteger(dayState.currentIndex)
+        ? dayState.currentIndex
+        : 0,
+      resetAt: Number(dayState.resetAt) || 0,
+    };
+    nextData.runValues = {
+      ...asRecord(originalData.runValues, "run-values"),
+      [runId]: { casesNeeded: 21, casesPerSkid: 12 },
+    };
+    nextData.runValuesUpdatedAt = {
+      ...asRecord(originalData.runValuesUpdatedAt, "run-value timestamps"),
+      [runId]: Date.now(),
+    };
+    await db.query(
+      `UPDATE daily_sync
+       SET data = $2::jsonb, canonical_revision = COALESCE(canonical_revision, 0) + 1, updated_at = NOW()
+       WHERE scope = 'live' AND date = $1`,
+      [date, JSON.stringify(nextData)],
+    );
+    await db.query("COMMIT");
+    guardedLiveSeedState.set(key, {
+      createdRow: inserted.rows.length > 0,
+      hadDayState,
+    });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     await db.end().catch(() => {});
   }
@@ -137,18 +203,89 @@ async function seedOwnedLiveRun(date: string, runId: string): Promise<void> {
 
 async function cleanupOwnedLiveRun(date: string, runId: string): Promise<void> {
   const db = new Client({ connectionString: requireIsolatedTestDatabase("guarded Undo live-input cleanup") });
+  const key = guardedLiveSeedKey(date, runId);
+  const seedState = guardedLiveSeedState.get(key);
   try {
     await db.connect();
+    await db.query("BEGIN");
     const existing = await db.query<{ data: Record<string, unknown> }>(
-      "SELECT data FROM daily_sync WHERE scope = 'live' AND date = $1",
+      "SELECT data FROM daily_sync WHERE scope = 'live' AND date = $1 FOR UPDATE",
       [date],
     );
-    if (!existing.rows.length) return;
-    const runs = ((existing.rows[0].data.dayState as { runs?: Array<{ id?: string }> } | undefined)?.runs ?? []);
-    if (runs.length !== 1 || runs[0].id !== runId) {
-      throw new Error("Refusing to remove a daily row that no longer matches this guarded-Undo fixture.");
+    if (!existing.rows.length) {
+      await db.query("COMMIT");
+      return;
     }
-    await db.query("DELETE FROM daily_sync WHERE scope = 'live' AND date = $1", [date]);
+    const originalData = existing.rows[0].data;
+    const dayState = originalData.dayState as {
+      runs?: Array<{ id?: string; brand?: string; flavor?: string }>;
+      currentIndex?: number;
+    } | undefined;
+    const runs = dayState?.runs ?? [];
+    const ownedIndexes = runs.flatMap((run, index) => run.id === runId ? [index] : []);
+    if (ownedIndexes.length > 1) {
+      throw new Error("Refusing to clean a guarded-Undo run ID that appears more than once.");
+    }
+    if (ownedIndexes.length === 0) {
+      await db.query("COMMIT");
+      return;
+    }
+    const ownedRun = runs[ownedIndexes[0]];
+    if (
+      ownedRun?.brand !== "Guarded Undo Fixture" ||
+      ownedRun.flavor !== "Live input check"
+    ) {
+      throw new Error("Refusing to clean a run that no longer matches this guarded-Undo fixture.");
+    }
+    if (runs.length === 1 && seedState?.createdRow) {
+      await db.query("DELETE FROM daily_sync WHERE scope = 'live' AND date = $1", [date]);
+      await db.query("COMMIT");
+      guardedLiveSeedState.delete(key);
+      return;
+    }
+
+    // The browser journey uses multiple accounts against one facility-day row.
+    // Remove only this test's uniquely identified run if another context has
+    // added or replaced unrelated day-state entries; preserve those entries.
+    const remainingRuns = runs.filter((run) => run.id !== runId);
+    const nextData = structuredClone(originalData);
+    const nextDayState = nextData.dayState as NonNullable<typeof dayState>;
+    if (remainingRuns.length > 0 || seedState?.hadDayState !== false) {
+      nextDayState.runs = remainingRuns;
+    } else {
+      delete nextData.dayState;
+    }
+    const removedIndex = ownedIndexes[0];
+    const currentIndex = Number(nextDayState.currentIndex ?? 0);
+    nextDayState.currentIndex = remainingRuns.length === 0
+      ? 0
+      : currentIndex > removedIndex
+        ? currentIndex - 1
+        : currentIndex === removedIndex
+          ? Math.min(removedIndex, remainingRuns.length - 1)
+          : currentIndex;
+    for (const key of [
+      "runValues",
+      "runValuesUpdatedAt",
+      "packagingProgress",
+      "autoTrackServerState",
+    ]) {
+      const values = nextData[key];
+      if (values && typeof values === "object" && !Array.isArray(values)) {
+        delete (values as Record<string, unknown>)[runId];
+      }
+    }
+    await db.query(
+      `UPDATE daily_sync
+       SET data = $2::jsonb, canonical_revision = COALESCE(canonical_revision, 0) + 1, updated_at = NOW()
+       WHERE scope = 'live' AND date = $1`,
+      [date, JSON.stringify(nextData)],
+    );
+    await db.query("COMMIT");
+    guardedLiveSeedState.delete(key);
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     await db.end().catch(() => {});
   }
@@ -284,7 +421,7 @@ test("guarded server Undo, legacy evidence, access, pagination, and responsive c
     await promoteManager(page, managerA);
     await seedOwnedLiveRun(liveDate, liveRunId);
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").click();
+    await selectCanonicalFixtureRun(page, liveRunId);
     const liveInput = page.getByTestId("input-casesNeeded");
     await expect(liveInput).toBeVisible();
     await liveInput.fill("37");
@@ -501,8 +638,8 @@ test("guarded server Undo, legacy evidence, access, pagination, and responsive c
     await checkNoHorizontalOverflow(page);
     await checkNoHorizontalOverflow(pageB);
   } finally {
-    await cleanupOwnedLiveRun(liveDate, liveRunId);
     await contextStaff?.close().catch(() => {});
     await contextB.close().catch(() => {});
+    await cleanupOwnedLiveRun(liveDate, liveRunId);
   }
 });

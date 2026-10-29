@@ -1631,3 +1631,19 @@ describe("protectRunValues server-owned autoTrackServerState (step 7b)", () => {
     expect(out.autoTrackServerState).toBeUndefined();
   });
 });
+
+describe("Dough timer control revision", () => {
+  it("preserves the per-run control fence through sync sanitization", () => {
+    const controls = {
+      r1: {
+        generation: "r1:100",
+        pausedAt: 110,
+        resumeAt: 6_110,
+        updatedAt: 110,
+        controlRevision: 12,
+      },
+    };
+    const out = sanitizeSyncPayload({ doughTimerControls: controls }) as Record<string, unknown>;
+    expect(out.doughTimerControls).toEqual(controls);
+  });
+});

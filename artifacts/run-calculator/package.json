@@ -54,7 +54,7 @@
     "test:e2e:home-deferred-panels": "BROWSER_TEST_INSTALL_WEBKIT=1 bash ../../scripts/src/run-release-node.sh env npm_config_offline=true bash ../../scripts/src/run-isolated-browser-suite.sh --playwright-config=playwright.home-deferred-panels.config.ts",
     "test:e2e:line-map": "BROWSER_TEST_INSTALL_WEBKIT=1 bash ../../scripts/src/run-release-node.sh env npm_config_offline=true bash ../../scripts/src/run-isolated-browser-suite.sh --playwright-config=playwright.line-map.config.ts",
     "prepare:e2e:department": "pnpm --filter @workspace/scripts run prepare:e2e:department",
-    "test:e2e:dough-correction": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.dough-correction.config.ts",
+    "test:e2e:dough-correction": "bash ../../scripts/src/run-release-node.sh env npm_config_offline=true bash ../../scripts/src/run-isolated-browser-suite.sh --playwright-config=playwright.dough-correction.config.ts",
     "test:e2e:recipe-refresh": "E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.recipe-refresh.config.ts",
     "check:e2e:syntax": "../../scripts/node_modules/.bin/tsx e2e/validate-browser-spec-syntax.ts",
     "test:e2e:ai-outage:phone": "E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.ai-outage-phone.config.ts",

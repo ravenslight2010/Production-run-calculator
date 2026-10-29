@@ -607,6 +607,8 @@ export type SyncPayload = {
     pausedAt: number;
     resumeAt: number;
     updatedAt: number;
+    /** Server revision that last changed this run's Dough timer control. */
+    controlRevision?: number;
   }>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;

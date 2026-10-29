@@ -21,6 +21,10 @@ const viewports = [
 async function openQc(page: Page, origin: string) {
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await navigateQc(page);
+}
+
+async function navigateQc(page: Page) {
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "QC workflows & history", exact: true }).click();
 }
@@ -277,7 +281,6 @@ test("authenticated managers review committed imports with stale conflict, retry
     const verifiedResponse = await verifiedResponsePromise;
     expect((await verifiedResponse.json()).qcStatus).toBe("verified");
     await expect(detail1.getByTestId("status-qc-import-receipt")).toContainText("Decision saved: verified");
-    await expect(operatorPage.getByTestId("text-qc-import-badge-pending")).toHaveText(`${initialPending - 1} pending`, { timeout: 35_000 });
 
     await detail2.getByTestId("textarea-qc-import-reason").fill("Synthetic stale review attempt; expected revision is deliberately outdated.");
     const conflictPromise = page2.waitForResponse((response) =>
@@ -301,7 +304,14 @@ test("authenticated managers review committed imports with stale conflict, retry
     const rejected = await (await rejectedPromise).json();
     expect(rejected.qcStatus).toBe("rejected");
     await expect(detail2.getByTestId("status-qc-import-receipt")).toContainText("Decision saved: rejected");
-    await expect(operatorPage.getByTestId("text-qc-import-badge-pending")).toHaveText(`${initialPending - 2} pending`, { timeout: 35_000 });
+
+    // These two decisions replace the same operation's status, so it leaves
+    // Pending once. Refresh rather than waiting through another 30-second badge
+    // poll; the dedicated reload-badge case verifies live cross-device polling.
+    await operatorPage.reload({ waitUntil: "domcontentloaded" });
+    await operatorPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await navigateQc(operatorPage);
+    await expect(operatorPage.getByTestId("text-qc-import-badge-pending")).toHaveText(`${initialPending - 1} pending`, { timeout: 35_000 });
     await expect(operatorPage.getByTestId("text-qc-import-badge-rejected")).toHaveText(`${initialRejected + 1} rejected`);
 
     // Second pending import: the first response is dropped only after route.fetch
@@ -343,6 +353,10 @@ test("authenticated managers review committed imports with stale conflict, retry
     expect(replay.qcStatus).toBe("verified");
     await expect(retryDetail.getByTestId("status-qc-import-receipt")).toContainText("Decision saved: verified (already recorded)");
     await page1.unroute(decisionRoute);
+
+    await operatorPage.reload({ waitUntil: "domcontentloaded" });
+    await operatorPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await navigateQc(operatorPage);
     await expect(operatorPage.getByTestId("text-qc-import-badge-pending")).toHaveText(`${initialPending - 2} pending`, { timeout: 35_000 });
     await expect(operatorPage.getByTestId("text-qc-import-badge-rejected")).toHaveText(`${initialRejected + 1} rejected`);
 

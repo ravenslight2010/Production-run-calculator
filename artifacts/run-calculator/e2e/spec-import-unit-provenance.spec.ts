@@ -489,13 +489,21 @@ test("a manager can replace a missing formula result and only redacted source ev
   await expect(review).toContainText("Step 2 of 2 — details");
   const apply = review.getByRole("button", { name: /^Apply 1 item$/ });
   await expect(apply).toBeEnabled();
+  await apply.click();
+  const serverReview = page.getByRole("dialog", { name: "Review spec changes" });
+  await expect(serverReview).toContainText(FORMULA_BRAND);
+  const confirmApply = serverReview.getByRole("button", {
+    name: "Confirm 1 change",
+    exact: true,
+  });
+  await expect(confirmApply).toBeEnabled();
 
   const applyResponsePromise = page.waitForResponse((response) =>
     response.url().includes("/api/import-operations/")
     && response.url().endsWith("/apply")
     && response.request().method() === "POST",
   );
-  await apply.click();
+  await confirmApply.click();
   const applyResponse = await applyResponsePromise;
   expect(applyResponse.status()).toBe(200);
   const operationMatch = new URL(applyResponse.url()).pathname.match(

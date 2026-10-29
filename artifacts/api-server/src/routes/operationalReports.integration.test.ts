@@ -180,7 +180,7 @@ describe("operational report endpoints", () => {
         calculator: "computeServerCalc",
         calculatorVersion: 1,
         temporaryOverrides: "applyTemporaryOverrides",
-        linePhasesVersion: 1,
+        linePhasesVersion: 2,
       },
     });
     const paused = await req(MANAGER, "GET", "/api/reports/operational-view?date=2026-09-07&runId=paused");

@@ -76,10 +76,17 @@ async function createCrustProfile(
   request: APIRequestContext,
   token: string,
 ): Promise<void> {
+  const canonical = await request.get(`${API_BASE}/api/brand-profiles`, {
+    headers: { Cookie: `rc_auth=${token}` },
+  });
+  expect(canonical.ok(), "profile fixture must read the current master-data epoch").toBe(true);
+  const epoch = canonical.headers()["x-master-data-epoch"];
+  expect(epoch).toMatch(/^\d+$/);
   const response = await request.post(`${API_BASE}/api/brand-profiles`, {
     headers: {
       "Content-Type": "application/json",
       Cookie: `rc_auth=${token}`,
+      "X-Master-Data-Epoch": epoch,
     },
     data: {
       items: [
@@ -217,7 +224,7 @@ test("adopts crust preference, reloads, and starts a new run in crust mode", asy
   }
   expect(profileApplied, "server-sourced crust preference did not apply after reload").toBe(true);
   await expect(
-    page.getByText("Approximate Line Speed (ppm)", { exact: true }),
+    page.getByText("Approximate Line Speed (pizzas/min)", { exact: true }),
   ).toBeVisible();
   await expect(page.locator('[data-testid="button-start-run"]')).toBeVisible();
 });
@@ -264,7 +271,7 @@ test("keeps the saved crust preference after sign-out and a fresh browser sessio
       freshPage.getByRole("button", { name: "Crust", exact: true }),
     ).toHaveClass(/bg-background/);
     await expect(
-      freshPage.getByText("Approximate Line Speed (ppm)", { exact: true }),
+      freshPage.getByText("Approximate Line Speed (pizzas/min)", { exact: true }),
     ).toBeVisible();
     await expect(
       freshPage.locator('[data-testid="button-start-run"]'),

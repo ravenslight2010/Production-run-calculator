@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AI_ROUTE_BOUNDARIES,
   safeAiErrorMetadata,
@@ -108,5 +108,34 @@ describe("AI operational data boundaries", () => {
     });
 
     expect(metadata).toEqual({ errorType: "Error" });
+  });
+
+  it("retains only a bounded upstream status from wrapped provider failures", () => {
+    const metadata = safeAiErrorMetadata(new Error("private wrapper", {
+      cause: {
+        status: 403,
+        code: "private-credential",
+        response: { headers: { authorization: "private-credential" }, data: "private recipe" },
+        message: "private provider URL",
+      },
+    }));
+    expect(metadata).toEqual({ errorType: "Error", upstreamStatus: 403 });
+    expect(JSON.stringify(metadata)).not.toContain("private");
+  });
+
+  it("bounds causal traversal, stops cycles, and does not invoke getters", () => {
+    const network: { code: string; cause?: unknown } = { code: "ENOTFOUND" };
+    network.cause = network;
+    expect(safeAiErrorMetadata(new Error("private", { cause: network })))
+      .toEqual({ errorType: "Error", networkCode: "ENOTFOUND" });
+    let nested: unknown = { status: 503, code: "private-credential" };
+    for (let i = 0; i < 5; i++) nested = { cause: nested };
+    expect(safeAiErrorMetadata(new Error("private", { cause: nested })))
+      .toEqual({ errorType: "Error" });
+    const getter = vi.fn(() => { throw new Error("private"); });
+    expect(safeAiErrorMetadata(new Error("private", {
+      cause: Object.defineProperty({}, "status", { get: getter }),
+    }))).toEqual({ errorType: "Error" });
+    expect(getter).not.toHaveBeenCalled();
   });
 });

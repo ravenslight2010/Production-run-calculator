@@ -3,6 +3,18 @@ name: Browser fixture seeding
 description: Reliable ways to seed master data for authenticated browser journeys that reload and hydrate from the server.
 ---
 
+Full-suite ordering can expose stale fixture epochs that a fresh-database
+standalone browser run cannot.
+
+**Why:** Guarded Undo advances a scope-wide master-data epoch. Later tests using
+raw API fixture writers can then fail before their journey begins, even under a
+different fixture account; restarting on an empty database hides that cause.
+
+**How to apply:** Exercise newly prepared fixture seeds against an advanced
+canonical epoch when confirming repairs. Preserve rejection of stale pending
+edits: fetching a new epoch must not become automatic replay of a rejected
+mutation.
+
 When a manual-counter browser fixture requires fixed totals, disable automatic
 tracking in the canonical seeded run as well as matching local recovery data.
 

@@ -9,6 +9,7 @@
 
 import { expect, test, type Browser, type Page, type Route, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
@@ -390,18 +391,25 @@ test("frontline supply recovers across runs and converges with a second tab", as
   const canonical = async () => (await getToday(page)) as {
     dayState: { runs: Array<{ id: string; startedAt?: number; pausedAt?: number; endedAt?: number }> };
     runValues: Record<string, Record<string, number>>;
+    syncVersion?: number;
   };
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").click();
+  await selectCanonicalFixtureRun(page, runA);
+  await expect(page.getByTestId("input-casesNeeded")).toHaveValue("120");
   await page.getByTestId("button-start-run").click();
-  await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].startedAt)).toBe(true);
+  await expect.poll(async () => Boolean(
+    (await canonical()).dayState.runs.find((run) => run.id === runA)?.startedAt,
+  )).toBe(true);
   await page.getByRole("button", { name: /^pause.?run$/i }).click();
-  await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].pausedAt)).toBe(true);
+  await expect.poll(async () => Boolean(
+    (await canonical()).dayState.runs.find((run) => run.id === runA)?.pausedAt,
+  )).toBe(true);
 
   const peerContext = await browser.newContext({ storageState: await page.context().storageState() });
   const peer = await peerContext.newPage();
   try {
     await peer.goto("/");
+    await selectCanonicalFixtureRun(peer, runA);
     await Promise.all([page.getByTestId("tab-frontline").click(), peer.getByTestId("tab-frontline").click()]);
     const supply = (p: Page) => p.getByTestId("frontline-supply-app1");
     const batchesOnLine = async (p: Page) =>
@@ -475,7 +483,10 @@ test("frontline supply recovers across runs and converges with a second tab", as
 
     await page.getByTestId("tab-run").click();
     await page.getByTestId("resume-run").click();
-    await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].pausedAt)).toBe(false);
+    await expect.poll(async () => {
+      const run = (await canonical()).dayState.runs.find((candidate) => candidate.id === runA);
+      return run ? Boolean(run.pausedAt) : null;
+    }).toBe(false);
     await page.getByTestId("tab-packaging").click();
     const beforeCorrection = (await canonical()).runValues[runA].casesOnCurrentSkid || 0;
     await page.getByTestId("btn-inc-casesOnCurrentSkid").click();
@@ -486,15 +497,144 @@ test("frontline supply recovers across runs and converges with a second tab", as
       timeout: 70_000,
     }).toBeGreaterThan(beforeConsumed);
     expect((await canonical()).runValues[runA].casesOnCurrentSkid).toBe(afterCorrection);
-    await expect.poll(() => batchesOnLine(peer), { timeout: 15_000 })
-      .not.toBeCloseTo((beforeLoad + 25) / 25, 2);
+    const convergenceSamples: Array<Record<string, number | string | null>> = [];
+    const peerSyncFailures: Array<Record<string, number | string>> = [];
+    const peerSyncFailureReads: Promise<void>[] = [];
+    peer.on("response", (response) => {
+      const pathname = new URL(response.url()).pathname;
+      if (!pathname.startsWith("/api/sync/") || response.ok()) return;
+      const failure: Record<string, number | string> = {
+        pathname,
+        status: response.status(),
+        error: "Reading safe response detail",
+      };
+      peerSyncFailures.push(failure);
+      if (peerSyncFailures.length > 12) peerSyncFailures.shift();
+      peerSyncFailureReads.push((async () => {
+        let claimShape: unknown = null;
+        if (pathname === "/api/sync/auto-track/claim") {
+          try {
+            const requestBody = response.request().postDataJSON() as {
+              claim?: Record<string, unknown>;
+            } | null;
+            const claim = requestBody?.claim;
+            const rawMutations = Array.isArray(claim?.mutations)
+              ? claim.mutations
+              : [];
+            claimShape = claim
+              ? {
+                  version: claim.version,
+                  channel: claim.channel,
+                  sequence: claim.sequence,
+                  dueAt: claim.dueAt,
+                  nextDueAt: claim.nextDueAt,
+                  baseUpdatedAt: claim.baseUpdatedAt,
+                  correctionGeneration: claim.correctionGeneration,
+                  runIdValid: typeof claim.runId === "string"
+                    && /^[A-Za-z0-9:_-]{1,160}$/.test(claim.runId),
+                  generationValid: typeof claim.generation === "string"
+                    && /^[A-Za-z0-9:_-]{1,160}$/.test(claim.generation),
+                  eventIdValid: typeof claim.eventId === "string"
+                    && /^[A-Za-z0-9:_-]{1,160}$/.test(claim.eventId),
+                  mutations: rawMutations.map((mutation) => {
+                    const item = mutation as Record<string, unknown>;
+                    return {
+                      field: item.field,
+                      from: item.from,
+                      to: item.to,
+                    };
+                  }),
+                }
+              : null;
+          } catch {
+            // Request details are diagnostic-only; keep the safe status record.
+          }
+        }
+        let error = "No safe server error message";
+        try {
+          const body = await response.json() as { error?: unknown };
+          if (typeof body.error === "string") error = body.error;
+        } catch {
+          // Keep diagnostics useful without retaining an unparsed response body.
+        }
+        Object.assign(failure, {
+          error,
+          ...(claimShape ? { claimShape: JSON.stringify(claimShape) } : {}),
+        });
+      })().catch(() => {
+        Object.assign(failure, { error: "Safe response diagnostics unavailable" });
+      }));
+    });
+    peer.on("requestfailed", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (!pathname.startsWith("/api/sync/")) return;
+      peerSyncFailures.push({
+        pathname,
+        error: request.failure()?.errorText ?? "request failed",
+      });
+      if (peerSyncFailures.length > 12) peerSyncFailures.shift();
+    });
+    try {
+      await expect.poll(async () => {
+        const peerBatches = await batchesOnLine(peer);
+        // Read the live peer UI first and the canonical row afterward. Stock
+        // can change while the running line produces and consumes, so reading
+        // the server first can compare the peer with an already-stale snapshot.
+        const snapshot = await canonical();
+        const values = snapshot.runValues[runA];
+        // The UI shows two decimal places; compare at that same precision so
+        // legitimate display rounding is not mistaken for a sync mismatch.
+        const canonicalDisplayBatches = Number((values.app1StockLbs / 25).toFixed(2));
+        convergenceSamples.push({
+          syncVersion: snapshot.syncVersion ?? null,
+          canonicalStockLbs: values.app1StockLbs,
+          canonicalConsumedLbs: values.app1StockConsumedLbs,
+          canonicalDisplayBatches,
+          peerDisplayedBatches: peerBatches,
+        });
+        if (convergenceSamples.length > 12) convergenceSamples.shift();
+        return peerBatches === canonicalDisplayBatches;
+      }, {
+        timeout: 15_000,
+        message: "second tab applicator supply should match fresh canonical stock after the accepted claim",
+      }).toBe(true);
+    } catch (error) {
+      await Promise.allSettled(peerSyncFailureReads);
+      const cause = error instanceof Error ? error.message : String(error);
+      const diagnostics = JSON.stringify(
+        { convergenceSamples, peerSyncFailures },
+        null,
+        2,
+      );
+      await testInfo.attach("frontline-canonical-peer-convergence", {
+        body: diagnostics,
+        contentType: "application/json",
+      });
+      throw new Error(`${cause}\nConvergence diagnostics:\n${diagnostics}`, {
+        cause: error,
+      });
+    }
+    await Promise.allSettled(peerSyncFailureReads);
+    const rejectedClaims = peerSyncFailures.filter(
+      (failure) =>
+        failure.pathname === "/api/sync/auto-track/claim"
+        && failure.status === 400,
+    );
+    expect(
+      rejectedClaims,
+      `Auto-track claims must satisfy the server request contract: ${JSON.stringify(rejectedClaims)}`,
+    ).toHaveLength(0);
     await page.getByTestId("tab-run").click();
     await page.getByRole("button", { name: /^stop.?run$/i }).first().click();
-    await expect.poll(async () => Boolean((await canonical()).dayState.runs[0].endedAt)).toBe(true);
-    await page.getByRole("button", { name: "Select run 2" }).click();
+    await expect.poll(async () => Boolean(
+      (await canonical()).dayState.runs.find((run) => run.id === runA)?.endedAt,
+    )).toBe(true);
+    await selectCanonicalFixtureRun(page, runB);
     await page.getByTestId("button-start-run").click();
-    await expect.poll(async () => Boolean((await canonical()).dayState.runs[1].startedAt)).toBe(true);
-    expect((await canonical()).dayState.runs[0].endedAt).toBeTruthy();
+    await expect.poll(async () => Boolean(
+      (await canonical()).dayState.runs.find((run) => run.id === runB)?.startedAt,
+    )).toBe(true);
+    expect((await canonical()).dayState.runs.find((run) => run.id === runA)?.endedAt).toBeTruthy();
     await page.getByTestId("tab-frontline").click();
     await expect(supply(page)).toBeVisible();
     await expect.poll(async () => (await canonical()).runValues[runB].app1StockLbs, {
@@ -514,8 +654,14 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
   await signUp(page, username);
   const runId = `latency-${Date.now()}`;
   expect((await putToday(page, seededPayload(runId))).responseStatus).toBe(200);
+  // Verify the canonical fixture before reload so a missing seed is distinct
+  // from a client hydration/convergence failure.
+  const seededCanonical = await getToday(page) as {
+    runValues?: Record<string, { casesNeeded?: number }>;
+  };
+  expect(seededCanonical.runValues?.[runId]?.casesNeeded).toBe(24);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").click();
+  await selectCanonicalFixtureRun(page, runId);
   await expect(page.getByTestId("input-casesNeeded")).toHaveValue("24");
   const peerContext = await browser.newContext({
     storageState: await page.context().storageState(),
@@ -741,6 +887,7 @@ test(
     // The route now allows the next attempt through. The existing retry queue
     // should recover without a manual retry and clear the retained-change state
     // only after the server acknowledges the write.
+    const telemetryObservedSince = new Date();
     blocked = false;
     await expect.poll(() => syncWriteAttempts, { timeout: 15_000 }).toBeGreaterThan(1);
     await expect.poll(() => completeWritesAfterRecovery, { timeout: 15_000 }).toBeGreaterThan(0);
@@ -770,12 +917,15 @@ test(
         }>(
           `SELECT outcome, metrics
            FROM field_check_observations
-           WHERE check_name = $1 AND observation_id LIKE $2
+           WHERE check_name = $1
+             AND outcome = 'success'
+             AND left(observation_id, char_length($2)) = $2
+             AND observed_at >= $3
            ORDER BY observed_at DESC
-           LIMIT 10`,
-          ["production-run-save-sync", `${telemetryClientId}:production-run-save-sync:%:success`],
+           LIMIT 1`,
+          ["production-run-save-sync", `${telemetryClientId}:`, telemetryObservedSince],
         );
-        return result.rows.find((row) => row.outcome === "success") ?? null;
+        return result.rows[0] ?? null;
       }, { timeout: 15_000 }).toEqual(expect.objectContaining({
         outcome: "success",
         metrics: expect.objectContaining({ durationMs: expect.any(Number) }),
@@ -783,10 +933,12 @@ test(
       const stored = await evidenceDb.query<{ metrics: Record<string, number> }>(
         `SELECT metrics
          FROM field_check_observations
-         WHERE check_name = $1 AND outcome = 'success' AND observation_id LIKE $2
+         WHERE check_name = $1 AND outcome = 'success'
+           AND left(observation_id, char_length($2)) = $2
+           AND observed_at >= $3
          ORDER BY observed_at DESC
          LIMIT 1`,
-        ["production-run-save-sync", `${telemetryClientId}:production-run-save-sync:%:success`],
+        ["production-run-save-sync", `${telemetryClientId}:`, telemetryObservedSince],
       );
       expect(Object.keys(stored.rows[0]?.metrics ?? {})).toEqual(["durationMs"]);
       expect(stored.rows[0]?.metrics.durationMs).toBeGreaterThanOrEqual(0);
@@ -1230,7 +1382,7 @@ test(
 
 test(
   "wake enforces reset epoch and client-date scope while unchanged writes stay no-op",
-  async ({ page, browser }: { page: Page; browser: Browser }) => {
+  async ({ page, browser }: { page: Page; browser: Browser }, testInfo: TestInfo) => {
     const username = uid();
     users.add(username);
     await signUp(page, username);
@@ -1270,13 +1422,82 @@ test(
       storageState: await page.context().storageState(),
     });
     const peer = await peerContext.newPage();
+    const peerSyncRequests: Array<Record<string, string | number | boolean | null>> = [];
+    peer.on("requestfinished", async (request) => {
+      const url = new URL(request.url());
+      if (!url.pathname.startsWith("/api/sync/")) return;
+      const entry: Record<string, string | number | boolean | null> = {
+        method: request.method(),
+        path: url.pathname,
+        queryKeys: [...url.searchParams.keys()].sort().join(","),
+        epoch: url.searchParams.has("epoch")
+          ? Number(url.searchParams.get("epoch"))
+          : null,
+      };
+      const response = await request.response().catch(() => null);
+      entry.status = response?.status() ?? null;
+      if (url.pathname === "/api/sync/today" && request.method() === "GET" && response?.ok()) {
+        const body = await response.json().catch(() => null) as {
+          resetEpoch?: number;
+          dayState?: { runs?: Array<{ id?: string }> };
+        } | null;
+        const runs = body?.dayState?.runs ?? [];
+        entry.responseEpoch = Number.isSafeInteger(body?.resetEpoch) ? body!.resetEpoch! : null;
+        entry.responseRunCount = runs.length;
+        entry.responseContainsTestRun = runs.some((run) => run.id === runId);
+      }
+      if (url.pathname === "/api/sync/today" && request.method() === "PUT") {
+        let body: { payload?: { dayState?: { runs?: Array<{ id?: string }> } } } | null = null;
+        try {
+          body = request.postDataJSON() as typeof body;
+        } catch {
+          // Keep the diagnostic summary bounded if a request body is malformed.
+        }
+        const runs = body?.payload?.dayState?.runs ?? [];
+        entry.requestRunCount = runs.length;
+        entry.requestContainsTestRun = runs.some((run) => run.id === runId);
+      }
+      peerSyncRequests.push(entry);
+    });
+    peer.on("requestfailed", (request) => {
+      const url = new URL(request.url());
+      if (!url.pathname.startsWith("/api/sync/")) return;
+      peerSyncRequests.push({
+        method: request.method(),
+        path: url.pathname,
+        queryKeys: [...url.searchParams.keys()].sort().join(","),
+        epoch: url.searchParams.has("epoch")
+          ? Number(url.searchParams.get("epoch"))
+          : null,
+        status: null,
+      });
+    });
     try {
+      await peer.addInitScript(() => {
+        // Start without a local day row so the peer must adopt the seeded
+        // canonical run before it becomes the intentionally stale device.
+        localStorage.removeItem("run-calc-day");
+      });
       await peer.goto("/", { waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+      await expect(peer.getByTestId("sync-status-button")).toHaveAttribute(
+        "title",
+        "Sync connected",
+        { timeout: 20_000 },
+      );
+      await expect.poll(
+        async () => (await localRuns(peer)).some((run) => run.id === runId),
+        { timeout: 20_000 },
+      ).toBe(true);
       await peerContext.setOffline(true);
+      await expect.poll(
+        () => peer.evaluate(() => navigator.onLine),
+        { timeout: 5_000 },
+      ).toBe(false);
 
       // Use the context request client so the reset broadcast can navigate the
       // page without destroying an in-flight page.evaluate execution context.
+      const resetRequestedAt = Date.now();
       const resetResponse = await page.request.post("/api/sync/reset", {
         data: { reason: "sync convergence test" },
       });
@@ -1300,9 +1521,93 @@ test(
         state: "attached",
         timeout: 20_000,
       });
-      await expect.poll(async () => (await localRuns(peer)).some((run) => run.id === runId), {
-        timeout: 15_000,
-      }).toBe(false);
+      const adoptedResetEpoch = await peer.evaluate(() => {
+        const raw = localStorage.getItem("run-calc-reset-epoch");
+        return raw === null ? 0 : JSON.parse(raw) as number;
+      });
+      expect(adoptedResetEpoch).toBe(reset.body.epoch);
+      try {
+        await expect.poll(
+          async () => peer.evaluate((after) => {
+            const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+              .filter((key): key is string => key?.startsWith("run-calc-sync-diagnostics:") === true);
+            return keys.some((key) => {
+              try {
+                const events = JSON.parse(localStorage.getItem(key) ?? "[]") as Array<{
+                  kind?: string;
+                  message?: string;
+                  at?: number;
+                }>;
+                return events.some((event) =>
+                  event.kind === "ack"
+                  && event.message === "Server baseline received"
+                  && typeof event.at === "number"
+                  && event.at >= after,
+                );
+              } catch {
+                return false;
+              }
+            });
+          }, resetRequestedAt),
+          {
+            message: "peer accepted a canonical baseline after the reset",
+            timeout: 20_000,
+          },
+        ).toBe(true);
+        await expect.poll(async () => (await localRuns(peer)).some((run) => run.id === runId), {
+          timeout: 15_000,
+        }).toBe(false);
+      } catch (error) {
+        const postResetBaselineReceived = await peer.evaluate((after) => {
+          const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+            .filter((key): key is string => key?.startsWith("run-calc-sync-diagnostics:") === true);
+          return keys.some((key) => {
+            try {
+              const events = JSON.parse(localStorage.getItem(key) ?? "[]") as Array<{
+                kind?: string;
+                message?: string;
+                at?: number;
+              }>;
+              return events.some((event) =>
+                event.kind === "ack"
+                && event.message === "Server baseline received"
+                && typeof event.at === "number"
+                && event.at >= after,
+              );
+            } catch {
+              return false;
+            }
+          });
+        }, resetRequestedAt).catch(() => false);
+        const localState = await peer.evaluate((targetRunId) => {
+          const raw = localStorage.getItem("run-calc-day");
+          let runs: Array<{ id?: string }> = [];
+          let date: string | null = null;
+          try {
+            const day = JSON.parse(raw ?? "{}") as { date?: string; runs?: Array<{ id?: string }> };
+            runs = day.runs ?? [];
+            date = day.date ?? null;
+          } catch {
+            // Report malformed cache state without retaining its raw contents.
+          }
+          return {
+            resetEpoch: localStorage.getItem("run-calc-reset-epoch"),
+            hasDayState: raw !== null,
+            date,
+            runCount: runs.length,
+            containsTestRun: runs.some((run) => run.id === targetRunId),
+          };
+        }, runId).catch(() => ({ pageUnavailable: true }));
+        await testInfo.attach("peer-reset-diagnostics.json", {
+          body: JSON.stringify({
+            localState,
+            postResetBaselineReceived,
+            syncRequests: peerSyncRequests,
+          }),
+          contentType: "application/json",
+        }).catch(() => {});
+        throw error;
+      }
       await peer.reload({ waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       expect((await localRuns(peer)).some((run) => run.id === runId)).toBe(false);
@@ -1333,9 +1638,12 @@ test(
 
     await signUp(page, username);
     await promoteToManager(page);
-    await page.evaluate(async ({ currentDate, futureDate, liveRunId, futureRunId }) => {
+    const seededFutureStamp = await page.evaluate(async ({ currentDate, futureDate, liveRunId, futureRunId }) => {
       const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
-      const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
+      const epoch = (await epochResponse.json() as { epoch?: number }).epoch;
+      if (!epochResponse.ok || !Number.isInteger(epoch) || epoch === undefined || epoch < 0) {
+        throw new Error("Schedule fixture requires the canonical reset epoch.");
+      }
       const put = async (path: string, payload: unknown) => {
         const response = await fetch(`${path}&epoch=${epoch}`, {
           method: "PUT",
@@ -1360,6 +1668,16 @@ test(
         runValues: { [futureRunId]: { casesNeeded: 37, casesPerSkid: 12 } },
         runValuesUpdatedAt: { [futureRunId]: 200 },
       });
+      const accepted = await fetch(`/api/sync/${futureDate}?today=${currentDate}`, {
+        cache: "no-store",
+      });
+      if (!accepted.ok) throw new Error(`Reading accepted schedule fixture failed: ${accepted.status}`);
+      const canonical = await accepted.json() as { runValuesUpdatedAt?: Record<string, number> };
+      const stamp = canonical.runValuesUpdatedAt?.[futureRunId];
+      if (typeof stamp !== "number" || !Number.isFinite(stamp) || stamp <= 0) {
+        throw new Error("Accepted schedule fixture has no canonical value stamp.");
+      }
+      return stamp;
     }, { currentDate, futureDate, liveRunId, futureRunId });
 
     try {
@@ -1371,6 +1689,7 @@ test(
       await page.getByRole("menuitem", { name: /^Schedule/ }).click();
       const dialog = page.getByRole("dialog", { name: "Scheduled Days" });
       await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("schedule-today-card")).toContainText("1 run on today's plan");
 
       const futureDay = page.getByTestId(`schedule-day-${futureDate}`);
       await expect(futureDay).toBeVisible();
@@ -1383,7 +1702,26 @@ test(
       const moveDate = futureDay.getByTestId(`move-date-${futureRunId}`);
       await expect(moveDate).toHaveAttribute("min", currentDate);
       await moveDate.fill(currentDate);
+      const moveWrite = page.waitForResponse((response) => {
+        if (response.request().method() !== "PUT"
+          || new URL(response.url()).pathname !== "/api/sync/today") return false;
+        const body = response.request().postDataJSON() as {
+          payload?: { dayState?: { runs?: Array<{ id?: string }> } };
+        };
+        return body.payload?.dayState?.runs?.some((run) => run.id === futureRunId) === true;
+      });
       await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
+      const movedResponse = await moveWrite;
+      expect(movedResponse.ok(), "the move must receive a canonical destination acknowledgement").toBe(true);
+      const movedBody = await movedResponse.json() as {
+        data?: { runValuesUpdatedAt?: Record<string, number> };
+      };
+      const movedStamp = movedBody.data?.runValuesUpdatedAt?.[futureRunId];
+      expect(typeof movedStamp).toBe("number");
+      // A new destination write may receive a newer server stamp. It must not
+      // regress behind the accepted source, and subsequent reads must match
+      // the move's actual acknowledgement, not the fixture's client hint.
+      expect(movedStamp).toBeGreaterThanOrEqual(seededFutureStamp);
 
       await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
       await expect(page.getByTestId(`schedule-day-${futureDate}`)).toHaveCount(0);
@@ -1399,7 +1737,7 @@ test(
       }, currentDate);
       expect(canonical.dayState?.runs?.map((run) => run.id)).toEqual([liveRunId, futureRunId]);
       expect(canonical.runValues?.[futureRunId]?.casesNeeded).toBe(37);
-      expect(canonical.runValuesUpdatedAt?.[futureRunId]).toBe(200);
+      expect(canonical.runValuesUpdatedAt?.[futureRunId]).toBe(movedStamp);
 
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });

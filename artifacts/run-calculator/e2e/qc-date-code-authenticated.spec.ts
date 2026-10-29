@@ -4,6 +4,17 @@ import { AuthorizedBrowserFixtures, requireDedicatedTestDatabase, uniqueTestId }
 import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 import { isBackgroundWebKitNetworkDiagnostic } from "./qc-date-code-browser-diagnostics.mjs";
 
+const FACILITY_TIME_ZONE = "America/Chicago";
+
+function facilityDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: FACILITY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 async function openQc(page: Page, origin: string, navigate = true) {
   if (navigate) await page.goto(origin, { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
@@ -19,9 +30,15 @@ test("QC records advisory date codes, approves exact text and retains a mismatch
   const runId = uniqueTestId("date-code-run");
   const brand = uniqueTestId("Date QC");
   const flavor = "Synthetic only";
-  const date = new Date().toISOString().slice(0, 10);
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const operatorContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const date = facilityDate();
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    timezoneId: FACILITY_TIME_ZONE,
+  });
+  const operatorContext = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    timezoneId: FACILITY_TIME_ZONE,
+  });
   const db = new Client({ connectionString: dbUrl });
   const diagnostics: string[] = [];
   const unexpectedPageErrors: string[] = [];
@@ -40,7 +57,7 @@ test("QC records advisory date codes, approves exact text and retains a mismatch
       token: manager.token, senderId: uniqueTestId("date-qc-seed"), date,
       payload: {
         dayState: { date, runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
-          currentIndex: 0, resetAt: 0, substitutions: [], substitutionLog: [], stagedItems: {} },
+          currentIndex: 0, currentRunId: runId, resetAt: 0, substitutions: [], substitutionLog: [], stagedItems: {} },
         runValues: { [runId]: { casesNeeded: 1, casesPerSkid: 12, pizzasPerCase: 12,
           doughRecipe: [], frontlineRecipe: [], app1Type: "", app2Type: "", app3Type: "", app4Type: "",
           pep1Type: "", pep1TypeB: "", pep2Type: "", pep2TypeB: "" } },

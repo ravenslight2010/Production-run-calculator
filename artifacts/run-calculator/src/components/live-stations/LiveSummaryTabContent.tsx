@@ -267,6 +267,7 @@ import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCom
 import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "../../adapters/browserResetPersistence";
 import {
   loadRunValues,
+  subscribeRunValuesWrites,
 } from "../../adapters/browserRunPersistence";
 import {
   acceptRemoteRunValueOnSync,
@@ -819,6 +820,15 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   );
   const pendingHistoryUploads = pendingCompletedHistoryCount();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
+  const [, refreshIngredientDetail] = useState(0);
+  useEffect(() => {
+    if (!ingredientDetailRunId) return;
+    return subscribeRunValuesWrites((runId) => {
+      if (runId === ingredientDetailRunId) {
+        refreshIngredientDetail((revision) => revision + 1);
+      }
+    });
+  }, [ingredientDetailRunId]);
   useAutomaticUpdateReloadBlocker(
     "ingredient-detail-dialog",
     Boolean(ingredientDetailRunId),
@@ -1618,13 +1628,14 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
         const hasStarted = Boolean(todayRun.startedAt || todayRun.endedAt);
         // A pending current run follows the active form. Once it has started,
         // Ingredient Detail must use its durable snapshot instead: the active
-        // form may be overlaid with a newer shared recipe. Non-selected runs
-        // stay reactive to canonical writes through runValuesById.
+        // form may be overlaid with a newer shared recipe. For a non-selected
+        // run, read its durable snapshot when detail is rendered: the summary
+        // map may not yet reflect a just-acknowledged recipe write.
         detailVals = isCurrentRun
           ? hasStarted
             ? loadRunValues(todayRun.id)
             : v
-          : (runValuesById.get(todayRun.id) ?? loadRunValues(todayRun.id));
+          : loadRunValues(todayRun.id);
       } else {
         for (const day of history) {
           if (day.runValues?.[ingredientDetailRunId]) {

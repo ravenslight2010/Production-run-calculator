@@ -8,6 +8,7 @@ import {
 } from "./isolation";
 import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 import { assertRecipePickerContract } from "./recipe-picker-contract";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 const API_BASE = requireLocalFixtureApiOrigin("manager attention fixtures");
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -911,6 +912,7 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     await profilesRead;
 
+    await selectCanonicalFixtureRun(page, runId);
     await page.getByRole("button", { name: /^More/ }).click();
     await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
     const liveSurface = page.getByTestId("setup-recipes-fieldset");
@@ -1116,10 +1118,12 @@ test("manager attention remains stable across dialog and destination transitions
           doughRecipes: [
             { id: uniqueTestId("malformed-dough"), name: null, components: [], enabled: true },
             { id: uniqueTestId("valid-dough"), name: "Valid Dough", components: [], enabled: true },
+            { id: uniqueTestId("legacy-dough"), name: "Legacy Dough", components: [], enabled: true },
           ],
           sauceRecipes: [
             { id: uniqueTestId("malformed-sauce"), name: 42, components: [], enabled: true },
             { id: uniqueTestId("valid-sauce"), name: "Valid Sauce", components: [], enabled: true },
+            { id: uniqueTestId("legacy-sauce"), name: "Legacy Sauce", components: [], enabled: true },
           ],
           cheeseRecipes: [
             { id: uniqueTestId("malformed-cheese"), name: {}, components: [], enabled: true },
@@ -1132,8 +1136,6 @@ test("manager attention remains stable across dialog and destination transitions
         }),
       }));
     await page.addInitScript(() => {
-      localStorage.setItem("run-calc-dough-recipe-names", JSON.stringify([null, "Legacy Dough"]));
-      localStorage.setItem("run-calc-frontline-recipe-names", JSON.stringify([{}, "Legacy Sauce"]));
       localStorage.setItem("run-calc-recipe-name-consolidation-v1", "1");
     });
 
@@ -1285,7 +1287,10 @@ test("manager can review and resolve an incident with Enter and Space", async ({
     await page.keyboard.press("Space");
     // Focused filtered rows intentionally remain mounted through the status
     // transition so keyboard focus is not abandoned when an action completes.
-    await expect(incident.getByText("Resolved", { exact: true })).toBeVisible();
+    // The status filter also contains a hidden native <option> named
+    // "Resolved". Assert the visible incident header rather than matching
+    // both the badge and the filter option.
+    await expect(headerButton).toContainText("Resolved");
     await expect(headerButton).toBeFocused();
     await expect(page.locator(":focus")).toBeVisible();
   } finally {

@@ -319,14 +319,17 @@ function statusOf(error: unknown): number | undefined {
   return typeof responseStatus === "number" ? responseStatus : undefined;
 }
 
-function fallbackTriggerFor(error: unknown): GeminiFallbackTrigger | null {
+function fallbackTriggerFor(
+  error: unknown,
+  selectedModel?: string,
+): GeminiFallbackTrigger | null {
   const cause = error instanceof Error && error.cause !== undefined
     ? error.cause
     : error;
   const status = statusOf(cause);
   if (status === 429) return "rate_limited";
   if (status === 503 || status === 504) return "service_unavailable";
-  if (isRetiredModelError(cause)) return "retired_model";
+  if (isRetiredModelError(cause, selectedModel)) return "retired_model";
   return null;
 }
 
@@ -348,8 +351,9 @@ function isTransientProviderError(error: unknown): boolean {
   ].includes(code);
 }
 
-function isRetiredModelError(error: unknown): boolean {
-  if (statusOf(error) !== 404 || !error || typeof error !== "object") return false;
+function isRetiredModelError(error: unknown, selectedModel?: string): boolean {
+  const status = statusOf(error);
+  if ((status !== 404 && status !== 400) || !error || typeof error !== "object") return false;
   const providerError = error as {
     message?: unknown;
     response?: { data?: { message?: unknown; error?: { message?: unknown } } | string };
@@ -358,8 +362,36 @@ function isRetiredModelError(error: unknown): boolean {
   const messages = [
     providerError.message,
     typeof data === "string" ? data : data?.message,
-    typeof data === "object" ? data.error?.message : undefined,
+    data && typeof data === "object" ? data.error?.message : undefined,
   ];
+  if (status === 400) {
+    // Some gateways reject an unavailable model with 400 rather than 404.
+    // Only accept a complete availability clause naming the selected Gemini
+    // model. Unrelated model, request-format and thinking-parameter failures
+    // must not advance the approved ladder.
+    const requestedModel = selectedModel?.toLowerCase().replace(/^models\//, "");
+    if (!requestedModel || !/^gemini-[a-z0-9._-]+$/.test(requestedModel)) return false;
+    const modelId = String.raw`["'\x60]?(?:models\/)?(gemini-[a-z0-9._-]+)["'\x60]?`;
+    const unavailable = String.raw`(?:not supported|not available|not found|unavailable|retired|decommissioned|does not exist|no longer (?:available|supported))`;
+    const namedModelUnavailable = new RegExp(
+      // Provider gateways often append the rejected operation or API version
+      // after the availability clause (for example, “not available for
+      // generateContent”). The exact selected model plus the explicit clause
+      // remains the narrow fallback signal; trailing context is not an anchor.
+      String.raw`\bmodel\s*[:=]?\s*${modelId}\s+(?:(?:is|was)\s+)?${unavailable}\b`,
+      "i",
+    );
+    const unsupportedModelUnavailable = new RegExp(
+      String.raw`\bunsupported model\s*[:=]?\s*${modelId}\b`,
+      "i",
+    );
+    return messages.some((message) => {
+      if (typeof message !== "string") return false;
+      return [namedModelUnavailable, unsupportedModelUnavailable].some((pattern) =>
+        pattern.exec(message)?.[1]?.toLowerCase() === requestedModel
+      );
+    });
+  }
   const message = messages
     .filter((value): value is string => typeof value === "string")
     .join(" ")
@@ -375,7 +407,7 @@ function isRetiredModelError(error: unknown): boolean {
   ].some((marker) => message.includes(marker));
 }
 
-function isChainAdvanceError(error: unknown): boolean {
+function isChainAdvanceError(error: unknown, selectedModel?: string): boolean {
   if (error instanceof GeminiRequestCancelledError || error instanceof GeminiRequestTimeoutError) {
     return false;
   }
@@ -389,7 +421,8 @@ function isChainAdvanceError(error: unknown): boolean {
   // A remote gateway deadline is an availability failure, not our local
   // request timeout. Healthy backups can recover a stalled upstream model.
   // Keep client cancellation/timeouts and other gateway errors ineligible.
-  return status === 429 || status === 503 || status === 504 || isRetiredModelError(cause);
+  return status === 429 || status === 503 || status === 504 ||
+    isRetiredModelError(cause, selectedModel);
 }
 
 function isSafetyBlockedResponse(response: GenerateContentResponse): boolean {
@@ -636,7 +669,7 @@ async function createForModel(
               requestResult = finalModel && chainIndex > 0 && !emittedChunk &&
                   !(normalized instanceof GeminiRequestCancelledError)
                 ? "fallback_exhausted"
-                : !finalModel && !emittedChunk && isChainAdvanceError(normalized)
+                : !finalModel && !emittedChunk && isChainAdvanceError(normalized, params.model)
                   ? "fallback_triggered"
                   : "attempt_failed";
               finishStream(
@@ -696,10 +729,10 @@ async function createForModel(
         requestResult = finalModel && chainIndex > 0 &&
             !(normalized instanceof GeminiRequestCancelledError)
           ? "fallback_exhausted"
-          : !finalModel && isChainAdvanceError(normalized)
+          : !finalModel && isChainAdvanceError(normalized, params.model)
             ? "fallback_triggered"
             : "attempt_failed";
-        if (isChainAdvanceError(normalized) && !finalModel) {
+        if (isChainAdvanceError(normalized, params.model) && !finalModel) {
           releaseIntermediateCircuit(circuitMode);
         } else {
           releaseCircuit(
@@ -754,8 +787,8 @@ function streamWithModelFallback(
           stream = attempt as AsyncIterable<ChatChunk>;
         } catch (error) {
           lastError = error;
-          if (finalModel || !isChainAdvanceError(error)) throw error;
-          fallbackTrigger = fallbackTriggerFor(error);
+          if (finalModel || !isChainAdvanceError(error, models[index]!)) throw error;
+          fallbackTrigger = fallbackTriggerFor(error, models[index]!);
           continue;
         }
       }
@@ -769,8 +802,8 @@ function streamWithModelFallback(
         return;
       } catch (error) {
         lastError = error;
-        if (emittedChunk || finalModel || !isChainAdvanceError(error)) throw error;
-        fallbackTrigger = fallbackTriggerFor(error);
+        if (emittedChunk || finalModel || !isChainAdvanceError(error, models[index]!)) throw error;
+        fallbackTrigger = fallbackTriggerFor(error, models[index]!);
       }
     }
 
@@ -956,9 +989,9 @@ async function createGeminiChain(
         fallbackTrigger,
       );
     } catch (error) {
-      if (finalModel || !isChainAdvanceError(error)) throw error;
+      if (finalModel || !isChainAdvanceError(error, model)) throw error;
       lastError = error;
-      fallbackTrigger = fallbackTriggerFor(error);
+      fallbackTrigger = fallbackTriggerFor(error, model);
       continue;
     }
 

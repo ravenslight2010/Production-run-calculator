@@ -1,5 +1,6 @@
 /** Browser cache reset adapter; epoch comparison is intentionally side-effect scoped here. */
 import { browserRecordStore } from "./browserRecordStore";
+import { blockDayStatePersistenceForReset } from "./dayStatePersistenceFence";
 const RESET_EPOCH_KEY = "run-calc-reset-epoch";
 const COMPLETED_HISTORY_OUTBOX_PREFIX = "run-calc-completed-history-outbox";
 const COMPLETED_HISTORY_CACHE_PREFIX = "run-calc-completed-history-cache";
@@ -19,6 +20,7 @@ export function getStoredResetEpoch(): number {
 
 export function applyResetWipe(serverEpoch: number): boolean {
   if (!Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
+  blockDayStatePersistenceForReset();
   try {
     const keys = browserRecordStore.keys("run-calc").filter((key) =>
         key !== RESET_EPOCH_KEY

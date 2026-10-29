@@ -208,15 +208,18 @@ const webkitCompatibilityProjects = compatibilityReport.config.projects
   .sort();
 assert.deepEqual(
   webkitCompatibilityProjects,
-  ["phone-webkit", "tablet-webkit"],
-  "the compatibility inventory must cover only the phone and tablet WebKit projects",
+  ["desktop-webkit", "phone-webkit", "tablet-landscape-webkit", "tablet-webkit"],
+  "the configured WebKit projects must match the approved required and optional project inventory",
 );
+// The release command selects this pair. Optional compatibility projects remain
+// configured, but collection of them cannot claim required runtime coverage.
+const requiredCompatibilityProjects = new Set(["phone-webkit", "tablet-webkit"]);
 const compatibilityIdentities = collectWebKitCaseIdentities(
   compatibilityReport.suites,
-  new Set(webkitCompatibilityProjects),
+  requiredCompatibilityProjects,
   true,
 );
-assert.equal(WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.length, 4);
+assert.equal(WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.length, 8);
 assert.equal(
   new Set(WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES).size,
   WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.length,

@@ -4108,6 +4108,7 @@ describe("POST /sync/auto-track/claim", () => {
     const bodies = await Promise.all([a.json(), b.json()]) as Array<{
       outcome: string;
       values: Record<string, number>;
+      data: Record<string, any>;
     }>;
     expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every(({ values }) =>
@@ -4115,6 +4116,13 @@ describe("POST /sync/auto-track/claim", () => {
       && values.app1StockAnchorNetSec === 15
       && values.app1BatchesMade === 9
     )).toBe(true);
+    const accepted = bodies.find(({ outcome }) => outcome === "accepted")!;
+    expect(accepted.data.autoTrackServerState.netOwnership[RUN]["app1-stock"]).toMatchObject({
+      generation: `${RUN}:2`,
+      sequence: 1,
+    });
+    expect(accepted.data.autoTrackServerState.netOwnership[RUN]["app1-stock"].updatedAt)
+      .toEqual(expect.any(Number));
     expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
   });
 

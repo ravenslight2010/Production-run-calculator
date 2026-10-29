@@ -9,6 +9,11 @@ Web-only "edit once, updates everywhere" for run setup data.
 - Setup Profiles editor Save → host page overlays the fresh profile onto the OPEN form when brand+flavor matches (`mergeProfileIntoOpenForm` in web storage.ts) — otherwise the next autosave/nav-save writes the stale form back over the profile (the classic open-form clobber).
 - Profile save (editor Save, or a nav/autosave where `saveProfile` returned true) → `propagateProfileToPendingRuns` overlays the profile onto today's pending runs and future scheduled days' matching not-started runs (see scheduled-run-profile-snapshot.md).
 - Shared dough/sauce pool change (local or remote, detected by a snapshot-diff effect on the react-query list) → `refreshProfilesFromNamedRecipes` rewrites every SAVED profile linked by NAME (targeted merge; never blanks other fields, never creates profiles), and the open form's linked rows refresh via setValue so the normal autosave persists + stamps.
+- Saved Dough/Crust run-start defaults are part of the pizza profile and must be server-owned and shared across browsers, not device-local.
+
+**Why:** The user expects these defaults to behave like the rest of each saved profile; device-local storage would make the same profile start differently on another browser.
+
+**How to apply:** Persist them through profile read/write and refresh paths, and verify they survive a fresh browser session and cross-device reload.
 
 **Why the guards matter:**
 - The merge overlay must skip PER_RUN_FIELDS + PROGRESS_FIELDS + brand/flavor, or a profile save wipes a started run's cases-needed/progress.

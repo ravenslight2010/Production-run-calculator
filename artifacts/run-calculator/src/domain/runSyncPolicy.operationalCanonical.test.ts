@@ -239,6 +239,53 @@ describe("server-owned App 1 batch sync convergence", () => {
     });
   });
 
+  it("adopts server-produced App 1 stock without overriding a newer manual stock correction", () => {
+    const payload = {
+      ...canonicalPayload,
+      runValues: {
+        run1: {
+          ...canonicalPayload.runValues.run1,
+          app1Type: "Cheese",
+          app1OzPerPizza: 16,
+          app1BatchLbs: 1,
+          app1CheeseRecipeName: "Fixture Cheese",
+          app1CheeseRecipe: [{ lbs: 1 }],
+          app1StockLbs: 1.5,
+          app1StockCorrectionGeneration: 0,
+          app1StockConsumedLbs: 0,
+          applicatorStockInitialized: true,
+        },
+      },
+    };
+    const local = {
+      ...DEFAULT_VALUES,
+      app1Type: "Cheese",
+      app1OzPerPizza: 16,
+      app1BatchLbs: 1,
+      app1CheeseRecipeName: "Fixture Cheese",
+      app1CheeseRecipe: [{ lbs: 1 }],
+      app1BatchesMade: 2,
+      app1BatchCorrectionGeneration: 2,
+      app1StockLbs: 1,
+      app1StockCorrectionGeneration: 0,
+      app1StockConsumedLbs: 0,
+      applicatorStockInitialized: true,
+    };
+    expect(serverOwnedApp1BatchProgress(payload, "run1", local)).toEqual({
+      app1BatchesMade: 3,
+      app1StockLbs: 1.5,
+    });
+
+    const newerManualCorrection = {
+      ...local,
+      app1StockLbs: 0.5,
+      app1StockCorrectionGeneration: 1,
+    };
+    expect(serverOwnedApp1BatchProgress(payload, "run1", newerManualCorrection)).toEqual({
+      app1BatchesMade: 3,
+    });
+  });
+
   it("does not bypass a newer local manual correction or an unproven projection", () => {
     const correctedLocally = {
       ...DEFAULT_VALUES,

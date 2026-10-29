@@ -12,7 +12,7 @@ import {
   LABEL_POSITION_OPTIONS,
   CARTON_SIZE_OPTIONS,
 } from "../types";
-import { loadProfile, saveProfileAndWaitForServer } from "../storage";
+import { loadProfile, loadProfileSubTab, saveProfileAndWaitForServer } from "../storage";
 import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { brandTagLabels } from "@workspace/name-match";
@@ -545,7 +545,8 @@ export default function SetupProfileEditor({
     const values = profile ?? DEFAULT_VALUES;
     form.reset(values);
     resetFieldArrays(values);
-    setLineType(Number(values.crustsPerCase) > 0 && (values.doughRecipe ?? []).length === 0 ? "crusts" : "dough");
+    setLineType(loadProfileSubTab(b, f) ??
+      (Number(values.crustsPerCase) > 0 && (values.doughRecipe ?? []).length === 0 ? "crusts" : "dough"));
     setAutofill(null);
     setAutofillError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -581,7 +582,7 @@ export default function SetupProfileEditor({
     setSaveError("");
     let serverAcknowledged = false;
     try {
-      const result = await saveProfileAndWaitForServer(b, f, values);
+      const result = await saveProfileAndWaitForServer(b, f, values, { subTab: lineType });
       if (result === "unchanged") {
         toast({ title: `No changes to save for ${b} — ${f}` });
         return;

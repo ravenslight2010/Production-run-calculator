@@ -46,6 +46,8 @@ const LIVE_FIXTURE_LOCK_BINDS = [0x4532_4546, 0x4c49_5645];
 function mockedPlaywright() {
   const request = {
     dispose: vi.fn().mockResolvedValue(undefined),
+    get: vi.fn(),
+    post: vi.fn(),
   };
   return {
     playwright: {
@@ -279,6 +281,146 @@ describe("AuthorizedBrowserFixtures live fixture lock", () => {
     );
     expect(lockClient.end).toHaveBeenCalledOnce();
     expect(request.dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AuthorizedBrowserFixtures master-data seeds", () => {
+  const localApiBase = "http://127.0.0.1:4173";
+
+  it("reads a fresh canonical epoch for every newly prepared seed, including after Undo", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(playwright, localApiBase, "signup-code");
+    request.post.mockResolvedValue({
+      ok: () => true,
+      status: () => 201,
+      text: async () => "",
+    });
+    for (const epoch of ["0", "3", "4", "5", "6"]) {
+      request.get.mockResolvedValueOnce({
+        ok: () => true,
+        headers: () => ({ "x-master-data-epoch": epoch }),
+      });
+    }
+    const account = { token: "fixture-session" };
+    try {
+      await fixtures.seedBrandProfile(account, { brand: "Fixture", flavor: "Epoch", values: {} });
+      await fixtures.seedCheeseRecipe(account, { id: "fixture-cheese", name: "Fixture Cheese" });
+      await fixtures.seedNamedRecipe("dough", account, { id: "fixture-dough", name: "Fixture Dough" });
+      await fixtures.seedNamedRecipe("sauce", account, { id: "fixture-sauce", name: "Fixture Sauce" });
+      await fixtures.seedMix(account, { id: "fixture-mix", name: "Fixture Mix" });
+      expect(request.get.mock.calls.map(([url]) => url)).toEqual([
+        `${localApiBase}/api/brand-profiles`,
+        `${localApiBase}/api/cheese-recipes`,
+        `${localApiBase}/api/dough-recipes`,
+        `${localApiBase}/api/sauce-recipes`,
+        `${localApiBase}/api/mixes`,
+      ]);
+      for (const [index, epoch] of ["0", "3", "4", "5", "6"].entries()) {
+        expect(request.post.mock.calls[index][1].headers).toEqual({
+          Cookie: "rc_auth=fixture-session",
+          "X-Master-Data-Epoch": epoch,
+        });
+        expect(request.get.mock.invocationCallOrder[index])
+          .toBeLessThan(request.post.mock.invocationCallOrder[index]);
+      }
+    } finally {
+      await fixtures.cleanup();
+    }
+  });
+
+  it.each([undefined, "", "-1", "not-an-epoch"])("does not seed with an invalid canonical epoch (%s)", async (epoch) => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(playwright, localApiBase, "signup-code");
+    request.get.mockResolvedValue({
+      ok: () => true,
+      headers: () => ({ "x-master-data-epoch": epoch }),
+    });
+    try {
+      await expect(fixtures.seedBrandProfile(
+        { token: "fixture-session" }, { brand: "Fixture", flavor: "Epoch", values: {} },
+      )).rejects.toThrow("seed was not submitted");
+      expect(request.post).not.toHaveBeenCalled();
+    } finally {
+      await fixtures.cleanup();
+    }
+  });
+
+  it("does not retry a rejected mutation with a newly fetched epoch", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(playwright, localApiBase, "signup-code");
+    request.get.mockResolvedValue({ ok: () => true, headers: () => ({ "x-master-data-epoch": "3" }) });
+    request.post.mockResolvedValue({
+      ok: () => false, status: () => 409, text: async () => "Fixture epoch changed",
+    });
+    try {
+      await expect(fixtures.seedBrandProfile(
+        { token: "fixture-session" }, { brand: "Fixture", flavor: "Epoch", values: {} },
+      )).rejects.toThrow("Fixture profile seed failed: HTTP 409 Fixture epoch changed");
+      expect(request.get).toHaveBeenCalledOnce();
+      expect(request.post).toHaveBeenCalledOnce();
+    } finally {
+      await fixtures.cleanup();
+    }
+  });
+});
+
+describe("AuthorizedBrowserFixtures canonical initial snapshots", () => {
+  it("seeds only an authorized disposable canonical row and advances its revision", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(playwright, "http://api.test", "signup-code");
+    request.get.mockResolvedValue({ ok: () => true });
+    const payload = {
+      dayState: { runs: [{ id: "fixture-run", startedAt: 100 }], currentIndex: 0 },
+      runValues: { "fixture-run": { casesNeeded: 20 } },
+    };
+    try {
+      await fixtures.seedCanonicalTodaySnapshot({
+        token: "fixture-session", senderId: "fixture", date: "2026-10-24", payload,
+      });
+      expect(request.post).not.toHaveBeenCalled();
+      expect(pgClients[1].query).toHaveBeenCalledWith(
+        expect.stringContaining("canonical_revision = daily_sync.canonical_revision + 1"),
+        ["2026-10-24", JSON.stringify({
+          ...payload,
+          syncVersion: 1,
+          completeness: "complete",
+          dayState: { ...payload.dayState, date: "2026-10-24" },
+        })],
+      );
+      expect(pgClients[1].end).toHaveBeenCalledOnce();
+    } finally {
+      await fixtures.cleanup();
+    }
+  });
+
+  it("does not write canonical state when the fixture account is rejected", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(playwright, "http://api.test", "signup-code");
+    request.get.mockResolvedValue({ ok: () => false, status: () => 401, text: async () => "" });
+    try {
+      await expect(fixtures.seedCanonicalTodaySnapshot({
+        token: "fixture-session", senderId: "fixture",
+        payload: { dayState: { runs: [] } },
+      })).rejects.toThrow("fixture authorization failed");
+      expect(pgClients).toHaveLength(1);
+    } finally {
+      await fixtures.cleanup();
+    }
+  });
+
+  it("refuses to persist a derived operational projection", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(playwright, "http://api.test", "signup-code");
+    try {
+      await expect(fixtures.seedCanonicalTodaySnapshot({
+        token: "fixture-session", senderId: "fixture",
+        payload: { dayState: { runs: [] }, operationalProjection: {} },
+      })).rejects.toThrow("without a persisted projection");
+      expect(request.get).not.toHaveBeenCalled();
+      expect(pgClients).toHaveLength(1);
+    } finally {
+      await fixtures.cleanup();
+    }
   });
 });
 

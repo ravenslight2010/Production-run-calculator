@@ -324,7 +324,11 @@ test("retained import QC reload and badge deltas", async ({ browser, playwright,
     browserPhase = "manager fresh navigation";
     await openImportReview(managerPage, origin);
     const queue = managerPage.getByTestId("section-qc-import-review");
-    await expect(queue.getByTestId("text-qc-import-empty")).toBeVisible();
+    // The facility queue is shared and may contain unrelated pending work.
+    // These two operations were resolved above, so neither should appear in
+    // the default Pending filter; do not require the global queue to be empty.
+    await expect(queue.getByTestId(`button-qc-import-item-${verifiedOperationId}`)).toHaveCount(0);
+    await expect(queue.getByTestId(`button-qc-import-item-${rejectedOperationId}`)).toHaveCount(0);
     browserPhase = "manager initial filter all";
     await managerPage.getByTestId("select-qc-import-status").selectOption("all");
     await expect(managerPage.getByTestId(`button-qc-import-item-${verifiedOperationId}`)).toBeVisible();
@@ -351,7 +355,9 @@ test("retained import QC reload and badge deltas", async ({ browser, playwright,
     await navigateQc(managerPage);
     await managerPage.getByTestId("button-toggle-qc-import-review").click();
     await expect(managerPage.getByTestId("section-qc-import-review")).toBeVisible();
-    await expect(managerPage.getByTestId("section-qc-import-review").getByTestId("text-qc-import-empty")).toBeVisible();
+    const reloadedQueue = managerPage.getByTestId("section-qc-import-review");
+    await expect(reloadedQueue.getByTestId(`button-qc-import-item-${verifiedOperationId}`)).toHaveCount(0);
+    await expect(reloadedQueue.getByTestId(`button-qc-import-item-${rejectedOperationId}`)).toHaveCount(0);
     browserPhase = "manager post-reload filter all";
     await managerPage.getByTestId("select-qc-import-status").selectOption("all");
     await expect(managerPage.getByTestId(`button-qc-import-item-${verifiedOperationId}`)).toBeVisible();

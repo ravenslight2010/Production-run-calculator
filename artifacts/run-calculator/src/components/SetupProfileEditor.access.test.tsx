@@ -6,11 +6,13 @@ import { DEFAULT_VALUES } from "../types";
 
 const mocks = vi.hoisted(() => ({
   loadProfile: vi.fn(),
+  loadProfileSubTab: vi.fn((): "dough" | "crusts" | null => null),
   saveProfileAndWaitForServer: vi.fn(),
   toast: vi.fn(),
 }));
 vi.mock("../storage", () => ({
   loadProfile: mocks.loadProfile,
+  loadProfileSubTab: mocks.loadProfileSubTab,
   saveProfileAndWaitForServer: mocks.saveProfileAndWaitForServer,
 }));
 
@@ -180,6 +182,7 @@ describe("SetupProfileEditor capability gate", () => {
       "Northstar",
       "Pepperoni",
       expect.objectContaining({ pep1Combined: true }),
+      { subTab: "dough" },
     );
   });
 
@@ -256,6 +259,23 @@ describe("SetupProfileEditor capability gate", () => {
     expect(onSaved).not.toHaveBeenCalled();
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "No changes to save for Northstar — Pepperoni" }),
+    );
+  });
+
+  it("saves the server-backed crust default without legacy crust indicators", async () => {
+    mocks.loadProfile.mockReturnValue({ ...DEFAULT_VALUES });
+    mocks.loadProfileSubTab.mockReturnValue("crusts");
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} />);
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+
+    expect(mocks.saveProfileAndWaitForServer).toHaveBeenCalledWith(
+      "Northstar",
+      "Pepperoni",
+      expect.any(Object),
+      { subTab: "crusts" },
     );
   });
 });

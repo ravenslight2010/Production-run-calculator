@@ -829,8 +829,16 @@ export default function SpecImportDialog({
    * on a routine re-import — the manager must explicitly opt in per mix.
    */
   const [acceptedNewMixNames, setAcceptedNewMixNames] = useState<Set<string>>(new Set());
+  const reviewedSourceRef = useRef<ParsedSpecImport | null>(null);
 
   useEffect(() => {
+    const previousSource = reviewedSourceRef.current;
+    reviewedSourceRef.current = prepared?.parsed ?? null;
+    // A refreshed server comparison requires fresh confirmation, not the loss
+    // of the manager's edits, inclusions, recipe choices, or manual values.
+    setCaptureGoldCase(false);
+    setDestructiveChangesConfirmed(false);
+    if (prepared && previousSource === prepared.parsed) return;
     if (prepared) {
       setCaptureGoldCase(false);
       setActiveSourceCellKey(null);

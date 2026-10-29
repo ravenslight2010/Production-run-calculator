@@ -148,7 +148,8 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ]),
   ...reads(["record-qc", "manage-qc"], "any", "scoped", ["/qc/recipe-review-statuses"]),
   ...reads(["manage-qc"], "all", "scoped", [
-    "/qc/history.csv", "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
+    "/qc/history.csv", "/qc/intelligence", "/qc/intelligence.csv",
+    "/qc/recipe-reviews", "/qc/recipe-reviews/:captureId",
     "/qc/import-reviews", "/qc/import-reviews/:operationId",
     "/qc/intelligence", "/qc/intelligence.csv",
   ]),
@@ -295,6 +296,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /dough-recipes", "DELETE /dough-recipes", "POST /ingredients", "DELETE /ingredients", "POST /ingredients/merge",
     "POST /freezer-pull-items", "DELETE /freezer-pull-items", "POST /freezer-surplus", "PUT /freezer-surplus/allocations/:runId",
     "POST /freezer-surplus/lots/:lotId/adjustments", "POST /freezer-surplus/confirmations",
+    "POST /freezer-surplus/confirmations/:runId/corrections",
     "POST /ingredient-batch-weights", "POST /mixes", "DELETE /mixes", "POST /photo-aliases",
     "POST /premix-sheets", "DELETE /premix-sheets/:id", "POST /cheese-sheets", "DELETE /cheese-sheets/:id",
     "POST /sauce-recipes", "DELETE /sauce-recipes", "PATCH /inventory/items/:id/production-link",
@@ -470,13 +472,28 @@ export function validateMutationAuthorizationInventory(
         const managerRoleIndex = layer.route.stack.findIndex(({ handle }) => isRequireManagerRole(handle));
         const matches = entries.some((entry) => {
           const expected = entry.capabilities ?? [];
-          const capabilityMatches = required.length === (expected.length ? 1 : 0) &&
-            (expected.length === 0 || required.some(({ capabilities, match, index }) =>
-              index < layer.route!.stack.length - 1 &&
-              match === (entry.capabilityMatch ?? "all") &&
-              capabilities.length === expected.length &&
-              expected.every((capability) => capabilities.includes(capability)),
-            ));
+          const expectedMatch = entry.capabilityMatch ?? "all";
+          const handlerIndex = layer.route!.stack.length - 1;
+          const actualCapabilities = required.flatMap(({ capabilities }) => [...capabilities]);
+          const actualCapabilitySet = new Set(actualCapabilities);
+          const singleGate = required.length === 1 ? required[0] : undefined;
+          const capabilityMatches = expected.length === 0
+            ? required.length === 0
+            : expectedMatch === "all"
+              ? required.length > 0 &&
+                required.every(({ capabilities, match, index }) =>
+                  index < handlerIndex &&
+                  match === "all" &&
+                  capabilities.length > 0 &&
+                  capabilities.every((capability) => expected.includes(capability)),
+                ) &&
+                actualCapabilities.length === expected.length &&
+                expected.every((capability) => actualCapabilitySet.has(capability))
+              : singleGate !== undefined &&
+                singleGate.index < handlerIndex &&
+                singleGate.match === "any" &&
+                singleGate.capabilities.length === expected.length &&
+                expected.every((capability) => singleGate.capabilities.includes(capability));
           const mustBeLiveOnly = entry.scope === "live-only" && entry.sandbox === "denied" && entry.ownership !== "public";
           const liveScopeMatches = mustBeLiveOnly
             ? liveScopeIndex >= 0 && liveScopeIndex < layer.route!.stack.length - 1

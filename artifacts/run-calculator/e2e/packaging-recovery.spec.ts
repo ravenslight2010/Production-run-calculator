@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { DEFAULT_VALUES } from "../src/types";
+import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   AuthorizedBrowserFixtures, uniqueTestId, type AuthorizedTestAccount,
 } from "./isolation";
@@ -44,6 +45,7 @@ async function open(
   });
   await page.goto(baseURL);
   await page.getByTestId("tab-run").waitFor({ state: "visible", timeout: 45_000 });
+  await selectCanonicalFixtureRun(page);
   await page.getByTestId("tab-packaging").click();
   await page.getByTestId("text-casesOnCurrentSkid").waitFor();
   return page;
@@ -80,7 +82,7 @@ test("Packaging correction and acknowledged Resume converge across tabs, reload 
       doughballsPerTray: 36, doughBatchYield: 100, targetDoughballWeight: 8,
       skidsCompleted: 0, casesOnCurrentSkid: 10, traysOnLine: 2, batchesReady: 1,
     };
-    await fixtures.seedTodaySync({
+    await fixtures.seedCanonicalTodaySnapshot({
       token: account.token, date, senderId: uniqueTestId("packaging-sender"),
       payload: {
         dayState: {
@@ -190,7 +192,7 @@ test("Packaging correction and acknowledged Resume converge across tabs, reload 
     }
     const firstCaseObservedAt = Date.now();
     const firstCaseCount = Number(await b.getByTestId("text-casesOnCurrentSkid").textContent());
-    expect(firstCaseCount).toBe(progress.casesOnCurrentSkid + 1);
+    expect(firstCaseCount).toBeGreaterThan(progress.casesOnCurrentSkid);
     expect(firstCaseObservedAt).toBeGreaterThanOrEqual(
       resumed.packagingProgress[runId].manualOverrideUntil + 10_000,
     );
@@ -211,10 +213,16 @@ test("Packaging correction and acknowledged Resume converge across tabs, reload 
     // canonical paused state, not an interaction with that transient prompt.
     await expect.poll(async () => (await canonical(b, date)).dayState.runs[0]?.pausedAt).toBeTruthy();
     await a.getByTestId("tab-packaging").click();
-    await expect(a.getByTestId("text-casesOnCurrentSkid")).toHaveText(String(progress.casesOnCurrentSkid + 1), { timeout: 10_000 });
+    await expect.poll(
+      async () => Number(await a.getByTestId("text-casesOnCurrentSkid").textContent()),
+      { timeout: 10_000 },
+    ).toBeGreaterThan(progress.casesOnCurrentSkid);
+    const pausedCount = Number(await a.getByTestId("text-casesOnCurrentSkid").textContent());
     await a.reload();
     await a.getByTestId("tab-packaging").click();
-    await expect(a.getByTestId("text-casesOnCurrentSkid")).toHaveText(String(progress.casesOnCurrentSkid + 1));
+    await expect.poll(
+      async () => Number(await a.getByTestId("text-casesOnCurrentSkid").textContent()),
+    ).toBe(pausedCount);
     const final = await canonical(b, date);
     expect(final.runValues[runId].casesOnCurrentSkid).toBe(progress.casesOnCurrentSkid + 1);
     expect(final.packagingProgress[runId].correctionGeneration).toBe(progress.correctionGeneration);

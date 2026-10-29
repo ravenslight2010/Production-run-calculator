@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "./autoTrackCoordination";
+import {
+  applyAutoTrackClaim,
+  attachServerOwnedAutoTrackClaim,
+  parseAutoTrackClaim,
+  type AutoTrackClaim,
+} from "./autoTrackCoordination";
 import {
   capApplicatorStock,
   computeApplicatorStockRateLbsPerSecond,
@@ -80,6 +85,34 @@ function sauceStockMutations(stock: number, anchor: number, generation: number, 
 }
 
 describe("auto-track coordination", () => {
+  it("attaches server ownership for peer stock convergence without dropping other server state", () => {
+    const data: Record<string, unknown> = {
+      autoTrackServerState: {
+        version: 1,
+        wallClockBookkeeping: { "run-1": { caseNextDueMs: NOW + 1_000 } },
+        netOwnership: {
+          "run-1": { "sauce-stock": { generation: "run-1:1", sequence: 2, updatedAt: NOW - 1 } },
+        },
+      },
+    };
+
+    const updated = attachServerOwnedAutoTrackClaim(data, stockClaim(), NOW);
+    const serverState = updated.autoTrackServerState as Record<string, any>;
+
+    expect(serverState.wallClockBookkeeping["run-1"].caseNextDueMs).toBe(NOW + 1_000);
+    expect(serverState.netOwnership["run-1"]["sauce-stock"]).toMatchObject({
+      generation: "run-1:1",
+      sequence: 2,
+      updatedAt: NOW - 1,
+    });
+    expect(serverState.netOwnership["run-1"]["app1-stock"]).toMatchObject({
+      generation: "run-1:2",
+      sequence: 1,
+      updatedAt: NOW,
+    });
+    expect(attachServerOwnedAutoTrackClaim(data, claim(), NOW)).toBe(data);
+  });
+
   it("validates allow-listed channels, fields, times, and bounded values", () => {
     expect(parseAutoTrackClaim(claim(), NOW)).toEqual(claim());
     expect(parseAutoTrackClaim(claim({

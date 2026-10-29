@@ -55,12 +55,17 @@ import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
-import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "../lib/autoTrackCoordination";
+import {
+  applyAutoTrackClaim,
+  attachServerOwnedAutoTrackClaim,
+  parseAutoTrackClaim,
+  type AutoTrackClaim,
+} from "../lib/autoTrackCoordination";
 import { executeAutoTrackClaim } from "../lib/autoTrackClaimService";
 import {
   buildNetSecondServerClaims,
-  buildWallClockServerClaims,
 } from "../lib/autoTrackServerTicks";
+import { buildServerWallClockPlans, fitServerWallClockPlans } from "../lib/serverWallClockPlans";
 import { parseOperationalIntent } from "../lib/operationalIntents";
 import {
   reconcileOperationalIntentInTransaction,
@@ -2837,18 +2842,47 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
     res.status(400).json({ error: "A valid nowMs is required" });
     return;
   }
+  const startOffsetMs = req.body?.startOffsetMs === undefined
+    ? 0
+    : Number(req.body.startOffsetMs);
+  if (
+    !Number.isSafeInteger(startOffsetMs)
+    || startOffsetMs < 0
+    || startOffsetMs > 15 * 60_000
+    || (startOffsetMs > 0 && req.body?.rearm !== true)
+  ) {
+    res.status(400).json({ error: "A valid E2E run start offset is required" });
+    return;
+  }
   const scope = currentScope();
   const date = clientToday(req);
   if (req.body?.rearm === true) {
-    await db.transaction(async (tx) => {
+    const rearmed = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(dailySyncTable).where(and(
         eq(dailySyncTable.scope, scope),
         eq(dailySyncTable.date, date),
       )).for("update");
-      if (!locked) return;
+      if (!locked) return false;
       const data = locked.data as Record<string, any>;
-      const run = data.dayState?.runs?.[data.dayState?.currentIndex ?? 0];
-      if (!run?.id || !run.startedAt || run.pausedAt || run.endedAt) return;
+      const runs = Array.isArray(data.dayState?.runs) ? data.dayState.runs : [];
+      const currentIndex = Number.isSafeInteger(data.dayState?.currentIndex)
+        ? data.dayState.currentIndex
+        : 0;
+      const run = runs[currentIndex];
+      if (!run?.id || !run.startedAt || run.pausedAt || run.endedAt) return false;
+      const updatedRuns = runs.slice();
+      if (startOffsetMs > 0) {
+        const adjustedStartedAt = Number(run.startedAt) - startOffsetMs;
+        if (!Number.isSafeInteger(adjustedStartedAt) || adjustedStartedAt <= 0) return false;
+        updatedRuns[currentIndex] = {
+          ...run,
+          startedAt: adjustedStartedAt,
+          metaUpdatedAt: Math.max(
+            Date.now(),
+            (Number(run.metaUpdatedAt) || 0) + 1,
+          ),
+        };
+      }
       const serverState = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
         ? data.autoTrackServerState as Record<string, any>
         : {};
@@ -2857,6 +2891,9 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       await tx.update(dailySyncTable).set({
         data: {
           ...data,
+          ...(startOffsetMs > 0
+            ? { dayState: { ...data.dayState, runs: updatedRuns } }
+            : {}),
           autoTrackServerState: {
             ...serverState,
             version: 1,
@@ -2868,7 +2905,12 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
         eq(dailySyncTable.scope, scope),
         eq(dailySyncTable.date, date),
       ));
+      return true;
     });
+    if (startOffsetMs > 0 && !rearmed) {
+      res.status(409).json({ error: "An active run is required for the E2E start offset" });
+      return;
+    }
   }
   const summary = req.body?.skipAutoTrack === true
     ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
@@ -3356,13 +3398,15 @@ export async function runAutoTrackServerTicks(opts: {
         const [locked] = await tx.select().from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope))).for("update");
         const stored = locked?.data ?? emptySyncData(row.date);
-        const wall = buildWallClockServerClaims(stored, nowMs, claimIdNamespace);
         const netClaims = buildNetSecondServerClaims(stored, nowMs, claimIdNamespace);
         const remainingBudget = maxClaims - builtClaims;
         // Never persist an arm-state that has advanced past a claim omitted by
         // this pass's global budget. A later pass must see that due event.
-        const wallFitsBudget = !wall || wall.claims.length <= Math.max(0, remainingBudget - netClaims.length);
-        const rawClaims = [...netClaims, ...(wallFitsBudget ? (wall?.claims ?? []) : [])]
+        const walls = fitServerWallClockPlans(
+          buildServerWallClockPlans(stored, nowMs, claimIdNamespace),
+          remainingBudget - netClaims.length,
+        );
+        const rawClaims = [...netClaims, ...walls.flatMap((wall) => wall.claims)]
           .slice(0, remainingBudget);
         let data = stored as Record<string, unknown>;
         let acceptedHere = 0;
@@ -3454,7 +3498,11 @@ export async function runAutoTrackServerTicks(opts: {
               });
             }
             acceptedNet.push(claim);
-          } else if (claim.channel === "sauce-barrel" || claim.channel === "sauce-stock") {
+          } else if (
+            /^app[1-4]-stock$/.test(claim.channel)
+            || claim.channel === "sauce-barrel"
+            || claim.channel === "sauce-stock"
+          ) {
             acceptedNet.push(claim);
           }
           acceptedHere++;
@@ -3462,33 +3510,25 @@ export async function runAutoTrackServerTicks(opts: {
         // A no-event bootstrap arm is safe to persist. Eventful arm-state is
         // committed only after every wall event in that state was accepted;
         // stale/rejected/truncated events remain rearmed for the next beat.
-        const allWallAccepted = !!wall && wallFitsBudget
-          && wall.claims.every((claim) => {
-            const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
-            return state?.generation === claim.generation
-              && state?.sequence === claim.sequence
-              && state?.acceptedEventId === claim.eventId;
-          });
-        if (wall && (wall.claims.length === 0 || allWallAccepted)) {
-          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
-            ? data.autoTrackServerState as Record<string, unknown> : {};
-          const book = previous.wallClockBookkeeping && typeof previous.wallClockBookkeeping === "object"
-            ? previous.wallClockBookkeeping as Record<string, unknown> : {};
-          data = { ...data, autoTrackServerState: { ...previous, version: 1, wallClockBookkeeping: { ...book, [wall.runId]: wall.bookkeeping } } };
+        for (const wall of walls) {
+          const allWallAccepted = wall.claims.every((claim) => {
+              const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
+              return state?.generation === claim.generation
+                && state?.sequence === claim.sequence
+                && state?.acceptedEventId === claim.eventId;
+            });
+          if (wall.claims.length === 0 || allWallAccepted) {
+            const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+              ? data.autoTrackServerState as Record<string, unknown> : {};
+            const book = previous.wallClockBookkeeping && typeof previous.wallClockBookkeeping === "object"
+              ? previous.wallClockBookkeeping as Record<string, unknown> : {};
+            data = { ...data, autoTrackServerState: { ...previous, version: 1, wallClockBookkeeping: { ...book, [wall.runId]: wall.bookkeeping } } };
+          }
         }
         if (acceptedNet.length) {
-          const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
-            ? data.autoTrackServerState as Record<string, any> : {};
-          const ownership = { ...(previous.netOwnership ?? {}) };
           for (const claim of acceptedNet) {
-            ownership[claim.runId] = {
-              ...(ownership[claim.runId] ?? {}),
-              [claim.channel]: {
-                generation: claim.generation, sequence: claim.sequence, updatedAt: nowMs,
-              },
-            };
+            data = attachServerOwnedAutoTrackClaim(data, claim, nowMs);
           }
-          data = { ...data, autoTrackServerState: { ...previous, version: 1, netOwnership: ownership } };
         }
         if (locked) await tx.update(dailySyncTable).set({
           data: data as any,

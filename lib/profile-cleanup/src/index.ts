@@ -162,6 +162,18 @@ export function profileHasRecipeData(p: Record<string, unknown> | null | undefin
 }
 
 /**
+ * A valid saved line-type choice is an explicit profile default, not recipe
+ * data. It must keep a selected profile from being pruned as a blank duplicate,
+ * while dough recipes and other defaults remain excluded from the recipe-data
+ * predicate so legacy placeholder cleanup still works.
+ */
+export function profileHasSavedModeDefault(
+  p: Record<string, unknown> | null | undefined,
+): boolean {
+  return p?._subTab === "dough" || p?._subTab === "crusts";
+}
+
+/**
  * Decide, from the CURRENT profiles, which cleanup actions are safe to take.
  * `getProfile(key)` returns the raw stored profile object (WITHOUT any default
  * overlay) or null when nothing is stored for that key.
@@ -178,7 +190,8 @@ export function planProfileCleanup(
 ): { deleteKeys: string[]; rebuildKeys: string[] } {
   const deleteKeys: string[] = [];
   for (const [emptyKey, twinKey] of PROFILE_DELETE_PAIRS) {
-    if (profileHasRecipeData(getProfile(emptyKey))) continue;
+    const emptyProfile = getProfile(emptyKey);
+    if (profileHasRecipeData(emptyProfile) || profileHasSavedModeDefault(emptyProfile)) continue;
     if (!profileHasRecipeData(getProfile(twinKey))) continue;
     deleteKeys.push(emptyKey);
   }

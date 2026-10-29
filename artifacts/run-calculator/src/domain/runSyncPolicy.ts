@@ -38,6 +38,19 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
+/**
+ * Form watchers may materialize optional top-level fields as `undefined`,
+ * while JSON-backed saved values omit them. Treat those representations as
+ * equal, but keep deep value and array-order comparisons for actual edits.
+ */
+export function hasUnsavedFormValueChanges(
+  current: Record<string, unknown>,
+  saved: Record<string, unknown>,
+): boolean {
+  const keys = new Set([...Object.keys(current), ...Object.keys(saved)]);
+  return [...keys].some((key) => !deepEqual(current[key], saved[key]));
+}
+
 export function freshDayState(): DayState {
   return {
     runs: [{ id: genId(), brand: "", flavor: "", seeded: true }],
@@ -70,6 +83,18 @@ export function isBlankRemovableRun(run: RunMeta): boolean {
 export function isPristineSeedRun(run: RunMeta): boolean {
   return !!run.seeded && isBlankRemovableRun(run);
 }
+
+export function shouldKeepLocalSeedPlaceholder(args: {
+  run: RunMeta;
+  remoteRunCount: number;
+  isCurrentRun: boolean;
+  hasRecentLocalEdit: boolean;
+  hasDirtyForm: boolean;
+}): boolean {
+  if (!isPristineSeedRun(args.run) || args.remoteRunCount === 0) return true;
+  return args.isCurrentRun && (args.hasRecentLocalEdit || args.hasDirtyForm);
+}
+
 export function shouldAtomicallyAdoptFirstSnapshot(args: {
   initialSnapshot?: boolean; localRuns: RunMeta[]; hasLocalUserEdit?: boolean;
 }): boolean {
@@ -208,7 +233,9 @@ export function serverOwnedApp1BatchProgress(
   payload: Pick<SyncPayload, "runValues" | "runValuesUpdatedAt" | "autoTrackCoordination" | "autoTrackServerState">,
   runId: string,
   localValues: FormValues,
-): Partial<Pick<FormValues, "app1BatchesMade" | "app1BatchCorrectionGeneration">> | null {
+): Partial<Pick<FormValues,
+  "app1BatchesMade" | "app1BatchCorrectionGeneration" | "app1StockLbs"
+>> | null {
   const remoteValues = payload.runValues[runId];
   const remoteStamp = Number(payload.runValuesUpdatedAt?.[runId]);
   const coordination = payload.autoTrackCoordination?.runs?.[runId]?.["app1-batch"];
@@ -247,12 +274,38 @@ export function serverOwnedApp1BatchProgress(
     || remoteCount <= localCount
   ) return null;
 
-  return {
+  const progress: Partial<Pick<FormValues,
+    "app1BatchesMade" | "app1BatchCorrectionGeneration" | "app1StockLbs"
+  >> = {
     app1BatchesMade: remoteCount,
     ...(remoteGeneration > localGeneration
       ? { app1BatchCorrectionGeneration: remoteGeneration }
       : {}),
   };
+  // An accepted App 1 batch claim also creates on-line stock. Merge that
+  // increase only under the same server ownership proof and only when no
+  // newer manual stock correction is present on this device.
+  const remoteStock = Number(remoteValues.app1StockLbs);
+  const localStock = Number(localValues.app1StockLbs);
+  const remoteStockGeneration = Number(remoteValues.app1StockCorrectionGeneration);
+  const localStockGeneration = Number(localValues.app1StockCorrectionGeneration);
+  const remoteStockCapacity = computeApplicatorStockCapacityLbs(
+    remoteValues as unknown as Record<string, unknown>,
+    "app1",
+  );
+  if (
+    remoteValues.applicatorStockInitialized === true
+    && Number.isFinite(remoteStock)
+    && remoteStock >= localStock
+    && remoteStock <= remoteStockCapacity
+    && Number.isFinite(localStock)
+    && Number.isSafeInteger(remoteStockGeneration)
+    && Number.isSafeInteger(localStockGeneration)
+    && remoteStockGeneration === localStockGeneration
+  ) {
+    progress.app1StockLbs = remoteStock;
+  }
+  return progress;
 }
 
 /** Adopt only server-proven stock claims, or a newer operator correction generation. */

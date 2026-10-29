@@ -82,6 +82,7 @@ import {
   resolveForegroundStopIntent,
   type ForegroundStopIntent,
 } from "../foregroundLifecycleIntent";
+import { hasUnsavedFormValueChanges } from "../domain/runSyncPolicy";
 import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
@@ -323,16 +324,18 @@ import {
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
+  shouldKeepLocalSeedPlaceholder,
   shouldHealFormFromStored,
   shouldKeepLocalRunLifecycle,
   shouldResetFormOnRunSwitch,
 } from "../domain/runSyncPolicy";
+import { getStockClaimScheduleAfterRebase } from "../domain/autoTrackClaimSchedule";
 import {
   getEqualPackagingProgress,
   loadPackagingProgress,
   overlayPackagingProgress,
   overlayPackagingProgressForRun,
-  reconcilePackagingProgress,
+  reconcilePackagingProgressSnapshot,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
   savePackagingProgress,
@@ -1930,6 +1933,7 @@ export default function Home() {
   // callers — e.g. the mergeUniverse memo via collectMergeSurfaces() — run
   // before the sync-ref block and would hit a TDZ ReferenceError otherwise.
   const dayStateRef = useRef(dayState);
+  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
   // One identity adapter feeds autosave, packaging progress, rollover, and
@@ -1944,7 +1948,16 @@ export default function Home() {
     if (!section) return;
     const owner = currentRunIdRef.current ? `local:${currentRunIdRef.current}` : "local";
     if (!claimManualSectionLock(runId, section, owner)) return;
-    const allBaseline = (baselineOverride ?? loadRunValues(runId) ?? {}) as unknown as Record<string, number>;
+    const canonicalRunValues = run.endedAt
+      ? adoptedCanonicalSnapshotRef.current?.runValues?.[runId]
+      : undefined;
+    // Prior-run tunnel drain is local until an operator explicitly changes a
+    // count. Rebase that manual correction on the last accepted server values,
+    // not the locally advanced drain counters, so the server's section fence
+    // can distinguish this edit from a concurrent remote change.
+    const allBaseline = (
+      canonicalRunValues ?? baselineOverride ?? loadRunValues(runId) ?? {}
+    ) as unknown as Record<string, number>;
     const baseline = Object.fromEntries(
       MANUAL_SECTION_FIELDS[section].map((field) => [field, Number(allBaseline[field] ?? 0)]),
     );
@@ -3769,7 +3782,10 @@ export default function Home() {
   // queued candidate can finish its POST and fan its stale value into the
   // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
-    (entries: { name: string; lbs: number }[]): Promise<void> => {
+    (
+      entries: { name: string; lbs: number }[],
+      refreshBeforeWrite = false,
+    ): Promise<void> => {
       if (screenMode !== null) return Promise.resolve();
       const changes = normalizeBatchWeightChanges(entries);
       if (changes.length === 0) return batchWeightSaveChainRef.current;
@@ -3779,6 +3795,17 @@ export default function Home() {
       batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
         .then(async () => {
           const submitted = [...pendingBatchWeightChangesRef.current.values()];
+          if (refreshBeforeWrite) {
+            // Manager edits can follow another shared-data action that advanced
+            // the write epoch while this page's five-minute query stayed cached.
+            // Refresh immediately before the explicit write; the server fence
+            // still rejects any change that races after this canonical read.
+            const latest = await fetchIngredientBatchWeights();
+            cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+              ["ingredientBatchWeights"],
+              latest,
+            );
+          }
           const canonical = await saveIngredientBatchWeights(submitted);
           cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
             ["ingredientBatchWeights"],
@@ -4615,6 +4642,66 @@ export default function Home() {
   // ── Manage Lists dialog ────────────────────────────────────────────────────
   const mergeFormRef = useRef<HTMLDivElement | null>(null);
   const [showManageDialog, setShowManageDialog] = useState(false);
+  const manageDialogRef = useRef<HTMLDivElement | null>(null);
+  const manageDialogFocusables = useCallback((dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, [tabindex]',
+    )).filter((element) =>
+      element.tabIndex >= 0
+      && !element.matches(":disabled")
+      && !element.closest('[aria-hidden="true"], [inert], [hidden]')
+      && element.getClientRects().length > 0
+      && window.getComputedStyle(element).visibility !== "hidden",
+    ), []);
+  useEffect(() => {
+    if (!showManageDialog) return;
+    const dialog = manageDialogRef.current;
+    if (!dialog) return;
+    (manageDialogFocusables(dialog)[0] ?? dialog).focus();
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const active = document.activeElement;
+      const activeDialog = active instanceof Element
+        ? active.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
+        : null;
+      // A nested modal owns its own keyboard focus while it is open.
+      if (activeDialog && activeDialog !== dialog) return;
+      const focusables = manageDialogFocusables(dialog);
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const keepFocusInside = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || dialog.contains(target)) return;
+      const targetDialog = target.closest<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      const targetPopup = target.closest(
+        '[role="menu"], [role="listbox"], [role="tree"], [role="grid"], [data-radix-popper-content-wrapper]',
+      );
+      if ((targetDialog && targetDialog !== dialog) || targetPopup) return;
+      (manageDialogFocusables(dialog)[0] ?? dialog).focus();
+    };
+    document.addEventListener("keydown", trapTab, true);
+    document.addEventListener("focusin", keepFocusInside, true);
+    return () => {
+      document.removeEventListener("keydown", trapTab, true);
+      document.removeEventListener("focusin", keepFocusInside, true);
+    };
+  }, [manageDialogFocusables, showManageDialog]);
   const [manageCategory, setManageCategory] = useState("brands");
   const [manageBrandFilter, setManageBrandFilter] = useState("");
   const [manageInput, setManageInput] = useState("");
@@ -6508,6 +6595,8 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  // Automatic blank placeholders are device-local, not shared planned runs.
+  const todayPlannedRunCount = dayState.runs.filter((run) => !isPristineSeedRun(run)).length;
   const {
     showImportDialog, setShowImportDialog, importResult, setImportResult, importInputRef, scheduleImportInputRef,
     showSpecImport, setShowSpecImport, specImportLoading, setSpecImportLoading, specImportApplying, setSpecImportApplying, specImportError, setSpecImportError, specImportPrepared, setSpecImportPrepared, specImportProgress, setSpecImportProgress, specImportInputRef,
@@ -7148,9 +7237,6 @@ export default function Home() {
   // can loop against the missing-row fallback and lifecycle commands can race
   // a row that does not exist yet.
   const completeSyncEstablishedRef = useRef(false);
-  // Exact server snapshot used as the base for peer partial frames. Never
-  // substitute the locally merged React state here.
-  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
@@ -7571,6 +7657,12 @@ export default function Home() {
           };
         })
       : claim.mutations;
+    const claimSchedule = getStockClaimScheduleAfterRebase({
+      channel: claim.channel,
+      dueAt: claim.dueAt,
+      nextDueAt: claim.nextDueAt,
+      mutations: rebasedMutations,
+    });
     const response = await fetch(
       `/api/sync/auto-track/claim?today=${encodeURIComponent(date)}&epoch=${epoch}`,
       {
@@ -7580,6 +7672,7 @@ export default function Home() {
           senderId: clientId.current,
           claim: {
             ...claim,
+            ...claimSchedule,
             baseUpdatedAt: currentBaseUpdatedAt,
             mutations: rebasedMutations,
             ...(claim.channel === "case"
@@ -7878,12 +7971,15 @@ export default function Home() {
       const localPackaging = loadPackagingProgress();
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
-      const packagingMerge = acceptRemoteDay
-        ? reconcilePackagingProgress(
-            {},
-            payload.packagingProgress,
-          )
-        : reconcilePackagingProgress(localPackaging, undefined);
+      // Within the same reset epoch, however, an omitted remote run is not a
+      // deletion: retain its newer local progress until the peer receives it.
+      const packagingMerge = reconcilePackagingProgressSnapshot({
+        local: localPackaging,
+        remote: payload.packagingProgress,
+        acceptRemoteDay,
+        resetBoundaryChanged:
+          atomicSeedSnapshot || remoteResetAt > localResetAt,
+      });
       if (acceptRemoteDay) savePackagingProgress(packagingMerge.merged);
       if (packagingMerge.rejectedRemoteIds.size > 0) rejectedStale = true;
       const packagingRunAtApplyStart =
@@ -8119,6 +8215,8 @@ export default function Home() {
                     ? canonicalOperationalRun(run, remote) : run;
                 });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
+                const hasRecentLocalEdit = Date.now() - lastLocalEditRef.current < 2000;
+                const hasDirtyForm = form.formState.isDirty;
                 const localOnly = prev.runs.filter(r => {
                   if (remoteIds.has(r.id)) return false;
                   // Drop our untouched auto-created placeholder run once the
@@ -8126,20 +8224,15 @@ export default function Home() {
                   // buildSyncPayload), and keeping it would leave a stray blank
                   // "Unnamed Run" appended to the adopted day on THIS device.
                   // Guards: never drop while the user might be mid-typing into
-                  // it (recent local edit, or the live form already holds
-                  // non-default values for it).
-                  if (
-                    remoteRuns.length > 0 &&
-                    isPristineSeedRun(r) &&
-                    !(
-                      r.id === currentLocalId &&
-                      (Date.now() - lastLocalEditRef.current < 2000 ||
-                        !deepEqual(form.getValues(), DEFAULT_VALUES))
-                    )
-                  ) {
-                    return false;
-                  }
-                  return true;
+                  // it (recent local edit or dirty form). Profile-loaded
+                  // defaults are not edits and must not retain this placeholder.
+                  return shouldKeepLocalSeedPlaceholder({
+                    run: r,
+                    remoteRunCount: remoteRuns.length,
+                    isCurrentRun: r.id === currentLocalId,
+                    hasRecentLocalEdit,
+                    hasDirtyForm,
+                  });
                 });
                 return [...mergedRemote, ...localOnly].filter(
                   r => !deletedRunSet.has(r.id.trim().toLowerCase()),
@@ -8380,14 +8473,18 @@ export default function Home() {
           }
         }
         if (currentId && payload.runValues[currentId]) {
+          const localApp1Values = form.getValues();
           const app1Progress = serverOwnedApp1BatchProgress(
             payload,
             currentId,
-            form.getValues(),
+            localApp1Values,
           );
           if (app1Progress) {
             for (const [field, value] of Object.entries(app1Progress)) {
-              const key = field as "app1BatchesMade" | "app1BatchCorrectionGeneration";
+              const key = field as
+                | "app1BatchesMade"
+                | "app1BatchCorrectionGeneration"
+                | "app1StockLbs";
               if (form.getValues(key) !== value) {
                 form.setValue(key, value, {
                   shouldDirty: false,
@@ -8516,9 +8613,7 @@ export default function Home() {
         if (!res.ok) return;
         const { epoch, rollover } = (await res.json()) as { epoch: number; rollover?: boolean };
         if (typeof epoch === "number" && epoch > getStoredResetEpoch()) {
-          const generation = synchronizationStateMachineRef.current.beginReset(epoch);
-          if ((rollover ? applyRolloverEpoch(epoch) : applyResetWipe(epoch))) window.location.reload();
-          else synchronizationStateMachineRef.current.completeReset(generation);
+          adoptClientResetEpoch(epoch, rollover === true);
         }
       } catch {}
     })();
@@ -8929,12 +9024,7 @@ export default function Home() {
         if ((msg.reset || msg.rollover) && typeof msg.resetEpoch === "number") {
           recordSyncEvent("reset", "Server reset received; local data will reload");
           if (initialResetRequiresReload(msg.resetEpoch, getStoredResetEpoch())) {
-            const generation = synchronizationStateMachineRef.current.beginReset(msg.resetEpoch);
-            const adopted = msg.rollover
-              ? applyRolloverEpoch(msg.resetEpoch)
-              : applyResetWipe(msg.resetEpoch);
-            if (adopted) window.location.reload();
-            else synchronizationStateMachineRef.current.completeReset(generation);
+            adoptClientResetEpoch(msg.resetEpoch, msg.rollover === true);
             return false;
           }
           // The server repeats its current reset marker on reconnect. Once this
@@ -9107,6 +9197,7 @@ export default function Home() {
       return (async () => {
         let reconciled = false;
         let permanentHttpFailure = false;
+        let failurePhase = "request";
         try {
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
@@ -9119,6 +9210,7 @@ export default function Home() {
             { ...syncTodayRequest.init, signal },
             10_000,
             async (res, requestSignal) => {
+          failurePhase = "response-validation";
           permanentHttpFailure = !res.ok && !isRetryableRecoveryStatus(res.status);
           if (permanentHttpFailure) classify("non-retryable-http");
           return consumeForegroundRecoveryResponse({
@@ -9126,20 +9218,13 @@ export default function Home() {
             expectedDate: clientDate,
             requestedSnapshotId: snapshot,
             adoptReset: ({ resetEpoch, rollover }) => {
+              failurePhase = "reset-adoption";
               if (resetEpoch <= getStoredResetEpoch()) return false;
-              const generation = synchronizationStateMachineRef.current.beginReset(resetEpoch);
-              const adopted = rollover
-                ? applyRolloverEpoch(resetEpoch)
-                : applyResetWipe(resetEpoch);
-              if (adopted) {
-                window.location.reload();
-                return true;
-              }
-              synchronizationStateMachineRef.current.completeReset(generation);
-              return false;
+              return adoptClientResetEpoch(resetEpoch, rollover);
             },
             isCurrent: () => isCurrentRecovery() && !requestSignal.aborted,
             adoptUnchanged: (body) => {
+              failurePhase = "unchanged-response-adoption";
               if (typeof body.canonicalRevision === "number" && body.canonicalRevision < currentOperationalRevision()) {
                 throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
               }
@@ -9154,6 +9239,7 @@ export default function Home() {
               pushAcknowledgedRef.current = true;
             },
             adoptCanonical: (payload, responseSnapshot) => {
+              failurePhase = "canonical-response-adoption";
               if (typeof payload.canonicalRevision === "number" && payload.canonicalRevision < currentOperationalRevision()) {
                 throw new Error("A newer operational revision is confirmed; retrying shared-state recovery");
               }
@@ -9185,6 +9271,7 @@ export default function Home() {
           // offline work here. The normal stamped push path will seed it.
           if (!isCurrentRecovery()) return false;
           if (payload) {
+            failurePhase = "canonical-state-adoption";
             // Preserve ordinary screen-off catch-up when the live row is
             // unchanged. Re-baselining every successful wake would erase the
             // legitimate production delta accumulated while the display slept.
@@ -9202,6 +9289,7 @@ export default function Home() {
             coordinateForegroundAdoption({
               payload,
               prepareLifecycle: () => {
+                failurePhase = "lifecycle-prepare";
                 const lifecycleAdoption = acceptsRemoteLifecycle
                   ? adoptStrictlyNewerRemoteLifecycles(
                       durableLocalDay,
@@ -9214,6 +9302,7 @@ export default function Home() {
                 };
               },
               persistLifecycle: (adoptedDayState) => {
+                failurePhase = "lifecycle-persist";
                 setAutoTrackWakeRebaseReason("lifecycle-replacement");
                 saveDayState(adoptedDayState, { stampMeta: false });
                 dayStateRef.current = adoptedDayState;
@@ -9221,6 +9310,7 @@ export default function Home() {
                 lastSyncSigRef.current = "";
               },
               applyGeneralMerge: (canonicalPayload) => {
+                failurePhase = "sync-merge";
                 applySyncCallbackRef.current(canonicalPayload, {
                   allowForegroundCanonicalFormReset: true,
                 });
@@ -9266,7 +9356,7 @@ export default function Home() {
            recordSyncEvent(
              "failure",
              "Foreground recovery failed; local work and lifecycle writes remain fenced",
-             "foreground-recovery",
+              `foreground-recovery:${failurePhase}`,
              foregroundStopIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
@@ -9560,13 +9650,52 @@ export default function Home() {
   // its response through this handler. A stale rejection means this device
   // hasn't honoured the latest data reset: adopt it (wipe + reload) so we stop
   // pushing pre-reset data. Returns true when the write was rejected as stale.
+  function cancelPendingSyncWritesForReset(): void {
+    // A callback already queued for animation-frame/timer execution could run
+    // after applyResetWipe records the new epoch and then publish the stale
+    // local day with that new epoch. Raise the same barrier used by wake
+    // reconciliation before changing the stored epoch.
+    foregroundSyncBarrierRef.current = true;
+    foregroundPushPendingRef.current = false;
+    syncApplyPushPendingRef.current = false;
+    syncPushGenerationRef.current += 1;
+    if (syncRetryTimerRef.current) {
+      clearTimeout(syncRetryTimerRef.current);
+      syncRetryTimerRef.current = null;
+    }
+    setSyncRetryWaiting(false);
+    syncPushTimingRef.current = null;
+    for (const controller of syncPushAbortControllersRef.current) controller.abort();
+    syncPushAbortControllersRef.current.clear();
+    if (pushTimerRef.current) {
+      clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = null;
+    }
+    syncPushQueueRef.current.reset();
+  }
+
+  function adoptClientResetEpoch(epoch: number, rollover = false): boolean {
+    const generation = synchronizationStateMachineRef.current.beginReset(epoch);
+    // A wake recovery that began before this reset must not release the
+    // barrier or replay its queued write after the new epoch is stored.
+    foregroundRecoveryOwnerRef.current = generation;
+    cancelPendingSyncWritesForReset();
+    const adopted = rollover
+      ? applyRolloverEpoch(epoch)
+      : applyResetWipe(epoch);
+    if (adopted) {
+      window.location.reload();
+      return true;
+    }
+    synchronizationStateMachineRef.current.completeReset(generation);
+    return false;
+  }
+
   function handleStaleSyncWrite(body: unknown): boolean {
     const b = body as { stale?: boolean; epoch?: number; rollover?: boolean } | null;
     if (!b?.stale) return false;
     if (typeof b.epoch === "number" && b.epoch > getStoredResetEpoch()) {
-      const generation = synchronizationStateMachineRef.current.beginReset(b.epoch);
-      if ((b.rollover ? applyRolloverEpoch(b.epoch) : applyResetWipe(b.epoch))) window.location.reload();
-      else synchronizationStateMachineRef.current.completeReset(generation);
+      adoptClientResetEpoch(b.epoch, b.rollover === true);
     }
     return true;
   }
@@ -11094,6 +11223,10 @@ export default function Home() {
     initiatingRunId?: string,
   ) {
     if (screenMode !== null) return;
+    const backgroundGenerationIsCurrent = () =>
+      backgroundGeneration === undefined
+      || backgroundGeneration === sharedRecipeRefreshGenerationRef.current;
+    if (!backgroundGenerationIsCurrent()) return;
     const refreshRunId =
       initiatingRunId ?? dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     const onNamedProfileSaved = (brand: string, flavor: string) => {
@@ -11141,32 +11274,48 @@ export default function Home() {
         ...(variants.length > 0 ? { doughballVariants: variants } : {}),
       });
     }
+    const refreshLinkedProfiles = async (
+      patches: Parameters<typeof refreshNamedRecipeProfilesAndPropagate>[1],
+    ) => {
+      const acknowledged = patches.filter((patch) =>
+        acknowledgedNames?.has(normalizeSelectableName(patch.name).toLowerCase()),
+      );
+      const passive = patches.filter((patch) =>
+        !acknowledgedNames?.has(normalizeSelectableName(patch.name).toLowerCase()),
+      );
+      const touched = new Map<string, { brand: string; flavor: string }>();
+      for (const [selected, options] of [
+        [acknowledged, undefined],
+        [passive, { emptyRowsOnly: true }],
+      ] as const) {
+        if (selected.length === 0) continue;
+        const refreshed = await refreshNamedRecipeProfilesAndPropagate(
+          kind,
+          selected,
+          options,
+          onNamedProfileSaved,
+        );
+        for (const profile of refreshed) {
+          touched.set(
+            `${profile.brand.trim().toLowerCase()}__${profile.flavor.trim().toLowerCase()}`,
+            profile,
+          );
+        }
+      }
+      return [...touched.values()];
+    };
     const prev = namedPoolSnapRef.current[kind];
     namedPoolSnapRef.current[kind] = snap;
     if (prev === null) {
-      // First load: run a one-time full heal so profiles whose rows are wrong
-      // or empty (e.g. from a pre-fix recipe merge) are corrected immediately.
-      // After the marker is set on this device, subsequent page loads only fill
-      // profiles with empty rows (the fast ongoing-safe path).
+      // A pool snapshot observed during boot or from another browser is
+      // passive evidence. It may backfill missing rows, but populated profile
+      // rows remain authoritative; only an acknowledged manager save may
+      // replace them. This prevents an older peer bootstrap from undoing a
+      // newer recipe edit.
       const patches = [...byKey.values()].filter((p) => p.rows.length > 0);
       if (patches.length > 0) {
-        const markerKey = `run-calc-${kind}-row-heal-v1`;
-        if (!localStorage.getItem(markerKey)) {
-          await refreshNamedRecipeProfilesAndPropagate(
-            kind,
-            patches,
-            undefined,
-            onNamedProfileSaved,
-          );
-          localStorage.setItem(markerKey, "1");
-        } else {
-          await refreshNamedRecipeProfilesAndPropagate(
-            kind,
-            patches,
-            { emptyRowsOnly: true },
-            onNamedProfileSaved,
-          );
-        }
+        await refreshLinkedProfiles(patches);
+        if (!backgroundGenerationIsCurrent()) return;
       }
       return;
     }
@@ -11184,13 +11333,9 @@ export default function Home() {
     const touched = await orchestrateSharedRecipeRefresh({
       getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
       initiatingRunId: refreshRunId,
-        refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
-        kind,
-        changed,
-        undefined,
-        onNamedProfileSaved,
-      ),
+      refreshProfiles: () => refreshLinkedProfiles(changed),
       refreshOpenForm: async () => {
+        if (!backgroundGenerationIsCurrent()) return;
         const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
         if (!liveRun || liveRun.id !== refreshRunId) return;
         const persistedRun = liveRun
@@ -11232,12 +11377,14 @@ export default function Home() {
           formUpdated = true;
         }
         if (Object.keys(openRunUpdates).length > 0) {
+          if (!backgroundGenerationIsCurrent()) return;
           await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
             expectedRunId: refreshRunId,
           });
         }
       },
     });
+    if (!backgroundGenerationIsCurrent()) return;
     for (const recipe of changed) {
       await propagateRecipeRowsToPendingRuns(
         recipe.name,
@@ -11292,25 +11439,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList, screenMode]);
 
-  // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
-  // healing. Cheese and mix pools don't have a diff-and-update watcher like
-  // dough/sauce, so profiles whose rows are wrong or empty from a past merge
-  // would never self-correct without this. Strategy mirrors applyNamedPoolChange:
-  //   • First load after the fix: full heal (any stale rows corrected), set marker.
-  //   • Subsequent loads: empty-rows-only pass so a profile with no rows still
-  //     gets filled even after the marker is set.
-  // Heal saved profiles + the open form so mix recipe rows show the imported
-  // oz/pizza amounts from the premix sheet rather than all-zero placeholders.
+  // Passive cheese/mix pool observations only fill empty or all-zero linked
+  // profile rows. A pool snapshot can lag an acknowledged profile edit, so it
+  // must not replace populated saved rows. Explicit manager saves/imports keep
+  // their authoritative full-replacement path.
   //
-  // Two-tier strategy:
-  //   • First-time full heal (marker not yet set): runs once when at least one
-  //     pool has data, overwrites ALL rows so stale pre-import zeros are fixed.
-  //     Protected by cheeseMixFullHealDoneRef so it fires exactly once per mount.
-  //   • Ongoing emptyRowsOnly heal (marker already set): runs every time the
-  //     mixes/cheese pool changes (e.g. after a fresh premix import while the
-  //     app is open) WITHOUT the ref guard, so newly imported amounts are
-  //     picked up immediately without a page reload.
-  const cheeseMixFullHealDoneRef = useRef(false);
+  // The initial pass waits for pool data and runs once per mount; later pool
+  // changes repeat the same empty-only repair so new profiles can be filled
+  // without overwriting existing recipe data.
+  const cheeseMixInitialPassDoneRef = useRef(false);
   const acknowledgedCheeseSaveFingerprintRef = useRef<string | null>(null);
   const acknowledgedMixSaveFingerprintRef = useRef<string | null>(null);
   async function applyAcknowledgedMixSave(
@@ -11446,40 +11583,40 @@ export default function Home() {
         }
       };
       if (markerSet) {
-        // Ongoing pass — recipe edits are authoritative for linked pending work,
-        // not just for profiles whose rows happened to be empty.
+        // Passive pool observations are not authoritative over populated
+        // profile rows; fill only missing/all-zero slots.
         for (const r of cheeseRecipesList) {
           const name = normalizeSelectableName(r.name);
           if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         for (const m of mixes) {
           const name = normalizeSelectableName(m.name);
           if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
       } else {
-        // First-time full heal — wait for pool data, run once per mount.
+        // First passive pass — wait for pool data, run once per mount.
         if (cheeseRecipesList.length === 0 && mixes.length === 0) return;
-        if (cheeseMixFullHealDoneRef.current) return;
-        cheeseMixFullHealDoneRef.current = true;
+        if (cheeseMixInitialPassDoneRef.current) return;
+        cheeseMixInitialPassDoneRef.current = true;
         for (const r of cheeseRecipesList) {
           const name = normalizeSelectableName(r.name);
           if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         for (const m of mixes) {
           const name = normalizeSelectableName(m.name);
           if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows, { emptyRowsOnly: true }));
         }
         localStorage.setItem(markerKey, "1");
       }
@@ -15376,8 +15513,12 @@ export default function Home() {
     : "pending";
 
   const hasActiveRun = dayState.runs.some((run) => run.startedAt && !run.endedAt);
-  const hasUnsavedForm =
-    Boolean(currentRunId) && !deepEqual(v, loadRunValues(currentRunId));
+  const savedCurrentRunValues = currentRunId ? loadRunValues(currentRunId) : undefined;
+  const hasUnsavedForm = Boolean(currentRunId)
+    && hasUnsavedFormValueChanges(
+      v as unknown as Record<string, unknown>,
+      savedCurrentRunValues as unknown as Record<string, unknown> | undefined ?? {},
+    );
   // Keep every Home-owned modal/full-screen interaction in one named inventory.
   // Locally owned surfaces (for example Ingredient Detail inside Summary) use
   // useAutomaticUpdateReloadBlocker and are aggregated by the external store.
@@ -15454,7 +15595,6 @@ export default function Home() {
     hasPendingSync: syncPendingCount > 0 || !pushAcknowledgedRef.current,
     hasFailedSync: syncPushFailed || syncRetryWaiting,
   });
-
   useEffect(() => {
     reportAutomaticUpdateReloadSafety(automaticUpdateReloadSafe);
     return () => reportAutomaticUpdateReloadSafety(false);
@@ -16690,9 +16830,11 @@ export default function Home() {
             onClick={() => setShowManageDialog(false)}
           >
             <div
+              ref={manageDialogRef}
               role="dialog"
               aria-modal="true"
               aria-labelledby="manage-lists-dialog-title"
+              tabIndex={-1}
               className={`${HOME_DIALOG_CARD_CLASS} bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col`}
               onClick={e => e.stopPropagation()}
             >
@@ -17389,7 +17531,7 @@ export default function Home() {
                       items={weightItems}
                       learnedWeights={learnedBatchWeights}
                       onSave={(entries) => {
-                        queueBatchWeightChanges(entries);
+                        queueBatchWeightChanges(entries, true);
                       }}
                     />
                   );
@@ -19341,7 +19483,7 @@ export default function Home() {
                           <p className="text-sm font-semibold truncate">
                             Today — {new Date(todayStr() + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
                           </p>
-                          <p className="text-xs text-muted-foreground">{dayState.runs.length} run{dayState.runs.length !== 1 ? "s" : ""} on today's plan</p>
+                          <p className="text-xs text-muted-foreground">{todayPlannedRunCount} run{todayPlannedRunCount !== 1 ? "s" : ""} on today's plan</p>
                         </div>
                         <button
                           type="button"

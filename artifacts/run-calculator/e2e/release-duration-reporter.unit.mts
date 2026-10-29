@@ -189,7 +189,7 @@ assert.ok(
 );
 assert.equal(
   createHash("sha256").update(JSON.stringify(debugIdentities)).digest("hex"),
-  "4de725cd89e5874ca2be37d171ce284f3f260ada8847637dcb6e2c3b5fa2a3cf",
+  "a013ddeeb37d74006289eeb145f29cb78b17b5c3079b2df270d0988bc92161f7",
   "standalone Chromium project/file/title identities changed; review its own lane selections, not the default suite count",
 );
 

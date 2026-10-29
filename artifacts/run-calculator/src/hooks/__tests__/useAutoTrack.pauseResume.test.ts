@@ -138,6 +138,45 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     unmount();
   });
 
+  it("does not revive a timed hold from a delayed canonical adoption after expiry", () => {
+    const offset = 3_600_000;
+    const control = {
+      generation: "run-held:100",
+      pausedAt: T0 + offset,
+      resumeAt: T0 + offset + 60_000,
+      updatedAt: T0 + offset,
+    };
+    setDoughTimerControlOwner("live:timer-fixture");
+    adoptDoughTimerControls({ "run-held": control });
+    const { form } = makeFakeForm();
+    const base: Parameters<typeof useAutoTrack>[0] = {
+      runId: "run-held",
+      runGeneration: "100",
+      runStatus: "running",
+      nowTime: ms(T0),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: BASE_V,
+      form,
+      serverClockOffsetMs: offset,
+      authoritativeServerAutoTrack: true,
+    };
+    const { result, rerender } = renderHook(
+      (props) => useAutoTrack(props),
+      { initialProps: base },
+    );
+    expect(result.current.isDoughTimerPaused).toBe(true);
+
+    // The server's canonical timer control arrives after its deadline while
+    // the displayed projection clock is still slightly behind that deadline.
+    act(() => {
+      vi.setSystemTime(T0 + 61_000);
+      adoptDoughTimerControls({ "run-held": control });
+      rerender({ ...base, nowTime: ms(T0 + 59_000) });
+    });
+    expect(result.current.isDoughTimerPaused).toBe(false);
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // 1. traysOnLine does not jump on resume
   //

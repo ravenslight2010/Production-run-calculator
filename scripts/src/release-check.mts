@@ -2002,6 +2002,8 @@ const steps: ReleaseStep[] = [
     args: [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.smoke.config.ts",
+      "--output",
+      resolve(rootDir, releaseEvidenceDir, "browser-smoke/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2015,6 +2017,8 @@ const steps: ReleaseStep[] = [
     args: [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.calendar.config.ts",
+      "--output",
+      resolve(rootDir, releaseEvidenceDir, "browser-calendar/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2028,6 +2032,8 @@ const steps: ReleaseStep[] = [
     args: [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.a11y.config.ts",
+      "--output",
+      resolve(rootDir, releaseEvidenceDir, "browser-accessibility/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2041,6 +2047,8 @@ const steps: ReleaseStep[] = [
     args: [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.webkit.config.ts",
+      "--output",
+      resolve(rootDir, releaseEvidenceDir, "browser-webkit/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2063,6 +2071,8 @@ export const FULL_RESPONSIVE_WEBKIT_GATE_STEP: ReleaseStep = {
     "--playwright-config=playwright.compatibility.config.ts",
     "--project=phone-webkit",
     "--project=tablet-webkit",
+    "--output",
+    resolve(rootDir, releaseEvidenceDir, "browser-compatibility/test-results"),
   ],
   env: {
     ...RELEASE_BROWSER_ENV,
@@ -2083,6 +2093,8 @@ if (fullRun) {
     args: [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.config.ts",
+      "--output",
+      resolve(rootDir, releaseEvidenceDir, "browser-full/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,

@@ -320,17 +320,23 @@ async function makeItem(key: string): Promise<number> {
 
 const validImage = "a".repeat(64);
 
-// Each gated route, tagged with the single capability it requires plus a body
-// and okStatus that would succeed once past the guard. The test derives expected
-// allow/deny for every role purely from whether the role holds `capability`.
+// Each gated route is tagged with its required capability or capabilities, plus
+// a body and okStatus that would succeed once past the guard. The test derives
+// expected allow/deny from whether a role holds every required capability.
 type GatedRoute = {
   name: string;
-  capability: Capability;
+  capability: Capability | readonly Capability[];
   method: string;
   path: (ctx: { itemId: number }) => string;
   body?: unknown;
   okStatus: number;
 };
+
+function routeCapabilities(
+  capability: Capability | readonly Capability[],
+): readonly Capability[] {
+  return typeof capability === "string" ? [capability] : capability;
+}
 
 const ROUTES: GatedRoute[] = [
   // --- manage-inventory ---
@@ -742,6 +748,14 @@ const ROUTES: GatedRoute[] = [
     okStatus: 400,
   },
   {
+    name: "POST /freezer-surplus/confirmations/:runId/corrections",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/freezer-surplus/confirmations/test-run/corrections",
+    body: {},
+    okStatus: 400,
+  },
+  {
     name: "POST /die-line-defaults",
     capability: "manage-inventory",
     method: "POST",
@@ -772,6 +786,30 @@ const ROUTES: GatedRoute[] = [
     path: () => "/api/factory-data",
     body: { key: "capability-coverage", value: true },
     okStatus: 200,
+  },
+  {
+    name: "POST /master-data-operations/:operationId/preview",
+    capability: ["manage-factory-settings", "manage-inventory", "manage-profiles"],
+    method: "POST",
+    path: () => "/api/master-data-operations/invalid/preview",
+    body: {},
+    okStatus: 400,
+  },
+  {
+    name: "POST /master-data-operations/:operationId/apply",
+    capability: ["manage-factory-settings", "manage-inventory", "manage-profiles"],
+    method: "POST",
+    path: () => "/api/master-data-operations/invalid/apply",
+    body: {},
+    okStatus: 400,
+  },
+  {
+    name: "POST /master-data-operations/:operationId/undo",
+    capability: ["manage-factory-settings", "manage-inventory", "manage-profiles"],
+    method: "POST",
+    path: () => "/api/master-data-operations/invalid/undo",
+    body: {},
+    okStatus: 400,
   },
   {
     name: "GET /sync/conflict-stats",
@@ -949,6 +987,16 @@ type ExpressRouteLayer = {
   };
 };
 
+// This handler revalidates a persisted session inside its database transaction.
+// Its manager allow/staff deny behavior is covered by the dedicated session-backed
+// masterDataOperations.integration.test.ts, not this legacy-token role matrix.
+const SESSION_BACKED_AUTHORIZATION_COVERAGE: Array<{
+  name: string;
+  capability: Capability;
+}> = [
+  { name: "GET /master-data-operations", capability: "manage-factory-settings" },
+];
+
 function declaredAuthorizationRoutes(
   ownedRouters: readonly {
     name: string;
@@ -1008,7 +1056,15 @@ describe("capability-based access control", () => {
   it("keeps owned operations routes in the direct authorization inventory", async () => {
     const { directAuthorizationCoverageRouters } = await import("./index");
     const declared = declaredAuthorizationRoutes(directAuthorizationCoverageRouters);
-    const covered = ROUTES.map(({ name, capability }) => ({ name, capability }));
+    const covered = [
+      ...ROUTES.flatMap(({ name, capability }) =>
+        routeCapabilities(capability).map((requiredCapability) => ({
+          name,
+          capability: requiredCapability,
+        })),
+      ),
+      ...SESSION_BACKED_AUTHORIZATION_COVERAGE,
+    ];
 
     for (const route of declared.capabilityRoutes) {
       expect(covered, `${route.name} direct capability coverage`).toContainEqual(route);
@@ -1047,6 +1103,15 @@ describe("capability-based access control", () => {
     expect(mutationAuthorizationInventory).toContainEqual({
       method: "POST",
       path: "/freezer-surplus/confirmations",
+      ownership: "capability-gated",
+      scope: "scoped",
+      sandbox: "allowed",
+      capabilities: ["manage-inventory"],
+      capabilityMatch: "all",
+    });
+    expect(mutationAuthorizationInventory).toContainEqual({
+      method: "POST",
+      path: "/freezer-surplus/confirmations/:runId/corrections",
       ownership: "capability-gated",
       scope: "scoped",
       sandbox: "allowed",
@@ -1229,15 +1294,16 @@ describe("capability-based access control", () => {
   });
 
   // Route guards and role-to-capability resolution are orthogonal: every route
-  // is exercised with one role that has its required capability and one that
+  // is exercised with one role that has all required capabilities and one that
   // does not, while the test above verifies the complete seeded role map.
   for (const route of ROUTES) {
-    it(`enforces the capability required by ${route.name}`, async () => {
+    it(`enforces the capability requirements for ${route.name}`, async () => {
       const itemId = await makeItem("ingredient:Target:lbs");
+      const requiredCapabilities = routeCapabilities(route.capability);
       const roleHasRequiredCapability = ([, caps]: [string, Capability[]]) =>
         route.name === "GET /import-history"
           ? caps.includes("manage-profiles") || caps.includes("manage-inventory")
-          : caps.includes(route.capability);
+          : requiredCapabilities.every((capability) => caps.includes(capability));
       const allowedRole =
         Object.entries(ROLE_CAPS).find(
           ([roleName, caps]) =>
@@ -1248,7 +1314,7 @@ describe("capability-based access control", () => {
       const deniedRole = Object.entries(ROLE_CAPS).find(([, caps]) =>
         route.name === "GET /import-history"
           ? !caps.includes("manage-profiles") && !caps.includes("manage-inventory")
-          : !caps.includes(route.capability)
+          : !requiredCapabilities.every((capability) => caps.includes(capability))
       )?.[0];
       if (!allowedRole || !deniedRole) {
         throw new Error(`Missing allow/deny role fixture for ${route.name}`);
@@ -1551,7 +1617,13 @@ describe("POST /ingredients/merge endpoint behavior", () => {
     expect(second.status).toBe(200);
 
     const body = (await second.json()) as {
-      items: Array<{ id: string; name: string; categories: string[]; enabled: boolean }>;
+      items: Array<{
+        id: string;
+        name: string;
+        categories: string[];
+        enabled: boolean;
+        updatedAt: number;
+      }>;
     };
     expect(body.items.filter((item) => item.enabled && item.name.toLowerCase() === "mozzarella")).toEqual([
       {
@@ -1562,6 +1634,7 @@ describe("POST /ingredients/merge endpoint behavior", () => {
         enabled: true,
         allergens: [],
         allergensReviewed: false,
+        updatedAt: expect.any(Number),
       },
     ]);
   });
