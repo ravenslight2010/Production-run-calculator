@@ -11,6 +11,11 @@ const MAX_RESULTS_PER_CASE = 32;
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const RESULTS = new Set(["passed", "failed", "timedOut", "skipped", "interrupted"]);
 const OUTCOMES = new Set(["passed", "failed", "timedout", "interrupted"]);
+const LANES = new Set(["chromium-full", "webkit-smoke", "webkit-compatibility", "webkit-compatibility-debug"]);
+const safeLane = (lane) => {
+  if (!LANES.has(lane)) throw new Error("Invalid browser attempt lane.");
+  return lane;
+};
 const storage = (root) => resolve(root, ".local/browser-verification-attempts");
 const safeText = (value) => {
   if (typeof value !== "string" || value.length === 0 || value.length > 4_096)
@@ -66,6 +71,7 @@ const sameIdentity = (left, right) =>
 /** Create-only startup record: no loading, merging, or resuming prior passes. */
 export function startBrowserAttempt({
   root,
+  lane = "chromium-full",
   identity = captureReleaseIdentity(root),
   runnerBudgets = { timeoutMs: null, warningMs: null },
   now = Date.now,
@@ -79,6 +85,7 @@ export function startBrowserAttempt({
   const start = {
     schemaVersion: 1,
     attemptId,
+    lane: safeLane(lane),
     environment: "isolated-test",
     authority: "diagnostic-only; never release evidence or resumable passes",
     identity: pickIdentity(identity),
@@ -105,6 +112,7 @@ export function startBrowserAttempt({
 /** A startup manifest can be claimed by exactly one reporter, never resumed. */
 export function claimBrowserAttempt({
   root,
+  lane = "chromium-full",
   attemptId,
   identity,
   now = Date.now,
@@ -116,7 +124,8 @@ export function claimBrowserAttempt({
   try {
     state = JSON.parse(readFileSync(resolve(directory, "start.json"), "utf8"));
     if (state.schemaVersion !== 1 || state.attemptId !== attemptId ||
-        state.phase !== "startup" || !sameIdentity(state.identity, identity))
+        state.phase !== "startup" || (state.lane ?? "chromium-full") !== safeLane(lane) ||
+        !sameIdentity(state.identity, identity))
       throw new Error("Invalid browser attempt.");
     durableNew(resolve(directory, "reporter-claim"), "claimed\n");
   } catch {
@@ -150,6 +159,7 @@ export function claimBrowserAttempt({
         ids.add(entry.id);
         return {
           id: safeText(entry.id), identity: safeText(entry.identity),
+          ...(entry.projectName ? { projectName: safeText(entry.projectName) } : {}),
           timeoutMs: number(entry.timeoutMs), retries: number(entry.retries),
           status: "not-run", elapsedMs: 0, results: [],
         };
@@ -217,7 +227,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const identity = captureReleaseIdentity(root);
     if (process.env.RELEASE_REVISION && process.env.RELEASE_REVISION !== identity.revision)
       throw new Error("Stale revision.");
-    console.log(startBrowserAttempt({ root, identity }));
+    console.log(startBrowserAttempt({ root, identity, lane: process.argv[2] ?? "chromium-full" }));
   } catch {
     console.error("Browser attempt startup persistence failed; no browser run started.");
     process.exitCode = 1;

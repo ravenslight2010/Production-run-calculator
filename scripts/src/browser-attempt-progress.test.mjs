@@ -177,3 +177,23 @@ test("skipped/interrupted worker sentinels and retry histories retain exact meta
   assert.equal(f.read().reporterErrors, 1);
   assert.doesNotMatch(JSON.stringify(f.read()), /PRIVATE/);
 });
+
+test("WebKit lanes cannot claim Chromium or one another, including across verification revisions", (t) => {
+  const f = fixture(t);
+  for (const lane of ["webkit-smoke", "webkit-compatibility", "webkit-compatibility-debug"]) {
+    assert.throws(() => f.claim({ lane }), /stale/);
+    const attemptId = startBrowserAttempt({ root: f.root, identity: f.identity, lane, runnerBudgets: budgets });
+    assert.throws(() => claimBrowserAttempt({ root: f.root, identity: f.identity, attemptId }), /stale/);
+    const writer = claimBrowserAttempt({ root: f.root, identity: f.identity, attemptId, lane });
+    writer.begin(cases.map((entry) => ({ ...entry, projectName: "phone-webkit" })), {
+      ...config, projects: [{ name: "phone-webkit", timeout: 75_000, retries: 0 }],
+    });
+    for (const row of cases) writer.testEnd(row.id, { ...event, status: "passed", duration: 1 });
+    put(f.root, `scripts/src/${lane}.test.mjs`, "changed verification");
+    assert.equal(writer.end("passed", captureReleaseIdentity(f.root), true), false);
+    const data = JSON.parse(readFileSync(resolve(f.directory, "..", attemptId, "progress.json"), "utf8"));
+    assert.equal(data.coverage, "INCOMPLETE");
+    assert.equal(data.lane, lane);
+    assert.equal(data.cases[0].projectName, "phone-webkit");
+  }
+});

@@ -2468,6 +2468,42 @@ async function run(): Promise<void> {
     if (startupAttemptPath) await rm(startupAttemptPath, { recursive: true, force: true });
     await rm(startupFixtureRoot, { recursive: true, force: true });
   }
+  for (const responsive of [false, true]) {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "webkit-attempt-startup-"));
+    const attempts: string[] = [];
+    try {
+      const startup = await runStep({
+        label: responsive ? "browser phone/tablet WebKit compatibility" : "browser WebKit smoke",
+        command: process.execPath,
+        args: ["-e", `console.log(JSON.stringify([
+          process.env.RELEASE_WEBKIT_ATTEMPT_ID,
+          process.env.RELEASE_WEBKIT_DEBUG_ATTEMPT_ID
+        ])); process.exit(2);`],
+        timeoutMs: 120_000, warningMs: 90_000,
+      }, { logPath: join(fixtureRoot, "private.log"), deferLog: true });
+      assert.equal(startup.exitCode, 2);
+      const ids = JSON.parse(startup.output!.trim()) as (string | null)[];
+      assert.equal(ids.filter(Boolean).length, responsive ? 2 : 1);
+      for (const [index, id] of ids.entries()) {
+        if (!id) continue;
+        assert.match(id, /^[a-f0-9-]{36}$/);
+        const path = fileURLToPath(new URL(`../../.local/browser-verification-attempts/${id}/`, import.meta.url));
+        attempts.push(path);
+        const manifest = JSON.parse(await readFile(resolve(path, "start.json"), "utf8"));
+        assert.equal(manifest.lane, index === 1 ? "webkit-compatibility-debug" :
+          responsive ? "webkit-compatibility" : "webkit-smoke");
+        assert.equal(manifest.coverage, "INCOMPLETE");
+        assert.equal(manifest.result, null);
+        assert.deepEqual(manifest.cases, []);
+        assert.deepEqual(manifest.originalRunnerBudgets, { timeoutMs: 120_000, warningMs: 90_000 });
+        assert.equal((await readdir(path)).includes("progress.json"), false);
+      }
+      assert.notEqual(ids[0], ids[1]);
+    } finally {
+      for (const path of attempts) await rm(path, { recursive: true, force: true });
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  }
   const descendantRoot = await mkdtemp(join(tmpdir(), "release-timeout-tree-"));
   const descendantMarker = join(descendantRoot, "leaked-descendant");
   try {

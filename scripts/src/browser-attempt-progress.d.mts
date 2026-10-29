@@ -2,7 +2,8 @@ import type { captureReleaseIdentity } from "./release-source-identity.mjs";
 
 type Identity = ReturnType<typeof captureReleaseIdentity>;
 type RunnerBudgets = { timeoutMs: number | null; warningMs: number | null };
-type Case = { id: string; identity: string; timeoutMs: number; retries: number };
+type Lane = "chromium-full" | "webkit-smoke" | "webkit-compatibility" | "webkit-compatibility-debug";
+type Case = { id: string; identity: string; projectName?: string; timeoutMs: number; retries: number };
 type Event = { retry: number; workerIndex: number; startTime: Date };
 type Result = Event & {
   duration: number;
@@ -15,10 +16,10 @@ type Config = {
 };
 export function atomicWriteBrowserMetadata(path: string, bytes: string): void;
 export function startBrowserAttempt(options: {
-  root: string; identity?: Identity; runnerBudgets?: RunnerBudgets; now?: () => number;
+  root: string; lane?: Lane; identity?: Identity; runnerBudgets?: RunnerBudgets; now?: () => number;
 }): string;
 export function claimBrowserAttempt(options: {
-  root: string; attemptId: string; identity: Identity; now?: () => number;
+  root: string; lane?: Lane; attemptId: string; identity: Identity; now?: () => number;
   write?: typeof atomicWriteBrowserMetadata;
 }): {
   begin(cases: Case[], config: Config): void;

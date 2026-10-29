@@ -3678,16 +3678,27 @@ export function runStep(
   return new Promise((resolve) => {
     const startedAt = Date.now();
     let attemptEnvironment: Record<string, string> = {};
-    if (step.label === FULL_BROWSER_GATE_LABEL) {
+    if ([FULL_BROWSER_GATE_LABEL, "browser WebKit smoke", FULL_RESPONSIVE_WEBKIT_GATE_LABEL].includes(step.label)) {
       try {
+        const lane = step.label === FULL_BROWSER_GATE_LABEL ? "chromium-full" :
+          step.label === "browser WebKit smoke" ? "webkit-smoke" : "webkit-compatibility";
         const attemptId = startBrowserAttempt({
           root: rootDir,
+          lane,
           runnerBudgets: {
             timeoutMs: step.timeoutMs ?? null,
             warningMs: step.warningMs ?? null,
           },
         });
-        attemptEnvironment = { RELEASE_BROWSER_ATTEMPT_ID: attemptId };
+        attemptEnvironment = lane === "chromium-full"
+          ? { RELEASE_BROWSER_ATTEMPT_ID: attemptId }
+          : { RELEASE_WEBKIT_ATTEMPT_ID: attemptId };
+        if (lane === "webkit-compatibility") {
+          attemptEnvironment.RELEASE_WEBKIT_DEBUG_ATTEMPT_ID = startBrowserAttempt({
+            root: rootDir, lane: "webkit-compatibility-debug",
+            runnerBudgets: { timeoutMs: step.timeoutMs ?? null, warningMs: step.warningMs ?? null },
+          });
+        }
       } catch {
         console.error("Browser attempt startup persistence failed; no browser run started.");
         resolve({ exitCode: 1, elapsedMs: Date.now() - startedAt, status: "INFRASTRUCTURE ERROR" });

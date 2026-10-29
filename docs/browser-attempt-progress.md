@@ -1,6 +1,6 @@
 # Browser attempt progress
 
-The full Chromium verification runner keeps private, metadata-only checkpoints in
+The full Chromium verification runner and dedicated WebKit lanes keep private, metadata-only checkpoints in
 `.local/browser-verification-attempts/<random-attempt-id>/`. This directory is
 excluded from Git and Replit deployment input. It is outside Playwright's output
 directory and the isolated runner's temporary PostgreSQL/server directories.
@@ -76,7 +76,76 @@ verification identity, retry/worker metadata, failed writes, and preservation
 of a prior complete report. They make no production, physical-device, or
 browser-flow certification claim.
 
+## Dedicated WebKit lanes
+
+Each reporter has its own attempt: `webkit-smoke` for the dedicated smoke
+evidence reporter, `webkit-compatibility` for compatibility evidence, and
+`webkit-compatibility-debug` for the phone/tablet diagnostic reporter. No
+WebKit reporter can claim a Chromium attempt or another WebKit lane's attempt.
+Legacy records without a lane remain Chromium-only.
+
+The release gate creates these records before spawning the isolated runner,
+with the original gate timeout/warning budgets. Standalone isolated invocation
+creates them before port selection, PostgreSQL, or server setup, with unknown
+outer budgets explicitly null. Direct Playwright execution starts at reporter
+initialization. `--list` does not create attempts. The evidence and debug
+reporters never share a claim, even when observing the same compatibility run.
+
+At `onBegin`, each records the exact discovered project/case identities and
+unchanged workers, retries, global, project, and per-case timeouts. The debug
+observer records only its existing phone/tablet project scope; other compatibility
+projects are not relabeled as reviewed phone/tablet evidence. A subset or changed
+inventory remains diagnostic and incomplete. Reviewed inventories are unchanged.
+
+Case begin/end, reporter errors, and finalization use the same bounded,
+allowlisted metadata and atomic writes as Chromium. No errors, attachments,
+screenshots, steps, or raw output enter checkpoints. Existing end-of-run sanitized
+debug artifacts retain their separate CI authorization and screenshot policy.
+Progress does not authorize their upload or replace them.
+
+The WebKit evidence reporter replaces a final report atomically only after
+reviewed inventory has completed, persistence remains healthy, and the source
+and verification identity is unchanged. Interruption, timeout, missing events,
+or reporter errors cannot overwrite a prior complete report. A fully completed
+failed run can still retain failure evidence; complete never means passing.
+Final-report write faults are explicit and leave the prior target intact.
+
+Additional metadata-only checks:
+
+```sh
+node scripts/node_modules/tsx/dist/cli.mjs --test \
+  artifacts/run-calculator/e2e/webkit-attempt-progress.unit.mts \
+  artifacts/run-calculator/e2e/compatibility-debug-reporter.unit.mts
+```
+
 ### Verification ledger
+
+Dedicated WebKit extension verification (metadata fixtures only):
+
+- PASS: fake smoke and responsive evidence/debug lifecycle events, including
+  missing `onEnd`, interruption, timeout, reporter errors, unreviewed inventory,
+  independent lane claims, startup-only failure, source/test identity changes,
+  checkpoint/final-report filesystem faults, and prior-report preservation.
+- PASS: real release-gate startup exercised with fake child processes for smoke
+  and responsive lanes; original budgets survive child failure before any reporter.
+- PASS: existing sanitized debug artifact and Chromium progress fixtures,
+  release-evidence contracts, shell syntax/inventory, and workspace typecheck.
+- PASS: focused strict compilation of touched Playwright reporters and fixtures.
+  Initial checks found the missing lane declaration and previously unchecked
+  Playwright type mismatches (optional error names/messages, timeout status casing,
+  and per-project output directories). All were repaired and rechecked here.
+- PASS: compatibility fixtures use the real configuration's entire project list
+  with only the reviewed phone/tablet cases executed. Playwright retains
+  unselected projects in `FullConfig.projects`; promotion is fenced by exact
+  discovered case identities, while checkpoints preserve every configured budget.
+  The initial configuration-list guard blocked this valid selection; it was
+  replaced with the discovered-suite guard. Executing an additional Chromium
+  case still prevents compatibility evidence promotion.
+- NOT RUN: browser certification, application runtime/device journeys, publishing,
+  and production writes. Desktop/phone/tablet portrait/landscape and physical
+  Android Chrome/iOS Safari/PWA proof are not applicable to metadata fixtures.
+
+Historical Chromium persistence verification:
 
 The persistence filesystem fixtures, fake reporter lifecycle checks, existing
 release-evidence contracts, and workspace-wide `pnpm run typecheck` passed.
