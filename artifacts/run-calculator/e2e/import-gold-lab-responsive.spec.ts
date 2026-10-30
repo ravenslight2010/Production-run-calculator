@@ -64,6 +64,45 @@ test("Import Gold manager panel fits and remains reviewable at this browser view
         }],
       }),
     }));
+    let deletionVerified = false;
+    await page.route("**/api/import-gold/retention?*", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        records: [
+          {
+            caseId: 91,
+            capturedAt: "2026-09-01T12:00:00.000Z",
+            deleteBy: "2026-10-01T12:00:00.000Z",
+            status: "overdue",
+            verifiedAt: null,
+            verifiedBy: null,
+          },
+          {
+            caseId: 92,
+            capturedAt: "2026-09-05T12:00:00.000Z",
+            deleteBy: "2026-10-05T12:00:00.000Z",
+            status: deletionVerified ? "verified" : "verification_needed",
+            verifiedAt: deletionVerified ? "2026-10-06T12:00:00.000Z" : null,
+            verifiedBy: deletionVerified ? "manager-fixture" : null,
+          },
+        ],
+        hasMore: false,
+        nextOffset: null,
+      }),
+    }));
+    await page.route("**/api/import-gold/retention/92/verification", async (route) => {
+      deletionVerified = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          caseId: 92,
+          verifiedAt: "2026-10-06T12:00:00.000Z",
+          verifiedBy: "manager-fixture",
+        }),
+      });
+    });
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
@@ -79,6 +118,12 @@ test("Import Gold manager panel fits and remains reviewable at this browser view
     await expect(lab).toBeVisible({ timeout: 15_000 });
     await expect(lab.getByText("Import Gold Lab", { exact: true })).toBeVisible();
     await expect(lab.getByText("local: 66.67% (2/3)", { exact: true })).toBeVisible();
+    await expect(lab.getByTestId("gold-retention-record-91")).toContainText("Overdue");
+    await expect(lab.getByTestId("gold-retention-record-92")).toContainText("Deletion verification needed");
+    await expect(lab.getByText("This register covers application case and score deletion only.", { exact: false })).toBeVisible();
+    await lab.getByTestId("button-verify-gold-case-92").click();
+    await expect(lab.getByTestId("gold-retention-record-92")).toContainText("App deletion verified");
+    await expect(lab.getByTestId("gold-retention-verification-92")).toContainText("manager-fixture");
     await lab.getByText("Review field differences", { exact: true }).click();
     await expect(lab.getByText("Expected: 1", { exact: false })).toBeVisible();
 
@@ -187,3 +232,78 @@ async function expectResponsiveBounds(lab: Locator): Promise<void> {
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
   expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
 }
+
+test("QC Manager can use the scoped retention panel without opening the Gold Lab", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(120_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_gold_retention_qc"),
+      password: PASSWORD,
+      capabilities: ["manage-qc"],
+      onboardingSeen: true,
+    });
+    await fixtures.assignQcManagerRole(account);
+    let verified = false;
+    await page.route("**/api/import-gold/retention?*", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        records: [{
+          caseId: 92,
+          capturedAt: "2026-09-05T12:00:00.000Z",
+          deleteBy: "2026-10-05T12:00:00.000Z",
+          status: verified ? "verified" : "verification_needed",
+          verifiedAt: verified ? "2026-10-06T12:00:00.000Z" : null,
+          verifiedBy: verified ? "qc-manager-fixture" : null,
+        }],
+        hasMore: false,
+        nextOffset: null,
+      }),
+    }));
+    await page.route("**/api/import-gold/retention/92/verification", async (route) => {
+      verified = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          caseId: 92,
+          verifiedAt: "2026-10-06T12:00:00.000Z",
+          verifiedBy: "qc-manager-fixture",
+        }),
+      });
+    });
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await page.locator('button[title="More"]').click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+    await expect(settings).toBeVisible();
+    await settings.getByRole("button", { name: "Settings", exact: true }).click();
+    await settings.getByRole("button", { name: "Gold Lab Retention", exact: true }).click();
+
+    const panel = settings.getByTestId("import-gold-retention");
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByText("Gold Lab retention", { exact: true })).toBeVisible();
+    await expect(panel.getByTestId("gold-retention-record-92")).toContainText("Deletion verification needed");
+    await expect(settings.getByText("Import Gold Lab", { exact: true })).toHaveCount(0);
+    await panel.getByTestId("button-verify-gold-case-92").click();
+    await expect(panel.getByTestId("gold-retention-record-92")).toContainText("App deletion verified");
+    await expect(panel.getByTestId("gold-retention-verification-92")).toContainText("qc-manager-fixture");
+
+    const geometry = await panel.evaluate((element) => ({
+      right: element.getBoundingClientRect().right,
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+    }));
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
+    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+  } finally {
+    await fixtures.cleanup();
+  }
+});

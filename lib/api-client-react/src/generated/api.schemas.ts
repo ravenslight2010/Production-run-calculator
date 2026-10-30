@@ -1306,6 +1306,44 @@ export interface ImportGoldCleanupCasesResponse {
   cases: ImportGoldCleanupCase[];
 }
 
+export type ImportGoldRetentionStatus = typeof ImportGoldRetentionStatus[keyof typeof ImportGoldRetentionStatus];
+
+
+export const ImportGoldRetentionStatus = {
+  within_limit: 'within_limit',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  deletion_incomplete: 'deletion_incomplete',
+  verification_needed: 'verification_needed',
+  verified: 'verified',
+} as const;
+
+export interface ImportGoldRetentionRecord {
+  /** @minimum 1 */
+  caseId: number;
+  capturedAt: string;
+  deleteBy: string;
+  status: ImportGoldRetentionStatus;
+  /** @nullable */
+  verifiedAt: string | null;
+  /** @nullable */
+  verifiedBy: string | null;
+}
+
+export interface ImportGoldRetentionResponse {
+  records: ImportGoldRetentionRecord[];
+  hasMore: boolean;
+  /** @nullable */
+  nextOffset: number | null;
+}
+
+export interface ImportGoldDeletionVerification {
+  /** @minimum 1 */
+  caseId: number;
+  verifiedAt: string;
+  verifiedBy: string;
+}
+
 export type ImportGoldScoreResponseResultsItemProvider = typeof ImportGoldScoreResponseResultsItemProvider[keyof typeof ImportGoldScoreResponseResultsItemProvider];
 
 
@@ -11048,6 +11086,19 @@ export type ListImportGoldCasesParams = {
  * @maximum 100
  */
 limit?: number;
+};
+
+export type ListImportGoldRetentionParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * @minimum 0
+ * @maximum 10000
+ */
+offset?: number;
 };
 
 export type ListDistillationApplyEvidenceParams = {

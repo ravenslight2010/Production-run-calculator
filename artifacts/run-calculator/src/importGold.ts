@@ -1,3 +1,9 @@
+import {
+  listImportGoldRetention,
+  recordImportGoldDeletionVerification,
+  type ImportGoldRetentionResponse,
+} from "@workspace/api-client-react";
+
 export type ImportGoldConfig = {
   enabled: boolean;
   cleanupEnabled: boolean;
@@ -46,6 +52,8 @@ export type ImportGoldCleanupCase = {
   importType: string;
   createdAt: string;
 };
+
+export type ImportGoldRetentionRecord = ImportGoldRetentionResponse["records"][number];
 
 export type ImportGoldScoreBatchResult = {
   scoredCount: number;
@@ -113,6 +121,14 @@ export async function fetchImportGoldCleanupCases(): Promise<ImportGoldCleanupCa
 
 export async function deleteImportGoldCleanupCase(id: number): Promise<void> {
   await goldFetch(`/api/import-gold/cleanup-cases/${id}`, { method: "DELETE" });
+}
+
+export async function fetchImportGoldRetention(offset = 0): Promise<ImportGoldRetentionResponse> {
+  return listImportGoldRetention({ limit: 100, offset });
+}
+
+export async function recordImportGoldCaseDeletionVerified(caseId: number): Promise<void> {
+  await recordImportGoldDeletionVerification(caseId);
 }
 
 export async function setImportGoldExcluded(id: number, excluded: boolean): Promise<void> {

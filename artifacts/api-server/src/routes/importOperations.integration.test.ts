@@ -116,7 +116,7 @@ beforeEach(async () => {
   delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
   delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
   route?.setImportGoldProviderForTest();
-  await db.execute(sql`TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.cheeseRecipesTable}, ${tables.importGoldScoresTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.factoryKvTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.cheeseRecipesTable}, ${tables.importGoldScoresTable}, ${tables.importGoldRetentionTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.factoryKvTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -1172,6 +1172,12 @@ describe("atomic import operations", () => {
     expect(saved.status).toBe(200);
     const liveCases = await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.scope, "live"));
     expect(liveCases).toHaveLength(1);
+    const liveRetention = await db.select().from(tables.importGoldRetentionTable).where(eq(tables.importGoldRetentionTable.scope, "live"));
+    expect(liveRetention).toMatchObject([{
+      caseId: liveCases[0]!.id,
+      capturedAt: liveCases[0]!.createdAt,
+      deleteBy: new Date(liveCases[0]!.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000),
+    }]);
     expect(liveCases[0]?.evaluatedInput).toEqual(goldCapture.input);
     expect(liveCases[0]?.expectedResult.mixes).toEqual([
       expect.objectContaining({ name: "Atomic Mix", batchSize: 1 }),
@@ -1378,6 +1384,12 @@ describe("atomic import operations", () => {
     }));
     expect(Object.keys(listBody.cases[0]!).sort()).toEqual(["createdAt", "id", "importType"]);
     expect(JSON.stringify(listBody)).not.toMatch(/SYNTHETIC_PRIVATE|sourceLabel|scores|fieldDiffs|evaluatedInput|expectedResult/);
+    const retentionBeforeCleanup = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    expect(retentionBeforeCleanup.status).toBe(200);
+    const retentionBeforeRows = (await retentionBeforeCleanup.json() as {
+      records: Array<{ caseId: number; status: string }>;
+    }).records;
+    expect(retentionBeforeRows.find((record) => record.caseId === liveCase!.id)?.status).toBe("within_limit");
 
     const ordinaryList = await fetch(`${baseUrl}/api/import-gold/cases`, { headers: headers() });
     expect(ordinaryList.status).toBe(404);
@@ -1448,6 +1460,21 @@ describe("atomic import operations", () => {
       changes: { outcome: "success", targetId: String(liveCase!.id) },
     });
     expect(JSON.stringify(cleanupAudit[0])).not.toMatch(/SYNTHETIC_PRIVATE|fieldDiffs|evaluatedInput|expectedResult/);
+    const retentionAfterCleanup = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    const retentionAfterRows = (await retentionAfterCleanup.json() as {
+      records: Array<{ caseId: number; status: string }>;
+    }).records;
+    expect(retentionAfterRows.find((record) => record.caseId === liveCase!.id)?.status)
+      .toBe("verification_needed");
+    const verifiedAfterCleanup = await fetch(
+      `${baseUrl}/api/import-gold/retention/${liveCase!.id}/verification`,
+      { method: "POST", headers: headers("qc-reviewer") },
+    );
+    expect(verifiedAfterCleanup.status).toBe(200);
+    expect(await verifiedAfterCleanup.json()).toMatchObject({
+      caseId: liveCase!.id,
+      verifiedBy: "qc-reviewer",
+    });
 
     const retry = await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
       method: "DELETE", headers: headers(),
@@ -1465,6 +1492,145 @@ describe("atomic import operations", () => {
       method: "DELETE", headers: headers(),
     })).status).toBe(404);
     expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, sandboxCase!.id))).toHaveLength(1);
+  });
+
+  it("tracks scoped deadlines and records manual deletion verification for either manager role", async () => {
+    const capturedAt = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
+    const [liveCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "retention-live-case",
+      importType: "spec",
+      sourceLabel: "Synthetic fixture",
+      evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true },
+      createdAt: capturedAt,
+    }).returning({ id: tables.importGoldCasesTable.id });
+    const [sandboxCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "sandbox",
+      operationId: "retention-sandbox-case",
+      importType: "spec",
+      sourceLabel: "Synthetic fixture",
+      evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true },
+      createdAt: capturedAt,
+    }).returning({ id: tables.importGoldCasesTable.id });
+    const [secondLiveCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "retention-live-case-second",
+      importType: "spec",
+      sourceLabel: "Synthetic fixture",
+      evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true },
+      createdAt: capturedAt,
+    }).returning({ id: tables.importGoldCasesTable.id });
+    expect(liveCase).toBeDefined();
+    expect(sandboxCase).toBeDefined();
+    expect(secondLiveCase).toBeDefined();
+
+    const livePage = await fetch(`${baseUrl}/api/import-gold/retention?limit=1`, { headers: headers() });
+    expect(livePage.status).toBe(200);
+    const firstPage = await livePage.json() as {
+      records: Array<{ caseId: number; capturedAt: string; deleteBy: string; status: string; verifiedAt: string | null }>;
+      hasMore: boolean;
+      nextOffset: number | null;
+    };
+    expect(firstPage.records).toMatchObject([{
+      caseId: liveCase!.id,
+      capturedAt: capturedAt.toISOString(),
+      deleteBy: new Date(capturedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      status: "overdue",
+      verifiedAt: null,
+    }]);
+    expect(firstPage.records[0]).not.toHaveProperty("evaluatedInput");
+    expect(firstPage.records[0]).not.toHaveProperty("expectedResult");
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.nextOffset).toBe(1);
+    const secondLivePage = await fetch(`${baseUrl}/api/import-gold/retention?limit=1&offset=1`, { headers: headers() });
+    expect((await secondLivePage.json() as { records: Array<{ caseId: number }> }).records)
+      .toMatchObject([{ caseId: secondLiveCase!.id }]);
+
+    const sandboxPage = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers("sandbox") });
+    expect((await sandboxPage.json() as { records: Array<{ caseId: number }> }).records)
+      .toMatchObject([{ caseId: sandboxCase!.id }]);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers("qc-reviewer") })).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers("profiles") })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention?limit=101`, { headers: headers() })).status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention?offset=-1`, { headers: headers() })).status).toBe(400);
+
+    const wrongScope = await fetch(`${baseUrl}/api/import-gold/retention/${liveCase!.id}/verification`, {
+      method: "POST", headers: headers("sandbox"),
+    });
+    expect(wrongScope.status).toBe(404);
+    const cannotVerifyExistingCase = await fetch(`${baseUrl}/api/import-gold/retention/${liveCase!.id}/verification`, {
+      method: "POST", headers: headers("qc-reviewer"),
+    });
+    expect(cannotVerifyExistingCase.status).toBe(409);
+    await db.insert(tables.importGoldScoresTable).values({
+      scope: "live",
+      caseId: liveCase!.id,
+      provider: "local",
+      status: "scored",
+      accuracy: 1,
+      comparedFields: 1,
+      equalFields: 1,
+      fieldDiffs: [],
+    });
+
+    const deleted = await fetch(`${baseUrl}/api/import-gold/cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(deleted.status).toBe(204);
+    expect(await db.select().from(tables.importGoldScoresTable)
+      .where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(0);
+    const pending = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    const pendingRecords = (await pending.json() as { records: Array<{ caseId: number; status: string }> }).records;
+    expect(pendingRecords.find((record) => record.caseId === liveCase!.id))
+      .toMatchObject({ caseId: liveCase!.id, status: "verification_needed" });
+
+    const verified = await fetch(`${baseUrl}/api/import-gold/retention/${liveCase!.id}/verification`, {
+      method: "POST", headers: headers("qc-reviewer"),
+    });
+    expect(verified.status).toBe(200);
+    const verification = await verified.json() as { caseId: number; verifiedAt: string; verifiedBy: string };
+    expect(verification).toMatchObject({ caseId: liveCase!.id, verifiedBy: "qc-reviewer" });
+    const afterReload = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    const reloadedRecords = (await afterReload.json() as {
+      records: Array<{ caseId: number; status: string; verifiedAt: string | null }>;
+    }).records;
+    expect(reloadedRecords.find((record) => record.caseId === liveCase!.id))
+      .toMatchObject({ caseId: liveCase!.id, status: "verified", verifiedAt: verification.verifiedAt });
+
+    const idempotentRetry = await fetch(`${baseUrl}/api/import-gold/retention/${liveCase!.id}/verification`, {
+      method: "POST", headers: headers(),
+    });
+    expect(await idempotentRetry.json()).toEqual(verification);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention/${liveCase!.id}/verification`, {
+      method: "POST", headers: headers("profiles"),
+    })).status).toBe(403);
+
+    const secondDeleted = await fetch(`${baseUrl}/api/import-gold/cases/${secondLiveCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(secondDeleted.status).toBe(204);
+    const managerVerification = await fetch(`${baseUrl}/api/import-gold/retention/${secondLiveCase!.id}/verification`, {
+      method: "POST", headers: headers("inventory-peer"),
+    });
+    expect(managerVerification.status).toBe(200);
+    expect(await managerVerification.json()).toMatchObject({
+      caseId: secondLiveCase!.id,
+      verifiedBy: "inventory-peer",
+    });
+
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
+    process.env.IMPORT_GOLD_RETENTION_APPROVED = "false";
+    const retainedAfterGateWithdrawal = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
+    expect(retainedAfterGateWithdrawal.status).toBe(200);
+    expect((await retainedAfterGateWithdrawal.json() as { records: Array<{ caseId: number }> }).records)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ caseId: liveCase!.id }),
+        expect.objectContaining({ caseId: secondLiveCase!.id }),
+      ]));
   });
 
   it("gates capture and manager controls, bounds input, and records provider errors without failing the batch", async () => {

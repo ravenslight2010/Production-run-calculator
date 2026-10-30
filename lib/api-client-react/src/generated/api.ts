@@ -135,9 +135,11 @@ import type {
   ImportGoldCasesResponse,
   ImportGoldCleanupCasesResponse,
   ImportGoldConfig,
+  ImportGoldDeletionVerification,
   ImportGoldExclusionRequest,
   ImportGoldLocalScoringRequest,
   ImportGoldLocalScoringResponse,
+  ImportGoldRetentionResponse,
   ImportGoldScoreRequest,
   ImportGoldScoreResponse,
   ImportGoldSyntheticApplyRequest,
@@ -174,6 +176,7 @@ import type {
   ListDistillationApplyEvidenceParams,
   ListFinalizedOperationalReportsParams,
   ListImportGoldCasesParams,
+  ListImportGoldRetentionParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
   ListInventoryLedgerParams,
@@ -26202,6 +26205,188 @@ export const useDeleteImportGoldCleanupCase = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteImportGoldCleanupCaseMutationOptions(options), queryClient);
+    }
+
+export const getListImportGoldRetentionUrl = (params?: ListImportGoldRetentionParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/import-gold/retention?${stringifiedParams}` : `/api/import-gold/retention`
+}
+
+/**
+ * @summary List scoped Gold Lab deadlines for Managers and QC Managers
+ */
+export const listImportGoldRetention = async (params?: ListImportGoldRetentionParams, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldRetentionResponse> => {
+
+  return customFetch<ImportGoldRetentionResponse>(getListImportGoldRetentionUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListImportGoldRetentionQueryKey = (params?: ListImportGoldRetentionParams,) => {
+    return [
+    `/api/import-gold/retention`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListImportGoldRetentionQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportGoldRetentionQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportGoldRetention>>> = ({ signal }) => listImportGoldRetention(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListImportGoldRetentionQueryResult = NonNullable<Awaited<ReturnType<typeof listImportGoldRetention>>>
+export type ListImportGoldRetentionQueryError = ErrorType<void>
+
+
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+ params: undefined |  ListImportGoldRetentionParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldRetention>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldRetention>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+ params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldRetention>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldRetention>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+ params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List scoped Gold Lab deadlines for Managers and QC Managers
+ */
+
+export function useListImportGoldRetention<TData = Awaited<ReturnType<typeof listImportGoldRetention>>, TError = ErrorType<void>>(
+ params?: ListImportGoldRetentionParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldRetention>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListImportGoldRetentionQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordImportGoldDeletionVerificationUrl = (caseId: number,) => {
+
+
+
+
+  return `/api/import-gold/retention/${caseId}/verification`
+}
+
+/**
+ * @summary Record manual verification for Managers and QC Managers
+ */
+export const recordImportGoldDeletionVerification = async (caseId: number, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldDeletionVerification> => {
+
+  return customFetch<ImportGoldDeletionVerification>(getRecordImportGoldDeletionVerificationUrl(caseId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRecordImportGoldDeletionVerificationMutationKey = () => ['recordImportGoldDeletionVerification'] as const;
+
+export const getRecordImportGoldDeletionVerificationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>, TError,RecordImportGoldDeletionVerificationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>, TError,RecordImportGoldDeletionVerificationMutationVariables, TContext> => {
+
+const mutationKey = getRecordImportGoldDeletionVerificationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>, RecordImportGoldDeletionVerificationMutationVariables> = (props) => {
+          const {caseId} = props ?? {};
+
+          return  recordImportGoldDeletionVerification(caseId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordImportGoldDeletionVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>>
+
+    export type RecordImportGoldDeletionVerificationMutationError = ErrorType<void>
+    export type RecordImportGoldDeletionVerificationMutationVariables = {caseId: number}
+
+    /**
+ * @summary Record manual verification for Managers and QC Managers
+ */
+export const useRecordImportGoldDeletionVerification = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>, TError,RecordImportGoldDeletionVerificationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordImportGoldDeletionVerification>>,
+        TError,
+        RecordImportGoldDeletionVerificationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordImportGoldDeletionVerificationMutationOptions(options), queryClient);
     }
 
 export const getSetImportGoldCaseExclusionUrl = (id: number,) => {

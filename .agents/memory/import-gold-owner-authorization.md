@@ -37,3 +37,12 @@ assuming automatic expiry or deletion of external copies.
 **How to apply:** Before real-source work, verify that the private source-specific
 approval and actual handling can meet this policy. Policy approval is not proof
 of implementation or permission to enable real-source capture.
+
+The owner selected a seven-day reminder window before the 30-day deadline. This
+is an in-app due-soon status, not an external notification or automated deletion.
+
+**Why:** The owner approved a visible advance reminder while keeping the
+application's deletion process manual.
+
+**How to apply:** Keep the due-soon boundary at seven days, show overdue cases
+explicitly, and do not imply push/email delivery or automated erasure.

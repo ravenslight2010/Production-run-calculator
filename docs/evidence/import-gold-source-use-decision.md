@@ -143,32 +143,51 @@ business records remain subject to their existing policy; lab cleanup must not
 delete them. Record actual backup retention and handling separately. Do not
 promise complete erasure within 30 days unless that is demonstrated for all
 applicable destinations, including backups. The project owner approved these
-terms; no automatic deletion, reminders, or deletion register has been implemented
-by this documentation change.
+terms. The implementation update below adds manual deadline tracking only; it
+does not provide automatic deletion or establish that every destination has
+been erased.
+
+### Runtime tracker implementation
+
+The application now has a scope-bound, payload-free register that records each
+case's capture time, a deadline exactly 30 elapsed days later, and the time and
+identity of a manager who records manual deletion verification. Existing cases
+are backfilled from their stored capture timestamps when the register is read.
+An in-app reminder appears during the seven days before a deadline and remains
+overdue until the case and score rows are absent and a Manager or QC Manager
+records verification. The register remains visible when the real-source feature
+gate is disabled; it does not enable capture, scoring, or case deletion.
+
+This is source-code and synthetic-test evidence, not proof of production
+behavior or real-source authorization. The register verifies only application
+case and score rows. It does not track or prove deletion of workbooks, exports,
+evaluator copies, diagnostic copies, or database backups. Those destinations
+remain separate manual responsibilities, and automatic erasure is not claimed.
 
 ### Deletion compatibility assessment
 
 | Approved requirement | Current behavior and disposition |
 | --- | --- |
-| Maximum 30 days for evaluation cases and scores | Manual case deletion exists and score cascade is declared. No automatic deadline enforcement exists. Compliance requires an actual deletion register, reminders, and timely execution; it is not established by policy approval. |
-| Earlier deletion on source-owner request | When source approval is disabled, an independently enabled cleanup-only route lists only scoped case IDs, import types, and creation times and deletes the selected application case and its score history. It requires `IMPORT_GOLD_CLEANUP_ENABLED=true` and `manage-staff`; it does not restore the ordinary case list, content reads, scoring, capture, or export. |
+| Maximum 30 days for evaluation cases and scores | A capture-based deadline register shows seven-day and overdue reminders. Case deletion and verification remain manual; there is no automatic expiry, and source inspection/tests do not prove production compliance. |
+| Earlier deletion on source-owner request | With approval active, ordinary case deletion remains approval-gated. After approval is withdrawn, the separately gated cleanup-only route (`IMPORT_GOLD_CLEANUP_ENABLED=true`, `manage-staff`) lists only scoped IDs, import types, and creation times and deletes the selected application case and score history without reopening ordinary content reads, scoring, capture, or export. The retention record remains for verification by either Manager or QC Manager after both rows are absent. Do not re-enable capture merely to delete retained data. |
 | Delete evaluation working copies and approved exports | Application cleanup cannot recall downloads or delete separately retained workbook copies. The responsible authorized role must inventory destinations and verify their cleanup separately. |
 | Record actual backup retention without promising unsupported erasure | Backup retention and deletion behavior were not inspected and remain unknown. No complete-erasure claim is supported. |
 | Keep original business records under their existing policy | The lab's case DELETE targets evaluation rows, not original workbooks; cleanup of external files must distinguish working copies from business records. |
 
-Evidence for the cleanup-only implementation is source inspection and the
-synthetic-only isolated integration case
+Evidence includes source inspection, synthetic isolated integration tests, and
+browser checks, not a real-source or production deletion rehearsal. The
+cleanup-only integration test
 `allows scoped metadata-only cleanup after approval withdrawal without
-reopening Gold Lab reads` in `importOperations.integration.test.ts`. It checks
-scope, role revocation, disabled capture/scoring/export/content reads,
-score-row deletion, audit minimization, invalid IDs, and repeated deletion.
-The cleanup interface and confirmation/refresh behavior were also exercised
-with synthetic API fixtures at desktop, phone, tablet portrait, and tablet
-landscape sizes in Chromium and WebKit. That browser matrix verifies the UI,
-not persistence; the isolated API test verifies the real database cascade.
-Neither is a production deletion rehearsal or establishes backup erasure,
-source-workbook deletion, export recall, evaluator-side deletion, or the
-published database's foreign-key state.
+reopening Gold Lab reads` checks scope, role revocation, disabled content reads,
+score-row deletion, audit minimization, invalid IDs, and repeated deletion. The
+retention integration test checks capture-based math, payload-free scoped
+metadata, role boundaries, manual verification, and persistence after reload.
+The cleanup and retention interfaces were exercised with synthetic data in
+desktop, phone, tablet portrait, and tablet landscape emulation on Chromium and
+WebKit. These browser checks verify the UI, not physical devices or persistence;
+the isolated API tests verify database behavior. No customer content was used.
+These checks do not establish backup erasure, source-workbook deletion, export
+recall, evaluator-side deletion, or the published database's foreign-key state.
 
 These limitations mean the approved policy cannot yet be attested as operationally
 satisfied. The decision therefore uses the task's conservative branch: no real

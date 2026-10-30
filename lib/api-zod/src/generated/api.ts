@@ -1044,6 +1044,11 @@ export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevision
 export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
 export const listImportGoldCasesQueryLimitDefault = 50;
 export const listImportGoldCasesQueryLimitMax = 100;
+export const listImportGoldRetentionQueryLimitDefault = 50;
+export const listImportGoldRetentionQueryLimitMax = 100;
+export const listImportGoldRetentionQueryOffsetDefault = 0;
+export const listImportGoldRetentionQueryOffsetMin = 0;
+export const listImportGoldRetentionQueryOffsetMax = 10000;
 export const scoreImportGoldCasesBodyCaseIdsMax = 3;
 export const previewImportOperationBodyImportTypeMax = 40;
 export const previewImportOperationBodySourceKeyMax = 300;
@@ -10321,6 +10326,42 @@ export const DeleteImportGoldCleanupCaseParams = zod.object({
 })
 
 export const DeleteImportGoldCleanupCaseResponse = zod.void()
+
+/**
+ * @summary List scoped Gold Lab deadlines for Managers and QC Managers
+ */
+
+export const ListImportGoldRetentionQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(listImportGoldRetentionQueryLimitMax).default(listImportGoldRetentionQueryLimitDefault),
+  "offset": zod.coerce.number().int().min(listImportGoldRetentionQueryOffsetMin).max(listImportGoldRetentionQueryOffsetMax).default(listImportGoldRetentionQueryOffsetDefault)
+})
+
+export const ListImportGoldRetentionResponse = zod.object({
+  "records": zod.array(zod.object({
+  "caseId": zod.int().min(1),
+  "capturedAt": zod.coerce.date(),
+  "deleteBy": zod.coerce.date(),
+  "status": zod.enum(['within_limit', 'due_soon', 'overdue', 'deletion_incomplete', 'verification_needed', 'verified']),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "verifiedBy": zod.string().nullable()
+})),
+  "hasMore": zod.boolean(),
+  "nextOffset": zod.int().nullable()
+})
+
+/**
+ * @summary Record manual verification for Managers and QC Managers
+ */
+
+export const RecordImportGoldDeletionVerificationParams = zod.object({
+  "caseId": zod.coerce.number().int().min(1)
+})
+
+export const RecordImportGoldDeletionVerificationResponse = zod.object({
+  "caseId": zod.int().min(1),
+  "verifiedAt": zod.coerce.date(),
+  "verifiedBy": zod.string()
+})
 
 /**
  * @summary Exclude or restore a case for scoring and export

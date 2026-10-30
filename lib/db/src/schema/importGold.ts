@@ -43,5 +43,28 @@ export const importGoldScoresTable = pgTable(
   }),
 );
 
+/**
+ * Payload-free retention metadata. Deliberately has no FK to the case so the
+ * deadline and verification record survive deletion of case/score payloads.
+ */
+export const importGoldRetentionTable = pgTable(
+  "import_gold_retention",
+  {
+    id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+    scope: text("scope").notNull().default("live"),
+    caseId: integer("case_id").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    deleteBy: timestamp("delete_by", { withTimezone: true }).notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    verifiedBy: text("verified_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    scopeCaseUnique: uniqueIndex("import_gold_retention_scope_case_unique").on(t.scope, t.caseId),
+    scopeDeadlineIdx: index("import_gold_retention_scope_deadline_idx").on(t.scope, t.deleteBy),
+  }),
+);
+
 export type ImportGoldCaseRow = typeof importGoldCasesTable.$inferSelect;
 export type ImportGoldScoreRow = typeof importGoldScoresTable.$inferSelect;
+export type ImportGoldRetentionRow = typeof importGoldRetentionTable.$inferSelect;

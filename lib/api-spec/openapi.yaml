@@ -6975,6 +6975,45 @@ paths:
         "400": { description: Invalid case identity }
         "403": { description: Manager capability required }
         "404": { description: Cleanup-only mode unavailable or case not found in the current scope }
+  /import-gold/retention:
+    get:
+      operationId: listImportGoldRetention
+      tags: [specImport]
+      summary: List scoped Gold Lab deadlines for Managers and QC Managers
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+      responses:
+        "200":
+          description: Capture deadlines and manual application-deletion verification metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldRetentionResponse" }
+        "400": { description: Invalid pagination }
+        "403": { description: Manager or QC Manager role required }
+  /import-gold/retention/{caseId}/verification:
+    post:
+      operationId: recordImportGoldDeletionVerification
+      tags: [specImport]
+      summary: Record manual verification for Managers and QC Managers
+      parameters:
+        - in: path
+          name: caseId
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Existing or newly recorded verification
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldDeletionVerification" }
+        "403": { description: Manager or QC Manager role required }
+        "404": { description: Retention record not found in the current scope }
+        "409": { description: The application case still exists or verification could not be recorded }
   /import-gold/cases/{id}/exclusion:
     patch:
       operationId: setImportGoldCaseExclusion
@@ -7975,6 +8014,35 @@ components:
         cases:
           type: array
           items: { $ref: "#/components/schemas/ImportGoldCleanupCase" }
+    ImportGoldRetentionStatus:
+      type: string
+      enum: [within_limit, due_soon, overdue, deletion_incomplete, verification_needed, verified]
+    ImportGoldRetentionRecord:
+      type: object
+      required: [caseId, capturedAt, deleteBy, status, verifiedAt, verifiedBy]
+      properties:
+        caseId: { type: integer, minimum: 1 }
+        capturedAt: { type: string, format: date-time }
+        deleteBy: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/ImportGoldRetentionStatus" }
+        verifiedAt: { type: string, format: date-time, nullable: true }
+        verifiedBy: { type: string, nullable: true }
+    ImportGoldRetentionResponse:
+      type: object
+      required: [records, hasMore, nextOffset]
+      properties:
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldRetentionRecord" }
+        hasMore: { type: boolean }
+        nextOffset: { type: integer, nullable: true }
+    ImportGoldDeletionVerification:
+      type: object
+      required: [caseId, verifiedAt, verifiedBy]
+      properties:
+        caseId: { type: integer, minimum: 1 }
+        verifiedAt: { type: string, format: date-time }
+        verifiedBy: { type: string }
     ImportGoldScoreResponse:
       type: object
       required: [results, scoredCount, errorCount]

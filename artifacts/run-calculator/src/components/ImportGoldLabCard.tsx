@@ -17,6 +17,8 @@ import {
   type ImportGoldSyntheticReview,
 } from "@/importGold";
 
+import ImportGoldRetentionCard from "@/components/ImportGoldRetentionCard";
+
 export default function ImportGoldLabCard() {
   const [config, setConfig] = useState<ImportGoldConfig | null>(null);
   const [cases, setCases] = useState<ImportGoldCase[]>([]);
@@ -43,7 +45,6 @@ export default function ImportGoldLabCard() {
         setConfig(nextConfig);
         if (nextConfig.cleanupEnabled) {
           setCases([]);
-          setCleanupCases([]);
           setSyntheticReview(null);
           setCleanupCases(await fetchImportGoldCleanupCases());
         } else if (nextConfig.enabled || nextConfig.syntheticFixtureAvailable) {
@@ -142,10 +143,13 @@ export default function ImportGoldLabCard() {
     }
   };
   const remove = async (item: ImportGoldCase) => {
-    if (!window.confirm("Permanently delete this evaluation case and its scores?")) return;
+    await removeCase(item.id);
+  };
+  const removeCase = async (caseId: number) => {
+    if (!window.confirm(`Permanently delete evaluation case #${caseId} and its scores?`)) return;
     setOperationBusy(true);
     try {
-      await deleteImportGoldCase(item.id);
+      await deleteImportGoldCase(caseId);
       await refresh(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete the case.");
@@ -240,6 +244,9 @@ export default function ImportGoldLabCard() {
               {config.syntheticFixtureAvailable ? " This development workspace can use only the fixed synthetic sample below; the local scoring switch does not enable real-source capture." : ""}
             </p>
           )}
+          <ImportGoldRetentionCard
+            canDeleteCase={config.enabled || config.syntheticFixtureAvailable}
+          />
           {config.syntheticFixtureAvailable && syntheticReview && (
             <div className="mt-3 rounded-md border border-dashed border-border p-3" data-testid="import-gold-synthetic-review">
               <h3 className="font-medium">Review a synthetic import sample</h3>
@@ -318,7 +325,7 @@ export default function ImportGoldLabCard() {
               </div>
             ))}
           </div>
-          {config.enabled && <p className="mt-2 text-xs text-muted-foreground">{config.retention} Factory purge does not delete these cases; delete them here when retention ends.</p>}
+          {config.enabled && <p className="mt-2 text-xs text-muted-foreground">{config.retention} Factory purge does not delete these cases; delete them here by the displayed deadline.</p>}
           <div className="mt-3 space-y-3">
             {cases.map((item) => (
               <article key={item.id} className={`rounded-md border border-border p-3 ${item.excluded ? "opacity-60" : ""}`} data-testid={`import-gold-case-${item.id}`}>

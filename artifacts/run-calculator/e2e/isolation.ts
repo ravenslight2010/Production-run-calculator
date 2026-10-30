@@ -518,6 +518,40 @@ export class AuthorizedBrowserFixtures {
     }
   }
 
+  async assignQcManagerRole(
+    account: Pick<AuthorizedTestAccount, "userId" | "token">,
+  ): Promise<void> {
+    requireIsolatedTestDatabase("assign QC Manager role to browser fixture account");
+    await this.withDatabase("assign QC Manager role to browser fixture account", async (db) => {
+      const qcManagerRole = await db.query(
+        "SELECT 1 FROM roles WHERE name = 'qc-manager' LIMIT 1",
+      );
+      if (qcManagerRole.rowCount !== 1) {
+        throw new Error("The isolated database does not contain the built-in QC Manager role.");
+      }
+      const updated = await db.query(
+        "UPDATE user_roles SET role = 'qc-manager', updated_at = NOW() WHERE user_id = $1 RETURNING user_id",
+        [account.userId],
+      );
+      if (updated.rowCount !== 1) {
+        throw new Error("The fixture account has no assigned role to promote.");
+      }
+    });
+    const identityResponse = await this.request.get(`${this.apiBase}/api/me`, {
+      headers: { Cookie: `rc_auth=${account.token}` },
+      failOnStatusCode: true,
+    });
+    const identity = await identityResponse.json() as {
+      userId?: string;
+      role?: string;
+    };
+    if (identity.userId !== account.userId || identity.role !== "qc-manager") {
+      throw new Error(
+        "The API did not observe the fixture account's QC Manager role after assignment.",
+      );
+    }
+  }
+
   /**
    * Fresh, test-owned seeds read the canonical collection first. If the server
    * rejects this unique seed only because the shared epoch changed between the

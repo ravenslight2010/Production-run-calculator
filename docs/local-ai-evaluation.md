@@ -67,9 +67,12 @@ synthetic fixture grants those approvals or changes general AI routing.
 
 For the current customer-source policy decision and deletion limitations, see
 [Gold Lab customer-source decision](evidence/import-gold-source-use-decision.md).
-The approved 30-day manual-retention policy does not enable real-source work;
-the recorded disposition remains synthetic-only until the source-specific
-evidence and actual deletion requirements are verified.
+The Gold Lab now shows capture-based 30-day deadlines, seven-day reminders,
+overdue status, and manual application-deletion verification. This register
+does not delete cases or verify external copies or backups. The approved policy
+does not enable real-source work; the recorded disposition remains
+synthetic-only until source-specific evidence and all actual deletion
+requirements are verified.
 
 CPU-only cold startup can take several minutes: the model runtime has a bounded
 480-second readiness deadline after launch, and the detached helper allows up to
