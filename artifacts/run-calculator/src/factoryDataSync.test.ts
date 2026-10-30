@@ -244,6 +244,84 @@ describe("memory directory and scoped durable commands", () => {
       expect(pending()).toHaveLength(1);
     },
   );
+  it.each(["malformed", "invalid-json", "stale"] as const)(
+    "delivers independent settings on reconnect while retaining a %s acknowledgment's command", async (failure) => {
+      vi.stubGlobal("fetch", vi.fn(async () => response({}, 503)));
+      putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+      putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+      await flushFactoryQueue();
+      const original = pending();
+      const fetcher = vi.fn(async (_url, init?: RequestInit) => {
+        const op = JSON.parse(String(init?.body));
+        if (op.key !== SHIFT_START_TIME_KEY) return ack(init);
+        if (failure === "invalid-json") return new Response("{", { status: 200 });
+        return response(failure === "malformed" ? {} : {
+          value: "06:00", updatedAt: new Date(op.updatedAt - 1).toISOString(),
+        });
+      });
+      vi.stubGlobal("fetch", fetcher);
+      window.dispatchEvent(new Event("online"));
+      await vi.waitFor(() => expect(pending()).toEqual([original[0]]));
+      expect(fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).key))
+        .toEqual([SHIFT_START_TIME_KEY, PRODUCTION_START_TIME_KEY]);
+      expect(getShiftStartTime()).toBe("08:15");
+      expect(getProductionStartTime()).toBe("08:30");
+      // A later retry uses the original payload, stamp, generation and epoch.
+      vi.stubGlobal("fetch", vi.fn(async (_url, init) => ack(init)));
+      await flushFactoryQueue();
+      expect(pending()).toEqual([]);
+      await flushFactoryQueue();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)))
+        .toEqual({ key: original[0].key, value: original[0].value, updatedAt: original[0].updatedAt });
+    },
+  );
+  it("defers a same-key replacement after a rejected in-flight acknowledgment but sends an independent key", async () => {
+    let release!: (res: Response) => void;
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }))
+      .mockImplementation(async (_url, init) => ack(init));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+    await settle();
+    putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+    putFactoryKey(SHIFT_START_TIME_KEY, "09:15");
+    const replacement = pending().find((op: { key: string }) => op.key === SHIFT_START_TIME_KEY);
+    release(response({}));
+    await flushFactoryQueue();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).key).toBe(PRODUCTION_START_TIME_KEY);
+    expect(pending()).toEqual([replacement]);
+    expect(getShiftStartTime()).toBe("09:15");
+    await flushFactoryQueue();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(pending()).toEqual([]);
+  });
+  it.each([401, 403, 409, 429, 503])("stops the pass on HTTP %i without delivering later keys", async (status) => {
+    const fetcher = vi.fn(async () => response({}, status));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+    putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+    await flushFactoryQueue();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(pending()).toHaveLength(2);
+  });
+  it("does not continue a rejected pass into a different scope", async () => {
+    let release!: (res: Response) => void;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(SHIFT_START_TIME_KEY, "08:15");
+    putFactoryKey(PRODUCTION_START_TIME_KEY, "08:30");
+    const request = flushFactoryQueue();
+    await settle();
+    const original = pending();
+    setFactoryDataIdentity("sandbox:other", true); hydrateFromServer({});
+    release(response({}));
+    await request;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(pending()).toEqual(original);
+    expect(localStorage.getItem(queueKey("sandbox:other"))).toBeNull();
+  });
   it("adopts a canonical stale-write rejection only after valid acknowledgment", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({}, 503)));
     putFactoryKey(BRANDS_KEY, ["Old"]); await flushFactoryQueue();

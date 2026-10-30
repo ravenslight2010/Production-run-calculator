@@ -62,3 +62,16 @@ setting can silently change live production behavior instead of showing an error
 **How to apply:** Keep an explicit non-secret operational read allowlist, preserve
 administrative read and write fences, and verify non-default manager configuration
 through a fresh staff session and a scope change.
+
+Facility settings are independently reconcilable by key; they are not a
+transactional bundle. Uncertainty about one acknowledgment must not authorize
+dropping that edit or indefinitely withholding unrelated settings.
+
+**Why:** A successful HTTP response can still be malformed or contradict the
+submitted revision. Retaining the unresolved intent protects recovery, while
+key-scoped progress avoids turning one conflict into a facility-wide save block.
+
+**How to apply:** Keep acknowledgment validation strict and preserve the
+unresolved command's original conflict identity. Treat a newer same-key intent
+as ordered work, not an independent setting. Authentication, authorization,
+transport and HTTP failures remain broader stop signals.

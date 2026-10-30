@@ -188,9 +188,13 @@ export function flushFactoryQueue(): Promise<void> {
   if (flushInFlight) return flushInFlight;
   const epoch = scopeEpoch;
   const request = Promise.resolve().then(async () => {
+    // A rejected acknowledgment blocks only its key for this pass. Retain the
+    // exact command as evidence, without retrying it (or a replacement for the
+    // same key) in a tight loop while unrelated settings wait behind it.
+    const blockedKeys = new Set<string>();
     try {
       while (epoch === scopeEpoch && canWrite) {
-        const op = readQueue()[0];
+        const op = readQueue().find((candidate) => !blockedKeys.has(candidate.key));
         if (!op) return;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -202,19 +206,25 @@ export function flushFactoryQueue(): Promise<void> {
           body: JSON.stringify({ key: op.key, value: op.value, updatedAt: op.updatedAt }),
         }); } finally { clearTimeout(timeout); }
         if (!res.ok || epoch !== scopeEpoch) return;
-        const body = await res.json();
+        let body;
+        try { body = await res.json(); }
+        catch { blockedKeys.add(op.key); continue; }
         if (epoch !== scopeEpoch) return;
         // HTTP success alone is not an acknowledgment. A canonical timestamp
         // and valid value are required before retiring the exact generation.
         if (typeof body?.updatedAt !== "string" || !Number.isFinite(Date.parse(body.updatedAt))
-          || !validValue(op.key, body.value)) return;
+          || !validValue(op.key, body.value)) {
+          blockedKeys.add(op.key); continue;
+        }
         const current = readQueue();
-        if (current[0]?.g !== op.g) continue;
+        if (!current.some((candidate) => candidate.key === op.key && candidate.g === op.g)) continue;
         const stamp = Date.parse(body.updatedAt);
-        if (stamp < op.updatedAt && JSON.stringify(body.value) !== JSON.stringify(op.value)) return;
+        if (stamp < op.updatedAt && JSON.stringify(body.value) !== JSON.stringify(op.value)) {
+          blockedKeys.add(op.key); continue;
+        }
         applyValue(op.key, body.value);
         setStamp(op.key, stamp);
-        writeQueue(current.slice(1));
+        writeQueue(current.filter((candidate) => candidate.key !== op.key || candidate.g !== op.g));
         cleanLegacy(op.key, body.value);
       }
     } catch { /* Durable operation remains pending for reconnect. */ }

@@ -894,7 +894,10 @@ test("manager removes saved copies repeatedly without touching pending or active
 test.describe("facility reconnect delivery", () => {
 test.use({ serviceWorkers: "block" });
 
-test("pending facility edit is acknowledged once after connectivity returns", async ({ page }) => {
+for (const acknowledgment of ["valid", "malformed", "stale"] as const) {
+test(acknowledgment === "valid"
+  ? "pending facility edit is acknowledged once after connectivity returns"
+  : `independent facility edit progresses after a ${acknowledgment} acknowledgment on reconnect`, async ({ page }) => {
   const username = uniqueTestId("e2e_facility_reconnect");
   const fixtureId = uniqueTestId("facility_reconnect");
   testUsernames.add(username);
@@ -907,6 +910,8 @@ test("pending facility edit is acknowledged once after connectivity returns", as
   const key = "run-calc-stop-reasons";
   const baseline = [`BASELINE_${fixtureId}`];
   const intended = [`ACKNOWLEDGED_${fixtureId}`];
+  const independentKey = "run-calc-production-start-time";
+  const independentValue = "08:35";
   const editedAt = Date.now();
   const db = new Client({
     connectionString: requireIsolatedTestDatabase("seed facility reconnect fixture"),
@@ -929,12 +934,15 @@ test("pending facility edit is acknowledged once after connectivity returns", as
 
     const identity = `live:${userId}`;
     const queueKey = `run-calc-fkv-queue-v2:${encodeURIComponent(identity)}`;
-    const pendingQueue = JSON.stringify([{
+    const commands = [{
       key,
       value: intended,
       updatedAt: editedAt,
       g: 1,
-    }]);
+    }, ...(acknowledgment === "valid" ? [] : [{
+      key: independentKey, value: independentValue, updatedAt: editedAt, g: 2,
+    }])];
+    const pendingQueue = JSON.stringify(commands);
     const unrelatedQueueKey =
       `run-calc-fkv-queue-v2:${encodeURIComponent(`live:unrelated_${fixtureId}`)}`;
     const unrelatedQueue = JSON.stringify([{
@@ -968,6 +976,8 @@ test("pending facility edit is acknowledged once after connectivity returns", as
     let offline = true;
     let targetPutAttempts = 0;
     let successfulAcknowledgments = 0;
+    let rejectFirst = acknowledgment !== "valid";
+    let independentAttempts = 0;
     const abortWhileOffline = async (route: Route) => {
       if (route.request().method() !== "PUT") {
         await route.continue();
@@ -979,6 +989,14 @@ test("pending facility edit is acknowledged once after connectivity returns", as
         await route.abort("internetdisconnected");
         return;
       }
+      if (body?.key === key && rejectFirst) {
+        await route.fulfill({ status: 200, contentType: "application/json",
+          body: JSON.stringify(acknowledgment === "malformed" ? {} : {
+            value: baseline, updatedAt: new Date(editedAt - 60_000).toISOString(),
+          }) });
+        return;
+      }
+      if (body?.key === independentKey) independentAttempts++;
       await route.continue();
     };
     await page.route("**/api/factory-data", abortWhileOffline);
@@ -1031,6 +1049,20 @@ test("pending facility edit is acknowledged once after connectivity returns", as
       await page.context().setOffline(true);
       await page.context().setOffline(false);
 
+      if (acknowledgment !== "valid") {
+        await expect.poll(() => independentAttempts).toBe(1);
+        await expect.poll(async () => page.evaluate((storageKey) =>
+          localStorage.getItem(storageKey), queueKey)).toBe(JSON.stringify([commands[0]]));
+        const retainedCanonical = await readCanonicalFactoryValues(page);
+        expect(retainedCanonical[key]).toEqual(baseline);
+        expect(retainedCanonical[independentKey]).toBe(independentValue);
+        // HTTP 200 did not acknowledge or discard the rejected command.
+        // Retry on a later reconnect with exactly its original stamp/payload.
+        rejectFirst = false;
+        successfulAcknowledgments = 0;
+        await page.context().setOffline(true);
+        await page.context().setOffline(false);
+      }
       await expect.poll(() => successfulAcknowledgments, {
         message: "exactly one successful facility-data acknowledgment is expected",
       }).toBe(1);
@@ -1049,6 +1081,13 @@ test("pending facility edit is acknowledged once after connectivity returns", as
         value: intended,
         rowCount: "1",
       });
+      if (acknowledgment !== "valid") {
+        expect(independentAttempts).toBe(1);
+        const row = await db.query<{ value: unknown }>(
+          "SELECT value FROM factory_kv WHERE scope = 'live' AND key = $1", [independentKey],
+        );
+        expect(row.rows[0].value).toBe(independentValue);
+      }
       const preservedAfterReconnect = await page.evaluate((storageKeys) =>
         Object.fromEntries(storageKeys.map((storageKey) => [
           storageKey,
@@ -1065,4 +1104,5 @@ test("pending facility edit is acknowledged once after connectivity returns", as
     await db.end().catch(() => {});
   }
 });
+}
 });
