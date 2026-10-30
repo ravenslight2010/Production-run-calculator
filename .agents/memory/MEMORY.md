@@ -116,7 +116,6 @@
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
 - [Stale-client fences](source-heal-stale-client-fence.md) + [save propagation](acknowledged-master-data-propagation.md) — protect repairs; bootstrap and refresh pending runs from accepted writes.
-- [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit report fixture](webkit-operational-report-fixture.md) — isolate canonical snapshots and fence sync writes after hydration.
 - [PWA sync](pwa-offline-eventsource-fixtures.md) + [cache](pwa-deferred-cache-policy.md) + [updates](pwa-update-prompts.md) — close offline SSE; lazy is not a cache exclusion.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
@@ -130,16 +129,13 @@
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
 - [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
-- [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
 - [GitHub CI evidence](github-actions-evidence-extraction.md) + [trigger access](github-ci-trigger-access.md) — retain run/revision records and verify access before claiming a run.
-- [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
 - [Local validation runtime](local-validation-runtime-index.md) + [pnpm bootstrap](pnpm-workspace-tool-cache.md) — runner locks, Node/CA conflicts, and offline browser fixtures.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [SSE topology](sse-topology-choice.md) + [publish](production-publish-workflow.md) — derive DB peaks from samples; provider metrics stay manual; peer SSE unsupported.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
-- [Signal cleanup](shell-signal-cleanup-output.md) + [skill refresh](skill-session-registry-refresh.md) — show cleanup warnings, close locks, and refresh loaded skills.
 - [Pool fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 bytes; waive drift only with fresh owner-reviewed pins.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) + [Brix targets](qc-brix-targets.md) — keep record-first QC non-blocking; separately review Brix limits and never infer a default.
 - [Run to Time policy](run-to-time-operator-policy.md) + [timeline](day-timeline-estimate-policy.md) — reset to evening target; separate ends and forecasts; show unknown durations/breaks.
@@ -148,11 +144,7 @@
 - [SSE timeouts](sse-test-reader-timeouts.md) + [listener stop](sync-listener-stop-diagnostics.md) — retain pending reads and fence metrics after shutdown.
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [Local build](local-production-graph-build.md) + [source hashes](typescript-source-bundle-hashing.md) + [field checks](field-check-evidence-boundary.md) — dev identity only; unknown is not success.
-- [Express route uniqueness](express-route-uniqueness.md) — same-method/path handlers can shadow stale implementations; verify effective registrations, not just source presence.
 - [Prep](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) + [stock corrections](completed-run-stock-corrections.md) — prepare from raw; use prepared stock; reconcile edits durably.
-- [Smoke images/inputs](docker-caddy-smoke-image.md) + [runtime](docker-browser-smoke-runtime.md) — preserve readiness and coverage in test images.
-- [Release guide claims](release-guide-authority-claims.md) — verify provider and live-target statements.
-- [Vitest hooks](vitest-hook-cleanup.md) + [Playwright 304s](playwright-304-responses.md) — avoid implicit cleanup returns; HTTP 304 cache hits are valid, but request failures remain fatal.
-- [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require explicit run-bound activity and bounded logs from the verified serving revision.
-- [Workflow effects](workflow-configuration-side-effects.md) + [metadata hosts](metadata-maintenance-supported-hosts.md) — inspect aggregate workflows; preserve approved hosts and kernel locks.
-- [Day estimates](day-timeline-estimate-policy.md) + [attempt retention](browser-attempt-retention-policy.md) — separate forecast facts; startup 30-day cleanup covers browser diagnostics only.
+- [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require run-bound activity, Tunnel/Warehouse confirmation and serving-revision logs.
+- [Operational runtime notes](operational-runtime-index.md) — less frequent build, browser, evidence, cleanup, host and workflow constraints.
+- [Replit staging boundary](replit-staging-project-boundary.md) — published staging needs a separate project; approved local testing needs its own app/cluster.
