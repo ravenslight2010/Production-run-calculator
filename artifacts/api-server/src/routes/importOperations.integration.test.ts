@@ -423,7 +423,159 @@ function approvalMetadata(sourceDigest: string, importType = "premix") {
   };
 }
 
+// Test-DB-only triggers stop the first transaction AFTER it has acquired the
+// approval row lock. Observing PostgreSQL's actual blocker chain (not elapsed
+// time or request start order) proves that the competing route reached the lock.
+async function withApprovalTransactionBarrier(
+  first: "capture" | "revocation",
+  run: (waitForFirst: () => Promise<number>, waitForCompetitor: (pid: number) => Promise<number>,
+    release: () => Promise<void>, pending: Promise<Response>[]) => Promise<void>,
+) {
+  const blocker = await pool.connect();
+  const pending: Promise<Response>[] = [];
+  const table = first === "capture" ? "mixes" : "import_gold_approvals";
+  const event = first === "capture" ? "INSERT" : "UPDATE";
+  const key = 3769001;
+  const release = async () => { await blocker.query("SELECT pg_advisory_unlock($1)", [key]); };
+  try {
+    const identity = await blocker.query("SELECT current_database() AS name, pg_backend_pid() AS pid");
+    expect(identity.rows[0].name).toBe(dbName);
+    await blocker.query("SELECT pg_advisory_lock($1)", [key]);
+    await blocker.query(`
+      CREATE FUNCTION test_approval_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        PERFORM pg_advisory_xact_lock(${key});
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER test_approval_barrier BEFORE ${event} ON ${table}
+        FOR EACH ROW EXECUTE FUNCTION test_approval_barrier();
+    `);
+    const waitForBlockedBy = async (pid: number) => {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const result = await blocker.query(`
+          SELECT pid FROM pg_stat_activity
+          WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
+        `, [pid]);
+        if (result.rows.length) return Number(result.rows[0].pid);
+      }
+      throw new Error(`Expected ${first} transaction blocker chain was not reached`);
+    };
+    await run(() => waitForBlockedBy(Number(identity.rows[0].pid)), waitForBlockedBy, release, pending);
+  } finally {
+    // Also unblock and drain requests on assertion failure before removing the
+    // trigger or allowing the next test's TRUNCATE to run.
+    await release();
+    await Promise.allSettled(pending);
+    await blocker.query(`
+      DROP TRIGGER IF EXISTS test_approval_barrier ON ${table};
+      DROP FUNCTION IF EXISTS test_approval_barrier();
+    `);
+    blocker.release();
+  }
+}
+
 describe("source approval metadata", () => {
+  it.each(["capture", "revocation"] as const)(
+    "serializes concurrent source capture and revocation with %s ordered first",
+    async (first) => {
+      const input = { candidates: [{ name: "Synthetic concurrent approval source" }] };
+      const post = (url: string, body: unknown, user = "inventory") => fetch(`${baseUrl}/api${url}`, {
+        method: "POST", headers: headers(user), body: JSON.stringify(body),
+      });
+      const created = await post("/import-gold/approvals", approvalMetadata(goldSourceDigest(input)));
+      expect(created.status).toBe(201);
+      const { approval } = await created.json() as { approval: { id: number } };
+      const approvalPath = `/import-gold/approvals/${approval.id}`;
+      expect((await post(`${approvalPath}/verification`, { reviewed: true }, "qc-reviewer")).status).toBe(200);
+      const operationId = `approval-race-${first}-operation-0001`;
+      const mixId = `approval-race-${first}-mix`;
+      const body = { ...change(mixId), goldCapture: { input, approvalId: approval.id } };
+
+      // Neither another scope nor an actor without the capability may mutate
+      // this approval or use it to capture a case.
+      expect((await post(`${approvalPath}/revocation`, { reviewed: true }, "sandbox")).status).toBe(404);
+      expect((await post(`${approvalPath}/revocation`, { reviewed: true }, "profiles")).status).toBe(403);
+      expect((await apply(`${operationId}-sandbox`, body, "sandbox")).status).toBe(403);
+      expect((await apply(`${operationId}-operator`, body, "profiles")).status).toBe(403);
+
+      await withApprovalTransactionBarrier(first, async (waitForFirst, waitForCompetitor, release, pending) => {
+        const capture = () => apply(operationId, body);
+        const revoke = () => post(`${approvalPath}/revocation`, { reviewed: true }, "qc-peer");
+        const firstRequest = first === "capture" ? capture() : revoke();
+        pending.push(firstRequest);
+        const firstPid = await waitForFirst();
+        const competingRequest = first === "capture" ? revoke() : capture();
+        pending.push(competingRequest);
+        const competingPid = await waitForCompetitor(firstPid);
+        expect(competingPid).not.toBe(firstPid);
+        await release();
+        const [firstResponse, competingResponse] = await Promise.all([firstRequest, competingRequest]);
+        const captureResponse = first === "capture" ? firstResponse : competingResponse;
+        const revokeResponse = first === "capture" ? competingResponse : firstResponse;
+        expect(revokeResponse.status).toBe(200);
+        expect(captureResponse.status).toBe(first === "capture" ? 200 : 403);
+        if (first === "revocation") {
+          expect(await captureResponse.json()).toEqual({ error: "A verified, matching and current source approval is required" });
+        }
+      });
+
+      // Retry the same identity and submit distinct new operations after the
+      // revocation commit: none may create (or duplicate) domain/history/cases.
+      for (const id of [operationId, `${operationId}-late-1`, `${operationId}-late-2`]) {
+        const rejected = await apply(id, {
+          ...body, ...(id === operationId ? {} : change(`${mixId}-${id.slice(-1)}`)),
+        });
+        expect(rejected.status).toBe(403);
+        expect(await rejected.json()).toEqual({ error: "A verified, matching and current source approval is required" });
+      }
+      const expectedCount = first === "capture" ? 1 : 0;
+      const mixes = await db.select().from(tables.mixesTable);
+      const operations = await db.select().from(tables.importOperationsTable);
+      const history = await db.select().from(tables.importHistoryTable);
+      const cases = await db.select().from(tables.importGoldCasesTable);
+      const retention = await db.select().from(tables.importGoldRetentionTable);
+      expect(mixes).toHaveLength(expectedCount);
+      expect(operations).toHaveLength(expectedCount);
+      expect(history).toHaveLength(expectedCount);
+      expect(cases).toHaveLength(expectedCount);
+      expect(retention).toHaveLength(expectedCount);
+      if (first === "capture") {
+        expect(mixes[0]).toMatchObject({ id: mixId, scope: "live" });
+        expect(operations[0]).toMatchObject({ id: operationId, scope: "live", actorId: "inventory", status: "applied" });
+        expect(history[0]).toMatchObject({ operationId, scope: "live", actorId: "inventory" });
+        expect(cases[0]).toMatchObject({
+          operationId, scope: "live", approvalId: approval.id, createdBy: "inventory", evaluatedInput: input,
+        });
+        expect(goldSourceDigest(cases[0]!.evaluatedInput)).toBe(goldSourceDigest(input));
+        expect(retention[0]).toMatchObject({ scope: "live", caseId: cases[0]!.id });
+      }
+      const approvals = await db.select().from(tables.importGoldApprovalsTable);
+      expect(approvals).toHaveLength(1);
+      const [stored] = approvals;
+      expect(stored).toMatchObject({
+        id: approval.id, scope: "live", createdBy: "inventory", verifiedBy: "qc-reviewer",
+        revokedBy: "qc-peer", sourceDigest: goldSourceDigest(input), importType: "premix",
+      });
+      expect(stored!.verifiedAt).toBeInstanceOf(Date);
+      expect(stored!.revokedAt).toBeInstanceOf(Date);
+      const audit = (await db.select().from(tables.auditLogsTable))
+        .filter((row) => row.resource === "import_gold_approval");
+      expect(audit).toHaveLength(3);
+      expect(audit.map((row) => row.action).sort()).toEqual([
+        "import_gold_approval_created", "import_gold_approval_revoked", "import_gold_approval_verified",
+      ]);
+      for (const row of audit) {
+        expect(row).toMatchObject({
+          scope: "live", changes: { outcome: "success", targetId: String(approval.id) },
+          actor: row.action === "import_gold_approval_created" ? "inventory"
+            : row.action === "import_gold_approval_verified" ? "qc-reviewer" : "qc-peer",
+        });
+        expect(Object.keys(row.changes).sort()).toEqual(["outcome", "targetId"]);
+      }
+    },
+  );
+
   it("requires explicit review, binds exact scoped input, and fences revocation without enabling capture", async () => {
     process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "synthetic-approval";
     const input = { candidates: [{ name: "Synthetic approved source" }] };
