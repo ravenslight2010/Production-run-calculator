@@ -94,4 +94,18 @@ describe("retained local record review", () => {
     expect(screen.queryByText("REMOVE_THIS")).toBeNull();
     expect(screen.getByText("Saved record on this device. Date: 2026-01-03.")).toBeTruthy();
   });
+
+  it("removes multiple reviewed copies one at a time and confirms the last removal", () => {
+    render(<SharedRecordsStatus />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove this saved copy from this device" })[0]);
+    expect(localStorage.getItem("run-calc-history")).toBeNull();
+    expect(localStorage.getItem("run-calc-completed-history-cache.live")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove this saved copy from this device" }));
+    expect(localStorage.getItem("run-calc-completed-history-cache.live")).toBeNull();
+    expect(localStorage.getItem("run-calc-completed-history-outbox.live")).toBe('[{"pending":true}]');
+    expect(screen.getByText("Saved copy removed from this device.")).toBeTruthy();
+    expect(screen.queryByText("2 saved local items to review")).toBeNull();
+  });
 });

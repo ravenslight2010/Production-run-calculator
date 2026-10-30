@@ -38,6 +38,12 @@ explicitly for Docker/Caddy: use the local `chromium` path in Replit and Playwri
 
 When the full `pnpm run typecheck` fails outside the changed package, isolate the named package before attributing the failure to the current task. A TypeScript 6.0.3 check of `artifacts/mockup-sandbox` has reproduced the compiler assertion `parameter should have errors when reporting errors` even when run alone, while the calculator package typecheck passes. Do not silently skip the root check or treat the isolated calculator result as a full pass.
 
+If a workspace-wide typecheck exceeds its shell time limit while another lock-heavy suite is active, record it as incomplete rather than as a compiler failure. Run the changed package's declared typecheck for focused evidence, and wait until the shared validation runner is clear before retrying the root check.
+
+**Why:** A five-minute root check was cut off while the calculator suite was running; the calculator package typecheck completed successfully afterward, but that did not establish a root pass.
+
+**How to apply:** Check the runner lock and active validation workflows before retrying; report focused package results and workspace-wide status separately.
+
 Generated API checks can fail earlier if Orval output drifts from the OpenAPI source. Compare temporary generated output with the tracked files; regenerate only when the source contract supports the difference, then rerun the full check to reveal later failures.
 
 **Why:** A clean focused check does not close a configured workspace-wide gate, and generated-contract drift can mask a separate compiler failure.

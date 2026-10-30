@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { factoryDirectoryState, factoryDirectoryVersion, subscribeFactoryDirectory, directoryRaw } from "../factoryDirectory";
 import {
   fetchFactoryData, hydrateFromServer, flushFactoryQueue, legacyDirectoryReviews,
@@ -87,37 +87,62 @@ function currentFacilityValue(key: string): unknown {
 export function FactoryDirectoryStatus() {
   useSyncExternalStore(subscribeFactoryDirectory, factoryDirectoryVersion, factoryDirectoryVersion);
   const [reviewError, setReviewError] = useState("");
+  const [reviewNotice, setReviewNotice] = useState("");
+  const [busyReviewId, setBusyReviewId] = useState<string | null>(null);
+  const resolvingReviewId = useRef<string | null>(null);
   const state = factoryDirectoryState();
   const reviews = legacyDirectoryReviews();
-  if (state.status === "ready") return reviews.length ? <aside data-testid="factory-directory-review" className="mb-3 rounded-md border border-amber-500 p-3 text-sm">
-    <details><summary>{reviews.length} saved facility-list edits need review</summary>
-      <p className="mt-2">These copies are saved on this device, not currently in use as shared facility lists. Their owner or order could not be confirmed, so they were not applied automatically. Compare both versions before choosing.</p>
-      {reviews.map((review) => <div className="my-3 rounded border border-border p-3" key={review.id}>
-        <h3 className="font-medium">{DIRECTORY_LABELS[review.key] ?? "Saved facility list"}</h3>
-        {review.problem && <p role="alert" className="mt-1">{review.problem}</p>}
-        <p className="mt-2 font-semibold">Currently in use</p>
-        <ul className="max-h-60 overflow-auto list-disc pl-5" tabIndex={0} aria-label="Current facility value, complete list">
-          {readableLines(currentFacilityValue(review.key)).map((line, index) => <li key={`current-${index}`}>{line}</li>)}
-        </ul>
-        <p className="mt-2 font-semibold">{review.source === "run-calc-fkv-queue-v1" ? "Saved change awaiting review" : "Saved copy on this device"}</p>
-        <ul className="max-h-60 overflow-auto list-disc pl-5" tabIndex={0} aria-label="Saved device copy, complete list">
-          {readableLines(review.value).map((line, index) => <li key={`saved-${index}`}>{line}</li>)}
-        </ul>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <button type="button" disabled={!!review.problem || !review.canApply} className="underline" onClick={() => {
-            if (!window.confirm(`Replace the facility’s current ${DIRECTORY_LABELS[review.key] ?? "list"} with this device’s saved copy?`)) return;
-            void resolveLegacyDirectoryReview(review, true).then((ok) => setReviewError(ok ? "" : "The saved edit could not be safely applied. It remains available for review."));
-          }}>Apply saved copy</button>
-          <button type="button" disabled={!review.canRemove} className="underline" onClick={() => {
-            if (!window.confirm("Permanently remove this saved copy from this device? This will not change the facility’s shared value.")) return;
-            void resolveLegacyDirectoryReview(review, false).then((ok) => setReviewError(ok ? "" : "The copy changed or could not be removed. Nothing else was removed; refresh this review and try again."));
-          }}>Remove saved copy from this device</button>
-        </div>
-        {!review.canRemove && review.removeBlockedReason && <p className="mt-2 text-muted-foreground">{review.removeBlockedReason}</p>}
-      </div>)}
-      {reviewError && <p role="alert">{reviewError}</p>}
-    </details>
-  </aside> : null;
+  if (state.status === "ready") {
+    if (!reviews.length && !reviewError && !reviewNotice) return null;
+    return <aside data-testid="factory-directory-review" className="mb-3 rounded-md border border-amber-500 p-3 text-sm">
+      {reviews.length > 0 && <details><summary>{reviews.length} saved facility-list edits need review</summary>
+        <p className="mt-2">These copies are saved on this device, not currently in use as shared facility lists. Their owner or order could not be confirmed, so they were not applied automatically. Compare both versions before choosing.</p>
+        {reviews.map((review) => <div className="my-3 rounded border border-border p-3" key={review.id}>
+          <h3 className="font-medium">{DIRECTORY_LABELS[review.key] ?? "Saved facility list"}</h3>
+          {review.problem && <p role="alert" className="mt-1">{review.problem}</p>}
+          <p className="mt-2 font-semibold">Currently in use</p>
+          <ul className="max-h-60 overflow-auto list-disc pl-5" tabIndex={0} aria-label="Current facility value, complete list">
+            {readableLines(currentFacilityValue(review.key)).map((line, index) => <li key={`current-${index}`}>{line}</li>)}
+          </ul>
+          <p className="mt-2 font-semibold">{review.source === "run-calc-fkv-queue-v1" ? "Saved change awaiting review" : "Saved copy on this device"}</p>
+          <ul className="max-h-60 overflow-auto list-disc pl-5" tabIndex={0} aria-label="Saved device copy, complete list">
+            {readableLines(review.value).map((line, index) => <li key={`saved-${index}`}>{line}</li>)}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="button" disabled={!!busyReviewId || !!review.problem || !review.canApply} className="underline" onClick={() => {
+              if (!window.confirm(`Replace the facility’s current ${DIRECTORY_LABELS[review.key] ?? "list"} with this device’s saved copy?`)) return;
+              setReviewError("");
+              setReviewNotice("");
+              void resolveLegacyDirectoryReview(review, true).then((ok) => setReviewError(ok ? "" : "The saved edit could not be safely applied. It remains available for review."));
+            }}>Apply saved copy</button>
+            <button type="button" disabled={!review.canRemove || !!busyReviewId} className="underline" onClick={() => {
+              if (resolvingReviewId.current || !review.canRemove) return;
+              if (!window.confirm("Permanently remove this saved copy from this device? This will not change the facility’s shared value.")) return;
+              resolvingReviewId.current = review.id;
+              setBusyReviewId(review.id);
+              setReviewError("");
+              setReviewNotice("");
+              void resolveLegacyDirectoryReview(review, false)
+                .then((ok) => {
+                  setReviewError(ok ? "" : "The copy changed or could not be removed. Nothing else was removed; refresh this review and try again.");
+                  setReviewNotice(ok ? "Saved copy removed from this device." : "");
+                })
+                .catch(() => {
+                  setReviewError("The copy could not be removed. Nothing else was removed; refresh this review and try again.");
+                })
+                .finally(() => {
+                  resolvingReviewId.current = null;
+                  setBusyReviewId(null);
+                });
+            }}>{busyReviewId === review.id ? "Removing saved copy…" : review.canRemove ? "Remove saved copy from this device" : "Removal unavailable"}</button>
+          </div>
+          {!review.canRemove && review.removeBlockedReason && <p className="mt-2 text-muted-foreground">{review.removeBlockedReason}</p>}
+        </div>)}
+      </details>}
+      {reviewError && <p role="alert" className="mt-2">{reviewError}</p>}
+      {reviewNotice && <p role="status" aria-live="polite" className="mt-2">{reviewNotice}</p>}
+    </aside>;
+  }
   return <aside role="status" className="mb-3 rounded-md border border-amber-500 p-3 text-sm">
     <p>{state.status === "loading" ? "Loading operational lists from the server…" : "Operational lists unavailable. Connect online to load lists or edit recipes. Saved run recovery remains available."}</p>
     {state.error && <p>{state.error}</p>}

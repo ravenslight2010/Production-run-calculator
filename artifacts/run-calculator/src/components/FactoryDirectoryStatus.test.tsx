@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { BRANDS_KEY } from "../types";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { BRANDS_KEY, STOP_REASONS_KEY } from "../types";
 import { directoryRaw } from "../factoryDirectory";
 import { hydrateFromServer, resetFactoryDataSyncForTests, setFactoryDataIdentity } from "../factoryDataSync";
 import { FactoryDirectoryStatus } from "./FactoryDirectoryStatus";
@@ -41,5 +41,36 @@ describe("legacy facility-list review", () => {
     expect(localStorage.getItem(BRANDS_KEY)).toBeNull();
     expect(screen.queryByText(/Old Brand/)).toBeNull();
     expect(screen.queryByText("Brands")).toBeNull();
+  });
+
+  it("removes multiple eligible copies sequentially and confirms the final removal", async () => {
+    localStorage.setItem(STOP_REASONS_KEY, '["Old stop reason"]');
+    render(<FactoryDirectoryStatus />);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "Remove saved copy from this device" })[0]);
+    });
+    expect(localStorage.getItem(BRANDS_KEY)).toBeNull();
+    expect(localStorage.getItem(STOP_REASONS_KEY)).toBe('["Old stop reason"]');
+
+    const stopReasons = screen.getByRole("heading", { name: "Stop reasons" }).closest("div")!;
+    await act(async () => {
+      fireEvent.click(within(stopReasons).getByRole("button", { name: "Remove saved copy from this device" }));
+    });
+
+    expect(localStorage.getItem(STOP_REASONS_KEY)).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Saved copy removed from this device.");
+    expect(screen.queryByRole("button", { name: "Remove saved copy from this device" })).toBeNull();
+  });
+
+  it("clearly disables removal for an edit that may still be unsent", () => {
+    const queue = JSON.stringify([{ key: BRANDS_KEY, value: ["Pending Brand"], updatedAt: 1, g: 1 }]);
+    localStorage.setItem("run-calc-fkv-queue-v1", queue);
+    render(<FactoryDirectoryStatus />);
+
+    const button = screen.getByRole("button", { name: "Removal unavailable" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText(/may not have been sent to the facility yet/)).toBeTruthy();
+    expect(localStorage.getItem("run-calc-fkv-queue-v1")).toBe(queue);
   });
 });
