@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import { Client } from "pg";
 import {
   cleanupDailySync,
@@ -11,10 +11,145 @@ import {
   dismissOnboardingIfPresent,
   signUpAndHandleOnboarding,
 } from "./onboarding";
+import { cancelledDocumentMessage } from "./breakPlanningEvidence";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
+
+function captureManagerApiNetwork(page: Page, isWebKit: boolean): {
+  pageErrors: string[];
+  responseStatuses: Array<{ url: string; status: number }>;
+  crossOriginRequests: string[];
+  preflightRequests: string[];
+  failedApiRequests: string[];
+  apiConsoleErrors: string[];
+  expectedNavigationCancellations: string[];
+  expectedWebKitNavigationMessages: string[];
+  start: () => void;
+  markExpectedNavigation: (expected: boolean) => void;
+} {
+  const pageErrors: string[] = [];
+  const responseStatuses: Array<{ url: string; status: number }> = [];
+  const crossOriginRequests: string[] = [];
+  const preflightRequests: string[] = [];
+  const failedApiRequests: string[] = [];
+  const apiConsoleErrors: string[] = [];
+  const expectedNavigationCancellations: string[] = [];
+  const expectedWebKitNavigationMessages: string[] = [];
+  const inFlight = new Set<Request>();
+  const navigationRequests = new WeakSet<Request>();
+  const navigationPaths = new Set<string>();
+  const successfulOrigins = new Set<string>();
+  let enabled = false;
+  let expectedNavigation = false;
+  const apiUrl = (value: string): URL | null => {
+    try {
+      const url = new URL(value);
+      return /^\/api\//.test(url.pathname) ? url : null;
+    } catch {
+      return null;
+    }
+  };
+  const isManagerTarget = (url: URL) =>
+    /^\/api\/(?:incidents(?:\/actionable-count)?|factory-data(?:\/operational)?)$/.test(url.pathname);
+  const classifyBrowserMessage = (
+    text: string,
+    source: string,
+    unexpectedErrors: string[],
+  ): void => {
+    const cancelledPath = cancelledDocumentMessage({
+      webkit: isWebKit,
+      text,
+      successfulOrigins,
+      navigationPaths,
+      duringReload: expectedNavigation,
+    });
+    if (cancelledPath) {
+      expectedWebKitNavigationMessages.push(`${source}: ${cancelledPath}`);
+    } else {
+      unexpectedErrors.push(text);
+    }
+  };
+
+  page.on("request", (request) => {
+    if (!enabled) return;
+    inFlight.add(request);
+    // Unload handlers can start a final write after reload was requested.
+    // Track those requests as well as ones already in flight at that point.
+    if (expectedNavigation) navigationRequests.add(request);
+    const url = apiUrl(request.url());
+    if (!url) return;
+    if (expectedNavigation) navigationPaths.add(url.pathname);
+    if (request.method() === "OPTIONS") {
+      preflightRequests.push(`${request.method()} ${url.origin}${url.pathname}`);
+    }
+    const pageOrigin = page.url() === "about:blank" ? null : new URL(page.url()).origin;
+    if (pageOrigin && url.origin !== pageOrigin) {
+      crossOriginRequests.push(`${request.method()} ${url.origin}${url.pathname}`);
+    }
+  });
+  page.on("requestfinished", (request) => inFlight.delete(request));
+  page.on("response", (response) => {
+    if (!enabled) return;
+    if (response.ok()) successfulOrigins.add(new URL(response.url()).origin);
+    const url = apiUrl(response.url());
+    if (!url || !isManagerTarget(url)) return;
+    responseStatuses.push({ url: `${url.origin}${url.pathname}`, status: response.status() });
+  });
+  page.on("requestfailed", (request) => {
+    inFlight.delete(request);
+    if (!enabled) return;
+    const url = apiUrl(request.url());
+    if (!url) return;
+    const entry = `${request.method()} ${url.origin}${url.pathname} (${request.failure()?.errorText ?? "unknown"})`;
+    if (
+      navigationRequests.has(request)
+      && (
+        request.failure()?.errorText === "Load request cancelled"
+        || request.failure()?.errorText === "net::ERR_ABORTED"
+      )
+    ) {
+      expectedNavigationCancellations.push(entry);
+    } else {
+      failedApiRequests.push(entry);
+    }
+  });
+  page.on("console", (message) => {
+    if (!enabled) return;
+    if (message.type() !== "error") return;
+    const text = message.text();
+    if (/\/api\/(?:incidents(?:\/actionable-count)?|factory-data|field-checks\/observations)(?:\?| |$)/.test(text)) {
+      classifyBrowserMessage(text, "console", apiConsoleErrors);
+    }
+  });
+  page.on("pageerror", (error) => {
+    if (enabled) classifyBrowserMessage(error.message, "page", pageErrors);
+  });
+
+  return {
+    pageErrors,
+    responseStatuses,
+    crossOriginRequests,
+    preflightRequests,
+    failedApiRequests,
+    apiConsoleErrors,
+    expectedNavigationCancellations,
+    expectedWebKitNavigationMessages,
+    start: () => { enabled = true; },
+    markExpectedNavigation: (expected) => {
+      if (expected) {
+        navigationPaths.clear();
+        for (const request of inFlight) {
+          navigationRequests.add(request);
+          const url = apiUrl(request.url());
+          if (url) navigationPaths.add(url.pathname);
+        }
+      }
+      expectedNavigation = expected;
+    },
+  };
+}
 
 async function openMore(page: Page): Promise<void> {
   const menu = page.getByRole("menu");
@@ -410,16 +545,32 @@ test("manager removes saved copies repeatedly without touching pending or active
 }, testInfo) => {
   const username = uniqueTestId("e2e_saved_copy_removal");
   const fixtureId = uniqueTestId("savedcopy");
-  const pageErrors: string[] = [];
+  const {
+    pageErrors,
+    responseStatuses: apiResponseStatuses,
+    crossOriginRequests: crossOriginApiRequests,
+    preflightRequests: apiPreflightRequests,
+    failedApiRequests,
+    apiConsoleErrors,
+    expectedNavigationCancellations,
+    expectedWebKitNavigationMessages,
+    start: startApiCapture,
+    markExpectedNavigation,
+  } = captureManagerApiNetwork(page, testInfo.project.name.endsWith("webkit"));
   testUsernames.add(username);
-  page.on("pageerror", (error) => pageErrors.push(error.message));
 
-  await signUpAndHandleOnboarding(page, username, PASSWORD, {
-    signupCode: SIGNUP_CODE,
+  // Create and promote the disposable account before loading the web app.
+  // This keeps unauthenticated startup telemetry out of the signed-in Safari
+  // request check while preserving the real HTTP-only session cookie.
+  const signupResponse = await page.request.post("/api/auth/sign-up", {
+    data: { username, password: PASSWORD, accessCode: SIGNUP_CODE },
   });
-  await dismissOnboardingIfPresent(page);
+  expect(signupResponse.status()).toBe(201);
   await promoteToManager(username);
-  await page.reload({ waitUntil: "domcontentloaded" });
+  startApiCapture();
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("tab-run")).toBeAttached({ timeout: 25_000 });
+  await dismissOnboardingIfPresent(page);
   await expect(page.getByTestId("tab-run")).toHaveAttribute(
     "data-state",
     "active",
@@ -478,6 +629,10 @@ test("manager removes saved copies repeatedly without touching pending or active
     unrelatedOutboxKey,
     unrelatedOutboxValue,
   });
+  expect(pageErrors).toEqual([]);
+  // The fixture reload can abort pending same-origin fetches and EventSource
+  // requests; check browser errors again after the new page has settled.
+  markExpectedNavigation(true);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("tab-run")).toHaveAttribute(
     "data-state",
@@ -488,6 +643,7 @@ test("manager removes saved copies repeatedly without touching pending or active
   const sharedReview = page.getByTestId("shared-records-status");
   await expect(factoryReview).toBeVisible();
   await expect(sharedReview).toBeVisible();
+  markExpectedNavigation(false);
   await factoryReview.locator("summary").click();
   await sharedReview.locator("summary").click();
   await expect(factoryReview).toContainText("4 saved facility-list edits need review");
@@ -638,6 +794,19 @@ test("manager removes saved copies repeatedly without touching pending or active
     return { date: state.date as string, runId: run.id as string };
   });
   expect(activeRunBeforeReload).toEqual(activeRunBeforeRemoval);
+  console.log(
+    `[${testInfo.project.name}] manager page origin=${new URL(page.url()).origin}; cross-origin API requests=${JSON.stringify(crossOriginApiRequests)}`,
+  );
+  expect(
+    crossOriginApiRequests,
+    "manager API requests should stay on the page origin",
+  ).toEqual([]);
+  expect(
+    pageErrors,
+    "the signed-in manager page should not report access-control failures",
+  ).toEqual([]);
+  expect(apiConsoleErrors, "manager API calls should not log access-control errors").toEqual([]);
+  markExpectedNavigation(true);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("tab-run")).toHaveAttribute(
     "data-state",
@@ -652,6 +821,7 @@ test("manager removes saved copies repeatedly without touching pending or active
     name: "Removal unavailable",
   })).toBeDisabled();
   await expect(page.getByTestId("shared-records-status")).toHaveCount(0);
+  markExpectedNavigation(false);
 
   const preservedAfter = await page.evaluate(({ queueKey, unrelatedKey, outboxKey }) => ({
     activeRecovery: localStorage.getItem("run-calc-day"),
@@ -678,22 +848,46 @@ test("manager removes saved copies repeatedly without touching pending or active
   }).toEqual(activeRunBeforeRemoval);
   const canonicalAfter = await readCanonicalFactoryValues(page);
   expect(canonicalAfter).toEqual(canonicalBefore);
-  const knownWebKitBackgroundApiErrors = testInfo.project.name.includes("webkit")
-    ? pageErrors.filter((message) =>
-      message.includes("due to access control checks")
-      && /\/api\/(incidents|factory-data|sync\/auto-track\/claim)(?:\?| |$)/.test(message))
-    : [];
-  const unexpectedPageErrors = pageErrors.filter(
-    (message) => !knownWebKitBackgroundApiErrors.includes(message),
-  );
-  expect(unexpectedPageErrors).toEqual([]);
-  if (knownWebKitBackgroundApiErrors.length > 0) {
-    const description = knownWebKitBackgroundApiErrors.join("; ");
-    testInfo.annotations.push({
-      type: "WebKit background API access-control errors",
-      description,
-    });
-    console.warn(`[${testInfo.project.name}] ${description}`);
+  if (pageErrors.length > 0) {
+    console.log(`[${testInfo.project.name}] Page errors:\n${pageErrors.join("\n---\n")}`);
+  }
+  expect(pageErrors, "manager API calls should not produce access-control errors").toEqual([]);
+  expect(apiConsoleErrors, "manager API calls should not log access-control errors").toEqual([]);
+  expect(crossOriginApiRequests, "manager API requests should stay on the page origin").toEqual([]);
+  expect(
+    apiResponseStatuses.filter(({ url, status }) =>
+      (
+        url.endsWith("/api/factory-data")
+        || url.endsWith("/api/factory-data/operational")
+        || url.endsWith("/api/incidents")
+        || url.endsWith("/api/incidents/actionable-count")
+      ) && (status < 200 || status >= 300)
+    ),
+    "manager API requests should return successful responses",
+  ).toEqual([]);
+  expect(
+    apiResponseStatuses.some(({ url, status }) =>
+      url.endsWith("/api/factory-data") && status === 200
+    ),
+    "the authenticated manager factory-data read should succeed",
+  ).toBe(true);
+  expect(
+    apiResponseStatuses.some(({ url, status }) =>
+      url.endsWith("/api/incidents/actionable-count") && status === 200
+    ),
+    "the authenticated manager incident-count read should succeed",
+  ).toBe(true);
+  expect(apiPreflightRequests, "same-origin manager requests should not preflight").toEqual([]);
+  expect(failedApiRequests, "manager API requests should not fail unexpectedly").toEqual([]);
+  if (expectedWebKitNavigationMessages.length > 0) {
+    console.log(
+      `[${testInfo.project.name}] same-origin WebKit requests cancelled by deliberate reloads: ${expectedWebKitNavigationMessages.length}`,
+    );
+  }
+  if (expectedNavigationCancellations.length > 0) {
+    console.log(
+      `[${testInfo.project.name}] same-origin API requests cancelled by deliberate reloads: ${expectedNavigationCancellations.length}`,
+    );
   }
 });
 

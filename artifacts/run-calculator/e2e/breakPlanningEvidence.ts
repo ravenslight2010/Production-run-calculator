@@ -15,6 +15,7 @@ export function cancelledDocumentMessage(input: {
     "/api/incidents",
     "/api/field-checks/observations",
     "/api/sync/today",
+    "/api/sync/auto-track/claim",
     "/api/factory-data",
   ];
   for (const origin of input.successfulOrigins) {

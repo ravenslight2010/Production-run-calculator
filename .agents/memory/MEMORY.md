@@ -25,7 +25,7 @@
 - [DB test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) — honor migrations; isolate writes.
 - [CI parity](local-ci-postgres-parity.md) + [development DB](isolated-destructive-browser-tests.md) — shared development data is not disposable.
 - [Runtime markers](replit-production-detection.md) — `REPLIT_ENVIRONMENT` alone does not prove production.
-- [Browser evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) — isolate browser state and stabilize evidence.
+- [Browser evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) — distinguish same-origin reload cancellations from CORS failures.
 - [Browser quality](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [accessibility](a11y-coverage-gate.md) — preserve acknowledgement, visual, and accessibility checks.
 - [Browser fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — use deterministic identities and seeds.
 - [Browser compatibility](browser-compatibility-index.md) + [WebKit timing](webkit-review-test-timing.md) + [native selects](webkit-native-select-color-scheme.md) — stabilize WebKit checks.

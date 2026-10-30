@@ -21,6 +21,28 @@ which could be mistaken for missing browser evidence.
 **How to apply:** Inspect the network schema first, then extract only the
 needed sanitized facts. Do not dump request headers, cookies, or entire bodies.
 
+## WebKit fetch access-control wording
+
+**Rule:** Do not diagnose a WebKit “due to access control checks” message from
+its wording alone. Compare the document and request origins, check whether an
+OPTIONS preflight occurred, inspect the network failure reason, and confirm
+whether protected API responses succeeded. `Load request cancelled` in WebKit
+and `net::ERR_ABORTED` in Chromium can indicate navigation cancellation rather
+than a CORS failure.
+
+**Why:** An authenticated tablet manager journey used same-origin API requests
+without preflight, and protected reads returned 200. WebKit emitted
+access-control wording when an explicit test reload cancelled pending requests.
+Changing server CORS or authorization in response would have weakened the wrong
+layer.
+
+**How to apply:** Reproduce under an authenticated browser context in WebKit
+and Chromium. Assert same-origin requests, expected preflight behavior, and
+successful protected reads; only disregard cancellation errors during a known
+navigation window, and keep other request failures fatal. Include requests that
+start during unload, not only those in flight before navigation was requested:
+unload handlers may flush a final write that is then cancelled by that navigation.
+
 ## Contention is the enemy, not logic
 Validation runs alongside the development workflows, which can starve Vitest.
 Concurrent workers have previously caused "Failed to start forks worker"
