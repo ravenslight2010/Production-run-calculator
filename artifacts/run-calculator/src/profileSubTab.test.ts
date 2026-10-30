@@ -38,7 +38,10 @@ describe("profile line-type preference", () => {
       _subTab: "crusts",
     });
     expect(localStorage.getItem("acme__pepperoni:subtab")).toBe("crusts");
-    expect(markProfileEdited).toHaveBeenCalledExactlyOnceWith("acme__pepperoni");
+    expect(markProfileEdited).toHaveBeenCalledExactlyOnceWith("acme__pepperoni", {
+      brand: "Acme",
+      flavor: "Pepperoni",
+    });
     saveProfileSubTab("Acme", "Pepperoni", "crusts");
     expect(markProfileEdited).toHaveBeenCalledTimes(1);
   });
@@ -92,7 +95,10 @@ describe("profile line-type preference", () => {
     expect(JSON.parse(readCachedProfileBlobs("acme__pepperoni").dough!)).toEqual({
       doughRecipeName: "Standard", _subTab: "crusts",
     });
-    expect(markProfileEdited).toHaveBeenCalledExactlyOnceWith("acme__pepperoni");
+    expect(markProfileEdited).toHaveBeenCalledExactlyOnceWith("acme__pepperoni", {
+      brand: "Acme",
+      flavor: "Pepperoni",
+    });
     setProfileCacheIdentity({ userId: "manager-b", scope: "sandbox" });
     expect(loadProfileSubTab("Acme", "Pepperoni")).toBeNull();
   });

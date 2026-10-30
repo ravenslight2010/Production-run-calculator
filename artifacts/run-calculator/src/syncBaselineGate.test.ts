@@ -312,7 +312,7 @@ describe("SSE sync baseline gate", () => {
     expect(lifecycle).toContain("if (readOnly) return;");
     expect(liveContext).toContain("disabled: screenMode !== null");
     expect(outbox).toContain("if (screenMode !== null) return;");
-    expect(dayStart).toContain("if (screenMode !== null) return;");
+    expect(dayStart).toContain("if (screenMode !== null || !canManageInventory) return;");
     expect(factory).toContain("if (screenMode !== null) return;");
     expect(factory).toContain("if (screenMode === null) void flushFactoryQueue();");
     expect(factory).toContain("if (screenMode === null) void runFactoryKvMigration(data);");
