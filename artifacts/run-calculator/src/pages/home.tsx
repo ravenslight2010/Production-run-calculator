@@ -923,6 +923,7 @@ const loadDoughGuideImportDialog = () =>
 const loadCheeseImportDialog = () => import("@/components/CheeseImportDialog");
 const loadImportGoldLabCard = () => import("@/components/ImportGoldLabCard");
 const loadImportGoldRetentionCard = () => import("@/components/ImportGoldRetentionCard");
+const loadImportGoldApprovalsCard = () => import("@/components/ImportGoldApprovalsCard");
 const loadSetupProfileEditor = () => import("@/components/SetupProfileEditor");
 const loadScreenModeView = () => import("../components/ScreenModeView");
 const loadDataHealthWorkspace = () => import("../components/DataHealthWorkspace");
@@ -16990,6 +16991,8 @@ export default function Home() {
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
            ...(canManageStaff ? [{ key: "audit", label: "Data Health & Audit" }] : []),
            ...(canManageStaff || canManageQc ? [{ key: "gold-retention", label: "Gold Lab Retention" }] : []),
+          ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
+            ? [{ key: "gold-approvals", label: "Gold Lab Approvals" }] : []),
           ...(canManageStaff ? [{ key: "ai-corrections", label: "AI Memory" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -17004,6 +17007,7 @@ export default function Home() {
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
             cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", "gold-retention": "Gold Lab Retention", pin: "Change PIN",
+          "gold-approvals": "Gold Lab Approvals",
           allergens: "Allergen Mappings",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
@@ -17035,6 +17039,8 @@ export default function Home() {
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
               ...(canManageStaff ? ["audit", "ai-corrections"] : []),
               ...(canManageStaff || canManageQc ? ["gold-retention"] : []),
+              ...((serverRole === "manager" || serverRole === "qc-manager") && (canManageStaff || canManageQc)
+                ? ["gold-approvals"] : []),
               "pin",
               ...(isSupervisor ? ["runs"] : []),
             ],
@@ -18265,6 +18271,16 @@ export default function Home() {
                     load={loadImportGoldRetentionCard}
                     componentProps={{ standalone: true }}
                   />
+                )}
+                {manageCategory === "gold-approvals" &&
+                  (serverRole === "manager" || serverRole === "qc-manager") &&
+                  (canManageStaff || canManageQc) && (
+                    <DeferredSurface
+                      key={`gold-approvals:${me?.userId}:${me?.sandbox}`}
+                      label="Gold Lab approvals"
+                      load={loadImportGoldApprovalsCard}
+                      componentProps={{}}
+                    />
                 )}
 
                 {/* AI corrections memory — manager-only view + delete */}

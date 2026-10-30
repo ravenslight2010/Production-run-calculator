@@ -15,6 +15,7 @@ export const DEFERRED_HOME_MODULE_SUFFIXES = [
   "/src/components/MixedImportReviewQueue.tsx",
   "/src/components/ImportGoldLabCard.tsx",
   "/src/components/ImportGoldRetentionCard.tsx",
+  "/src/components/ImportGoldApprovalsCard.tsx",
   "/src/components/SetupContent.tsx",
   "/src/components/WarehouseTabContent.tsx",
   "/src/components/MixesTabContent.tsx",

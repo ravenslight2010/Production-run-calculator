@@ -590,6 +590,15 @@ describe("source approval metadata", () => {
     expect(created.status).toBe(201);
     const { approval } = await created.json() as { approval: { id: number; verifiedAt: null } };
     expect(approval.verifiedAt).toBeNull();
+    const readApproval = async (user = "inventory") => {
+      const response = await fetch(`${baseUrl}/api/import-gold/approvals`, { headers: headers(user) });
+      expect(response.status).toBe(200);
+      const page = await response.json() as { approvals: Array<Record<string, unknown>> };
+      return page.approvals.find((row) => row.id === approval.id);
+    };
+    expect(await readApproval("qc-reviewer")).toMatchObject({
+      ...metadata, id: approval.id, verifiedAt: null, revokedAt: null,
+    });
     expect((await post("/import-gold/approvals", metadata)).status).toBe(409);
     const capture = { ...change("source-approved"), goldCapture: { input, approvalId: approval.id } };
     const unbound = await post("/import-operations/source-unbound-approval-0001/apply", {
@@ -601,6 +610,9 @@ describe("source approval metadata", () => {
     expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true }, "sandbox")).status).toBe(404);
     expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: false })).status).toBe(400);
     expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true }, "qc-reviewer")).status).toBe(200);
+    expect(await readApproval()).toMatchObject({
+      ...metadata, verifiedBy: "qc-reviewer", verifiedAt: expect.any(String), revokedAt: null,
+    });
     expect((await apply("source-approval-mismatch-0001", {
       ...capture, goldCapture: { input: { candidates: [] }, approvalId: approval.id },
     })).status).toBe(403);
@@ -619,6 +631,9 @@ describe("source approval metadata", () => {
     expect((await apply("source-approval-wrong-ref-0001", capture)).status).toBe(403);
     process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = metadata.recordRef;
     expect((await post(`/import-gold/approvals/${approval.id}/revocation`, { reviewed: true })).status).toBe(200);
+    expect(await readApproval("qc-reviewer")).toMatchObject({
+      ...metadata, revokedBy: "inventory", revokedAt: expect.any(String),
+    });
     expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true })).status).toBe(409);
     expect((await apply("source-approval-revoked-0001", capture)).status).toBe(403);
     const sandbox = await fetch(`${baseUrl}/api/import-gold/approvals`, { headers: headers("sandbox") });

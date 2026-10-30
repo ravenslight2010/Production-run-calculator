@@ -68,6 +68,18 @@ For browser matrices whose projects share one disposable database, reset test-ow
 
 **How to apply:** In each test's setup, remove only the current test's live-day fixture rows from the guarded disposable database, and keep the normal Home hydration path enabled.
 
+Immutable approval/audit fixtures need explicit test-owned record cleanup as
+well as account cleanup, even inside a disposable multi-project browser run.
+
+**Why:** Such ledgers intentionally survive actor deletion; one viewport's
+retained records can invalidate another viewport's empty-list assumption.
+Reusing the lifecycle record for a second fixture can also correctly conflict.
+
+**How to apply:** Give each independently seeded ledger record a unique opaque
+reference, track those references, and remove only those records in the guarded
+disposable database during cleanup. Do not weaken ledger retention or reset
+shared application data to make a fixture pass.
+
 For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
 
 **Why:** Starting another run after reload exercises a separate hydration and adoption path, which can obscure whether the cold destination itself restored the expected state.
