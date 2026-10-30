@@ -24,6 +24,7 @@
 - [Surplus decisions](surplus-confirmation-receipts.md) — explicit none and positive outcomes belong to completed runs; product/date or UI dismissal cannot establish acknowledgment.
 - [DB test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) — honor migrations; isolate writes.
 - [CI parity](local-ci-postgres-parity.md) + [development DB](isolated-destructive-browser-tests.md) — shared development data is not disposable.
+- [Runtime markers](replit-production-detection.md) — `REPLIT_ENVIRONMENT` alone does not prove production.
 - [Browser evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) — isolate browser state and stabilize evidence.
 - [Browser quality](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [accessibility](a11y-coverage-gate.md) — preserve acknowledgement, visual, and accessibility checks.
 - [Browser fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — use deterministic identities and seeds.
@@ -100,7 +101,6 @@
 - [Bundle boundaries](bundle-boundary-manifests.md) + [build isolation](build-integration-isolation.md) — use Rollup module membership; keep bundler caches out of reused dependencies.
 - [Physical-total attestations](physical-total-attestations.md) — automatic observations and manager-confirmed totals remain separate append-only evidence streams.
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
-- [Replit production detection](replit-production-detection.md) — REPLIT_ENVIRONMENT=production can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) + [MPL web-push approval](mpl-web-push-approval.md) — keep one atomic alert claim; package approval is limited to web-push@3.6.7.
 - [Queue warnings](scheduled-queue-warning-channel.md) + [evaluation identity](scheduled-evaluation-idempotency.md) — log stalls and dedupe by scope/time, not scheduler identity.
 - [Dated sync authorization](dated-sync-authorization.md) — staff use `/sync/today`; dated writes must not trust client-claimed scheduling dates.
@@ -144,7 +144,7 @@
 - [SSE timeouts](sse-test-reader-timeouts.md) + [listener stop](sync-listener-stop-diagnostics.md) — retain pending reads and fence metrics after shutdown.
 - [Provider audit isolation](provider-audit-isolation.md) — use authorized disposable fixtures for provider-only retries; distinguish shared DB readiness from upstream availability.
 - [Local build](local-production-graph-build.md) + [source hashes](typescript-source-bundle-hashing.md) + [field checks](field-check-evidence-boundary.md) — dev identity only; unknown is not success.
-- [Prep](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) + [stock corrections](completed-run-stock-corrections.md) — prepare from raw; use prepared stock; reconcile edits durably.
-- [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require run-bound activity, Tunnel/Warehouse confirmation and serving-revision logs.
 - [Operational runtime notes](operational-runtime-index.md) — less frequent build, browser, evidence, cleanup, host and workflow constraints.
 - [Replit staging boundary](replit-staging-project-boundary.md) — published staging needs a separate project; approved local testing needs its own app/cluster.
+- [Prep](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) + [stock corrections](completed-run-stock-corrections.md) — prepare from raw; use prepared stock; reconcile edits durably.
+- [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require run-bound activity, Tunnel/Warehouse confirmation and serving-revision logs.

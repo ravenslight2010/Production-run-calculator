@@ -1,16 +1,16 @@
 # Staff Role Permissions Audit
 
 **Review date:** 2026-10-30  
-**Scope:** Role/capability audit followed by the targeted safeguards and development-only role update explicitly approved by the owner. This is not a security certification.
+**Scope:** Role/capability audit followed by targeted safeguards and approved supervisor role updates in development and production. This is not a security certification.
 
 ## Executive summary
 
 - The system has 11 capabilities. Protected API requests resolve current role data on the server; client visibility is not the security boundary.
-- The seeded `supervisor` and shared development `supervisor` role now include `approve-password-resets`, as explicitly approved. Production role data was not queried or changed.
+- The seeded and development `supervisor` roles include `approve-password-resets`; after separate explicit authorization, the published `supervisor` role now includes it too.
 - Last-enabled-manager checks now share an advisory transaction lock, exclude disabled/sandbox accounts, and cover status changes, role changes, role edits, deletion, and bootstrap.
 - Schedule, profile, and QC controls identified in this review now use their API capability gates; an open authenticated client refreshes `/me` every 60 seconds.
 - The owner chose to keep the current higher-access staff deletion behavior. It remains a documented risk accepted by that decision, not a newly added restriction.
-- No role assignments, accounts, passwords, sessions, schema, or production data were changed. The development role record change was limited to the approved supervisor capability.
+- No staff assignments, accounts, passwords, or schema were changed. Production authentication created an ordinary manager session for the authorized API request; it was not explicitly signed out and remains subject to normal session expiry. No pre-existing sessions were changed. The only production role data accessed was the supervisor row; its record change was limited to adding the approved capability.
 
 ## Capability contract: protected actions and client controls
 
@@ -37,9 +37,11 @@ Additional combined gates:
 - `/master-data-operations` requires `manage-factory-settings` plus the literal `manager` role for access; preview/apply/undo additionally require both `manage-inventory` and `manage-profiles`.
 - Hardware confirmations and applicator-batch evidence finalization require `review-incidents` **and** the literal `manager` role.
 
-## Seeded roles versus development records
+## Seeded, development, and production role records
 
-Role seeds are defined in `artifacts/api-server/src/lib/roles.ts`. The comparison selected role name, capability array, built-in flag, and grouped assignment count only. After explicit approval, a conditional development-only write added the supervisor reset capability. Counts are all `user_roles` assignments, without filtering account status or sandbox membership; they are not a count of enabled human staff.
+Role seeds are defined in `artifacts/api-server/src/lib/roles.ts`. The development comparison selected role name, capability array, built-in flag, and grouped assignment count only. After explicit approval, a conditional development write added the supervisor reset capability. Counts are all `user_roles` assignments, without filtering account status or sandbox membership; they are not a count of enabled human staff.
+
+After separate explicit authorization, the production supervisor role was read only for its name, capabilities, and built-in flag. The published role lacked `approve-password-resets`; the manager-authorized role update added it while preserving its existing grants. The update did not enumerate or change staff assignments; ordinary manager authentication resolved the acting manager's authority.
 
 | Role | Seeded capabilities | Development capabilities | Assignment rows |
 |---|---|---|---:|
@@ -57,11 +59,11 @@ Notable current overlap:
 
 - `operator` and `warehouse` have identical capability sets. Both retain the signed-in operational baseline; `warehouse` does not currently grant warehouse-specific write privileges.
 - Only the `manager` role currently holds `manage-staff`, `manage-factory-settings`, and `manage-profiles` among the seeded non-manager roles.
-- The `supervisor` reset-approval grant is now present in both the code seed and development record. Existing production/custom records are not automatically upgraded by this change.
+- The `supervisor` reset-approval grant is now present in the code seed, development record, and published supervisor record. Other production roles and custom records were not reviewed or upgraded.
 
 ## Current versus proposed role matrix
 
-This matrix records the audit baseline and the approved development result. Only the supervisor reset-approval grant was added; the remaining grants were left unchanged.
+This matrix records the audit baseline and the approved development result. Only the supervisor reset-approval grant was added; the remaining grants were left unchanged. Production work was limited to the supervisor record described above.
 
 | Role | Audit baseline | Approved development result | User-facing purpose and operational effect |
 |---|---|---|---|
@@ -81,7 +83,7 @@ This matrix records the audit baseline and the approved development result. Only
 | `manage-staff` | manager |
 | `manage-inventory` | manager, inventory |
 | `edit-production-rules` | manager, supervisor |
-| `approve-password-resets` | manager, supervisor (approved in code seed and development role only) |
+| `approve-password-resets` | manager, supervisor (approved in the code seed, development role, and published supervisor role) |
 | `review-incidents` | manager, supervisor, qc-manager |
 | `use-ai-tools` | manager, qc-operator, qc-manager |
 | `manage-factory-settings` | manager |
@@ -125,15 +127,16 @@ These targeted changes address the identified mismatches; they do not replace a 
 - **PASS:** `roles.integration.test.ts` and `passwordReset.integration.test.ts` — 234 tests passed against isolated disposable test databases.
 - **PASS:** `roleSurfaceAccess.test.ts`, `AuthContext.race.test.tsx`, and `profileWriteAccess.test.ts` — 18 tests passed.
 - **PASS:** workspace `typecheck` completed successfully.
-- **PASS:** development-only supervisor update used a conditional write against the reviewed prior capability list, then read back the new capabilities. Grouped assignment totals were checked; no identities or account fields were queried.
+- **PASS:** the development supervisor update added the approved capability against the reviewed prior capability list, then read it back. Grouped assignment totals were checked; no identities or account fields were queried.
+- **PASS:** after explicit authorization, the published supervisor row was read using only `name`, `capabilities`, and `builtin`. Before the update it had `review-incidents` and `edit-production-rules`, with `builtin: false`; the manager-authorized endpoint added only `approve-password-resets`. Production read-back confirmed `review-incidents`, `edit-production-rules`, and `approve-password-resets`, with `builtin: false`. The update did not enumerate or change staff assignments. Manager authentication created an ordinary session for the request; no pre-existing session was altered.
 - **FAIL — broader client-suite baseline:** the configured `test:client` run began at 18:13:38, before this task's code edits, and reported 3 unrelated failures across 387 files: two stale argument assertions in `profileSubTab.test.ts` and one exact-string assertion in `syncBaselineGate.test.ts`. The focused role/access client tests passed. Owner: client test maintainers; next action: repair those assertions in separate work.
-- **NOT RUN:** browser compatibility/E2E tests on Chromium or WebKit at desktop, phone, and tablet sizes/orientations; physical iOS/Android device checks; production database inspection; and deployment checks. The preview screenshot showed only the sign-in page; authenticated manager UI was not visually verified. No production data or deployment was accessed or changed; the focused API/client tests and typecheck are the verification performed for this bounded change.
+- **NOT RUN:** browser compatibility/E2E tests on Chromium or WebKit at desktop, phone, and tablet sizes/orientations; physical iOS/Android device checks; broader production database inspection; and deployment-readiness checks. The preview screenshot showed only the sign-in page; authenticated manager UI was not visually verified. Production access was limited to the authorized supervisor role operation above; the focused API/client tests and typecheck are the code verification performed for this bounded change.
 
 ## Owner decisions and next step
 
-- **Approved and implemented:** add `approve-password-resets` to the supervisor code seed and shared development supervisor role.
+- **Approved and implemented:** add `approve-password-resets` to the supervisor code seed and development role; after separate explicit authorization, add it to the published supervisor role.
 - **Approved and preserved:** keep current higher-access account deletion behavior.
 - **Approved targeted scope:** unify enabled-manager safeguards, align schedule/profile/QC controls to their API capabilities, and refresh open-client capabilities every 60 seconds.
-- **Not approved or changed:** production role data, any role assignment, accounts/statuses, and the unresolved constrained-role-editor revocation policy.
+- **Not changed:** any role assignment, account, or account status. The constrained-role-editor revocation policy remains unresolved.
 
-**Next step:** if the owner wants the approved supervisor reset grant on the published app, explicitly authorize a separate production-role update; this task intentionally changed development data only. Separately decide whether staff role editors may revoke capabilities they do not hold before adding or changing that policy.
+**Next step:** the published supervisor role update is complete and verified; this does not mean other production roles were reviewed or upgraded. Separately decide whether staff role editors may revoke capabilities they do not hold before adding or changing that policy.
