@@ -2,7 +2,7 @@
 - [Allergen foundation](allergen-foundation.md) — reviewed-empty is none of the nine; missing or unreviewed is unknown; the footprint stays visibility-only and separate from manual labels.
 - [Database evidence](drizzle-generator-evaluation.md) + [timestamps](drizzle-raw-timestamp-decoding.md) — ignore volatile SQL metadata; normalize raw aggregates and timestamps.
 - [Partial schema pushes](drizzle-partial-push.md) — table filters can still touch excluded identity sequences; verify actual DDL after errors, even with exit zero.
-- [Generated validation](orval-zod-declaration-order.md) — normalize scalars before validators; declare smoke-tested toolchain packages directly.
+- [Generated validation](orval-zod-declaration-order.md) + [enums](alias-kind-contract-lockstep.md) — normalize before validation; keep API enums and codegen aligned.
 - [Registry/lockfile integrity](npm-registry-script-metadata.md) + [tarball transport](npm-tarball-transport.md) — verify script metadata and test network transport.
 - [pnpm provenance](pnpm12-lockfile-provenance.md) + [outdated scope](pnpm-outdated-scope-limits.md) — verify importer changes and limit outdated checks.
 - [Dependency override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to affected parents when global replacements risk consumers.
@@ -60,7 +60,6 @@
 - [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Station order](line-station-order.md) + [batch weights](ingredient-batch-weights.md) + [mix slots](mix-applicator-slots.md) — weights follow ingredients; slots stay recipe-linked.
 - [Dough/sauce relink](spec-import-name-first-relink.md) + [crust backstop](crust-dough-name-backstop.md) — attach names early; hydrate only a unique crust match.
-- [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.
 - [Spec-import chunk union](spec-import-chunk-union.md) — union chunk applicators; replace on file merge; same type at two weights means two stations.
 - [Profile autofill](profile-autofill-from-saved-sheets.md) + [Apply](profile-force-apply.md) — mirror import behavior through Save Setup.
 - [Save ack](explicit-profile-ack.md) + [setup edits](unified-setup-editing.md) — verify writes and refresh open forms.
@@ -82,7 +81,7 @@
 - [Sync and auto-tracking priority](sync-autotracking-priority.md) — prioritize sync reliability; align recovery/lifecycle across trackers without flattening station-specific production math.
 - [Cross-channel claims](cross-channel-auto-track-claims.md) — shared stamps need queued deltas to distinguish peer auto-accepts from manual edits before rebasing.
 - [Formula safety](formula-import-safety.md) + [layouts](source-workbook-layouts.md) + [Apply retention](apply-source-evidence-retention.md) — preserve units; formula/cached values stay review-only.
-- [Release evidence and readiness](release-evidence-index.md) — revision binding, bounded gates, browser proof, retry/cancel outcomes and deployment-bound readiness.
+- [Release evidence](release-evidence-index.md) + [guide claims](release-guide-authority-claims.md) — bind readiness to revision and deployment; verify provider/live-target claims.
 - [Source](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to its DB, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
@@ -95,7 +94,7 @@
 - [AI cache](retained-ai-cache-boundary.md) + [retired data](retired-ai-data-retention.md) — recompute deterministic matches; stop writers before allowlisted cleanup and redact sensitive payloads.
 - [Operational read-model integrity](operational-read-model-integrity.md) — canonical reports fail closed on rejected snapshot facts; offline exports must preserve non-authoritative provenance.
 - [Import lifecycle row identity](import-lifecycle-row-identity.md) — compare repeated ingredient rows by totals, but preserve structure; ambiguous manager fields stay review-only.
-- [Import Gold authorization](import-gold-owner-authorization.md) — source-owner use/retention approval and any required privacy review must be recorded before real customer cases are collected.
+- [Gold Lab approvals](import-gold-owner-authorization.md) + [filters](retention-queue-filter-policy.md) — record source/privacy approval before capture; select one exact retention status.
 - [Scoped offline master-data queues](scoped-offline-master-data-queues.md) — scope owned recovery; fence late reads/writes; never infer legacy ownership.
 - [Historical repair compatibility](historical-repair-compatibility.md) — preserve released marker-first transactions; validate stored nested results with bounded recursive telemetry.
 - [Bundle boundaries](bundle-boundary-manifests.md) + [build isolation](build-integration-isolation.md) — use Rollup module membership; keep bundler caches out of reused dependencies.

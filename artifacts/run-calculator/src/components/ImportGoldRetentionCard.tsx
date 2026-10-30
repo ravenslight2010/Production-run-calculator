@@ -25,11 +25,13 @@ export default function ImportGoldRetentionCard({
   standalone = false,
 }: ImportGoldRetentionCardProps) {
   const [records, setRecords] = useState<ImportGoldRetentionRecord[]>([]);
+  const [statusFilter, setStatusFilter] = useState<ImportGoldRetentionRecord["status"] | "all">("all");
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const requestIdRef = useRef(0);
 
   const setActionBusy = (next: boolean) => {
     busyRef.current = next;
@@ -38,17 +40,20 @@ export default function ImportGoldRetentionCard({
 
   const refresh = useCallback(async (allowWhileBusy = false) => {
     if (busyRef.current && !allowWhileBusy) return;
+    const requestId = ++requestIdRef.current;
     try {
       setError(null);
-      const page = await fetchImportGoldRetention();
+      const page = await fetchImportGoldRetention(0, statusFilter === "all" ? undefined : statusFilter);
+      if (requestId !== requestIdRef.current) return;
       setRecords(page.records);
       setNextOffset(page.nextOffset);
     } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
       setError(cause instanceof Error ? cause.message : "Could not load deletion deadlines.");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
     void refresh();
@@ -60,6 +65,7 @@ export default function ImportGoldRetentionCard({
     };
     window.addEventListener("focus", onFocus);
     return () => {
+      requestIdRef.current += 1;
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
@@ -67,13 +73,16 @@ export default function ImportGoldRetentionCard({
 
   const loadMore = async () => {
     if (nextOffset === null || busy) return;
+    const requestId = ++requestIdRef.current;
     setActionBusy(true);
     setError(null);
     try {
-      const page = await fetchImportGoldRetention(nextOffset);
+      const page = await fetchImportGoldRetention(nextOffset, statusFilter === "all" ? undefined : statusFilter);
+      if (requestId !== requestIdRef.current) return;
       setRecords((current) => [...current, ...page.records]);
       setNextOffset(page.nextOffset);
     } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
       setError(cause instanceof Error ? cause.message : "Could not load more deadlines.");
     } finally {
       setActionBusy(false);
@@ -82,6 +91,7 @@ export default function ImportGoldRetentionCard({
 
   const removeCase = async (caseId: number) => {
     if (!canDeleteCase || !window.confirm(`Permanently delete evaluation case #${caseId} and its scores?`)) return;
+    requestIdRef.current += 1;
     setActionBusy(true);
     setError(null);
     try {
@@ -95,6 +105,7 @@ export default function ImportGoldRetentionCard({
   };
 
   const verifyDeletion = async (caseId: number) => {
+    requestIdRef.current += 1;
     setActionBusy(true);
     setError(null);
     try {
@@ -124,6 +135,28 @@ export default function ImportGoldRetentionCard({
         diagnostic copies, and database backups are separate and are not verified here. No automated erasure is
         performed.
       </p>
+      <label className="mt-3 flex flex-col gap-1 text-sm sm:max-w-sm">
+        <span className="font-medium">Filter by status</span>
+        <select
+          value={statusFilter}
+          disabled={busy}
+          onChange={(event) => {
+            requestIdRef.current += 1;
+            setRecords([]);
+            setNextOffset(null);
+            setLoading(true);
+            setStatusFilter(event.target.value as ImportGoldRetentionRecord["status"] | "all");
+          }}
+          className="min-h-11 rounded border border-border bg-background px-3 py-2 text-foreground [color-scheme:light] dark:[color-scheme:dark] disabled:opacity-50"
+          aria-label="Filter retention records by status"
+          data-testid="gold-retention-status-filter"
+        >
+          <option value="all">All statuses</option>
+          {Object.entries(RETENTION_STATUS_LABEL).map(([status, label]) => (
+            <option key={status} value={status}>{label}</option>
+          ))}
+        </select>
+      </label>
       {standalone && !canDeleteCase && (
         <p className="mt-2 text-xs text-muted-foreground">
           Use the Gold Lab case controls to delete an application case. Either a Manager or QC Manager can record
@@ -138,7 +171,11 @@ export default function ImportGoldRetentionCard({
       {loading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading deletion deadlines…</p>
       ) : records.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">No case deadlines are registered in this scope.</p>
+        !error && <p className="mt-3 text-sm text-muted-foreground">
+          {statusFilter === "all"
+            ? "No case deadlines are registered in this scope."
+            : "No case deadlines match this status in this scope."}
+        </p>
       ) : (
         <div className="mt-3 space-y-2">
           {records.map((item) => (

@@ -127,8 +127,11 @@ export async function deleteImportGoldCleanupCase(id: number): Promise<void> {
   await goldFetch(`/api/import-gold/cleanup-cases/${id}`, { method: "DELETE" });
 }
 
-export async function fetchImportGoldRetention(offset = 0): Promise<ImportGoldRetentionResponse> {
-  return listImportGoldRetention({ limit: 100, offset });
+export async function fetchImportGoldRetention(
+  offset = 0,
+  status?: ImportGoldRetentionRecord["status"],
+): Promise<ImportGoldRetentionResponse> {
+  return listImportGoldRetention({ limit: 100, offset, ...(status ? { status } : {}) });
 }
 
 export async function fetchImportGoldRetentionReminderCounts(): Promise<{

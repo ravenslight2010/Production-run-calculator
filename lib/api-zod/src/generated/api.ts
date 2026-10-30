@@ -10571,7 +10571,8 @@ export const DeleteImportGoldCleanupCaseResponse = zod.void()
 
 export const ListImportGoldRetentionQueryParams = zod.object({
   "limit": zod.coerce.number().int().min(1).max(listImportGoldRetentionQueryLimitMax).default(listImportGoldRetentionQueryLimitDefault),
-  "offset": zod.coerce.number().int().min(listImportGoldRetentionQueryOffsetMin).max(listImportGoldRetentionQueryOffsetMax).default(listImportGoldRetentionQueryOffsetDefault)
+  "offset": zod.coerce.number().int().min(listImportGoldRetentionQueryOffsetMin).max(listImportGoldRetentionQueryOffsetMax).default(listImportGoldRetentionQueryOffsetDefault),
+  "status": zod.enum(['within_limit', 'due_soon', 'overdue', 'deletion_incomplete', 'verification_needed', 'verified']).optional().describe('Return only records with this current retention status; filtering is applied before pagination.')
 })
 
 export const ListImportGoldRetentionResponse = zod.object({

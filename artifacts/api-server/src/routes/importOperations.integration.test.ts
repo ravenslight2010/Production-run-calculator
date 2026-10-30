@@ -1761,9 +1761,20 @@ describe("atomic import operations", () => {
       expectedResult: { synthetic: true },
       createdAt: capturedAt,
     }).returning({ id: tables.importGoldCasesTable.id });
+    const dueSoonCapturedAt = new Date(Date.now() - 27 * 24 * 60 * 60 * 1000);
+    const [dueSoonLiveCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "retention-live-case-due-soon",
+      importType: "spec",
+      sourceLabel: "Synthetic fixture",
+      evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true },
+      createdAt: dueSoonCapturedAt,
+    }).returning({ id: tables.importGoldCasesTable.id });
     expect(liveCase).toBeDefined();
     expect(sandboxCase).toBeDefined();
     expect(secondLiveCase).toBeDefined();
+    expect(dueSoonLiveCase).toBeDefined();
 
     const livePage = await fetch(`${baseUrl}/api/import-gold/retention?limit=1`, { headers: headers() });
     expect(livePage.status).toBe(200);
@@ -1787,8 +1798,37 @@ describe("atomic import operations", () => {
     expect((await secondLivePage.json() as { records: Array<{ caseId: number }> }).records)
       .toMatchObject([{ caseId: secondLiveCase!.id }]);
 
+    // This matching record sorts after the first unfiltered page, but status
+    // filtering must happen before pagination so it is still returned at offset 0.
+    const dueSoonPage = await fetch(
+      `${baseUrl}/api/import-gold/retention?limit=1&status=due_soon`,
+      { headers: headers() },
+    );
+    expect(dueSoonPage.status).toBe(200);
+    expect(await dueSoonPage.json()).toMatchObject({
+      records: [{ caseId: dueSoonLiveCase!.id, status: "due_soon" }],
+      hasMore: false,
+      nextOffset: null,
+    });
+    const qcFilteredPage = await fetch(
+      `${baseUrl}/api/import-gold/retention?limit=1&status=overdue`,
+      { headers: headers("qc-reviewer") },
+    );
+    expect(qcFilteredPage.status).toBe(200);
+    expect((await qcFilteredPage.json() as { records: Array<{ caseId: number; status: string }> }).records)
+      .toMatchObject([{ caseId: liveCase!.id, status: "overdue" }]);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention?status=not-a-retention-status`, {
+      headers: headers(),
+    })).status).toBe(400);
+
     const sandboxPage = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers("sandbox") });
     expect((await sandboxPage.json() as { records: Array<{ caseId: number }> }).records)
+      .toMatchObject([{ caseId: sandboxCase!.id }]);
+    const sandboxFilteredPage = await fetch(
+      `${baseUrl}/api/import-gold/retention?status=overdue`,
+      { headers: headers("sandbox") },
+    );
+    expect((await sandboxFilteredPage.json() as { records: Array<{ caseId: number }> }).records)
       .toMatchObject([{ caseId: sandboxCase!.id }]);
     expect((await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers("qc-reviewer") })).status).toBe(200);
     expect((await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers("profiles") })).status).toBe(403);
@@ -1990,6 +2030,87 @@ describe("atomic import operations", () => {
     expect(sandboxResponse.status).toBe(200);
     expect((await sandboxResponse.json() as { records: Array<{ caseId: number; status: string }> }).records)
       .toMatchObject([{ caseId: sandboxCase[0]!.id, status: "overdue" }]);
+  });
+
+  it("filters every retention status before pagination without exposing payloads or crossing scope and role boundaries", async () => {
+    const statuses = [
+      "within_limit", "due_soon", "overdue", "deletion_incomplete", "verification_needed", "verified",
+    ] as const;
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const expectedIds = new Map<string, number[]>();
+    for (const status of statuses) {
+      const ids: number[] = [];
+      for (let index = 0; index < 2; index += 1) {
+        const deleteBy = new Date(now + (status === "within_limit" ? 14 : status === "due_soon" ? 3 : -1) * day);
+        const capturedAt = new Date(deleteBy.getTime() - 30 * day);
+        // A case in another scope must not count as present for the live
+        // register. This also lets us model orphaned scoped score history
+        // without dropping the score-to-case foreign key.
+        const caseScope = ["deletion_incomplete", "verification_needed"].includes(status) ? "sandbox" : "live";
+        const [caseRow] = await db.insert(tables.importGoldCasesTable).values({
+          scope: caseScope,
+          operationId: `synthetic-filter-${status}-${index}`,
+          importType: "premix",
+          sourceLabel: "SYNTHETIC_PRIVATE_LABEL",
+          evaluatedInput: { privateFixture: "SYNTHETIC_PRIVATE_INPUT" },
+          expectedResult: { privateFixture: "SYNTHETIC_PRIVATE_RESULT" },
+          createdAt: capturedAt,
+        }).returning({ id: tables.importGoldCasesTable.id });
+        ids.push(caseRow!.id);
+        await db.insert(tables.importGoldRetentionTable).values({
+          scope: "live",
+          caseId: caseRow!.id,
+          capturedAt,
+          deleteBy,
+          verifiedAt: status === "verified" ? new Date(now) : null,
+          verifiedBy: status === "verified" ? "synthetic-manager" : null,
+        });
+        if (status === "deletion_incomplete") {
+          await db.insert(tables.importGoldScoresTable).values(["local", "gemini"].map((provider) => ({
+            scope: "live", caseId: caseRow!.id, provider, status: "scored",
+            fieldDiffs: [{ privateFixture: "SYNTHETIC_PRIVATE_SCORE" }],
+          })));
+        }
+      }
+      expectedIds.set(status, ids);
+    }
+    for (const status of statuses) {
+      const first = await fetch(`${baseUrl}/api/import-gold/retention?status=${status}&limit=1`, {
+        headers: headers(),
+      });
+      expect(first.status).toBe(200);
+      const firstBody = await first.json() as { records: Array<{ caseId: number; status: string }>; hasMore: boolean; nextOffset: number | null };
+      expect(firstBody.records).toHaveLength(1);
+      expect(firstBody.records[0]).toMatchObject({ caseId: expectedIds.get(status)![0], status });
+      expect(Object.keys(firstBody.records[0]!).sort())
+        .toEqual(["capturedAt", "caseId", "deleteBy", "status", "verifiedAt", "verifiedBy"]);
+      expect(JSON.stringify(firstBody)).not.toMatch(/SYNTHETIC_PRIVATE|sourceLabel|fieldDiffs|evaluatedInput|expectedResult/);
+      expect(firstBody.hasMore).toBe(true);
+      expect(firstBody.nextOffset).toBe(1);
+      const next = await fetch(`${baseUrl}/api/import-gold/retention?status=${status}&limit=1&offset=1`, {
+        headers: headers("qc-reviewer"),
+      });
+      expect(next.status).toBe(200);
+      const nextBody = await next.json() as typeof firstBody;
+      expect(nextBody.records).toHaveLength(1);
+      expect(nextBody.records[0]).toMatchObject({ caseId: expectedIds.get(status)![1], status });
+      expect(nextBody.hasMore).toBe(false);
+      expect(nextBody.nextOffset).toBeNull();
+      const empty = await fetch(`${baseUrl}/api/import-gold/retention?status=${status}&limit=1&offset=2`, {
+        headers: headers(),
+      });
+      expect(await empty.json()).toEqual({ records: [], hasMore: false, nextOffset: null });
+    }
+    const sandbox = await fetch(`${baseUrl}/api/import-gold/retention?status=verified`, { headers: headers("sandbox") });
+    expect(await sandbox.json()).toEqual({ records: [], hasMore: false, nextOffset: null });
+    expect((await fetch(`${baseUrl}/api/import-gold/retention?status=overdue`, { headers: headers("profiles") })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/import-gold/retention?status=overdue`)).status).toBe(401);
+    for (const query of ["status=unknown", "status=", "status=overdue&status=due_soon"]) {
+      const invalid = await fetch(`${baseUrl}/api/import-gold/retention?${query}`, { headers: headers() });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toEqual({ error: "Invalid retention status" });
+    }
   });
 
   it("gates capture and manager controls, bounds input, and records provider errors without failing the batch", async () => {

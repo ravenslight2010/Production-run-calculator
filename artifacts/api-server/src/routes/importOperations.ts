@@ -7,7 +7,7 @@ import {
   isImportGoldLocalConfigured,
 } from "../lib/importGoldEndpoint";
 import { Router, type IRouter, type NextFunction, type Request, type Response } from "express";
-import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm";
 import {
   db,
   factoryKvTable,
@@ -29,9 +29,14 @@ import {
 import { buildImportQcSummary } from "../lib/importQcSummary";
 import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { currentScope } from "../lib/requestScope";
-import { importGoldDeleteBy, importGoldRetentionStatus } from "../lib/importGoldRetention";
 import { completeStoredGoldApproval, goldSourceDigest } from "../lib/importGoldApproval";
 import goldApprovalsRouter from "./importGoldApprovals";
+import {
+  IMPORT_GOLD_RETENTION_REMINDER_MS,
+  importGoldDeleteBy,
+  importGoldRetentionStatus,
+  type ImportGoldRetentionStatus,
+} from "../lib/importGoldRetention";
 import {
   buildRecipeQcCapture,
   lockRecipeQcFamily,
@@ -64,6 +69,14 @@ const MAX_GOLD_EXPECTED_BYTES = 200 * 1024;
 const MAX_GOLD_CASES = 100;
 const MAX_GOLD_RETENTION_PAGE_SIZE = 100;
 const MAX_GOLD_RETENTION_OFFSET = 10_000;
+const IMPORT_GOLD_RETENTION_STATUSES: ImportGoldRetentionStatus[] = [
+  "within_limit",
+  "due_soon",
+  "overdue",
+  "deletion_incomplete",
+  "verification_needed",
+  "verified",
+];
 const MAX_GOLD_SCORE_CASES = 3;
 const MAX_GOLD_DIFFS = 30;
 const MAX_GOLD_DIFF_VALUE_CHARS = 400;
@@ -1283,11 +1296,16 @@ router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, 
 router.get("/import-gold/retention", requireGoldRetentionCapability, requireGoldRetentionRole, async (req, res) => {
   const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
   const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+  const statusParam = req.query.status;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_GOLD_RETENTION_PAGE_SIZE) {
     res.status(400).json({ error: `Limit must be an integer from 1 to ${MAX_GOLD_RETENTION_PAGE_SIZE}` }); return;
   }
   if (!Number.isInteger(offset) || offset < 0 || offset > MAX_GOLD_RETENTION_OFFSET) {
     res.status(400).json({ error: `Offset must be an integer from 0 to ${MAX_GOLD_RETENTION_OFFSET}` }); return;
+  }
+  if (statusParam !== undefined &&
+    (typeof statusParam !== "string" || !IMPORT_GOLD_RETENTION_STATUSES.includes(statusParam as ImportGoldRetentionStatus))) {
+    res.status(400).json({ error: "Invalid retention status" }); return;
   }
 
   const scope = currentScope();
@@ -1306,8 +1324,44 @@ router.get("/import-gold/retention", requireGoldRetentionCapability, requireGold
     }))).onConflictDoNothing();
   }
 
+  const status = statusParam as ImportGoldRetentionStatus | undefined;
+  const now = new Date();
+  const reminderThreshold = new Date(now.getTime() + IMPORT_GOLD_RETENTION_REMINDER_MS);
+  const caseExists = sql`EXISTS (
+    SELECT 1 FROM ${importGoldCasesTable}
+    WHERE ${importGoldCasesTable.id} = ${importGoldRetentionTable.caseId}
+      AND ${importGoldCasesTable.scope} = ${scope}
+  )`;
+  const scoreHistoryExists = sql`EXISTS (
+    SELECT 1 FROM ${importGoldScoresTable}
+    WHERE ${importGoldScoresTable.caseId} = ${importGoldRetentionTable.caseId}
+      AND ${importGoldScoresTable.scope} = ${scope}
+  )`;
+  const statusCondition = status
+    ? {
+        within_limit: and(isNull(importGoldRetentionTable.verifiedAt), caseExists, gt(importGoldRetentionTable.deleteBy, reminderThreshold)),
+        due_soon: and(
+          isNull(importGoldRetentionTable.verifiedAt),
+          caseExists,
+          gt(importGoldRetentionTable.deleteBy, now),
+          lte(importGoldRetentionTable.deleteBy, reminderThreshold),
+        ),
+        overdue: and(isNull(importGoldRetentionTable.verifiedAt), caseExists, lte(importGoldRetentionTable.deleteBy, now)),
+        deletion_incomplete: and(
+          isNull(importGoldRetentionTable.verifiedAt),
+          not(caseExists),
+          scoreHistoryExists,
+        ),
+        verification_needed: and(
+          isNull(importGoldRetentionTable.verifiedAt),
+          not(caseExists),
+          not(scoreHistoryExists),
+        ),
+        verified: isNotNull(importGoldRetentionTable.verifiedAt),
+      }[status]
+    : undefined;
   const rows = await db.select().from(importGoldRetentionTable)
-    .where(eq(importGoldRetentionTable.scope, scope))
+    .where(and(eq(importGoldRetentionTable.scope, scope), ...(statusCondition ? [statusCondition] : [])))
     .orderBy(
       asc(sql`CASE WHEN ${importGoldRetentionTable.verifiedAt} IS NULL THEN 0 ELSE 1 END`),
       asc(importGoldRetentionTable.deleteBy),
@@ -1329,7 +1383,6 @@ router.get("/import-gold/retention", requireGoldRetentionCapability, requireGold
       inArray(importGoldScoresTable.caseId, page.map((row) => row.caseId)),
     ))).map((row) => row.caseId))
     : new Set<number>();
-  const now = new Date();
   res.json({
     records: page.map((row) => ({
       caseId: row.caseId,

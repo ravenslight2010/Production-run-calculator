@@ -11251,6 +11251,10 @@ limit?: number;
  * @maximum 10000
  */
 offset?: number;
+/**
+ * Return only records with this current retention status; filtering is applied before pagination.
+ */
+status?: ImportGoldRetentionStatus;
 };
 
 export type ListDistillationApplyEvidenceParams = {

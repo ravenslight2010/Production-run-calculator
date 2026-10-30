@@ -7071,13 +7071,17 @@ paths:
         - in: query
           name: offset
           schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+        - in: query
+          name: status
+          description: Return only records with this current retention status; filtering is applied before pagination.
+          schema: { $ref: "#/components/schemas/ImportGoldRetentionStatus" }
       responses:
         "200":
           description: Capture deadlines and manual application-deletion verification metadata
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ImportGoldRetentionResponse" }
-        "400": { description: Invalid pagination }
+        "400": { description: Invalid pagination or retention status }
         "403": { description: Manager or QC Manager role required }
   /import-gold/retention/{caseId}/verification:
     post:

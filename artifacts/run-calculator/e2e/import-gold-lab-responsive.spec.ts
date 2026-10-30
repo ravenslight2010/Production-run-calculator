@@ -311,7 +311,7 @@ test("QC Manager can use the scoped retention panel without opening the Gold Lab
 test("daily retention reminders stay metadata-only and scoped by role", async ({
   page,
   playwright,
-}) => {
+}, testInfo) => {
   test.setTimeout(180_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
   try {
@@ -336,6 +336,7 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
     });
 
     let retentionRequests = 0;
+    const retentionQueries: Array<{ status: string | null; offset: string | null }> = [];
     let goldCaseRequests = 0;
     await page.route("**/api/import-gold/config", (route) => route.fulfill({
       status: 200,
@@ -355,30 +356,38 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
     }));
     await page.route("**/api/import-gold/retention?*", async (route) => {
       retentionRequests += 1;
+      const requestUrl = new URL(route.request().url());
+      const status = requestUrl.searchParams.get("status");
+      const offset = requestUrl.searchParams.get("offset");
+      retentionQueries.push({ status, offset });
+      const overdueRecord = {
+        caseId: 91,
+        capturedAt: "2026-09-01T12:00:00.000Z",
+        deleteBy: "2026-10-01T12:00:00.000Z",
+        status: "overdue",
+        verifiedAt: null,
+        verifiedBy: null,
+      };
+      const dueSoonRecord = {
+        caseId: 92,
+        capturedAt: "2026-10-05T12:00:00.000Z",
+        deleteBy: "2026-11-04T12:00:00.000Z",
+        status: "due_soon",
+        verifiedAt: null,
+        verifiedBy: null,
+      };
+      const allRecords = [overdueRecord, dueSoonRecord, { ...dueSoonRecord, caseId: 93 }];
+      const matchingRecords = status === null ? allRecords : allRecords.filter((record) => record.status === status);
+      const pageOffset = Number(offset ?? 0);
+      const filteredRecords = matchingRecords.slice(pageOffset, pageOffset + 1);
+      const hasMore = matchingRecords.length > pageOffset + 1;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          records: [
-            {
-              caseId: 91,
-              capturedAt: "2026-09-01T12:00:00.000Z",
-              deleteBy: "2026-10-01T12:00:00.000Z",
-              status: "overdue",
-              verifiedAt: null,
-              verifiedBy: null,
-            },
-            {
-              caseId: 92,
-              capturedAt: "2026-10-05T12:00:00.000Z",
-              deleteBy: "2026-11-04T12:00:00.000Z",
-              status: "due_soon",
-              verifiedAt: null,
-              verifiedBy: null,
-            },
-          ],
-          hasMore: false,
-          nextOffset: null,
+          records: filteredRecords,
+          hasMore,
+          nextOffset: hasMore ? pageOffset + 1 : null,
         }),
       });
     });
@@ -400,7 +409,7 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
     await openHome(manager.token);
     const reminders = page.getByTestId("gold-retention-reminders");
     await expect(reminders).toBeVisible({ timeout: 15_000 });
-    await expect(reminders.getByTestId("gold-retention-due-soon-reminder")).toContainText("1 deadline due within 7 days");
+    await expect(reminders.getByTestId("gold-retention-due-soon-reminder")).toContainText("2 deadlines due within 7 days");
     await expect(reminders.getByTestId("gold-retention-overdue-reminder")).toContainText("1 overdue deadline");
     await expect(reminders).not.toContainText(/SYNTHETIC_PRIVATE|Expected:|Predicted:|Spec import/);
     await expectResponsiveBounds(reminders);
@@ -412,7 +421,20 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
     await expect(managerRetention.getByTestId("gold-retention-record-91")).toContainText("Overdue");
     await expect(managerSettings.getByText("Import Gold Lab", { exact: true })).toHaveCount(0);
     await expect(managerSettings.getByRole("button", { name: /Delete app case/ })).toHaveCount(0);
+    await expect(managerRetention.getByTestId("gold-retention-record-91")).toBeVisible();
+    await expect(managerRetention.getByTestId("gold-retention-record-92")).toHaveCount(0);
+    await managerRetention.getByTestId("button-load-more-gold-retention").click();
+    await expect(managerRetention.getByTestId("gold-retention-record-92")).toBeVisible();
+    await managerRetention.getByTestId("gold-retention-status-filter").selectOption("due_soon");
+    await expect(managerRetention.getByTestId("gold-retention-record-92")).toBeVisible();
+    await expect(managerRetention.getByTestId("gold-retention-record-91")).toHaveCount(0);
+    expect(retentionQueries).toContainEqual({ status: "due_soon", offset: "0" });
+    await managerRetention.getByTestId("button-load-more-gold-retention").click();
+    await expect(managerRetention.getByTestId("gold-retention-record-93")).toBeVisible();
+    expect(retentionQueries).toContainEqual({ status: "due_soon", offset: "1" });
+    await expect(managerRetention.getByTestId("button-load-more-gold-retention")).toHaveCount(0);
     await expectResponsiveBounds(managerRetention);
+    await managerRetention.screenshot({ path: testInfo.outputPath("retention-status-due-soon.png") });
     expect(goldCaseRequests).toBe(0);
 
     await openHome(qcManager.token);
@@ -425,6 +447,10 @@ test("daily retention reminders stay metadata-only and scoped by role", async ({
     await expect(qcRetention).toBeVisible({ timeout: 15_000 });
     await expect(qcSettings.getByText("Import Gold Lab", { exact: true })).toHaveCount(0);
     await expect(qcSettings.getByRole("button", { name: /Delete app case/ })).toHaveCount(0);
+    await qcRetention.getByTestId("gold-retention-status-filter").selectOption("overdue");
+    await expect(qcRetention.getByTestId("gold-retention-record-91")).toBeVisible();
+    await expect(qcRetention.getByTestId("gold-retention-record-92")).toHaveCount(0);
+    expect(retentionQueries).toContainEqual({ status: "overdue", offset: "0" });
     await expectResponsiveBounds(qcRetention);
     expect(goldCaseRequests).toBe(0);
 
