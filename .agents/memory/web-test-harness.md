@@ -72,6 +72,18 @@ setup file.
 with the existing Vitest environment or add matcher setup as a deliberate,
 repo-wide harness change.
 
+## Nested modal measurements
+
+**Rule:** Measure an outer modal's visible-layer state before opening a nested
+modal. Modal accessibility behavior may mark the background dialog `aria-hidden`,
+causing role-based Playwright locators to stop matching it while the child is open.
+
+**Why:** A nested picker can be working correctly while a later role-based
+measurement of the now-hidden parent hangs until the test timeout.
+
+**How to apply:** Capture the parent layer before opening the child, then inspect
+the child's visibility, viewport position, and layer while it is open.
+
 ## Dense review surfaces
 
 Entity names can repeat across cards, warnings, and change summaries in import
@@ -145,6 +157,18 @@ interrupted before its `finally` cleanup.
 `today` and assert the selected run, acquire the shared fixture lock, remove the
 current live date row, then write the fixture snapshot and retain normal
 `finally` cleanup. Never do this against a shared or production database.
+
+## Shared factory data across browser projects
+
+**Rule:** Restore any shared factory-data keys changed by an E2E test before
+that test ends, even when the browser matrix runs only against a disposable DB.
+
+**Why:** Browser projects in one matrix can reuse that DB sequentially, so one
+variant's unique directory entries can accumulate and change what later
+variants see.
+
+**How to apply:** Snapshot the canonical value, write unique fixture entries,
+and restore the snapshot in `finally` using a fresh master-data epoch.
 
 ## Reserved ingredient names in full-app browser fixtures
 

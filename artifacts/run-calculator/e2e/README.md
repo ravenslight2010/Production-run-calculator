@@ -204,6 +204,19 @@ through Setup Profiles and live Setup, including selection, add/clear behavior,
 accessible labels, and touch-dialog focus restoration. The four WebKit projects
 are browser emulations; they do not provide physical iOS Safari evidence.
 
+Run the isolated Schedule access and nested-picker journey across desktop,
+phone, and both tablet orientations in Chromium and WebKit:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:schedule-dialog-layering
+```
+
+The test creates and removes manager/restricted accounts and two temporary
+brand profiles in a disposable database. Touch-emulated layouts select nested
+Schedule options by pointer and keyboard; desktop checks native-select input.
+Physical Android Chrome and iOS Safari/PWA are not run by this matrix and need
+their separately authorized device services.
+
 WebKit is intentionally not included by `playwright.config.ts` and does not
 inherit `global-setup.ts`. It is a release signal for the highest-risk
 cross-browser journeys, not a duplicate of every Chromium test. The standard
