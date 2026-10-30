@@ -25,6 +25,7 @@ export type ImportOperationSourceEvidence = {
 };
 
 export type ImportGoldCapture = {
+  approvalId: number;
   input: Record<string, unknown>;
 };
 

@@ -14,6 +14,7 @@ import {
   importHistoryTable,
   importOperationsTable,
   importGoldCasesTable,
+  importGoldApprovalsTable,
   importGoldRetentionTable,
   importGoldScoresTable,
   mixesTable,
@@ -29,6 +30,8 @@ import { buildImportQcSummary } from "../lib/importQcSummary";
 import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { currentScope } from "../lib/requestScope";
 import { importGoldDeleteBy, importGoldRetentionStatus } from "../lib/importGoldRetention";
+import { completeStoredGoldApproval, goldSourceDigest } from "../lib/importGoldApproval";
+import goldApprovalsRouter from "./importGoldApprovals";
 import {
   buildRecipeQcCapture,
   lockRecipeQcFamily,
@@ -107,6 +110,7 @@ const SYNTHETIC_GOLD_FIXTURE = {
     }],
   },
 } as const;
+router.use("/import-gold/approvals", requireGoldRetentionCapability, requireGoldRetentionRole, goldApprovalsRouter);
 const TABLES = {
   mixes: { table: mixesTable, key: "id" },
   cheeseRecipes: { table: cheeseRecipesTable, key: "id" },
@@ -955,6 +959,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
     return;
   }
   let goldInput: Record<string, unknown> | null = null;
+  let goldApprovalId: number | null = null;
   if (body.goldCapture !== undefined) {
     const capture = body.goldCapture as Record<string, unknown> | null;
     if (
@@ -962,7 +967,8 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       !capabilities.includes("manage-staff") ||
       !["spec", "premix", "cheese"].includes(importType) ||
       !capture || typeof capture !== "object" || Array.isArray(capture) ||
-      Object.keys(capture).sort().join(",") !== "input"
+      Object.keys(capture).sort().join(",") !== "approvalId,input" ||
+      !Number.isSafeInteger(capture.approvalId) || Number(capture.approvalId) < 1
     ) {
       res.status(importGoldEnabled() ? 403 : 404).json({ error: "Import gold capture is unavailable" });
       return;
@@ -973,10 +979,28 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       return;
     }
     goldInput = validated.input;
+    goldApprovalId = Number(capture.approvalId);
   }
   try {
     const operation = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"import-operation:" + scope}, 0))`);
+      if (goldInput) {
+        // Lock the immutable approval before any domain writes. Revocation uses
+        // this same row lock, so it cannot race a new capture past this check.
+        const [approval] = await tx.select().from(importGoldApprovalsTable).where(and(
+          eq(importGoldApprovalsTable.id, goldApprovalId!),
+          eq(importGoldApprovalsTable.scope, scope),
+        )).for("update");
+        if (!approval || !completeStoredGoldApproval(approval) || !approval.verifiedAt || !approval.verifiedBy || approval.revokedAt ||
+            approval.validUntil.getTime() <= Date.now() ||
+            approval.recordRef !== process.env.IMPORT_GOLD_APPROVAL_RECORD_REF?.trim() ||
+            approval.sourceDigest !== goldSourceDigest(goldInput) || approval.importType !== importType ||
+            approval.purpose !== "local_spec_import_accuracy" ||
+            approval.retentionDays !== 30 ||
+            !approval.manualDeletionAccepted || !approval.conditionsSatisfied) {
+          throw Object.assign(new Error("Gold approval is unavailable"), { code: "GOLD_APPROVAL" });
+        }
+      }
       const prior = await tx.select().from(importOperationsTable).where(and(
         eq(importOperationsTable.id, operationId), eq(importOperationsTable.scope, scope),
       )).limit(1);
@@ -1055,6 +1079,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
         const [goldCase] = await tx.insert(importGoldCasesTable).values({
           scope,
           operationId,
+          approvalId: goldApprovalId,
           importType,
           sourceLabel: GOLD_SOURCE_LABELS[importType as keyof typeof GOLD_SOURCE_LABELS],
           evaluatedInput: goldInput,
@@ -1091,6 +1116,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
     res.json({ operation: operationApi(operation) });
   } catch (err: any) {
     if (err?.code === "STALE_REVIEW") { res.status(409).json({ error: "STALE_REVIEWED_STATE" }); return; }
+    if (err?.code === "GOLD_APPROVAL") { res.status(403).json({ error: "A verified, matching and current source approval is required" }); return; }
     if (err?.code === "REQUEST_CHANGED") { res.status(409).json({ error: "IMPORT_REQUEST_CHANGED" }); return; }
     if (err?.code === "STALE_IMPORT") { res.status(409).json({ error: "STALE_IMPORT_REVISION" }); return; }
     if (err?.code === "GOLD_TOO_LARGE") { res.status(413).json({ error: "Applied result is too large to save as an evaluation case" }); return; }
@@ -1494,6 +1520,9 @@ router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async
     eq(importGoldCasesTable.excluded, false),
     ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
   )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_CASES);
+  if (cases.some((row) => row.operationId !== SYNTHETIC_GOLD_OPERATION_ID || row.sourceLabel !== SYNTHETIC_GOLD_SOURCE_LABEL)) {
+    res.status(403).json({ error: "Local-evaluation approval does not authorize case exports" }); return;
+  }
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="import-gold-cases.jsonl"');
   res.send(cases.map((row) => JSON.stringify({
@@ -1542,6 +1571,26 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
     ...(!realSourceAccess ? [syntheticGoldCaseCondition()!] : []),
     ...(ids ? [inArray(importGoldCasesTable.id, ids)] : []),
   )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_SCORE_CASES);
+  for (const goldCase of eligible) {
+    const synthetic = goldCase.operationId === SYNTHETIC_GOLD_OPERATION_ID &&
+      goldCase.sourceLabel === SYNTHETIC_GOLD_SOURCE_LABEL;
+    if (!synthetic && goldCase.approvalId === null) {
+      res.status(403).json({ error: "Legacy source cases require a source-specific approval before scoring" }); return;
+    }
+    if (goldCase.approvalId !== null) {
+      const [approval] = await db.select().from(importGoldApprovalsTable).where(and(
+        eq(importGoldApprovalsTable.id, goldCase.approvalId),
+        eq(importGoldApprovalsTable.scope, scope),
+      )).limit(1);
+      if (provider !== "local" || !approval || !completeStoredGoldApproval(approval) ||
+          !approval.verifiedAt || !approval.verifiedBy || approval.revokedAt ||
+          approval.sourceDigest !== goldSourceDigest(goldCase.evaluatedInput) ||
+          approval.importType !== goldCase.importType ||
+          approval.recordRef !== process.env.IMPORT_GOLD_APPROVAL_RECORD_REF?.trim()) {
+        res.status(403).json({ error: "Current source approval is required; local-evaluation approval does not authorize Gemini" }); return;
+      }
+    }
+  }
   const results = [];
   for (const goldCase of eligible) {
     try {

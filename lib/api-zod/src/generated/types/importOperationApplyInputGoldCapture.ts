@@ -11,5 +11,10 @@ import type { ImportOperationApplyInputGoldCaptureInput } from './importOperatio
  * Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
  */
 export type ImportOperationApplyInputGoldCapture = {
+  /**
+     * Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.
+     * @minimum 1
+     */
+  approvalId: number;
   input: ImportOperationApplyInputGoldCaptureInput;
 };

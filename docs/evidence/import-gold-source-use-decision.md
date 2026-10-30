@@ -6,6 +6,110 @@
 Synthetic cases only until source-specific evidence and deletion compatibility
 are verified.**
 
+### Metadata-only approval ledger
+
+The owner selected an application-database record containing metadata only.
+The additive schema is `import_gold_approvals`; it stores opaque private-record,
+owner, reviewer, conditions, external-copy and backup-handling references,
+the permitted local-evaluation purpose, import type, exact evaluation-input
+digest, review dates, 30-day manual-deletion acceptance, validity, and the
+authenticated creation/verification/revocation actors and times. It stores no
+workbook, source location, full approval document, or free-text evidence.
+
+The protected `/api/import-gold/approvals` endpoints allow scoped Manager or
+QC Manager users with `manage-staff` or `manage-qc` to create pending records
+and list at most 50 at a time. Verification and revocation are separate explicit
+review actions. Metadata is immutable after creation; revocation is permanent,
+and the metadata/audit history is retained rather than silently deleted.
+Neither creation nor verification changes runtime flags or independently
+verifies a private document. The responsible human must actually review the
+referenced evidence and its conditions before recording verification.
+
+Real-source capture is also unavailable in all three existing import dialogs,
+even if legacy server settings say Gold Lab is enabled. Home no longer builds
+the old input-only capture payload, so ordinary Spec, Premix and Cheese Apply
+does not fail because an unavailable approval ID was omitted. The future client
+capture type requires an approval ID, but no approval-selection workflow is
+enabled by this task. A later explicitly authorized workflow must select the
+verified, matching source approval before exposing capture again; neither
+metadata records nor configuration flags alone are sufficient.
+
+Capture must now provide `goldCapture.approvalId` alongside `input`. Before
+domain writes, the server locks the approval and checks its scope, configured
+reference, import type, local-evaluation purpose, completeness, validity,
+verification and revocation status, and exact input digest. The digest is
+SHA-256 over JSON with recursively sorted object keys (JavaScript UTF-16
+lexicographic order) and original array order, not a workbook-file hash or
+evidence of permission. The private
+approval record must map this digest to the exact permitted source. The case
+retains its approval ID. Missing, mismatched, incomplete, expired, or revoked
+approvals reject the whole Apply without committing domain or case changes.
+Capture and revocation use the same row lock.
+
+This local-use metadata does not approve Gemini comparison or case exports:
+new approval-linked cases cannot be sent to Gemini or exported by the existing
+JSONL endpoint. Local scoring rechecks the current approval before dispatch.
+Legacy non-synthetic cases without an approval link cannot be scored, and case
+exports remain synthetic-only under this policy.
+Full documents, source ownership, permitted recipients/processing locations,
+external copies and actual backup retention still require separate restricted
+evidence and handling. The 30-day case policy is not a claim that approval
+metadata, audit history, or backups are automatically erased.
+
+No real approvals were inserted, no private evidence was copied, no enablement
+settings were changed, and no production schema migration was run. The
+development schema now has the approval table and nullable case link; production
+schema application remains part of the normal Replit Publish process, not
+startup DDL or direct production writes. The schema and endpoints do not change
+the real-source NO-GO.
+
+### Implementation verification and bounded failure record
+
+- Synthetic verification: 42 tests passed across the approval-validator unit
+  tests and atomic-import integration suite. The integration database was
+  disposable and removed by its teardown. No real sources were captured.
+- Completion review found that the old visible capture checkbox could submit
+  input without the newly required approval ID and reject the entire import.
+  The correction deliberately makes capture unavailable rather than adding
+  an approval-selection workflow or enabling source capture. Dialog regressions
+  exercise legacy `goldCaptureEnabled: true`, require no capture option, and
+  require ordinary Apply to report no capture opt-in. All 43 tests across the
+  three dialog suites and import-operation client boundary passed. The full
+  root typecheck also passed again after this client correction.
+- API generation initially rejected two unquoted comma-containing YAML
+  descriptions; both were corrected and generation succeeded.
+- The root typecheck identified an ambiguous transaction error-response type
+  in the new approval router. Its result union was made explicit; final
+  `bash scripts/src/run-release-node.sh env CI=true pnpm run typecheck`
+  passed after that correction, including generated-API freshness, shared
+  libraries, the API route check, client, mockup and scripts checks.
+- A read-only metadata command encountered a stale API-local `tsx` executable
+  link. The existing scripts-package executable worked. Database fingerprints
+  confirmed the application connection matched managed development and
+  differed from production, without recording connection strings or raw
+  database names.
+- The development-only, table-filtered Drizzle push created the requested table
+  and nullable link, then reported an attempt to drop the unrelated
+  `import_gold_scores_id_seq`. PostgreSQL refused that operation. The command
+  returned zero despite this error. No forced retry or sequence deletion was
+  attempted. Read-only metadata inspection confirmed the new primary key,
+  source/reference unique index, scoped-list index, case foreign key and
+  existing case indexes are present, and the unrelated score identity sequence
+  remains attached. The temporary scoped configuration was removed. This is
+  not a clean full-schema migration or proof of production compatibility.
+- The development API started and reached readiness. `/api/healthz` returned
+  `status: ok` with process, startup, database, audit protection, dependencies
+  and background-worker checks all `ok`. The API-only screenshot also reported
+  a missing favicon; no application page or browser interaction changed.
+- After the client correction, the web workflow started cleanly and its
+  screenshot showed the normal signed-out landing page. Its protected API
+  requests returned 401 without a session, as expected. This screenshot does
+  not claim to inspect the authenticated import dialogs; their availability
+  and Apply callbacks are covered by the component tests above.
+- An automatic log refresh included database-timeout warnings from the existing
+  published queue/alert process. They are not evidence from this task's serving
+  revision; no production investigation or change was performed.
+
 ### Implementation update — 2026-10-30
 
 A cleanup-only application path is now implemented for retained cases when
@@ -49,9 +153,10 @@ production routing, and other uses are not authorized by this decision.
 
 ## Evidence scope
 
-This is a documentation and implementation review of repository baseline
+The initial documentation and implementation review used repository baseline
 `440ed6a9091998f63615ceb76930bffd962b4b90`, not a runtime or production
-attestation. Reviewed:
+attestation. Later metadata-only implementation changes and read-only checks
+are identified separately above and below. Reviewed:
 
 - `docs/spec-import-gold-review.md`
 - `docs/local-ai-evaluation.md`
@@ -66,12 +171,30 @@ private authorization evidence was accessed or copied. Available integration
 discovery did not identify an accessible approval-record store. This does not
 prove that no private approval records exist.
 
+On 2026-10-30, read-only table-metadata queries against the Replit managed
+development and production databases returned `public.import_gold_cases` and
+`public.import_gold_scores` as the only public tables whose names matched
+`%gold%` or `%approv%`. No named approval-record table or Gold retention table
+was returned. Before the metadata-only addition, the repository had no
+approval-record model; its Gold models covered cases, scores, and retention
+metadata. No table rows or customer
+content were queried. This establishes only that these database snapshots have
+no matching named table; it does not rule out a record in a generic table or an
+external restricted system. It also does not verify the runtime database schema
+used by a published process.
+
+Read-only Replit environment and secret-inventory checks on the same date found
+none of the five real-source gate settings in either development or production.
+The application gate therefore cannot pass from those configured values.
+Nothing was changed. This does not attest to runtime configuration outside
+Replit's environment inventory.
+
 ## Claim assessments
 
 | Claim | Assessment | Evidence and limitation |
 | --- | --- | --- |
 | The development-only scorer switch grants customer-source permission. | **contradicted**, high confidence | `importGoldEnabled` independently requires the real-source flags, approval reference, and privacy status; the development path filters cases by its fixed synthetic identity. |
-| An approval reference proves the owner authorized a specific workbook. | **contradicted**, high confidence | The server validates reference presence/format, not the referenced record, identity, terms, or source scope. An authorized human must verify those separately. |
+| An approval reference proves the owner authorized a specific workbook. | **contradicted**, high confidence | A reference alone is not evidence. Capture now also requires a verified, current, scoped metadata row bound to the exact input and import type. The verification action records an authorized human's attestation; it does not independently inspect the referenced private document or establish the owner's authority. |
 | Case exclusion deletes stored content. | **contradicted**, high confidence | The exclusion handler updates `excluded` and `excludedAt`; it does not delete rows. |
 | Case deletion removes the case and its score attempts from the application database. | **verified**, high confidence for implementation intent only | The scoped manager DELETE handler deletes the case; the declared score foreign key specifies `onDelete: "cascade"`. No deletion was executed and the deployed database constraint was not inspected. |
 | Export deletes cases or recalls previously downloaded copies. | **contradicted**, high confidence | The JSONL handler reads cases without deletion. Previously downloaded copies are outside this deletion handler. |
@@ -196,15 +319,12 @@ the source-use boundary.
 
 ## Verification and unresolved requirements
 
-- **Validation failure and repair:** the first required
-  `bash scripts/src/run-release-node.sh pnpm run typecheck` attempt failed to
-  resolve the already-declared `@workspace/schedule-move` dependency, producing
-  consequent implicit-type errors and cancellation of the sibling client check.
-  A frozen-lockfile workspace install restored the missing package link without
-  changing application source, dependency manifests, or the lockfile.
-  Completion validation must rerun; this repair alone is not a passing typecheck.
+- **PASS:** final root typecheck, including generated-API freshness and API
+  routes, after the dependency-link and error-response repairs described in
+  this review history. This is not a full release or production-readiness gate.
 - **PASS:** bounded source inspection of authorization and application deletion
-  behavior; no code, runtime settings, scorer switch, or provider routing changed.
+  behavior and the metadata-only implementation described above. No enablement
+  setting or scorer switch changed; source approvals are local-use-only.
 - **PASS:** user decisions recorded for the five workbook categories, local
   evaluation purpose, shared authorized roles, reported approved privacy review,
   and 30-day manual-retention policy.
@@ -218,11 +338,14 @@ the source-use boundary.
   inventory evaluation copies, maintain and execute deletion deadlines, and
   establish backup handling and an approved cleanup route after revocation.
   No existing customer-case presence is inferred; no customer data was queried.
-- **Not run:** runtime deletion, upload, scoring, database queries, and browser
-  tests; no customer-source operation is authorized or needed for this review.
+- **Not run:** real-source upload, scoring or deletion, private-document review,
+  published-schema migration, or authenticated end-to-end browser flows.
+  Synthetic database/API tests, bounded schema metadata checks and the
+  development health screenshot are recorded above.
 - **Not applicable:** desktop/phone/tablet portrait and landscape,
   Chromium/Chrome, WebKit/Safari, physical-device and PWA checks; this note changes
-  no UI or runtime behavior.
+  no layout or navigation changes. The removed capture-option availability is
+  covered by component tests; server behavior by scoped database/API checks.
 
 This closes the source-use decision on the synthetic-only branch while the
 remaining operational requirements are uncertain. It does not complete or

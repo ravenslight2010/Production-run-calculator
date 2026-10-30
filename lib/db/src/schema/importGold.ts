@@ -1,4 +1,5 @@
 import { boolean, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { importGoldApprovalsTable } from "./importGoldApprovals";
 
 /** A manager-opted-in case whose expected values came from a successful human Apply. */
 export const importGoldCasesTable = pgTable(
@@ -7,6 +8,7 @@ export const importGoldCasesTable = pgTable(
     id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
     scope: text("scope").notNull().default("live"),
     operationId: text("operation_id").notNull(),
+    approvalId: integer("approval_id").references(() => importGoldApprovalsTable.id),
     importType: text("import_type").notNull(),
     sourceLabel: text("source_label").notNull(),
     evaluatedInput: jsonb("evaluated_input").notNull().$type<Record<string, unknown>>(),

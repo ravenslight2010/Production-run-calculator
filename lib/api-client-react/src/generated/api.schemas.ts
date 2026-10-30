@@ -1095,6 +1095,11 @@ export type ImportOperationApplyInputGoldCaptureInput = { [key: string]: unknown
  * Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
  */
 export type ImportOperationApplyInputGoldCapture = {
+  /**
+     * Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.
+     * @minimum 1
+     */
+  approvalId: number;
   input: ImportOperationApplyInputGoldCaptureInput;
 };
 
@@ -1145,6 +1150,146 @@ export interface ImportOperationApplyInput {
   sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
+}
+
+/**
+ * Opaque identifier only, never a URL, name, file path, email or private document text.
+ * @maxLength 128
+ * @pattern ^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$
+ */
+export type ImportGoldOpaqueReference = string;
+
+export type ImportGoldApprovalInputImportType = typeof ImportGoldApprovalInputImportType[keyof typeof ImportGoldApprovalInputImportType];
+
+
+export const ImportGoldApprovalInputImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export type ImportGoldApprovalInputPurpose = typeof ImportGoldApprovalInputPurpose[keyof typeof ImportGoldApprovalInputPurpose];
+
+
+export const ImportGoldApprovalInputPurpose = {
+  local_spec_import_accuracy: 'local_spec_import_accuracy',
+} as const;
+
+export type ImportGoldApprovalInputPrivacyStatus = typeof ImportGoldApprovalInputPrivacyStatus[keyof typeof ImportGoldApprovalInputPrivacyStatus];
+
+
+export const ImportGoldApprovalInputPrivacyStatus = {
+  approved: 'approved',
+  not_required: 'not_required',
+} as const;
+
+export type ImportGoldApprovalInputRetentionDays = typeof ImportGoldApprovalInputRetentionDays[keyof typeof ImportGoldApprovalInputRetentionDays];
+
+
+export const ImportGoldApprovalInputRetentionDays = {
+  NUMBER_30: 30,
+} as const;
+
+export interface ImportGoldApprovalInput {
+  recordRef: ImportGoldOpaqueReference;
+  /**
+     * SHA-256 of evaluation input JSON with recursively sorted object keys and original array order. Not a workbook-file hash and not approval evidence.
+     * @pattern ^[a-f0-9]{64}$
+     */
+  sourceDigest: string;
+  importType: ImportGoldApprovalInputImportType;
+  purpose: ImportGoldApprovalInputPurpose;
+  ownerRef: ImportGoldOpaqueReference;
+  ownerApprovedAt: string;
+  privacyStatus: ImportGoldApprovalInputPrivacyStatus;
+  privacyReviewerRef: ImportGoldOpaqueReference;
+  privacyReviewedAt: string;
+  conditionsRef: ImportGoldOpaqueReference;
+  externalCopiesRef: ImportGoldOpaqueReference;
+  backupHandlingRef: ImportGoldOpaqueReference;
+  /** Human confirms manual deletion within 30 days or earlier on owner request, covering cases, scores and evaluation working copies. Backups require separately documented handling. */
+  manualDeletionAccepted: true;
+  retentionDays: ImportGoldApprovalInputRetentionDays;
+  conditionsSatisfied: true;
+  validUntil: string;
+}
+
+export type ImportGoldApprovalImportType = typeof ImportGoldApprovalImportType[keyof typeof ImportGoldApprovalImportType];
+
+
+export const ImportGoldApprovalImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export type ImportGoldApprovalPurpose = typeof ImportGoldApprovalPurpose[keyof typeof ImportGoldApprovalPurpose];
+
+
+export const ImportGoldApprovalPurpose = {
+  local_spec_import_accuracy: 'local_spec_import_accuracy',
+} as const;
+
+export type ImportGoldApprovalPrivacyStatus = typeof ImportGoldApprovalPrivacyStatus[keyof typeof ImportGoldApprovalPrivacyStatus];
+
+
+export const ImportGoldApprovalPrivacyStatus = {
+  approved: 'approved',
+  not_required: 'not_required',
+} as const;
+
+export type ImportGoldApprovalRetentionDays = typeof ImportGoldApprovalRetentionDays[keyof typeof ImportGoldApprovalRetentionDays];
+
+
+export const ImportGoldApprovalRetentionDays = {
+  NUMBER_30: 30,
+} as const;
+
+export interface ImportGoldApproval {
+  id: number;
+  scope: string;
+  recordRef: ImportGoldOpaqueReference;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceDigest: string;
+  importType: ImportGoldApprovalImportType;
+  purpose: ImportGoldApprovalPurpose;
+  ownerRef: ImportGoldOpaqueReference;
+  ownerApprovedAt: string;
+  privacyStatus: ImportGoldApprovalPrivacyStatus;
+  privacyReviewerRef: ImportGoldOpaqueReference;
+  privacyReviewedAt: string;
+  conditionsRef: ImportGoldOpaqueReference;
+  externalCopiesRef: ImportGoldOpaqueReference;
+  backupHandlingRef: ImportGoldOpaqueReference;
+  manualDeletionAccepted: true;
+  retentionDays: ImportGoldApprovalRetentionDays;
+  conditionsSatisfied: true;
+  validUntil: string;
+  createdBy: string;
+  createdAt: string;
+  /** @nullable */
+  verifiedBy: string | null;
+  /** @nullable */
+  verifiedAt: string | null;
+  /** @nullable */
+  revokedBy: string | null;
+  /** @nullable */
+  revokedAt: string | null;
+}
+
+export interface ImportGoldApprovalReview {
+  reviewed: true;
+}
+
+export interface ImportGoldApprovalResponse {
+  approval: ImportGoldApproval;
+}
+
+export interface ImportGoldApprovalsResponse {
+  /** @maxItems 50 */
+  approvals: ImportGoldApproval[];
+  /** @nullable */
+  nextBefore: number | null;
 }
 
 export interface ImportGoldConfig {
@@ -11078,6 +11223,13 @@ export type ListOperationalIntentReceipts200 = {
   cursor: number;
   hasMore: boolean;
   mutations: OperationalIntentReceipt[];
+};
+
+export type ListImportGoldApprovalsParams = {
+/**
+ * @minimum 1
+ */
+before?: number;
 };
 
 export type ListImportGoldCasesParams = {

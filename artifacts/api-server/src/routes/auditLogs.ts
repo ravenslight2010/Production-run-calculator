@@ -123,6 +123,9 @@ export const MIX_RECIPE_AUDIT_FIELDS = [
 const EVENT_SCHEMAS: Record<string, AuditEventSchema> = {
   factory_reset: { required: ["outcome"], allowed: ["outcome", "count"] },
   import_gold_case_deleted: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  import_gold_approval_created: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  import_gold_approval_verified: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  import_gold_approval_revoked: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   role_granted: { required: ["outcome"], allowed: ["outcome", "targetId"] },
   role_revoked: { required: ["outcome"], allowed: ["outcome", "targetId"] },
   role_changed: { required: ["outcome"], allowed: ["outcome", "targetId"] },

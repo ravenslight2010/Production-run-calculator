@@ -742,7 +742,7 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(screen.queryByTestId("spec-source-preview")).toBeNull();
   });
 
-  it("sends the gold opt-in only after the final reviewed Apply is selected", () => {
+  it("keeps unbound gold capture unavailable even when legacy configuration enables it", () => {
     const onConfirm = vi.fn();
     renderDialog(
       makePrepared([{ brand: "Aldo Foods", flavor: "Classic", applicators: [], pepperonis: [] }]),
@@ -754,8 +754,8 @@ describe("SpecImportDialog two-step wizard", () => {
     );
     expect(screen.queryByTestId("spec-import-gold-opt-in")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByTestId("spec-import-gold-opt-in"));
+    expect(screen.queryByTestId("spec-import-gold-opt-in")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Apply 1 item/ }));
-    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(true);
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(false);
   });
 });

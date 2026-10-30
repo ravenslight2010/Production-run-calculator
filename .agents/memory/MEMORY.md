@@ -1,6 +1,7 @@
 - [Policy evidence anchors](policy-evidence-anchors.md) — operational policy prose is checked by stable regex anchors; preserve required phrases when clarifying task rules.
 - [Allergen foundation](allergen-foundation.md) — reviewed-empty is none of the nine; missing or unreviewed is unknown; the footprint stays visibility-only and separate from manual labels.
 - [Database evidence](drizzle-generator-evaluation.md) + [timestamps](drizzle-raw-timestamp-decoding.md) — ignore volatile SQL metadata; normalize raw aggregates and timestamps.
+- [Partial schema pushes](drizzle-partial-push.md) — table filters can still touch excluded identity sequences; verify actual DDL after errors, even with exit zero.
 - [Generated validation](orval-zod-declaration-order.md) — normalize scalars before validators; declare smoke-tested toolchain packages directly.
 - [Registry/lockfile integrity](npm-registry-script-metadata.md) + [tarball transport](npm-tarball-transport.md) — verify script metadata and test network transport.
 - [pnpm provenance](pnpm12-lockfile-provenance.md) + [outdated scope](pnpm-outdated-scope-limits.md) — verify importer changes and limit outdated checks.
@@ -152,8 +153,6 @@
 - [Smoke images/inputs](docker-caddy-smoke-image.md) + [runtime](docker-browser-smoke-runtime.md) — preserve readiness and coverage in test images.
 - [Release guide claims](release-guide-authority-claims.md) — verify provider and live-target statements.
 - [Vitest hooks](vitest-hook-cleanup.md) + [Playwright 304s](playwright-304-responses.md) — avoid implicit cleanup returns; HTTP 304 cache hits are valid, but request failures remain fatal.
-- [Line Map activity ages](line-map-station-activity.md) — use fresh run-bound server evidence; Tunnel and Warehouse require explicit confirmation, never infer from counters or edit time.
-- [Deployment log fallback](deployment-log-fallback.md) — if revision-scoped runtime logs are unavailable, verify the live build first and use only a time-bounded current-serving log query.
-- [Workflow configuration side effects](workflow-configuration-side-effects.md) — after updating an individual workflow, inspect whether the aggregate Project workflow picked it up.
-- [Metadata maintenance hosts](metadata-maintenance-supported-hosts.md) — metadata append is approved on Linux, macOS, and bounded Windows x64; require native identity and kernel locking.
-- [Attempt retention approval](browser-attempt-retention-policy.md) — owner approved automatic 30-day diagnostic cleanup at browser-check startup, not deletion of release or user evidence.
+- [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require explicit run-bound activity and bounded logs from the verified serving revision.
+- [Workflow effects](workflow-configuration-side-effects.md) + [metadata hosts](metadata-maintenance-supported-hosts.md) — inspect aggregate workflows; preserve approved hosts and kernel locks.
+- [Day estimates](day-timeline-estimate-policy.md) + [attempt retention](browser-attempt-retention-policy.md) — separate forecast facts; startup 30-day cleanup covers browser diagnostics only.

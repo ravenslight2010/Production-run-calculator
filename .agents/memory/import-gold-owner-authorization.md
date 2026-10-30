@@ -46,3 +46,31 @@ application's deletion process manual.
 
 **How to apply:** Keep the due-soon boundary at seven days, show overdue cases
 explicitly, and do not imply push/email delivery or automated erasure.
+
+The owner selected metadata-only approval records in the application database.
+Full approval documents, workbook content, source locations, and private source
+mapping remain outside the repository and outside this metadata ledger.
+
+**Why:** The owner initially expected the app database to hold approvals, then
+explicitly chose the metadata-only approach rather than copying full evidence.
+This avoids creating another store of sensitive approval documents while
+preserving an accountable verification record.
+
+**How to apply:** Use opaque references to restricted evidence and source-bound
+metadata. Creating a record or recording a human attestation does not itself
+authorize enablement, replace actual evidence review, or establish backup
+erasure. Keep real-source use blocked until all source-specific prerequisites
+are genuinely satisfied.
+
+Approval metadata readiness and real-source UI availability are separate.
+Until the manager workflow can select a verified source-bound approval, keep
+capture unavailable rather than showing an opt-in that cannot satisfy the
+server contract.
+
+**Why:** Tightening source authorization can otherwise turn an optional
+capture selection into a failure of the entire ordinary import. Synthetic
+server fixtures that inject approval IDs do not prove the human workflow works.
+
+**How to apply:** Trace approval-contract changes through each human import
+consumer. Preserve ordinary imports without capture and verify client behavior
+without enabling capture or using private customer sources.

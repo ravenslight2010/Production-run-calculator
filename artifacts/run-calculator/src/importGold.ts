@@ -4,6 +4,10 @@ import {
   type ImportGoldRetentionResponse,
 } from "@workspace/api-client-react";
 
+// No source-bound approval picker exists yet. Configuration flags or metadata
+// records alone must not expose the old, unbound capture checkbox.
+export const REAL_SOURCE_CAPTURE_UI_AVAILABLE = false;
+
 export type ImportGoldConfig = {
   enabled: boolean;
   cleanupEnabled: boolean;

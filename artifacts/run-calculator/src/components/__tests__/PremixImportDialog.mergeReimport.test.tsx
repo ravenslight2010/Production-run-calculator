@@ -114,11 +114,11 @@ describe("PremixImportDialog merge re-import guidance", () => {
     expect(screen.queryByTestId("premix-merged-away-mix:old-blend")).toBeNull();
   });
 
-  it("includes explicit gold opt-in in the Apply callback", () => {
+  it("keeps unbound capture unavailable without blocking ordinary Apply", () => {
     const onConfirm = vi.fn();
     renderDialog(makePrepared(), { goldCaptureEnabled: true, onConfirm });
-    screen.getByTestId("premix-import-gold-opt-in").click();
+    expect(screen.queryByTestId("premix-import-gold-opt-in")).toBeNull();
     screen.getByRole("button", { name: /Apply/ }).click();
-    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(true);
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(false);
   });
 });

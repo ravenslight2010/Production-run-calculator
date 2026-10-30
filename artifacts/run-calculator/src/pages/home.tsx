@@ -515,9 +515,8 @@ import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
 import {
-  fetchImportGoldConfig,
+  REAL_SOURCE_CAPTURE_UI_AVAILABLE,
   fetchImportGoldRetentionReminderCounts,
-  makeImportGoldInput,
 } from "../importGold";
 import {
   clearPendingImportOperation,
@@ -3270,13 +3269,6 @@ export default function Home() {
   const canRecordQc = hasCapability("record-qc");
   const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
-  const { data: importGoldConfig } = useQuery({
-    queryKey: ["import-gold-config"],
-    queryFn: fetchImportGoldConfig,
-    enabled: canManageStaff,
-    staleTime: 30_000,
-    retry: false,
-  });
   const importGoldRetentionReminders = useQuery({
     queryKey: ["import-gold-retention-reminder-counts", me?.userId, me?.sandbox],
     queryFn: fetchImportGoldRetentionReminderCounts,
@@ -3285,7 +3277,7 @@ export default function Home() {
     refetchInterval: 60_000,
     retry: false,
   });
-  const goldCaptureEnabled = canManageStaff && importGoldConfig?.enabled === true;
+  const goldCaptureEnabled = canManageStaff && REAL_SOURCE_CAPTURE_UI_AVAILABLE;
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
@@ -13926,7 +13918,7 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
     destructiveChangesAcknowledged = false,
     destructiveReviewSignature?: string,
-    captureGoldCase = false,
+    _captureGoldCase = false,
   ) {
     if (!specImportPrepared) return;
     // The commit spans profile and inventory master-data writes after an AI
@@ -13974,7 +13966,7 @@ export default function Home() {
           forceUpdateProfileKeys,
           acceptedNewMixIngredientNames,
           operationId,
-          captureGoldCase ? { input: makeImportGoldInput({ profiles: editedParsed.profiles, recipes: editedParsed.recipes }) } : undefined,
+          undefined, // Capture stays unavailable until a verified approval can be selected.
         );
       mixedImportQueue.outcome("spec", aliasSaveFailed || toCommit.note?.includes("could not be read") ? "partial" : "applied",
         "Server confirmed this import. Any Undo remains scoped to this operation in Import history.");
@@ -14607,7 +14599,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     mixesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
-    captureGoldCase = false,
+    _captureGoldCase = false,
   ) {
     if (!premixImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -14639,7 +14631,7 @@ export default function Home() {
         newAliases,
         mixesToRemove,
         operationId,
-        captureGoldCase ? { input: makeImportGoldInput({ candidates: premixImportPrepared.candidates.map(({ mix }) => mix) }) } : undefined,
+        undefined, // Never submit the former input-only capture payload.
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
@@ -15123,7 +15115,7 @@ export default function Home() {
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
     destructiveChangesAcknowledged = false,
-    captureGoldCase = false,
+    _captureGoldCase = false,
   ) {
     if (!cheeseImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -15155,7 +15147,7 @@ export default function Home() {
         newAliases,
         recipesToRemove,
         operationId,
-        captureGoldCase ? { input: makeImportGoldInput({ recipes: cheeseImportPrepared.candidates.map(({ recipe }) => recipe) }) } : undefined,
+        undefined, // Never submit the former input-only capture payload.
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");

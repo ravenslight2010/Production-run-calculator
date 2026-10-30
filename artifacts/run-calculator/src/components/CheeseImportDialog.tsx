@@ -1,4 +1,5 @@
 import { ImportReviewTiming } from "../importReviewTiming";
+import { REAL_SOURCE_CAPTURE_UI_AVAILABLE } from "../importGold";
 import { useEffect, useState } from "react";
 import {
   X,
@@ -786,7 +787,7 @@ export default function CheeseImportDialog({
           )}
         </div>
 
-        {goldCaptureEnabled && prepared && (
+        {REAL_SOURCE_CAPTURE_UI_AVAILABLE && goldCaptureEnabled && prepared && (
           <label className="mx-4 flex cursor-pointer items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             <input
               type="checkbox"

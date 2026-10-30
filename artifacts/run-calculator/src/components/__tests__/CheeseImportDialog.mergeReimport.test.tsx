@@ -100,12 +100,12 @@ describe("CheeseImportDialog merge re-import guidance", () => {
     expect(screen.queryByTestId("cheese-merged-away-cheese:old-blend")).toBeNull();
   });
 
-  it("includes explicit gold opt-in in the human Apply callback", () => {
+  it("keeps unbound capture unavailable without blocking ordinary Apply", () => {
     const onConfirm = vi.fn();
     renderDialog(makePrepared(), { goldCaptureEnabled: true, onConfirm });
     (screen.getByTestId("cheese-import-destructive-confirmation").querySelector("input") as HTMLInputElement).click();
-    screen.getByTestId("cheese-import-gold-opt-in").click();
+    expect(screen.queryByTestId("cheese-import-gold-opt-in")).toBeNull();
     screen.getByRole("button", { name: /Apply/ }).click();
-    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(true);
+    expect(onConfirm.mock.calls[0]?.at(-1)).toBe(false);
   });
 });

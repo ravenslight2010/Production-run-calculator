@@ -1042,6 +1042,72 @@ export const listOperationalIntentReceiptsQueryAfterMin = 0;
 export const listOperationalIntentReceiptsResponseCursorMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
 export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+export const listImportGoldApprovalsResponseApprovalsItemRecordRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const listImportGoldApprovalsResponseApprovalsItemOwnerRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemConditionsRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefMax = 128;
+export const listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const listImportGoldApprovalsResponseApprovalsMax = 50;
+export const createImportGoldApprovalBodyRecordRefMax = 128;
+export const createImportGoldApprovalBodyRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodySourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const createImportGoldApprovalBodyOwnerRefMax = 128;
+export const createImportGoldApprovalBodyOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyPrivacyReviewerRefMax = 128;
+export const createImportGoldApprovalBodyPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyConditionsRefMax = 128;
+export const createImportGoldApprovalBodyConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyExternalCopiesRefMax = 128;
+export const createImportGoldApprovalBodyExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalBodyBackupHandlingRefMax = 128;
+export const createImportGoldApprovalBodyBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalRecordRefMax = 128;
+export const createImportGoldApprovalResponseApprovalRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const createImportGoldApprovalResponseApprovalOwnerRefMax = 128;
+export const createImportGoldApprovalResponseApprovalOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalPrivacyReviewerRefMax = 128;
+export const createImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalConditionsRefMax = 128;
+export const createImportGoldApprovalResponseApprovalConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalExternalCopiesRefMax = 128;
+export const createImportGoldApprovalResponseApprovalExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const createImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
+export const createImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalRecordRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const verifyImportGoldApprovalResponseApprovalOwnerRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalConditionsRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalExternalCopiesRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const verifyImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
+export const verifyImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalRecordRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalRecordRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalSourceDigestRegExp = new RegExp('^[a-f0-9]{64}$');
+export const revokeImportGoldApprovalResponseApprovalOwnerRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalOwnerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalConditionsRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalConditionsRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalExternalCopiesRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalExternalCopiesRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+export const revokeImportGoldApprovalResponseApprovalBackupHandlingRefMax = 128;
+export const revokeImportGoldApprovalResponseApprovalBackupHandlingRefRegExp = new RegExp('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
 export const listImportGoldCasesQueryLimitDefault = 50;
 export const listImportGoldCasesQueryLimitMax = 100;
 export const listImportGoldRetentionQueryLimitDefault = 50;
@@ -10219,6 +10285,178 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
 })
 
 /**
+ * Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture.
+ */
+
+export const ListImportGoldApprovalsQueryParams = zod.object({
+  "before": zod.coerce.number().int().min(1).optional()
+})
+
+export const ListImportGoldApprovalsResponse = zod.object({
+  "approvals": zod.array(zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemRecordRefMax).regex(listImportGoldApprovalsResponseApprovalsItemRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(listImportGoldApprovalsResponseApprovalsItemSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemOwnerRefMax).regex(listImportGoldApprovalsResponseApprovalsItemOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefMax).regex(listImportGoldApprovalsResponseApprovalsItemPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemConditionsRefMax).regex(listImportGoldApprovalsResponseApprovalsItemConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefMax).regex(listImportGoldApprovalsResponseApprovalsItemExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefMax).regex(listImportGoldApprovalsResponseApprovalsItemBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})).max(listImportGoldApprovalsResponseApprovalsMax),
+  "nextBefore": zod.int().nullable()
+})
+
+/**
+ * Create immutable pending metadata only. Never submit workbook data, names, locations, or approval documents. References identify evidence retained in a separate restricted system. Creation is not verification or enablement.
+ */
+
+export const CreateImportGoldApprovalBody = zod.object({
+  "recordRef": zod.string().max(createImportGoldApprovalBodyRecordRefMax).regex(createImportGoldApprovalBodyRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(createImportGoldApprovalBodySourceDigestRegExp).describe('SHA-256 of evaluation input JSON with recursively sorted object keys and original array order. Not a workbook-file hash and not approval evidence.'),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(createImportGoldApprovalBodyOwnerRefMax).regex(createImportGoldApprovalBodyOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(createImportGoldApprovalBodyPrivacyReviewerRefMax).regex(createImportGoldApprovalBodyPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(createImportGoldApprovalBodyConditionsRefMax).regex(createImportGoldApprovalBodyConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(createImportGoldApprovalBodyExternalCopiesRefMax).regex(createImportGoldApprovalBodyExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(createImportGoldApprovalBodyBackupHandlingRefMax).regex(createImportGoldApprovalBodyBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true).describe('Human confirms manual deletion within 30 days or earlier on owner request, covering cases, scores and evaluation working copies. Backups require separately documented handling.'),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date()
+})
+
+export const CreateImportGoldApprovalResponse = zod.object({
+  "approval": zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(createImportGoldApprovalResponseApprovalRecordRefMax).regex(createImportGoldApprovalResponseApprovalRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(createImportGoldApprovalResponseApprovalSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(createImportGoldApprovalResponseApprovalOwnerRefMax).regex(createImportGoldApprovalResponseApprovalOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(createImportGoldApprovalResponseApprovalPrivacyReviewerRefMax).regex(createImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(createImportGoldApprovalResponseApprovalConditionsRefMax).regex(createImportGoldApprovalResponseApprovalConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(createImportGoldApprovalResponseApprovalExternalCopiesRefMax).regex(createImportGoldApprovalResponseApprovalExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(createImportGoldApprovalResponseApprovalBackupHandlingRefMax).regex(createImportGoldApprovalResponseApprovalBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+})
+
+/**
+ * Explicit authorized human attestation that referenced private evidence was reviewed. Records current actor and server time, not an independent automated privacy review. Does not enable capture.
+ */
+
+export const VerifyImportGoldApprovalParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const VerifyImportGoldApprovalBody = zod.object({
+  "reviewed": zod.literal(true)
+})
+
+export const VerifyImportGoldApprovalResponse = zod.object({
+  "approval": zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(verifyImportGoldApprovalResponseApprovalRecordRefMax).regex(verifyImportGoldApprovalResponseApprovalRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(verifyImportGoldApprovalResponseApprovalSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(verifyImportGoldApprovalResponseApprovalOwnerRefMax).regex(verifyImportGoldApprovalResponseApprovalOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefMax).regex(verifyImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(verifyImportGoldApprovalResponseApprovalConditionsRefMax).regex(verifyImportGoldApprovalResponseApprovalConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(verifyImportGoldApprovalResponseApprovalExternalCopiesRefMax).regex(verifyImportGoldApprovalResponseApprovalExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(verifyImportGoldApprovalResponseApprovalBackupHandlingRefMax).regex(verifyImportGoldApprovalResponseApprovalBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+})
+
+/**
+ * Permanently revoke an approval. Audit and metadata are retained; future captures cannot use it. Requires current Manager or QC Manager role and manage-staff or manage-qc capability.
+ */
+
+export const RevokeImportGoldApprovalParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const RevokeImportGoldApprovalBody = zod.object({
+  "reviewed": zod.literal(true)
+})
+
+export const RevokeImportGoldApprovalResponse = zod.object({
+  "approval": zod.object({
+  "id": zod.int(),
+  "scope": zod.string(),
+  "recordRef": zod.string().max(revokeImportGoldApprovalResponseApprovalRecordRefMax).regex(revokeImportGoldApprovalResponseApprovalRecordRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "sourceDigest": zod.string().regex(revokeImportGoldApprovalResponseApprovalSourceDigestRegExp),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "purpose": zod.enum(['local_spec_import_accuracy']),
+  "ownerRef": zod.string().max(revokeImportGoldApprovalResponseApprovalOwnerRefMax).regex(revokeImportGoldApprovalResponseApprovalOwnerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "ownerApprovedAt": zod.coerce.date(),
+  "privacyStatus": zod.enum(['approved', 'not_required']),
+  "privacyReviewerRef": zod.string().max(revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefMax).regex(revokeImportGoldApprovalResponseApprovalPrivacyReviewerRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "privacyReviewedAt": zod.coerce.date(),
+  "conditionsRef": zod.string().max(revokeImportGoldApprovalResponseApprovalConditionsRefMax).regex(revokeImportGoldApprovalResponseApprovalConditionsRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "externalCopiesRef": zod.string().max(revokeImportGoldApprovalResponseApprovalExternalCopiesRefMax).regex(revokeImportGoldApprovalResponseApprovalExternalCopiesRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "backupHandlingRef": zod.string().max(revokeImportGoldApprovalResponseApprovalBackupHandlingRefMax).regex(revokeImportGoldApprovalResponseApprovalBackupHandlingRefRegExp).describe('Opaque identifier only, never a URL, name, file path, email or private document text.'),
+  "manualDeletionAccepted": zod.literal(true),
+  "retentionDays": zod.literal(30),
+  "conditionsSatisfied": zod.literal(true),
+  "validUntil": zod.coerce.date(),
+  "createdBy": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "verifiedBy": zod.string().nullable(),
+  "verifiedAt": zod.coerce.date().nullable(),
+  "revokedBy": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+})
+
+/**
  * @summary Read manager-only import-gold feature and provider configuration
  */
 export const GetImportGoldConfigResponse = zod.object({
@@ -10433,6 +10671,7 @@ export const PreviewImportOperationBody = zod.object({
   "requestHash": zod.string().regex(previewImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(previewImportOperationBodyExpectedStateHashRegExp).nullish(),
   "goldCapture": zod.object({
+  "approvalId": zod.int().min(1).describe('Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.'),
   "input": zod.looseObject({
 
 })
@@ -10473,6 +10712,7 @@ export const ApplyImportOperationBody = zod.object({
   "requestHash": zod.string().regex(applyImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
   "goldCapture": zod.object({
+  "approvalId": zod.int().min(1).describe('Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference.'),
   "input": zod.looseObject({
 
 })

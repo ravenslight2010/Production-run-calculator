@@ -170,20 +170,16 @@ variants see.
 **How to apply:** Snapshot the canonical value, write unique fixture entries,
 and restore the snapshot in `finally` using a fresh master-data epoch.
 
-## Reserved ingredient names in full-app browser fixtures
+## Focused edge cases and full-app fixtures
 
-When checking prototype-sensitive ingredient accumulation, keep reserved names
-in focused accumulator/API tests and use ordinary live-run data for responsive
-full-app browser checks. Seeding `__proto__` as the initial pepperoni type caused
-a live-run startup error before the deferred Mix Plan view mounted.
+Use focused tests for adversarial input domains and representative valid data
+for unrelated full-app journeys.
 
-**Why:** The full app runs live applicator setup before the Mix Plan view is
-opened, so that unrelated startup path can mask whether the accumulator and
-rendered view handle a reserved ingredient key correctly.
+**Why:** A full-app fixture can fail an earlier invariant before the feature
+under test mounts, masking which boundary actually failed.
 
-**How to apply:** If browser-level reserved-name coverage is needed, isolate the
-Mix Plan component or exercise the name through its recipe data without placing
-it in the initial live-run form; investigate live-run startup separately.
+**How to apply:** Test the target boundary directly, and investigate earlier
+startup failures separately rather than counting them as target-feature proof.
 
 ## Same-origin request diagnostics
 
@@ -194,12 +190,9 @@ proves a CORS failure. Capture the method, URL origin, safe header names,
 response status, and browser failure separately, and redact cookie,
 authorization, and client-ID values.
 
-**Why:** A browser can report a failed request near a fixture API route even
-when the intended same-origin `GET` succeeded. Distinguishing methods and
-responses exposed a fixture's generic `404` on an operator `PUT`, rather than
-a cross-origin or preflight problem.
+**Why:** A nearby failed request does not identify a CORS failure or show that
+the intended request failed. Method, response and preflight evidence matter.
 
-**How to apply:** For WebKit/PWA fixture errors, first check whether `OPTIONS`
-was actually sent and whether the browser reached the fixture handler. Model
-the endpoint's real authorization status for unsupported fixture writes;
-do not add permissive CORS headers to make the test pass.
+**How to apply:** Check whether preflight occurred and whether the request
+reached its handler. Preserve real authorization behavior in fixtures; do not
+add permissive CORS headers to conceal an unrelated failure.

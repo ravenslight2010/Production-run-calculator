@@ -8,6 +8,7 @@ import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
+import { goldSourceDigest } from "../lib/importGoldApproval";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -116,13 +117,14 @@ beforeEach(async () => {
   delete process.env.IMPORT_GOLD_CLEANUP_ENABLED;
   process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
   process.env.IMPORT_GOLD_RETENTION_APPROVED = "true";
-  process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "test-only://synthetic-import-gold-approval";
+  process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "synthetic-approval";
   process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "not_required";
   delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
   delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
   route?.setImportGoldProviderForTest();
   await db.execute(sql`TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.cheeseRecipesTable}, ${tables.importGoldScoresTable}, ${tables.importGoldRetentionTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.factoryKvTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
+  await db.delete(tables.importGoldApprovalsTable);
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
     { id: "inventory-peer", username: "inventory-peer", passwordHash: "x" },
@@ -386,10 +388,95 @@ async function apply(
   user = "inventory",
   extraHeaders: Record<string, string> = {},
 ) {
+  const capture = body.goldCapture as { input?: unknown; approvalId?: number } | undefined;
+  if (capture && typeof capture === "object" && capture.input && capture.approvalId === undefined) {
+    const scope = user === "sandbox" ? "sandbox" : "live";
+    const sourceDigest = goldSourceDigest(capture.input);
+    const fixture = approvalMetadata(sourceDigest, String(body.importType));
+    await db.insert(tables.importGoldApprovalsTable).values({
+      ...fixture, scope, createdBy: "inventory", verifiedBy: "inventory", verifiedAt: new Date(),
+      ownerApprovedAt: new Date(fixture.ownerApprovedAt), privacyReviewedAt: new Date(fixture.privacyReviewedAt),
+      validUntil: new Date(fixture.validUntil),
+    }).onConflictDoNothing();
+    const [approval] = await db.select().from(tables.importGoldApprovalsTable).where(and(
+      eq(tables.importGoldApprovalsTable.scope, scope),
+      eq(tables.importGoldApprovalsTable.sourceDigest, sourceDigest),
+      eq(tables.importGoldApprovalsTable.importType, String(body.importType)),
+    ));
+    body = { ...body, goldCapture: { ...capture, approvalId: approval!.id } };
+  }
   return fetch(`${baseUrl}/api/import-operations/${operationId}/apply`, {
     method: "POST", headers: { ...headers(user), ...extraHeaders }, body: JSON.stringify(body),
   });
 }
+
+function approvalMetadata(sourceDigest: string, importType = "premix") {
+  return {
+    recordRef: "synthetic-approval",
+    sourceDigest, importType, purpose: "local_spec_import_accuracy",
+    ownerRef: "synthetic-owner", ownerApprovedAt: "2020-01-01T00:00:00.000Z",
+    privacyStatus: "not_required", privacyReviewerRef: "synthetic-reviewer",
+    privacyReviewedAt: "2020-01-01T00:00:00.000Z", conditionsRef: "synthetic-none",
+    externalCopiesRef: "synthetic-copy-handling", backupHandlingRef: "synthetic-backup-handling",
+    manualDeletionAccepted: true, conditionsSatisfied: true, retentionDays: 30,
+    validUntil: "2099-01-01T00:00:00.000Z",
+  };
+}
+
+describe("source approval metadata", () => {
+  it("requires explicit review, binds exact scoped input, and fences revocation without enabling capture", async () => {
+    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "synthetic-approval";
+    const input = { candidates: [{ name: "Synthetic approved source" }] };
+    const metadata = approvalMetadata(goldSourceDigest(input));
+    const post = (url: string, body: unknown, user = "inventory") => fetch(`${baseUrl}/api${url}`, {
+      method: "POST", headers: headers(user), body: JSON.stringify(body),
+    });
+    expect((await post("/import-gold/approvals", metadata, "profiles")).status).toBe(403);
+    expect((await post("/import-gold/approvals", { ...metadata, ownerRef: "private@example.com" })).status).toBe(400);
+    expect((await post("/import-gold/approvals", { ...metadata, privacyStatus: "pending" })).status).toBe(400);
+    const created = await post("/import-gold/approvals", metadata);
+    expect(created.status).toBe(201);
+    const { approval } = await created.json() as { approval: { id: number; verifiedAt: null } };
+    expect(approval.verifiedAt).toBeNull();
+    expect((await post("/import-gold/approvals", metadata)).status).toBe(409);
+    const capture = { ...change("source-approved"), goldCapture: { input, approvalId: approval.id } };
+    const unbound = await post("/import-operations/source-unbound-approval-0001/apply", {
+      ...change("source-unbound"), goldCapture: { input },
+    });
+    expect(unbound.status).toBe(403);
+    expect((await apply("source-approval-pending-0001", capture)).status).toBe(403);
+    expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+    expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true }, "sandbox")).status).toBe(404);
+    expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: false })).status).toBe(400);
+    expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true }, "qc-reviewer")).status).toBe(200);
+    expect((await apply("source-approval-mismatch-0001", {
+      ...capture, goldCapture: { input: { candidates: [] }, approvalId: approval.id },
+    })).status).toBe(403);
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    expect((await apply("source-approval-disabled-0001", capture)).status).toBe(404);
+    process.env.IMPORT_GOLD_ENABLED = "true";
+    expect((await apply("source-approval-success-0001", capture)).status).toBe(200);
+    const [saved] = await db.select().from(tables.importGoldCasesTable);
+    expect(saved!.approvalId).toBe(approval.id);
+    await db.update(tables.importGoldApprovalsTable).set({ validUntil: new Date("2020-01-01") })
+      .where(eq(tables.importGoldApprovalsTable.id, approval.id));
+    expect((await apply("source-approval-expired-0001", capture)).status).toBe(403);
+    await db.update(tables.importGoldApprovalsTable).set({ validUntil: new Date(metadata.validUntil) })
+      .where(eq(tables.importGoldApprovalsTable.id, approval.id));
+    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "different-reference";
+    expect((await apply("source-approval-wrong-ref-0001", capture)).status).toBe(403);
+    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = metadata.recordRef;
+    expect((await post(`/import-gold/approvals/${approval.id}/revocation`, { reviewed: true })).status).toBe(200);
+    expect((await post(`/import-gold/approvals/${approval.id}/verification`, { reviewed: true })).status).toBe(409);
+    expect((await apply("source-approval-revoked-0001", capture)).status).toBe(403);
+    const sandbox = await fetch(`${baseUrl}/api/import-gold/approvals`, { headers: headers("sandbox") });
+    expect(await sandbox.json()).toEqual({ approvals: [], nextBefore: null });
+    const events = await db.select().from(tables.auditLogsTable);
+    expect(events.filter((row) => row.resource === "import_gold_approval")).toHaveLength(3);
+    expect(events.filter((row) => row.resource === "import_gold_approval").every((row) =>
+      Object.keys(row.changes).sort().join(",") === "outcome,targetId")).toBe(true);
+  });
+});
 
 describe("atomic import operations", () => {
   it("preserves premade-crust classification on re-import and leaves new names unclassified", async () => {
@@ -1311,10 +1398,8 @@ describe("atomic import operations", () => {
     });
     expect(restored.status).toBe(200);
     const exported = await fetch(`${baseUrl}/api/import-gold/export.jsonl`, { headers: headers() });
-    expect(exported.headers.get("content-type")).toContain("application/x-ndjson");
-    const jsonl = await exported.text();
-    expect(jsonl.trim().split("\n")).toHaveLength(1);
-    expect(JSON.parse(jsonl)).toMatchObject({ id: caseId, evaluatedInput: { candidates: [{ name: "Controls" }] } });
+    expect(exported.status).toBe(403);
+    expect(await exported.json()).toEqual({ error: "Local-evaluation approval does not authorize case exports" });
 
     const deleted = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}`, { method: "DELETE", headers: headers() });
     expect(deleted.status).toBe(204);
@@ -1936,7 +2021,7 @@ describe("atomic import operations", () => {
     process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "  ";
     expect(((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json()) as { enabled: boolean }).enabled).toBe(false);
     expect((await captureWhileApprovalMissing("gold-capture-no-approval-ref-001")).status).toBe(404);
-    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "test-only://synthetic-import-gold-approval";
+    process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "synthetic-approval";
     process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "pending";
     expect(((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json()) as { enabled: boolean }).enabled).toBe(false);
     expect((await captureWhileApprovalMissing("gold-capture-pending-privacy-001")).status).toBe(404);

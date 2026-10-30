@@ -132,6 +132,10 @@ import type {
   IdentifyPhotoInput,
   IdentifyPhotoResult,
   ImportAliasList,
+  ImportGoldApprovalInput,
+  ImportGoldApprovalResponse,
+  ImportGoldApprovalReview,
+  ImportGoldApprovalsResponse,
   ImportGoldCasesResponse,
   ImportGoldCleanupCasesResponse,
   ImportGoldConfig,
@@ -175,6 +179,7 @@ import type {
   ListDistillationApplyEvidence200,
   ListDistillationApplyEvidenceParams,
   ListFinalizedOperationalReportsParams,
+  ListImportGoldApprovalsParams,
   ListImportGoldCasesParams,
   ListImportGoldRetentionParams,
   ListImportHistoryParams,
@@ -25543,6 +25548,368 @@ export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<type
 
 
 
+
+export const getListImportGoldApprovalsUrl = (params?: ListImportGoldApprovalsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/import-gold/approvals?${stringifiedParams}` : `/api/import-gold/approvals`
+}
+
+/**
+ * Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture.
+ */
+export const listImportGoldApprovals = async (params?: ListImportGoldApprovalsParams, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalsResponse> => {
+
+  return customFetch<ImportGoldApprovalsResponse>(getListImportGoldApprovalsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListImportGoldApprovalsQueryKey = (params?: ListImportGoldApprovalsParams,) => {
+    return [
+    `/api/import-gold/approvals`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListImportGoldApprovalsQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportGoldApprovalsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportGoldApprovals>>> = ({ signal }) => listImportGoldApprovals(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListImportGoldApprovalsQueryResult = NonNullable<Awaited<ReturnType<typeof listImportGoldApprovals>>>
+export type ListImportGoldApprovalsQueryError = ErrorType<void>
+
+
+export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
+ params: undefined |  ListImportGoldApprovalsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldApprovals>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldApprovals>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
+ params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldApprovals>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldApprovals>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
+ params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useListImportGoldApprovals<TData = Awaited<ReturnType<typeof listImportGoldApprovals>>, TError = ErrorType<void>>(
+ params?: ListImportGoldApprovalsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldApprovals>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListImportGoldApprovalsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateImportGoldApprovalUrl = () => {
+
+
+
+
+  return `/api/import-gold/approvals`
+}
+
+/**
+ * Create immutable pending metadata only. Never submit workbook data, names, locations, or approval documents. References identify evidence retained in a separate restricted system. Creation is not verification or enablement.
+ */
+export const createImportGoldApproval = async (importGoldApprovalInput: ImportGoldApprovalInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportGoldApprovalResponse>(getCreateImportGoldApprovalUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldApprovalInput)
+  }
+);}
+
+
+
+
+
+export const getCreateImportGoldApprovalMutationKey = () => ['createImportGoldApproval'] as const;
+
+export const getCreateImportGoldApprovalMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createImportGoldApproval>>, TError,CreateImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createImportGoldApproval>>, TError,CreateImportGoldApprovalMutationVariables, TContext> => {
+
+const mutationKey = getCreateImportGoldApprovalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createImportGoldApproval>>, CreateImportGoldApprovalMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createImportGoldApproval(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateImportGoldApprovalMutationResult = NonNullable<Awaited<ReturnType<typeof createImportGoldApproval>>>
+    export type CreateImportGoldApprovalMutationBody = BodyType<ImportGoldApprovalInput>
+    export type CreateImportGoldApprovalMutationError = ErrorType<void>
+    export type CreateImportGoldApprovalMutationVariables = {data: BodyType<ImportGoldApprovalInput>}
+
+    export const useCreateImportGoldApproval = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createImportGoldApproval>>, TError,CreateImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createImportGoldApproval>>,
+        TError,
+        CreateImportGoldApprovalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateImportGoldApprovalMutationOptions(options), queryClient);
+    }
+
+export const getVerifyImportGoldApprovalUrl = (id: number,) => {
+
+
+
+
+  return `/api/import-gold/approvals/${id}/verification`
+}
+
+/**
+ * Explicit authorized human attestation that referenced private evidence was reviewed. Records current actor and server time, not an independent automated privacy review. Does not enable capture.
+ */
+export const verifyImportGoldApproval = async (id: number,
+    importGoldApprovalReview: ImportGoldApprovalReview, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportGoldApprovalResponse>(getVerifyImportGoldApprovalUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldApprovalReview)
+  }
+);}
+
+
+
+
+
+export const getVerifyImportGoldApprovalMutationKey = () => ['verifyImportGoldApproval'] as const;
+
+export const getVerifyImportGoldApprovalMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyImportGoldApproval>>, TError,VerifyImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyImportGoldApproval>>, TError,VerifyImportGoldApprovalMutationVariables, TContext> => {
+
+const mutationKey = getVerifyImportGoldApprovalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyImportGoldApproval>>, VerifyImportGoldApprovalMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  verifyImportGoldApproval(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyImportGoldApprovalMutationResult = NonNullable<Awaited<ReturnType<typeof verifyImportGoldApproval>>>
+    export type VerifyImportGoldApprovalMutationBody = BodyType<ImportGoldApprovalReview>
+    export type VerifyImportGoldApprovalMutationError = ErrorType<void>
+    export type VerifyImportGoldApprovalMutationVariables = {id: number;data: BodyType<ImportGoldApprovalReview>}
+
+    export const useVerifyImportGoldApproval = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyImportGoldApproval>>, TError,VerifyImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof verifyImportGoldApproval>>,
+        TError,
+        VerifyImportGoldApprovalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getVerifyImportGoldApprovalMutationOptions(options), queryClient);
+    }
+
+export const getRevokeImportGoldApprovalUrl = (id: number,) => {
+
+
+
+
+  return `/api/import-gold/approvals/${id}/revocation`
+}
+
+/**
+ * Permanently revoke an approval. Audit and metadata are retained; future captures cannot use it. Requires current Manager or QC Manager role and manage-staff or manage-qc capability.
+ */
+export const revokeImportGoldApproval = async (id: number,
+    importGoldApprovalReview: ImportGoldApprovalReview, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldApprovalResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportGoldApprovalResponse>(getRevokeImportGoldApprovalUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldApprovalReview)
+  }
+);}
+
+
+
+
+
+export const getRevokeImportGoldApprovalMutationKey = () => ['revokeImportGoldApproval'] as const;
+
+export const getRevokeImportGoldApprovalMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeImportGoldApproval>>, TError,RevokeImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeImportGoldApproval>>, TError,RevokeImportGoldApprovalMutationVariables, TContext> => {
+
+const mutationKey = getRevokeImportGoldApprovalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeImportGoldApproval>>, RevokeImportGoldApprovalMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  revokeImportGoldApproval(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeImportGoldApprovalMutationResult = NonNullable<Awaited<ReturnType<typeof revokeImportGoldApproval>>>
+    export type RevokeImportGoldApprovalMutationBody = BodyType<ImportGoldApprovalReview>
+    export type RevokeImportGoldApprovalMutationError = ErrorType<void>
+    export type RevokeImportGoldApprovalMutationVariables = {id: number;data: BodyType<ImportGoldApprovalReview>}
+
+    export const useRevokeImportGoldApproval = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeImportGoldApproval>>, TError,RevokeImportGoldApprovalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof revokeImportGoldApproval>>,
+        TError,
+        RevokeImportGoldApprovalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRevokeImportGoldApprovalMutationOptions(options), queryClient);
+    }
 
 export const getGetImportGoldConfigUrl = () => {
 

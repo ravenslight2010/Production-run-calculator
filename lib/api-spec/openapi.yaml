@@ -6861,6 +6861,90 @@ paths:
         "400":
           description: Invalid cursor
 
+  /import-gold/approvals:
+    get:
+      operationId: listImportGoldApprovals
+      tags: [specImport]
+      description: Restricted metadata ledger. Requires current Manager or QC Manager role and manage-staff or manage-qc capability. Does not enable capture.
+      parameters:
+        - name: before
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: At most 50 scoped approval records, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalsResponse" }
+        "400": { description: Invalid cursor }
+        "403": { description: Role or capability denied }
+    post:
+      operationId: createImportGoldApproval
+      tags: [specImport]
+      description: Create immutable pending metadata only. Never submit workbook data, names, locations, or approval documents. References identify evidence retained in a separate restricted system. Creation is not verification or enablement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldApprovalInput" }
+      responses:
+        "201":
+          description: Pending record created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalResponse" }
+        "400": { description: Invalid or incomplete metadata }
+        "403": { description: Role or capability denied }
+        "409": { description: "This source, type and reference already exist" }
+  /import-gold/approvals/{id}/verification:
+    post:
+      operationId: verifyImportGoldApproval
+      tags: [specImport]
+      description: Explicit authorized human attestation that referenced private evidence was reviewed. Records current actor and server time, not an independent automated privacy review. Does not enable capture.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldApprovalReview" }
+      responses:
+        "200":
+          description: Verification saved or already present.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalResponse" }
+        "400": { description: Invalid review confirmation }
+        "403": { description: Role or capability denied }
+        "404": { description: Record absent in current scope }
+        "409": { description: "Expired, revoked or incomplete" }
+  /import-gold/approvals/{id}/revocation:
+    post:
+      operationId: revokeImportGoldApproval
+      tags: [specImport]
+      description: Permanently revoke an approval. Audit and metadata are retained; future captures cannot use it. Requires current Manager or QC Manager role and manage-staff or manage-qc capability.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportGoldApprovalReview" }
+      responses:
+        "200":
+          description: Revoked or already revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldApprovalResponse" }
+        "400": { description: Invalid review confirmation }
+        "403": { description: Role or capability denied }
+        "404": { description: Record absent in current scope }
   /import-gold/config:
     get:
       operationId: getImportGoldConfig
@@ -7880,9 +7964,10 @@ components:
         goldCapture:
           type: object
           description: Optional manager-opted-in evaluation input; expected values are captured from the successful server Apply snapshot.
-          required: [input]
+          required: [input, approvalId]
           additionalProperties: false
           properties:
+            approvalId: { type: integer, minimum: 1, description: "Verified current scoped approval matching the exact canonical input digest, import type and configured private-record reference." }
             input: { type: object, maxProperties: 2 }
         sourceEvidence:
           type: object
@@ -7896,6 +7981,86 @@ components:
           type: object
           description: Reviewed entity batches keyed by supported master-data domain.
           additionalProperties: true
+    ImportGoldOpaqueReference:
+      type: string
+      maxLength: 128
+      pattern: "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$"
+      description: Opaque identifier only, never a URL, name, file path, email or private document text.
+    ImportGoldApprovalInput:
+      type: object
+      additionalProperties: false
+      required: [recordRef, sourceDigest, importType, purpose, ownerRef, ownerApprovedAt, privacyStatus, privacyReviewerRef, privacyReviewedAt, conditionsRef, externalCopiesRef, backupHandlingRef, manualDeletionAccepted, retentionDays, conditionsSatisfied, validUntil]
+      properties:
+        recordRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        sourceDigest:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+          description: SHA-256 of evaluation input JSON with recursively sorted object keys and original array order. Not a workbook-file hash and not approval evidence.
+        importType: { type: string, enum: [spec, premix, cheese] }
+        purpose: { type: string, enum: [local_spec_import_accuracy] }
+        ownerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        ownerApprovedAt: { type: string, format: date-time }
+        privacyStatus: { type: string, enum: [approved, not_required] }
+        privacyReviewerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        privacyReviewedAt: { type: string, format: date-time }
+        conditionsRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        externalCopiesRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        backupHandlingRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        manualDeletionAccepted:
+          type: boolean
+          enum: [true]
+          description: Human confirms manual deletion within 30 days or earlier on owner request, covering cases, scores and evaluation working copies. Backups require separately documented handling.
+        retentionDays: { type: integer, enum: [30] }
+        conditionsSatisfied: { type: boolean, enum: [true] }
+        validUntil: { type: string, format: date-time }
+    ImportGoldApproval:
+      type: object
+      required: [id, scope, recordRef, sourceDigest, importType, purpose, ownerRef, ownerApprovedAt, privacyStatus, privacyReviewerRef, privacyReviewedAt, conditionsRef, externalCopiesRef, backupHandlingRef, manualDeletionAccepted, retentionDays, conditionsSatisfied, validUntil, createdBy, createdAt, verifiedBy, verifiedAt, revokedBy, revokedAt]
+      properties:
+        id: { type: integer }
+        scope: { type: string }
+        recordRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        sourceDigest: { type: string, pattern: "^[a-f0-9]{64}$" }
+        importType: { type: string, enum: [spec, premix, cheese] }
+        purpose: { type: string, enum: [local_spec_import_accuracy] }
+        ownerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        ownerApprovedAt: { type: string, format: date-time }
+        privacyStatus: { type: string, enum: [approved, not_required] }
+        privacyReviewerRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        privacyReviewedAt: { type: string, format: date-time }
+        conditionsRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        externalCopiesRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        backupHandlingRef: { $ref: "#/components/schemas/ImportGoldOpaqueReference" }
+        manualDeletionAccepted: { type: boolean, enum: [true] }
+        retentionDays: { type: integer, enum: [30] }
+        conditionsSatisfied: { type: boolean, enum: [true] }
+        validUntil: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        verifiedBy: { type: string, nullable: true }
+        verifiedAt: { type: string, format: date-time, nullable: true }
+        revokedBy: { type: string, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    ImportGoldApprovalReview:
+      type: object
+      additionalProperties: false
+      required: [reviewed]
+      properties:
+        reviewed: { type: boolean, enum: [true] }
+    ImportGoldApprovalResponse:
+      type: object
+      required: [approval]
+      properties:
+        approval: { $ref: "#/components/schemas/ImportGoldApproval" }
+    ImportGoldApprovalsResponse:
+      type: object
+      required: [approvals, nextBefore]
+      properties:
+        approvals:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/ImportGoldApproval" }
+        nextBefore: { type: integer, nullable: true }
     ImportGoldConfig:
       type: object
       required: [enabled, cleanupEnabled, localConfigured, localAvailable, localScoringSwitchAvailable, localScoringEnabled, syntheticFixtureAvailable, geminiConfigured, retention, persistsAcrossFactoryPurge]
