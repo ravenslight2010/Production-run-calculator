@@ -175,6 +175,26 @@ This matrix verifies deletion tombstones, reload persistence, reset epochs,
 client-date-scoped reads, and conditional unchanged responses in both desktop
 and phone-sized Chromium contexts.
 
+Run the isolated first-daily-baseline reconnect check across Chromium and WebKit
+at desktop and phone sizes:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:sync-baseline
+```
+
+It covers stale local state against a populated server baseline, an explicit
+empty baseline, and an EventSource interruption followed by reconnect. The
+runner creates a disposable PostgreSQL database, verifies persisted server
+state through authenticated API reads, and attaches local-state and
+outgoing-write evidence to each browser result.
+
+Verification on 2026-10-30: all 12 scenarios passed across desktop Chromium,
+phone Chromium, desktop WebKit, and phone WebKit emulation. The populated and
+interrupted cases require an actual app-issued recovery write and inspect the
+adopted local state before that request is allowed through. Tablet emulation:
+**not run**. Physical-device checks: **not run**. No shared development or
+production data was used, and this does not constitute production verification.
+
 Run the bounded WebKit release smoke with an approved disposable database:
 
 ```sh

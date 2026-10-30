@@ -315,10 +315,19 @@ async function putToday(page: Page, payload: SyncPayload): Promise<{
 }
 
 async function getToday(page: Page): Promise<Record<string, unknown>> {
-  return page.evaluate(async (date) => {
-    const response = await fetch(`/api/sync/today?today=${date}`);
-    return (await response.json()) as Record<string, unknown>;
-  }, today());
+  const response = await page.request.get(`/api/sync/today?today=${today()}`, {
+    headers: { "cache-control": "no-store" },
+  });
+  const body = await response.json() as Record<string, unknown>;
+  if (!response.ok()) {
+    throw new Error(`canonical today GET failed: ${response.status()} ${JSON.stringify(body)}`);
+  }
+  if (!body.dayState || !Array.isArray((body.dayState as { runs?: unknown }).runs)) {
+    throw new Error(
+      `canonical today GET returned no day state (status ${response.status()}, keys ${Object.keys(body).sort().join(",")})`,
+    );
+  }
+  return body;
 }
 
 async function localRuns(page: Page): Promise<Array<{ id?: string; endedAt?: number }>> {
@@ -353,6 +362,397 @@ function seededPayload(runId: string): SyncPayload {
     completeness: "complete",
   };
 }
+
+type BaselinePushObservation = {
+  localRunIds: string[];
+  localDate: string | null;
+  localResetAt: number;
+  baselineAcknowledged: boolean;
+  outgoingRunIds: string[];
+  outgoingRunValues: Record<string, unknown>;
+};
+
+async function clearTodaySyncRow(): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("empty first-baseline fixture"),
+  });
+  try {
+    await db.connect();
+    await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
+async function startStaleBaselineClient(
+  page: Page,
+  options: {
+    staleRunId: string;
+    interruptFirstStream?: boolean;
+  },
+): Promise<{
+  peer: Page;
+  pushes: BaselinePushObservation[];
+  streamAttempts: number;
+  firstStreamInterrupted: boolean;
+}> {
+  const context = page.context();
+  await page.close();
+  const peer = await context.newPage();
+  await peer.addInitScript(({ staleRunId, date }) => {
+    localStorage.setItem("run-calc-day", JSON.stringify({
+      date,
+      resetAt: 0,
+      runs: [{ id: staleRunId, brand: "", flavor: "", seeded: true }],
+      currentIndex: 0,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+    }));
+  }, { staleRunId: options.staleRunId, date: today() });
+
+  const pushes: BaselinePushObservation[] = [];
+  let streamAttempts = 0;
+  let firstStreamInterrupted = false;
+  await peer.route("**/api/sync/today**", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const requestBody = route.request().postDataJSON() as {
+      payload?: {
+        dayState?: { runs?: Array<{ id?: string }> };
+        runValues?: Record<string, unknown>;
+      };
+    };
+    const local = await peer.evaluate((staleId) => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        date?: string;
+        resetAt?: number;
+        runs?: Array<{ id?: string }>;
+      };
+      const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+        .filter((key): key is string => key?.startsWith("run-calc-sync-diagnostics:") === true);
+      const diagnostics = keys.flatMap((key) => {
+        try {
+          return JSON.parse(localStorage.getItem(key) ?? "[]") as Array<{
+            kind?: string;
+            message?: string;
+          }>;
+        } catch {
+          return [];
+        }
+      });
+      return {
+        date: day.date ?? null,
+        resetAt: day.resetAt ?? 0,
+        runs: day.runs ?? [],
+        baselineAcknowledged: diagnostics.some((entry) =>
+          entry.kind === "ack"
+          && (entry.message === "Server baseline received" || entry.message === "Server baseline unchanged"),
+        ),
+        containsStaleRun: (day.runs ?? []).some((run) => run.id === staleId),
+      };
+    }, options.staleRunId);
+    pushes.push({
+      localRunIds: local.runs.map((run) => run.id ?? ""),
+      localDate: local.date,
+      localResetAt: local.resetAt,
+      baselineAcknowledged: local.baselineAcknowledged,
+      outgoingRunIds: (requestBody.payload?.dayState?.runs ?? []).map((run) => run.id ?? ""),
+      outgoingRunValues: requestBody.payload?.runValues ?? {},
+    });
+    await route.continue();
+  });
+  if (options.interruptFirstStream) {
+    await peer.route("**/api/sync/events**", async (route) => {
+      streamAttempts += 1;
+      if (streamAttempts === 1) {
+        firstStreamInterrupted = true;
+        await route.abort("internetdisconnected");
+        return;
+      }
+      await route.continue();
+    });
+  }
+  await peer.goto("/", { waitUntil: "domcontentloaded" });
+  await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  return { peer, pushes, get streamAttempts() { return streamAttempts; }, get firstStreamInterrupted() { return firstStreamInterrupted; } };
+}
+
+async function expectFirstBaselineAdopted(
+  peer: Page,
+  staleRunId: string,
+  canonicalRunId?: string,
+): Promise<void> {
+  await expect.poll(async () => {
+    const state = await peer.evaluate(() => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        runs?: Array<{ id?: string }>;
+      };
+      return day.runs ?? [];
+    });
+    return {
+      containsStale: state.some((run) => run.id === staleRunId),
+      containsCanonical: canonicalRunId
+        ? state.some((run) => run.id === canonicalRunId)
+        : true,
+    };
+  }, { timeout: 25_000, message: "the client must adopt the server baseline before writing" }).toEqual({
+    containsStale: false,
+    containsCanonical: true,
+  });
+}
+
+async function attachFirstBaselineEvidence(
+  testInfo: TestInfo,
+  peer: Page,
+  staleRunId: string,
+  pushes: BaselinePushObservation[],
+  stream: { attempts: number; firstInterrupted: boolean },
+): Promise<void> {
+  const local = await peer.evaluate((staleId) => {
+    const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+      date?: string;
+      resetAt?: number;
+      runs?: Array<{ id?: string; brand?: string; flavor?: string }>;
+    };
+    return {
+      date: day.date ?? null,
+      resetAt: day.resetAt ?? 0,
+      runs: day.runs ?? [],
+      containsStaleRun: (day.runs ?? []).some((run) => run.id === staleId),
+    };
+  }, staleRunId);
+  await testInfo.attach("first-daily-baseline-browser-evidence.json", {
+    body: JSON.stringify({ local, pushes, stream }, null, 2),
+    contentType: "application/json",
+  });
+  await testInfo.attach("first-daily-baseline-after-adoption.png", {
+    body: await peer.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+}
+
+test.describe("first daily baseline adoption", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("server's first daily baseline replaces stale local day state before recovery push", async ({
+    page,
+  }, testInfo) => {
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await promoteToManager(page);
+
+    const canonicalRunId = `baseline-populated-${Date.now()}`;
+    const staleRunId = `baseline-stale-${Date.now()}`;
+    const seeded = seededPayload(canonicalRunId);
+    expect((await putToday(page, seeded)).responseStatus).toBe(200);
+    const authContext = page.context();
+    const client = await startStaleBaselineClient(page, {
+      staleRunId,
+    });
+
+    try {
+      await expectFirstBaselineAdopted(client.peer, staleRunId, canonicalRunId);
+      await expect(client.peer.getByTestId("sync-status-button")).toHaveAttribute(
+        "title",
+        "Sync connected",
+        { timeout: 20_000 },
+      );
+      const localRuns = await client.peer.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string; brand?: string; flavor?: string }>;
+        };
+        return day.runs ?? [];
+      });
+      expect(localRuns).toContainEqual(expect.objectContaining({
+        id: canonicalRunId,
+        brand: "Wake",
+        flavor: "Convergence",
+      }));
+      await expect.poll(() => client.pushes.length, {
+        timeout: 10_000,
+        message: "the queued startup recovery write should resume after baseline adoption",
+      }).toBeGreaterThan(0);
+      for (const push of client.pushes) {
+        expect(push.localRunIds).toContain(canonicalRunId);
+        expect(push.localRunIds).not.toContain(staleRunId);
+        expect(push.outgoingRunIds).toContain(canonicalRunId);
+        expect(push.outgoingRunIds).not.toContain(staleRunId);
+        expect(push.baselineAcknowledged).toBe(true);
+      }
+      const canonical = await getToday(client.peer);
+      expect((canonical.dayState as SyncPayload["dayState"]).runs)
+        .toContainEqual(expect.objectContaining({
+          id: canonicalRunId,
+          brand: "Wake",
+          flavor: "Convergence",
+        }));
+      expect((canonical.dayState as SyncPayload["dayState"]).runs.some((run) => run.id === staleRunId))
+        .toBe(false);
+      await attachFirstBaselineEvidence(
+        testInfo,
+        client.peer,
+        staleRunId,
+        client.pushes,
+        { attempts: 1, firstInterrupted: false },
+      );
+
+      await client.peer.reload({ waitUntil: "domcontentloaded" });
+      await client.peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+      await expectFirstBaselineAdopted(client.peer, staleRunId, canonicalRunId);
+      const afterReload = await getToday(client.peer);
+      expect((afterReload.dayState as SyncPayload["dayState"]).runs.map((run) => run.id))
+        .toContain(canonicalRunId);
+    } finally {
+      await authContext.close();
+    }
+  });
+
+  test("server's explicit empty first daily baseline removes stale local day state", async ({
+    page,
+  }, testInfo) => {
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await promoteToManager(page);
+
+    const staleRunId = `baseline-empty-stale-${Date.now()}`;
+    const authContext = page.context();
+    await page.close();
+    await clearTodaySyncRow();
+    const peer = await authContext.newPage();
+    await peer.addInitScript(({ staleId, date }) => {
+      localStorage.setItem("run-calc-day", JSON.stringify({
+        date,
+        resetAt: 0,
+        runs: [{ id: staleId, brand: "", flavor: "", seeded: true }],
+        currentIndex: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+      }));
+    }, { staleId: staleRunId, date: today() });
+    const pushes: BaselinePushObservation[] = [];
+    await peer.route("**/api/sync/today**", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      const body = route.request().postDataJSON() as {
+        payload?: { dayState?: { runs?: Array<{ id?: string }> } };
+      };
+      const localRuns = await peer.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string }>;
+          resetAt?: number;
+        };
+        return { runs: day.runs ?? [], resetAt: day.resetAt ?? 0 };
+      });
+      pushes.push({
+        localRunIds: localRuns.runs.map((run) => run.id ?? ""),
+        localDate: today(),
+        localResetAt: localRuns.resetAt,
+        baselineAcknowledged: false,
+        outgoingRunIds: (body.payload?.dayState?.runs ?? []).map((run) => run.id ?? ""),
+        outgoingRunValues: {},
+      });
+      await route.continue();
+    });
+    await peer.goto("/", { waitUntil: "domcontentloaded" });
+    try {
+      await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await expectFirstBaselineAdopted(peer, staleRunId);
+      await expect(peer.getByTestId("sync-status-button")).toHaveAttribute(
+        "title",
+        "Sync connected",
+        { timeout: 20_000 },
+      );
+      for (const push of pushes) {
+        expect(push.localRunIds).not.toContain(staleRunId);
+        expect(push.outgoingRunIds).not.toContain(staleRunId);
+      }
+      const canonical = await getToday(peer);
+      expect((canonical.dayState as SyncPayload["dayState"]).runs.map((run) => run.id))
+        .not.toContain(staleRunId);
+      await attachFirstBaselineEvidence(
+        testInfo,
+        peer,
+        staleRunId,
+        pushes,
+        { attempts: 1, firstInterrupted: false },
+      );
+
+      await peer.reload({ waitUntil: "domcontentloaded" });
+      await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+      await expectFirstBaselineAdopted(peer, staleRunId);
+      const afterReload = await getToday(peer);
+      expect((afterReload.dayState as SyncPayload["dayState"]).runs.map((run) => run.id))
+        .not.toContain(staleRunId);
+    } finally {
+      await authContext.close();
+    }
+  });
+
+  test("server's first daily baseline is adopted after a stream interruption", async ({
+    page,
+  }, testInfo) => {
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await promoteToManager(page);
+
+    const canonicalRunId = `baseline-reconnect-${Date.now()}`;
+    const staleRunId = `baseline-reconnect-stale-${Date.now()}`;
+    const seeded = seededPayload(canonicalRunId);
+    expect((await putToday(page, seeded)).responseStatus).toBe(200);
+    const authContext = page.context();
+    const client = await startStaleBaselineClient(page, {
+      staleRunId,
+      interruptFirstStream: true,
+    });
+
+    try {
+      await expect.poll(() => client.streamAttempts, {
+        timeout: 20_000,
+        message: "EventSource must retry after the injected first-stream interruption",
+      }).toBeGreaterThanOrEqual(2);
+      expect(client.firstStreamInterrupted).toBe(true);
+      await expectFirstBaselineAdopted(client.peer, staleRunId, canonicalRunId);
+      await expect(client.peer.getByTestId("sync-status-button")).toHaveAttribute(
+        "title",
+        "Sync connected",
+        { timeout: 20_000 },
+      );
+      await expect.poll(() => client.pushes.length, {
+        timeout: 10_000,
+        message: "the reconnect recovery write should resume after baseline adoption",
+      }).toBeGreaterThan(0);
+      for (const push of client.pushes) {
+        expect(push.localRunIds).toContain(canonicalRunId);
+        expect(push.localRunIds).not.toContain(staleRunId);
+        expect(push.outgoingRunIds).toContain(canonicalRunId);
+        expect(push.outgoingRunIds).not.toContain(staleRunId);
+      }
+      const canonical = await getToday(client.peer);
+      expect((canonical.dayState as SyncPayload["dayState"]).runs.map((run) => run.id))
+        .toContain(canonicalRunId);
+      expect((canonical.dayState as SyncPayload["dayState"]).runs.map((run) => run.id))
+        .not.toContain(staleRunId);
+      await attachFirstBaselineEvidence(
+        testInfo,
+        client.peer,
+        staleRunId,
+        client.pushes,
+        { attempts: client.streamAttempts, firstInterrupted: client.firstStreamInterrupted },
+      );
+    } finally {
+      await authContext.close();
+    }
+  });
+});
 
 test("frontline supply recovers across runs and converges with a second tab", async ({ page, browser }, testInfo) => {
   // The browser runner owns a disposable PostgreSQL cluster. Never run this
