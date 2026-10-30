@@ -3,7 +3,7 @@ import { factoryDirectoryState, factoryDirectoryVersion, subscribeFactoryDirecto
 import {
   fetchFactoryData, hydrateFromServer, flushFactoryQueue, legacyDirectoryReviews,
   resolveLegacyDirectoryReview, getStopReasons, getPackagingSettings, getShiftStartTime,
-  getProductionStartTime,
+  getProductionStartTime, managerPendingFactoryDataWriteCount,
 } from "../factoryDataSync";
 import {
   CIRCLES_KEY, GRIP_SHEETS_KEY, PRODUCTION_START_TIME_KEY, SHIPPER_KEY,
@@ -86,6 +86,20 @@ function currentFacilityValue(key: string): unknown {
 
 export function FactoryDirectoryStatus() {
   useSyncExternalStore(subscribeFactoryDirectory, factoryDirectoryVersion, factoryDirectoryVersion);
+  const pending = managerPendingFactoryDataWriteCount();
+  return <>
+    {(pending === null || pending > 0) && <aside role="status" aria-live="polite"
+      data-testid="factory-directory-pending" className="mb-3 rounded-md border border-amber-500 p-3 text-sm">
+      <p className="font-medium">{pending === null
+        ? "Pending facility edits could not be counted."
+        : `${pending} facility ${pending === 1 ? "edit is" : "edits are"} awaiting server confirmation.`}</p>
+      <p>Not yet confirmed as saved to the facility. Pending edits are retained on this device; delivery retries when connectivity returns. Do not clear browser data.</p>
+    </aside>}
+    <FactoryDirectoryDetails />
+  </>;
+}
+
+function FactoryDirectoryDetails() {
   const [reviewError, setReviewError] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
   const [busyReviewId, setBusyReviewId] = useState<string | null>(null);

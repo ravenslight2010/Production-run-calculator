@@ -3,6 +3,7 @@ import {
   fetchFactoryData, flushFactoryQueue, getShiftStartTime, getProductionStartTime, getStopReasons, getPackagingSettings, hydrateFromServer,
   putFactoryKey, resetFactoryDataSyncForTests, setFactoryDataIdentity,
   runFactoryKvMigration, legacyDirectoryReviews, resolveLegacyDirectoryReview,
+  managerPendingFactoryDataWriteCount,
 } from "./factoryDataSync";
 import { BRANDS_KEY, DOUGH_RECIPE_NAMES_KEY, DOUGH_RECIPE_PRESETS_KEY, SHIFT_START_TIME_KEY,
   STOP_REASONS_KEY, CIRCLES_KEY, SHIPPER_KEY, SKID_STACKING_KEY, GRIP_SHEETS_KEY, PRODUCTION_START_TIME_KEY } from "./types";
@@ -26,6 +27,43 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("memory directory and scoped durable commands", () => {
+  it("notifies count subscribers after durable enqueue and each acknowledgment, retaining the unacknowledged remainder", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({}, 503)));
+    const counts: Array<number | null> = [];
+    const unsubscribe = subscribeFactoryDirectory(() => counts.push(managerPendingFactoryDataWriteCount()));
+    try {
+      putFactoryKey(STOP_REASONS_KEY, ["Pending stop"]);
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(1);
+      putFactoryKey(CIRCLES_KEY, ["Pending circle"]);
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(2);
+      vi.stubGlobal("fetch", vi.fn(async (_url, init) =>
+        JSON.parse(String(init?.body)).key === STOP_REASONS_KEY ? ack(init) : response({}, 503)));
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(1);
+      expect(pending()).toHaveLength(1);
+      expect(pending()[0].key).toBe(CIRCLES_KEY);
+      vi.stubGlobal("fetch", vi.fn(async (_url, init) => ack(init)));
+      await flushFactoryQueue();
+      expect(counts.at(-1)).toBe(0);
+    } finally { unsubscribe(); }
+  });
+
+  it("keeps unreadable-count projection pure and does not expose it without write permission", () => {
+    localStorage.setItem(queueKey(), "{bad");
+    const listener = vi.fn();
+    const unsubscribe = subscribeFactoryDirectory(listener);
+    try {
+      expect(managerPendingFactoryDataWriteCount()).toBeNull();
+      expect(listener).not.toHaveBeenCalled();
+      expect(factoryDirectoryState().status).toBe("ready");
+      setFactoryDataIdentity("live:manager", false);
+      expect(managerPendingFactoryDataWriteCount()).toBe(0);
+      expect(localStorage.getItem(queueKey())).toBe("{bad");
+    } finally { unsubscribe(); }
+  });
+
   it("loads manager-configured operational settings for fresh staff and across scope changes, without defaults or caches", async () => {
     const values = (scope: string) => ({
       [STOP_REASONS_KEY]: [`${scope} custom stop`],

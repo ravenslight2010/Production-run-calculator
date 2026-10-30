@@ -49,6 +49,7 @@ export function setFactoryDataIdentity(identity: string | null, writable: boolea
   scopeIdentity = identity; canWrite = writable; scopeEpoch++; adoptedWriteEpoch = "unbound";
   memoryQueue = null; flushInFlight = null; settings.clear();
   setFactoryDirectoryIdentity(identity);
+  notifyFactoryDirectory();
 }
 function queueKey(): string | null { return scopeIdentity ? QUEUE_PREFIX + encodeURIComponent(scopeIdentity) : null; }
 function stampKey(key: string): string { return `${STAMP_PREFIX}${scopeIdentity ?? "unbound"}:${key}`; }
@@ -62,7 +63,7 @@ export function stampLocalWrite(key: string): number {
   const stamp = Math.max(Date.now(), localStamp(key) + 1);
   setStamp(key, stamp); return stamp;
 }
-function readQueue(): FactoryQueueOp[] {
+function readQueue(reportError = true): FactoryQueueOp[] {
   if (memoryQueue) return [...memoryQueue];
   const key = queueKey();
   if (!key) return [];
@@ -75,7 +76,7 @@ function readQueue(): FactoryQueueOp[] {
     }
     return raw;
   } catch {
-    setFactoryDirectoryStatus("unavailable", "Pending factory edits could not be read. Stored edits were retained; do not clear browser data. Ask a manager to review this device.");
+    if (reportError) setFactoryDirectoryStatus("unavailable", "Pending factory edits could not be read. Stored edits were retained; do not clear browser data. Ask a manager to review this device.");
     throw new Error("Pending factory edits unavailable; stored commands retained.");
   }
 }
@@ -87,6 +88,7 @@ function writeQueue(queue: FactoryQueueOp[]): void {
     memoryQueue = [...queue];
     setFactoryDirectoryStatus("unavailable", "This device could not save pending factory edits. Keep this tab open, free browser storage, then retry online before closing it.");
   }
+  notifyFactoryDirectory();
 }
 function enqueue(key: string, value: unknown, updatedAt: number): void {
   generation = Math.max(generation + 1, Date.now());
@@ -183,6 +185,14 @@ export function putFactoryKey(key: string, value: unknown): void {
   void flushFactoryQueue();
 }
 export const pendingFactoryDataWriteCount = () => readQueue().length;
+/** Manager-only projection; never mutate the store while React reads it.
+ * Keep the transport/save-guard count above unchanged, including its errors.
+ */
+export function managerPendingFactoryDataWriteCount(): number | null {
+  if (!scopeIdentity || !canWrite) return 0;
+  try { return readQueue(false).length; }
+  catch { return null; }
+}
 export function flushFactoryQueue(): Promise<void> {
   if (!scopeIdentity || !canWrite || factoryDirectoryState().status !== "ready") return Promise.resolve();
   if (flushInFlight) return flushInFlight;

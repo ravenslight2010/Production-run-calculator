@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { BRANDS_KEY, STOP_REASONS_KEY } from "../types";
 import { directoryRaw } from "../factoryDirectory";
-import { hydrateFromServer, resetFactoryDataSyncForTests, setFactoryDataIdentity } from "../factoryDataSync";
+import { flushFactoryQueue, hydrateFromServer, putFactoryKey, resetFactoryDataSyncForTests, setFactoryDataIdentity } from "../factoryDataSync";
 import { FactoryDirectoryStatus } from "./FactoryDirectoryStatus";
 
 describe("legacy facility-list review", () => {
@@ -72,5 +72,77 @@ describe("legacy facility-list review", () => {
     expect(button.disabled).toBe(true);
     expect(screen.getByText(/may not have been sent to the facility yet/)).toBeTruthy();
     expect(localStorage.getItem("run-calc-fkv-queue-v1")).toBe(queue);
+  });
+});
+
+describe("pending facility edits", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetFactoryDataSyncForTests();
+    setFactoryDataIdentity("live:manager", true);
+    hydrateFromServer({});
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+  });
+  afterEach(() => {
+    cleanup();
+    resetFactoryDataSyncForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("updates for queued settings, retains failed writes and clears only on canonical acknowledgment", async () => {
+    render(<FactoryDirectoryStatus />);
+    expect(screen.queryByTestId("factory-directory-pending")).toBeNull();
+    await act(async () => {
+      putFactoryKey(STOP_REASONS_KEY, ["Pending"]);
+      await flushFactoryQueue();
+    });
+    const status = screen.getByTestId("factory-directory-pending");
+    expect(status.textContent).toContain("1 facility edit is awaiting server confirmation");
+    expect(within(status).queryByRole("button")).toBeNull();
+    await act(async () => {
+      putFactoryKey(BRANDS_KEY, ["Pending Brand"]);
+      putFactoryKey(STOP_REASONS_KEY, ["Newest"]);
+      await flushFactoryQueue();
+    });
+    expect(status.textContent).toContain("2 facility edits are awaiting server confirmation");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
+    await act(async () => { await flushFactoryQueue(); });
+    expect(status.textContent).toContain("2 facility edits");
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const op = JSON.parse(init.body);
+      return new Response(JSON.stringify({ value: op.value, updatedAt: new Date(op.updatedAt).toISOString() }));
+    }));
+    await act(async () => { await flushFactoryQueue(); });
+    expect(screen.queryByTestId("factory-directory-pending")).toBeNull();
+  });
+
+  it("restores the count after reload and hides it from staff, signed-out and other scopes", async () => {
+    await act(async () => {
+      putFactoryKey(STOP_REASONS_KEY, ["Pending"]);
+      await flushFactoryQueue();
+    });
+    resetFactoryDataSyncForTests();
+    setFactoryDataIdentity("live:manager", true);
+    hydrateFromServer({});
+    render(<FactoryDirectoryStatus />);
+    expect(screen.getByTestId("factory-directory-pending").textContent).toContain("1 facility edit");
+    for (const [identity, writable] of [
+      ["live:manager", false], ["live:staff", false], [null, false], ["sandbox:manager", true],
+    ] as const) {
+      act(() => { setFactoryDataIdentity(identity, writable); hydrateFromServer({}); });
+      expect(screen.queryByTestId("factory-directory-pending")).toBeNull();
+      expect(screen.queryByTestId("factory-directory-review")).toBeNull();
+    }
+    act(() => { setFactoryDataIdentity("live:manager", true); hydrateFromServer({}); });
+    expect(screen.getByTestId("factory-directory-pending").textContent).toContain("1 facility edit");
+  });
+
+  it("retains unreadable queue evidence without crashing or offering removal", () => {
+    localStorage.setItem("run-calc-fkv-queue-v2:live%3Amanager", "{bad");
+    render(<FactoryDirectoryStatus />);
+    const status = screen.getByTestId("factory-directory-pending");
+    expect(status.textContent).toContain("could not be counted");
+    expect(within(status).queryByRole("button")).toBeNull();
+    expect(localStorage.getItem("run-calc-fkv-queue-v2:live%3Amanager")).toBe("{bad");
   });
 });

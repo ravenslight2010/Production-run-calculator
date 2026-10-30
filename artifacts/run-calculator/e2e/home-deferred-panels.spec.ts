@@ -897,7 +897,7 @@ test.use({ serviceWorkers: "block" });
 for (const acknowledgment of ["valid", "malformed", "stale"] as const) {
 test(acknowledgment === "valid"
   ? "pending facility edit is acknowledged once after connectivity returns"
-  : `independent facility edit progresses after a ${acknowledgment} acknowledgment on reconnect`, async ({ page }) => {
+  : `independent facility edit progresses after a ${acknowledgment} acknowledgment on reconnect`, async ({ page }, testInfo) => {
   const username = uniqueTestId("e2e_facility_reconnect");
   const fixtureId = uniqueTestId("facility_reconnect");
   testUsernames.add(username);
@@ -1025,6 +1025,26 @@ test(acknowledgment === "valid"
         expect.objectContaining({ key, value: intended }),
       ]));
       expect(successfulAcknowledgments).toBe(0);
+      const pendingStatus = page.getByTestId("factory-directory-pending");
+      const expectPendingCount = async () => {
+        // Home can enqueue other legitimate settings during bootstrap. The
+        // status must count the whole owned queue, not just our seeded edit.
+        await expect.poll(async () => {
+          const queued = await page.evaluate((storageKey) =>
+            JSON.parse(localStorage.getItem(storageKey) ?? "[]") as Array<{ key: string; value: unknown }>, queueKey);
+          const expected = `${queued.length} facility ${queued.length === 1 ? "edit is" : "edits are"} awaiting server confirmation`;
+          return queued.some((op) => op.key === key && JSON.stringify(op.value) === JSON.stringify(intended))
+            && (await pendingStatus.textContent())?.includes(expected);
+        }, { message: "pending status must match every owned queued edit and retain the intended change" }).toBe(true);
+      };
+      await expectPendingCount();
+      await expect(pendingStatus.getByRole("button")).toHaveCount(0);
+      await expect(pendingStatus).toBeInViewport();
+      await pendingStatus.screenshot({ path: testInfo.outputPath("pending-facility-status.png") });
+      // A second boot must show retained work, not assume the first attempt saved it.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expectPendingCount();
+      expect(successfulAcknowledgments).toBe(0);
       const stillBaseline = await db.query<{ value: unknown }>(
         "SELECT value FROM factory_kv WHERE scope = 'live' AND key = $1",
         [key],
@@ -1068,6 +1088,7 @@ test(acknowledgment === "valid"
       }).toBe(1);
       await expect.poll(async () => page.evaluate((storageKey) =>
         localStorage.getItem(storageKey), queueKey)).toBe("[]");
+      await expect(pendingStatus).toHaveCount(0);
 
       const canonical = await readCanonicalFactoryValues(page);
       expect(canonical[key]).toEqual(intended);
@@ -1095,6 +1116,9 @@ test(acknowledgment === "valid"
         ])), [unrelatedQueueKey, unrelatedOutboxKey, anotherOutboxKey]);
       expect(preservedAfterReconnect).toEqual(preservedBeforeReconnect);
       expect(successfulAcknowledgments).toBe(1);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("tab-run")).toHaveAttribute("data-state", "active");
+      await expect(pendingStatus).toHaveCount(0);
     } finally {
       offline = false;
       await page.context().setOffline(false);
