@@ -65,6 +65,12 @@ Real-source capture and Gemini comparison remain separately gated by the
 required approvals and configuration. Neither the development switch nor the
 synthetic fixture grants those approvals or changes general AI routing.
 
+For the current customer-source policy decision and deletion limitations, see
+[Gold Lab customer-source decision](evidence/import-gold-source-use-decision.md).
+The approved 30-day manual-retention policy does not enable real-source work;
+the recorded disposition remains synthetic-only until the source-specific
+evidence and actual deletion requirements are verified.
+
 CPU-only cold startup can take several minutes: the model runtime has a bounded
 480-second readiness deadline after launch, and the detached helper allows up to
 600 seconds for startup. Setup verifies the pinned files before launch, so the
