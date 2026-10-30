@@ -35,6 +35,9 @@ CRUD on roles via `/roles` (GET/POST/PUT/DELETE). Managers can create/edit/delet
 roles and assign any role. Guardrails:
 - **Privilege-escalation guard:** you can't grant a capability you don't hold —
   applied to role create, role edit, AND user-role assignment (`setUserRole`).
+- **Owner-approved role edit policy (2026-10-30):** an editor may remove only
+  capabilities they currently hold. Keep this boundary separate from the grant
+  check; enforce both when editing a role.
 - Can't delete a role that is assigned to any user.
 - Can't remove the last enabled, non-sandbox `manage-staff` holder. Manager-set
   mutations use a shared transaction-scoped lock so concurrent operations cannot

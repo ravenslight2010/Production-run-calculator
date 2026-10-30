@@ -2198,6 +2198,32 @@ describe("role administration", () => {
     expect(res.status).toBe(400);
   });
 
+  it("protects the last enabled manager when editing a custom role (400)", async () => {
+    await db.insert(rolesTable).values({
+      name: "solo-manager",
+      capabilities: ["manage-staff"],
+      builtin: false,
+    });
+    await db
+      .update(userRolesTable)
+      .set({ role: "solo-manager" })
+      .where(eq(userRolesTable.userId, MANAGER));
+
+    const res = await req(MANAGER, "PUT", "/api/roles/solo-manager", {
+      capabilities: [],
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringMatching(/last staff manager/i),
+    });
+
+    const [role] = await db
+      .select({ capabilities: rolesTable.capabilities })
+      .from(rolesTable)
+      .where(eq(rolesTable.name, "solo-manager"));
+    expect(role.capabilities).toEqual(["manage-staff"]);
+  });
+
   it("refuses to delete a built-in role (400)", async () => {
     const res = await req(MANAGER, "DELETE", "/api/roles/operator");
     expect(res.status).toBe(400);
@@ -2316,6 +2342,51 @@ describe("privilege-escalation guard", () => {
       capabilities: ["use-ai-tools"],
     });
     expect(res.status).toBe(403);
+  });
+
+  it("allows the junior-admin to remove a capability they hold from another role", async () => {
+    await db
+      .update(rolesTable)
+      .set({ capabilities: ["manage-staff", "manage-inventory"] })
+      .where(eq(rolesTable.name, "junior-admin"));
+    await db.insert(rolesTable).values({
+      name: "limited-admin",
+      capabilities: ["manage-staff", "manage-inventory"],
+      builtin: false,
+    });
+
+    const res = await req(OPERATOR, "PUT", "/api/roles/limited-admin", {
+      capabilities: ["manage-staff"],
+    });
+
+    expect(res.status).toBe(200);
+    const [role] = await db
+      .select({ capabilities: rolesTable.capabilities })
+      .from(rolesTable)
+      .where(eq(rolesTable.name, "limited-admin"));
+    expect(role.capabilities).toEqual(["manage-staff"]);
+  });
+
+  it("forbids the junior-admin from removing a capability they do not hold (403)", async () => {
+    await db.insert(rolesTable).values({
+      name: "ai-reviewer",
+      capabilities: ["use-ai-tools"],
+      builtin: false,
+    });
+
+    const res = await req(OPERATOR, "PUT", "/api/roles/ai-reviewer", {
+      capabilities: [],
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringMatching(/remove capabilities you don't have: use-ai-tools/i),
+    });
+
+    const [role] = await db
+      .select({ capabilities: rolesTable.capabilities })
+      .from(rolesTable)
+      .where(eq(rolesTable.name, "ai-reviewer"));
+    expect(role.capabilities).toEqual(["use-ai-tools"]);
   });
 
   it("forbids the junior-admin assigning a role with capabilities they lack (403)", async () => {

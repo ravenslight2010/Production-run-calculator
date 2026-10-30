@@ -713,13 +713,13 @@ export async function createRole(
 }
 
 // Edit a role's capabilities and, optionally, rename it. Guards: role must
-// exist; the actor cannot grant capabilities they lack; the manager role must
-// keep manage-staff; the change must never strand the team without a
-// manage-staff holder. Rename guards: built-in roles can't be renamed, the new
-// name must be non-empty and not collide with another role. Because user_roles
-// stores the role NAME (free text, no FK), a rename rewrites both the roles row
-// and every staff assignment in one transaction so no one is left pointing at a
-// name that no longer exists.
+// exist; the actor cannot grant capabilities they lack or remove capabilities
+// they don't hold; the manager role must keep manage-staff; the change must
+// never strand the team without a manage-staff holder. Rename guards: built-in
+// roles can't be renamed, the new name must be non-empty and not collide with
+// another role. Because user_roles stores the role NAME (free text, no FK), a
+// rename rewrites both the roles row and every staff assignment in one
+// transaction so no one is left pointing at a name that no longer exists.
 export async function updateRoleCapabilities(
   name: string,
   capabilities: unknown,
@@ -739,6 +739,17 @@ export async function updateRoleCapabilities(
         ok: false,
         status: 403,
         error: `You can't grant capabilities you don't have: ${missing.join(", ")}`,
+      };
+    }
+
+    const unauthorizedRemovals = def.capabilities.filter(
+      (capability) => !caps.includes(capability) && !actorCapabilities.includes(capability),
+    );
+    if (unauthorizedRemovals.length > 0) {
+      return {
+        ok: false,
+        status: 403,
+        error: `You can't remove capabilities you don't have: ${unauthorizedRemovals.join(", ")}`,
       };
     }
 

@@ -19,7 +19,7 @@
 - [Display identity](profile-display-identity.md) — preserve spelling across queued retries.
 - [Auth boundary](daily-reset-auth-boundary.md) + [revocation](password-change-session-invalidation.md) + [daily reset](daily-reset-trigger.md) — server owns rollover; fence sessions.
 - [Auth identity](auth-identity-cache.md) + [account lifecycle](account-lifecycle-sessions.md) — keep roles, tokens, and sessions fenced.
-- [Staff deletion policy](staff-account-deletion-policy.md) + [role gating](role-gating.md) — preserve the approved account-removal boundary; trust capabilities and stored roles.
+- [Staff deletion policy](staff-account-deletion-policy.md) + [role gating](role-gating.md) — preserve account-removal policy; role editors may remove only capabilities they hold.
 - [Inventory accounting](ingredient-merge.md) + [locks](inventory-settings-concurrency.md) + [idempotency](inventory-consume-idempotency.md) — serialize drawdowns and reconcile against the ledger.
 - [Surplus decisions](surplus-confirmation-receipts.md) — explicit none and positive outcomes belong to completed runs; product/date or UI dismissal cannot establish acknowledgment.
 - [DB test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) — honor migrations; isolate writes.

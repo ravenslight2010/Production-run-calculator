@@ -214,8 +214,9 @@ router.post(
   res.status(201).json(result.row);
 });
 
-// Edit a role's capabilities. Refuses to grant capabilities the actor lacks,
-// to strip manage-staff from the manager role, or to strand the last admin.
+// Edit a role's capabilities. Refuses to grant or remove capabilities the actor
+// doesn't hold, to strip manage-staff from the manager role, or to strand the
+// last admin.
 router.put("/roles/:name", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
   const name = pathUserId(req.params.name);
   if (!name) {
