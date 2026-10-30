@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { fetchImportGoldLocal, importGoldEndpoint, isImportGoldLocalConfigured } from "./importGoldEndpoint";
+import {
+  fetchImportGoldLocal,
+  importGoldEndpoint,
+  importGoldHealthEndpoint,
+  isImportGoldDevelopmentRuntime,
+  isImportGoldLocalAvailable,
+  isImportGoldLocalConfigured,
+} from "./importGoldEndpoint";
 
 describe("same-host Import Gold endpoint", () => {
   it("distinguishes disabled, valid configuration and invalid configuration without a live probe", () => {
@@ -18,6 +25,35 @@ describe("same-host Import Gold endpoint", () => {
     ["http://2130706433/v1", "http://127.0.0.1/v1/chat/completions"],
   ])("pins accepted loopback %s without DNS", (base, expected) => {
     expect(importGoldEndpoint(base).href).toBe(expected);
+  });
+  it("uses the root health route on the same pinned loopback origin", () => {
+    expect(importGoldHealthEndpoint("http://localhost:11434/v1").href)
+      .toBe("http://127.0.0.1:11434/healthz");
+    expect(() => importGoldHealthEndpoint("http://169.254.169.254/v1")).toThrow(/^provider_unavailable$/);
+  });
+  it("enables the development switch only without a deployed-runtime marker", () => {
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "development", REPLIT_ENVIRONMENT: "production" })).toBe(true);
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "production" })).toBe(false);
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "development", REPLIT_DEPLOYMENT_ID: "deployment" })).toBe(false);
+    expect(isImportGoldDevelopmentRuntime({ NODE_ENV: "development", REPLIT_DEPLOYMENT: "1" })).toBe(false);
+  });
+  it("requires the pinned model identity and readiness contract for availability", async () => {
+    const server = createServer((req, res) => {
+      if (req.url !== "/healthz") {
+        res.writeHead(404).end();
+        return;
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ status: "healthy", model: "qwen3.5-9b-q3_k_m", contextLimit: 4096 }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      expect(await isImportGoldLocalAvailable(`http://127.0.0.1:${port}/v1`)).toBe(true);
+      expect(await isImportGoldLocalAvailable(`http://127.0.0.1:${port}/v1`, "other-model")).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it.each([

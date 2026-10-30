@@ -1323,7 +1323,7 @@ test("QC manager targets and operator checks fit phone and tablet layouts", asyn
       if (["phone-320", "tablet-landscape", "phone-short-landscape"].includes(viewport.name)) {
         await assertQcActionReachable(saveTarget, "Save reviewed target", viewport);
       }
-      if (["phone-320", "tablet-landscape", "desktop"].includes(viewport.name)) {
+      if (["phone-320", "tablet-portrait", "tablet-landscape", "desktop"].includes(viewport.name)) {
         await capture(managerPage.page, testInfo, `qc-manager-target-${viewport.name}`, [
           longIngredientName,
           runId,
@@ -1386,7 +1386,7 @@ test("QC manager targets and operator checks fit phone and tablet layouts", asyn
       if (["phone-320", "tablet-landscape", "phone-short-landscape"].includes(viewport.name)) {
         await assertQcActionReachable(recordChecklist, "Record checklist", viewport);
       }
-      if (["phone-320", "tablet-landscape", "desktop"].includes(viewport.name)) {
+      if (["phone-320", "tablet-portrait", "tablet-landscape", "desktop"].includes(viewport.name)) {
         await capture(operatorPage.page, testInfo, `qc-operator-checklist-${viewport.name}`, [
           longIngredientName,
           runId,

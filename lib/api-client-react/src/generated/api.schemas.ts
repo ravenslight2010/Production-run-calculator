@@ -1150,9 +1150,59 @@ export interface ImportOperationApplyInput {
 export interface ImportGoldConfig {
   enabled: boolean;
   localConfigured: boolean;
+  localAvailable: boolean;
+  localScoringSwitchAvailable: boolean;
+  localScoringEnabled: boolean;
+  syntheticFixtureAvailable: boolean;
   geminiConfigured: boolean;
   retention: string;
   persistsAcrossFactoryPurge: boolean;
+}
+
+export interface ImportGoldLocalScoringRequest {
+  enabled: boolean;
+}
+
+export interface ImportGoldLocalScoringResponse {
+  enabled: boolean;
+}
+
+export type ImportGoldSyntheticReviewImportType = typeof ImportGoldSyntheticReviewImportType[keyof typeof ImportGoldSyntheticReviewImportType];
+
+
+export const ImportGoldSyntheticReviewImportType = {
+  premix: 'premix',
+} as const;
+
+export type ImportGoldSyntheticReviewInput = { [key: string]: unknown };
+
+export type ImportGoldSyntheticReviewExpectedResult = { [key: string]: unknown };
+
+export interface ImportGoldSyntheticReview {
+  fixtureVersion: string;
+  importType: ImportGoldSyntheticReviewImportType;
+  sourceLabel: string;
+  input: ImportGoldSyntheticReviewInput;
+  expectedResult: ImportGoldSyntheticReviewExpectedResult;
+  applyEffect: string;
+}
+
+export type ImportGoldSyntheticApplyRequestFixtureVersion = typeof ImportGoldSyntheticApplyRequestFixtureVersion[keyof typeof ImportGoldSyntheticApplyRequestFixtureVersion];
+
+
+export const ImportGoldSyntheticApplyRequestFixtureVersion = {
+  'synthetic-mix-v1': 'synthetic-mix-v1',
+} as const;
+
+export interface ImportGoldSyntheticApplyRequest {
+  fixtureVersion: ImportGoldSyntheticApplyRequestFixtureVersion;
+  reviewed: true;
+}
+
+export interface ImportGoldSyntheticApplyResponse {
+  /** @minimum 1 */
+  caseId: number;
+  created: boolean;
 }
 
 export type ImportGoldScoreRequestProvider = typeof ImportGoldScoreRequestProvider[keyof typeof ImportGoldScoreRequestProvider];
@@ -3163,6 +3213,33 @@ export type SyncRecoveryPayload = SyncPayload & {
   resetEpoch: number;
   rollover: boolean;
 };
+
+export interface ScheduledRunMoveRequest {
+  sourceDate: string;
+  destinationDate: string;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /** @maxLength 160 */
+  senderId?: string;
+  runIds: 'all' | string[];
+}
+
+export interface ScheduledDaySwapRequest {
+  sourceDate: string;
+  destinationDate: string;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /** @maxLength 160 */
+  senderId?: string;
+}
 
 export type SyncWriteRequestPayload = SyncPayload & ({
   syncVersion?: 1;
@@ -8688,6 +8765,8 @@ export interface NamedRecipe {
   /** The ingredients that make up the recipe */
   components: NamedRecipeComponent[];
   enabled: boolean;
+  /** Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification. */
+  isPremadeCrust?: boolean;
   /** Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers. */
   brand?: string;
   /** Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes). */
@@ -10808,6 +10887,53 @@ cursor?: string;
  * @maximum 500
  */
 limit?: number;
+};
+
+export type MoveSyncScheduledRuns200 = {
+  moved: true;
+  sourceRemoved: boolean;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  destinationSnapshotId: string;
+};
+
+export type GetSyncScheduleSwapEligibilityParams = {
+sourceDate: string;
+destinationDate: string;
+};
+
+/**
+ * @nullable
+ */
+export type GetSyncScheduleSwapEligibility200Reason = typeof GetSyncScheduleSwapEligibility200Reason[keyof typeof GetSyncScheduleSwapEligibility200Reason] | null;
+
+
+export const GetSyncScheduleSwapEligibility200Reason = {
+  'today-started-after-6am': 'today-started-after-6am',
+} as const;
+
+export type GetSyncScheduleSwapEligibility200 = {
+  today: string;
+  sourceScheduled: boolean;
+  destinationScheduled: boolean;
+  canSwap: boolean;
+  /** @nullable */
+  reason: GetSyncScheduleSwapEligibility200Reason;
+};
+
+export type SwapSyncScheduleDays200 = {
+  swapped: true;
+  /** @minimum 0 */
+  sourceRevision: number;
+  /** @minimum 0 */
+  destinationRevision: number;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceSnapshotId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  destinationSnapshotId: string;
 };
 
 export type GetSyncTodayParams = {

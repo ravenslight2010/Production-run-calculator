@@ -8,16 +8,6 @@ import { collectGetRoutePathsFromRouter } from "../../lib/routeScan";
 import { Router } from "express";
 import { requireCapability } from "../../middlewares/requireCapability";
 
-const intentionallyUnexposedReadRouteExemptions = [
-  {
-    method: "GET" as const,
-    path: "/background-operations/diagnostics",
-    module: "backgroundOperationDiagnostics.ts",
-    reason:
-      "The standalone module is not exposed in this task branch; endpoint wiring and request tests are owned by the companion restore task. Remove this exemption when mounted.",
-  },
-];
-
 describe("capability route registration", () => {
   it("has one explicit top-level registration for every authenticated family", () => {
     expect(authenticatedCapabilityFamilies.map(({ name }) => name)).toEqual([
@@ -27,6 +17,7 @@ describe("capability route registration", () => {
       "administration",
       "retained-ai",
       "server-jobs",
+      "background-operation-diagnostics",
     ]);
     expect(new Set(authenticatedCapabilityFamilies.map(({ router }) => router)).size).toBe(
       authenticatedCapabilityFamilies.length,
@@ -43,13 +34,12 @@ describe("capability route registration", () => {
       "/brand-profiles",
       "/roles",
       "/qc/planning",
+      "/background-operations/diagnostics",
     ]));
   });
 
   it("checks mounted protected GETs and declared contracts in the assembled route stack", () => {
-    expect(() => validateReadAuthorizationInventory(apiRouter, {
-      exemptions: intentionallyUnexposedReadRouteExemptions,
-    })).not.toThrow();
+    expect(() => validateReadAuthorizationInventory(apiRouter)).not.toThrow();
     expect(readAuthorizationInventory).toEqual(expect.arrayContaining([
       expect.objectContaining({
         method: "GET",
@@ -118,6 +108,12 @@ describe("capability route registration", () => {
 
   it("rejects an exemption as soon as its route is mounted", () => {
     const mounted = Router();
+    const staleDiagnosticExemption = [{
+      method: "GET" as const,
+      path: "/background-operations/diagnostics",
+      module: "backgroundOperationDiagnostics.ts",
+      reason: "The test deliberately supplies an obsolete exemption.",
+    }];
     mounted.get(
       "/background-operations/diagnostics",
       requireCapability("manage-staff"),
@@ -128,7 +124,7 @@ describe("capability route registration", () => {
       inventory: readAuthorizationInventory.filter(
         ({ path }) => path === "/background-operations/diagnostics",
       ),
-      exemptions: intentionallyUnexposedReadRouteExemptions,
+      exemptions: staleDiagnosticExemption,
     })).toThrow(/read authorization exemption .* is stale; remove it now that the route is mounted/);
   });
 });

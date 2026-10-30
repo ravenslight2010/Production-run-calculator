@@ -16,6 +16,7 @@ import MixesManager from "../MixesManager";
 import NamedRecipesManager from "../NamedRecipesManager";
 import { saveCheeseRecipes } from "../../cheeseRecipes";
 import { saveMixes } from "../../mixes";
+import { saveNamedRecipes } from "../../namedRecipes";
 
 const namedItems: NamedRecipe[] = [];
 const cheeseItems: CheeseRecipe[] = [];
@@ -32,7 +33,7 @@ vi.mock("../../hooks/useMixes", () => ({
   useMixes: () => ({ items: mixItems, isLoading: false }),
 }));
 vi.mock("../../namedRecipes", () => ({
-  saveNamedRecipes: vi.fn(async (next: NamedRecipe[]) => next),
+  saveNamedRecipes: vi.fn(async (_kind: string, next: NamedRecipe[]) => next),
   deleteNamedRecipes: vi.fn(async () => []),
 }));
 vi.mock("../../cheeseRecipes", () => ({
@@ -57,6 +58,7 @@ afterEach(() => {
   namedRecipesLoading = false;
   vi.mocked(saveCheeseRecipes).mockClear();
   vi.mocked(saveMixes).mockClear();
+  vi.mocked(saveNamedRecipes).mockClear();
 });
 
 
@@ -149,6 +151,52 @@ describe("recipe managers with incomplete persisted names", () => {
       (screen.getByPlaceholderText("Recipe name…") as HTMLInputElement).value,
     ).toBe("Valid Dough");
     expect(screen.getByTitle("Delete recipe")).toBeTruthy();
+  });
+
+  it("shows explicit premade status, preserves manager changes, and keeps unmarked empties distinct", async () => {
+    namedItems.push(
+      namedRecipe({
+        id: "premade-empty",
+        name: "Specialty Crust",
+        components: [],
+        isPremadeCrust: true,
+      }),
+      namedRecipe({
+        id: "unclassified-empty",
+        name: "Unclassified Dough",
+        components: [],
+      }),
+    );
+
+    renderWithQueryClient(<NamedRecipesManager kind="dough" />);
+
+    const premadeRecipe = screen.getByRole("button", { name: /Specialty Crust/ });
+    expect(within(premadeRecipe).getByText("Premade crust")).toBeTruthy();
+    fireEvent.click(premadeRecipe);
+
+    const classification = screen.getByRole("checkbox", { name: "Premade crust" });
+    expect((classification as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(
+      "Manager classification. No in-house dough formula is needed; linked setup selects Crust mode. Existing runs are not changed.",
+    )).toBeTruthy();
+    expect(screen.getByText("No in-house dough formula is needed for this premade crust.")).toBeTruthy();
+
+    fireEvent.click(classification);
+    await waitFor(() => expect(saveNamedRecipes).toHaveBeenCalledWith(
+      "dough",
+      expect.arrayContaining([
+        expect.objectContaining({ id: "premade-empty", isPremadeCrust: false }),
+      ]),
+    ));
+
+    const unclassified = screen.getByRole("button", { name: /Unclassified Dough/ });
+    fireEvent.click(unclassified);
+    const unclassifiedEditor = within(unclassified.parentElement!);
+    expect(unclassifiedEditor.getByText(
+      "No formula recorded. Manager review is needed before treating this as premade.",
+    )).toBeTruthy();
+    expect((unclassifiedEditor.getByRole("checkbox", { name: "Premade crust" }) as HTMLInputElement).checked)
+      .toBe(false);
   });
 
   it("keeps valid sauce rows usable with malformed customer metadata", () => {

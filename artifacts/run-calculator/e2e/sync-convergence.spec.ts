@@ -9,6 +9,7 @@
 
 import { expect, test, type Browser, type Page, type Route, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
+import { DEFAULT_VALUES } from "../src/types";
 import { selectCanonicalFixtureRun } from "./canonical-run-selection";
 import {
   cleanupTestUsers,
@@ -220,15 +221,42 @@ async function attachScheduleMoveEvidence(
   });
 }
 
-async function cleanupScheduleMoveFixture(fixture: ScheduleMoveFixture): Promise<void> {
+async function seedAdditionalScheduleDay(
+  page: Page,
+  todayDate: string,
+  date: string,
+  runId: string,
+): Promise<void> {
+  await page.evaluate(async ({ todayDate, date, runId }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+    const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
+    const response = await fetch(`/api/sync/${date}?today=${todayDate}&epoch=${epoch}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "schedule-choice-e2e",
+        payload: {
+          dayState: { date, runs: [{ id: runId, brand: "Move Choice", flavor: date }] },
+          runValues: { [runId]: { casesNeeded: 9 } },
+          runValuesUpdatedAt: { [runId]: 300 },
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`additional schedule fixture failed: ${response.status}`);
+  }, { todayDate, date, runId });
+}
+
+async function cleanupScheduleMoveFixture(
+  fixture: ScheduleMoveFixture,
+  extraDates: string[] = [],
+): Promise<void> {
   const db = new Client({
     connectionString: requireIsolatedTestDatabase("schedule move e2e cleanup"),
   });
   try {
     await db.connect();
-    await db.query("DELETE FROM daily_sync WHERE date IN ($1, $2)", [
-      fixture.currentDate,
-      fixture.futureDate,
+    await db.query("DELETE FROM daily_sync WHERE date = ANY($1::text[])", [
+      [fixture.currentDate, fixture.futureDate, ...extraDates],
     ]);
   } finally {
     await db.end().catch(() => {});
@@ -708,6 +736,7 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
   let failedPulls = 0;
   let peerPulls = 0;
   let peerWrites = 0;
+  const peerPutOutcomes: Array<{ status: number; unchanged: boolean }> = [];
   await page.route("**/api/sync/today**", async (route) => {
     if (injectedDelayMs) await new Promise((resolve) => setTimeout(resolve, injectedDelayMs));
     await route.continue();
@@ -727,6 +756,15 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
       failedPulls++;
       await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Temporary fixture outage"}' });
     } else await route.continue();
+  });
+  peer.on("response", (response) => {
+    if (!response.url().includes("/api/sync/today") || response.request().method() !== "PUT") return;
+    void response.json().then((body: unknown) => {
+      const unchanged = typeof body === "object" && body !== null
+        && "unchanged" in body
+        && (body as { unchanged?: unknown }).unchanged === true;
+      peerPutOutcomes.push({ status: response.status(), unchanged });
+    }).catch(() => peerPutOutcomes.push({ status: response.status(), unchanged: false }));
   });
   const isWriteFor = (response: import("@playwright/test").Response, value: number) => {
     if (!response.url().includes("/api/sync/today") || response.request().method() !== "PUT" || !response.ok()) return false;
@@ -798,12 +836,13 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
       await expect(peer.getByTestId("foreground-recovery-status")).toHaveAttribute("data-foreground-recovery-state", "outcome");
       wakeSamples.push({ durationMs: Date.now() - startedAt, condition: sample === 4 ? "one-client-timeout-then-retry" : sample === 1 ? "one-503-then-retry" : "healthy-duplicate-wake" });
     }
+    await expect.poll(() => peerPutOutcomes.length).toBe(peerWrites);
     const stageMeasurements = await page.evaluate((date) =>
       JSON.parse(localStorage.getItem(`run-calc-sync-measurements:${date}`) ?? "[]"), today());
     // Measurements are fixed numeric fields; never attach cookies or payloads.
     const evidence = { environment: "isolated-browser", project: testInfo.project.name,
       network: "loopback, 0/40ms injected request delay, no bandwidth cap",
-      samples, wakeSamples, serverTiming: timings, stageMeasurements, failedPulls, peerPulls, peerWrites, timedOutPulls, browserSignals };
+      samples, wakeSamples, serverTiming: timings, stageMeasurements, failedPulls, peerPulls, peerWrites, timedOutPulls, peerPutOutcomes, browserSignals };
     console.info(`sync-browser-latency ${JSON.stringify(evidence)}`);
     await testInfo.attach("sync-latency.json", { body: JSON.stringify(evidence), contentType: "application/json" });
     await testInfo.attach("authenticated-peer-converged.png", {
@@ -816,6 +855,8 @@ test("measures canonical edit and foreground recovery latency", async ({ page, b
     expect(Math.max(...wakeSamples.filter((sample) => sample.condition !== "one-client-timeout-then-retry").map((sample) => Number(sample.durationMs)))).toBeLessThan(5000);
     expect(peerPulls).toBeLessThan(20);
     expect(peerWrites).toBeLessThan(20);
+    expect(peerPutOutcomes).toHaveLength(peerWrites);
+    expect(peerPutOutcomes.every((outcome) => outcome.status === 200 && outcome.unchanged)).toBe(true);
   } finally {
     await peerContext.close();
   }
@@ -827,6 +868,7 @@ test(
     const username = uid();
     users.add(username);
     await signUp(page, username);
+    await promoteToManager(page);
     await page.getByTestId("tab-run").click();
     await page.getByTestId("input-casesNeeded").waitFor({ state: "visible", timeout: 20_000 });
 
@@ -1043,6 +1085,340 @@ test(
 );
 
 test(
+  "stale-base recovery keeps the server conflict, reapplies independent edits and settles after reload",
+  async ({ page }: { page: Page }) => {
+    await page.addInitScript(() => {
+      const NativeEventSource = window.EventSource;
+      const sources: EventSource[] = [];
+      const hooks = window as unknown as {
+        fixtureSyncSources: EventSource[];
+        armRecoveryCopyStorageFailure: () => void;
+        recoveryCopyStorageFailureOccurred: boolean;
+      };
+      let failNextPendingSyncWrite = false;
+      hooks.recoveryCopyStorageFailureOccurred = false;
+      hooks.armRecoveryCopyStorageFailure = () => {
+        failNextPendingSyncWrite = true;
+      };
+      const nativeSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (failNextPendingSyncWrite && key.startsWith("run-calculator:sync-pending-v1:")) {
+          failNextPendingSyncWrite = false;
+          hooks.recoveryCopyStorageFailureOccurred = true;
+          throw new DOMException("synthetic recovery-copy storage failure", "QuotaExceededError");
+        }
+        nativeSetItem.call(this, key, value);
+      };
+      window.EventSource = class extends NativeEventSource {
+        constructor(...args: ConstructorParameters<typeof EventSource>) {
+          super(...args);
+          sources.push(this);
+        }
+      } as typeof EventSource;
+      hooks.fixtureSyncSources = sources;
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await promoteToManager(page);
+    await page.getByTestId("tab-run").click();
+    const casesNeeded = page.getByTestId("input-casesNeeded");
+    await expect(casesNeeded).toBeVisible();
+
+    const runId = `server-wins-${Date.now()}`;
+    const initial = seededPayload(runId);
+    initial.runValues[runId] = {
+      ...DEFAULT_VALUES,
+      casesNeeded: 24,
+      casesPerSkid: 12,
+    };
+    expect((await putToday(page, initial)).responseStatus).toBe(200);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+    await page.getByTestId("tab-run").click();
+    await expect(casesNeeded).toHaveValue("24", { timeout: 20_000 });
+    expect((await localRuns(page)).some((run) => run.id === runId)).toBe(true);
+    await expect(page.getByTestId("sync-status-button")).toHaveAttribute(
+      "title",
+      "Sync connected",
+      { timeout: 20_000 },
+    );
+
+    await page.evaluate(() => {
+      (window as unknown as { fixtureSyncSources: EventSource[] })
+        .fixtureSyncSources.forEach((source) => source.close());
+    });
+
+    // Advance the canonical server field without notifying this intentionally
+    // stale tab. Its next real UI write must receive the server's fallback.
+    const current = await getToday(page) as unknown as SyncPayload;
+    const serverUpdate = structuredClone(current);
+    serverUpdate.syncVersion = 1;
+    serverUpdate.completeness = "complete";
+    serverUpdate.baseSnapshotId = undefined;
+    serverUpdate.runValues[runId] = {
+      ...serverUpdate.runValues[runId],
+      casesNeeded: 999,
+    };
+    serverUpdate.runValuesUpdatedAt[runId] = Math.max(
+      Date.now(),
+      (serverUpdate.runValuesUpdatedAt[runId] ?? 0) + 1,
+    );
+    expect((await putToday(page, serverUpdate)).responseStatus).toBe(200);
+    await expect.poll(async () => {
+      const server = await getToday(page) as unknown as SyncPayload;
+      return server.runValues[runId]?.casesNeeded;
+    }).toBe(999);
+
+    const runValueWrites: number[] = [];
+    const runValueWritePayloads: Array<{
+      casesNeeded: number;
+      pizzasPerCase?: number;
+      casesPerSkid?: number;
+    }> = [];
+    const runValueWriteResponses: Array<{
+      value: number;
+      status: number;
+      responseKind: string;
+      canonicalRevision: number | null;
+    }> = [];
+    const expectCanonicalConflictSequence = () => {
+      // One coalesced newest snapshot may drain after the stale write is
+      // rebased. Allow that bounded queue drain, but never another stale value
+      // or more than one follow-up snapshot.
+      expect(runValueWrites.length).toBeGreaterThanOrEqual(2);
+      expect(runValueWrites.length).toBeLessThanOrEqual(3);
+      expect(runValueWrites[0]).toBe(777);
+      expect(runValueWrites.slice(1).every((value) => value === 999)).toBe(true);
+      expect(runValueWritePayloads).toHaveLength(runValueWrites.length);
+      expect(runValueWritePayloads[0]).toEqual({
+        casesNeeded: 777,
+        pizzasPerCase: 8,
+        casesPerSkid: 16,
+      });
+      expect(runValueWritePayloads.slice(1).every((payload) =>
+        payload.casesNeeded === 999 &&
+        payload.pizzasPerCase === 8 &&
+        payload.casesPerSkid === 16,
+      )).toBe(true);
+    };
+    page.on("request", (request) => {
+      if (request.method() !== "PUT" || !request.url().includes("/api/sync/today")) return;
+      try {
+        const body = request.postDataJSON() as {
+          payload?: { runValues?: Record<string, {
+            casesNeeded?: number;
+            pizzasPerCase?: number;
+            casesPerSkid?: number;
+          }> };
+        };
+        const values = body.payload?.runValues?.[runId];
+        if (typeof values?.casesNeeded === "number") {
+          runValueWrites.push(values.casesNeeded);
+          runValueWritePayloads.push({
+            casesNeeded: values.casesNeeded,
+            pizzasPerCase: values.pizzasPerCase,
+            casesPerSkid: values.casesPerSkid,
+          });
+        }
+      } catch {
+        // Ignore unrelated requests with no JSON body.
+      }
+    });
+    page.on("response", (response) => {
+      const request = response.request();
+      if (request.method() !== "PUT" || !request.url().includes("/api/sync/today")) return;
+      let value: number | undefined;
+      try {
+        const body = request.postDataJSON() as {
+          payload?: { runValues?: Record<string, { casesNeeded?: number }> };
+        };
+        value = body.payload?.runValues?.[runId]?.casesNeeded;
+      } catch {
+        return;
+      }
+      if (typeof value !== "number") return;
+      void response.json().then((body: { canonicalRevision?: unknown }) => {
+        runValueWriteResponses.push({
+          value,
+          status: response.status(),
+          responseKind: response.headers()["x-sync-response"] ?? "missing",
+          canonicalRevision: typeof body.canonicalRevision === "number"
+            ? body.canonicalRevision
+            : null,
+        });
+      }).catch(() => {});
+    });
+    let recoveryCopyFaultInjected = false;
+    await page.route("**/api/sync/today**", async (route) => {
+      const request = route.request();
+      if (recoveryCopyFaultInjected || request.method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      let cases: number | undefined;
+      try {
+        const body = request.postDataJSON() as {
+          payload?: { runValues?: Record<string, { casesNeeded?: number }> };
+        };
+        cases = body.payload?.runValues?.[runId]?.casesNeeded;
+      } catch {
+        // Keep unrelated or malformed requests on the ordinary route.
+      }
+      if (cases !== 777) {
+        await route.continue();
+        return;
+      }
+      recoveryCopyFaultInjected = true;
+      const response = await route.fetch();
+      await page.evaluate(() => {
+        (window as unknown as { armRecoveryCopyStorageFailure: () => void })
+          .armRecoveryCopyStorageFailure();
+      });
+      await route.fulfill({ response });
+    });
+    const staleWriteResponse = page.waitForResponse((response) => {
+      if (response.request().method() !== "PUT" || !response.url().includes("/api/sync/today")) {
+        return false;
+      }
+      try {
+        const body = response.request().postDataJSON() as {
+          payload?: { runValues?: Record<string, { casesNeeded?: number }> };
+        };
+        return body.payload?.runValues?.[runId]?.casesNeeded === 777;
+      } catch {
+        return false;
+      }
+    });
+    const lineSetup = page.locator("details").filter({
+      has: page.locator("summary", { hasText: /line.?setup/i }),
+    }).first();
+    if (!(await lineSetup.evaluate((element) => (element as HTMLDetailsElement).open))) {
+      await lineSetup.locator("summary").click();
+    }
+    await page.getByTestId("input-pizzasPerCase").fill("8");
+    await page.getByTestId("input-pizzasPerCase").blur();
+    await page.getByTestId("input-casesPerSkid").fill("16");
+    await page.getByTestId("input-casesPerSkid").blur();
+    await casesNeeded.fill("777");
+    const response = await staleWriteResponse;
+    expect(response.status()).toBe(200);
+    expect((await response.json() as { partialFallback?: boolean }).partialFallback).toBe(true);
+    expect(recoveryCopyFaultInjected).toBe(true);
+    await expect.poll(() => page.evaluate(() => (
+      window as unknown as { recoveryCopyStorageFailureOccurred: boolean }
+    ).recoveryCopyStorageFailureOccurred)).toBe(true);
+
+    await expect(casesNeeded).toHaveValue("999", { timeout: 15_000 });
+    await expect(page.getByTestId("input-pizzasPerCase")).toHaveValue("8");
+    await expect(page.getByTestId("input-casesPerSkid")).toHaveValue("16");
+    await expect.poll(() => page.evaluate((id) => {
+      const raw = localStorage.getItem(`run-calc-run-${id}`);
+      const values = JSON.parse(raw ?? "{}") as {
+        casesNeeded?: number;
+        pizzasPerCase?: number;
+        casesPerSkid?: number;
+      };
+      return {
+        casesNeeded: values.casesNeeded,
+        pizzasPerCase: values.pizzasPerCase,
+        casesPerSkid: values.casesPerSkid,
+      };
+    }, runId)).toEqual({
+      casesNeeded: 999,
+      pizzasPerCase: 8,
+      casesPerSkid: 16,
+    });
+    await page.getByTestId("sync-status-button").click();
+    const conflictActivity = page.locator('[data-testid^="sync-activity-"]')
+      .filter({ hasText: "discarded the conflicting local value" });
+    await expect(conflictActivity).toBeVisible({ timeout: 10_000 });
+    await expect(conflictActivity).toContainText("kept the server value for 1 conflict");
+    await expect(conflictActivity).toContainText(/reapplied \d+ changes/);
+    await expect(conflictActivity).toContainText("browser storage did not save this rebase for reload");
+    await expect(conflictActivity).toContainText("review the current value before editing again");
+
+    const pendingWrites = page.getByText("Pending writes", { exact: true });
+    await expect(pendingWrites).toBeVisible();
+    await expect.poll(async () => Number(await pendingWrites.evaluate(
+      (element) => element.nextElementSibling?.textContent?.trim() ?? "NaN",
+    ))).toBe(0);
+
+    expectCanonicalConflictSequence();
+    await expect.poll(() => runValueWriteResponses.length).toBe(runValueWrites.length);
+    const settledWriteCount = runValueWrites.length;
+    expect(runValueWriteResponses[0]).toMatchObject({
+      value: 777,
+      status: 200,
+      responseKind: "partial-fallback",
+    });
+    for (let reload = 0; reload < 2; reload += 1) {
+      const revisionBeforeReload = Number((await getToday(page)).canonicalRevision);
+      expect(Number.isSafeInteger(revisionBeforeReload)).toBe(true);
+      const responsesBeforeReload = runValueWriteResponses.length;
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+      await page.getByTestId("tab-run").click();
+      await expect(casesNeeded).toHaveValue("999", { timeout: 20_000 });
+      await expect(page.getByTestId("input-pizzasPerCase")).toHaveValue("8");
+      await expect(page.getByTestId("input-casesPerSkid")).toHaveValue("16");
+      await expect.poll(() => page.evaluate((id) => {
+        const raw = localStorage.getItem(`run-calc-run-${id}`);
+        const values = JSON.parse(raw ?? "{}") as {
+          casesNeeded?: number;
+          pizzasPerCase?: number;
+          casesPerSkid?: number;
+        };
+        return {
+          casesNeeded: values.casesNeeded,
+          pizzasPerCase: values.pizzasPerCase,
+          casesPerSkid: values.casesPerSkid,
+        };
+      }, runId)).toEqual({
+        casesNeeded: 999,
+        pizzasPerCase: 8,
+        casesPerSkid: 16,
+      });
+      await expect(page.getByTestId("sync-status-button")).toHaveAttribute(
+        "title",
+        "Sync connected",
+        { timeout: 20_000 },
+      );
+
+      await page.getByTestId("sync-status-button").click();
+      await expect(conflictActivity).toBeVisible({ timeout: 10_000 });
+      await expect(conflictActivity).toContainText("kept the server value for 1 conflict");
+       await expect(conflictActivity).toContainText(/reapplied \d+ changes/);
+      await expect(conflictActivity).toContainText("browser storage did not save this rebase for reload");
+      await expect(pendingWrites).toBeVisible();
+      await expect.poll(async () => Number(await pendingWrites.evaluate(
+        (element) => element.nextElementSibling?.textContent?.trim() ?? "NaN",
+      ))).toBe(0);
+      expectCanonicalConflictSequence();
+      expect(runValueWrites).toHaveLength(settledWriteCount);
+      const revisionAfterReload = Number((await getToday(page)).canonicalRevision);
+      expect(revisionAfterReload).toBe(revisionBeforeReload);
+      await expect.poll(() => runValueWriteResponses.length)
+        .toBe(runValueWrites.length);
+      expect(runValueWriteResponses.slice(responsesBeforeReload).every((result) =>
+        result.value === 999 && result.status === 200,
+      )).toBe(true);
+    }
+    expect(runValueWriteResponses.slice(1).every((result) =>
+      result.value === 999 && result.status === 200 &&
+      result.canonicalRevision !== null,
+    )).toBe(true);
+
+    const finalServer = await getToday(page) as unknown as SyncPayload;
+    expect(finalServer.runValues[runId]?.casesNeeded).toBe(999);
+    expect(finalServer.runValues[runId]?.pizzasPerCase).toBe(8);
+    expect(finalServer.runValues[runId]?.casesPerSkid).toBe(16);
+  },
+);
+
+test(
   "@real-mobile-browser queued Target Cases edit recovers after Android Chrome suspension",
   async ({ page }: { page: Page }) => {
     test.skip(
@@ -1133,12 +1509,8 @@ test(
 );
 
 test(
-  "@real-mobile-browser queued Target Cases edit survives an Android Chrome process restart",
+  "queued Target Cases edits survive a tab restart in browser emulation",
   async ({ page }: { page: Page }) => {
-    test.skip(
-      test.info().project.name !== "real-mobile-chromium",
-      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
-    );
     test.setTimeout(180_000);
     const username = uid();
     users.add(username);
@@ -1773,8 +2145,8 @@ test(
     const destinationFailureRoute = async (route: Route) => {
       const request = route.request();
       if (
-        request.method() === "PUT" &&
-        new URL(request.url()).pathname === "/api/sync/today" &&
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/sync/schedule-move" &&
         request.postData()?.includes(fixture.futureRunId)
       ) {
         forcedDestinationFailures += 1;
@@ -1797,7 +2169,6 @@ test(
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: /^Schedule/ }).click();
 
-      const dialog = page.getByRole("dialog", { name: "Scheduled Days" });
       const futureDay = page.getByTestId(`schedule-day-${fixture.futureDate}`);
       await expect(futureDay).toBeVisible();
       await futureDay.locator("button").first().click();
@@ -1809,14 +2180,10 @@ test(
       await page.route("**/api/sync/**", destinationFailureRoute);
       await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
 
-      const destinationWriteError = page
-        .getByRole("alert")
-        .filter({ hasText: "Couldn't save the destination plan." })
-        .filter({
-          hasText: "The source is unchanged; check your connection and try again.",
-        });
+      const destinationWriteError = page.getByRole("alert")
+        .filter({ hasText: "The move result is uncertain." });
       await expect(destinationWriteError).toContainText(
-        "The source is unchanged; check your connection and try again.",
+        "Refresh both dates before retrying; do not repeat it until confirmed.",
       );
       await expect(futureDay).toBeVisible();
       await expect(moveDate).toHaveValue(fixture.currentDate);
@@ -1830,7 +2197,7 @@ test(
       // retry after the injected failure should now complete normally.
       await page.unroute("**/api/sync/**", destinationFailureRoute);
       await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
-      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      await expect(page.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
       await expect(page.getByTestId(`schedule-day-${fixture.futureDate}`)).toHaveCount(0);
       expect(evidence.pageErrors).toEqual([]);
     } finally {
@@ -1842,25 +2209,29 @@ test(
 );
 
 test(
-  "retries source cleanup after a successful destination write without duplicating today's run",
+  "reload after a lost move acknowledgement confirms one canonical copy without replay",
   async ({ page }: { page: Page }, testInfo: TestInfo) => {
     const username = uid();
     users.add(username);
     const fixture = scheduleMoveFixture();
     const evidence = observeScheduleMoveEvidence(page);
-    let forcedCleanupFailures = 0;
-    const cleanupFailureRoute = async (route: Route) => {
+    let committedResponsesHidden = 0;
+    const lostAcknowledgementRoute = async (route: Route) => {
       const request = route.request();
       if (
-        request.method() === "DELETE" &&
-        new URL(request.url()).pathname === `/api/sync/${fixture.futureDate}`
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/sync/schedule-move" &&
+        request.postData()?.includes(fixture.futureRunId)
       ) {
-        forcedCleanupFailures += 1;
-        await route.fulfill({
-          status: 503,
-          contentType: "application/json",
-          body: JSON.stringify({ error: "forced source cleanup failure" }),
-        });
+        const committed = await route.fetch();
+        if (committed.ok()) {
+          committedResponsesHidden += 1;
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "simulated lost response after commit" }),
+          });
+        } else await route.fulfill({ response: committed });
         return;
       }
       await route.continue();
@@ -1875,7 +2246,6 @@ test(
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: /^Schedule/ }).click();
 
-      const dialog = page.getByRole("dialog", { name: "Scheduled Days" });
       const futureDay = page.getByTestId(`schedule-day-${fixture.futureDate}`);
       await expect(futureDay).toBeVisible();
       await futureDay.locator("button").first().click();
@@ -1884,23 +2254,26 @@ test(
       const moveDate = futureDay.getByTestId(`move-date-${fixture.futureRunId}`);
       await moveDate.fill(fixture.currentDate);
 
-      await page.route("**/api/sync/**", cleanupFailureRoute);
+      await page.route("**/api/sync/**", lostAcknowledgementRoute);
       await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
 
-      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
-      await expect(page.getByRole("alert")).toContainText("Retry Move to finish.");
-      await expect(futureDay).toBeVisible();
-      expect(forcedCleanupFailures).toBe(1);
+      await expect(page.getByRole("alert")).toContainText("The move result is uncertain.");
+      expect(committedResponsesHidden).toBe(1);
       await page.screenshot({
-        path: testInfo.outputPath("05-cleanup-failure-retry-guidance.png"),
+        path: testInfo.outputPath("05-lost-move-acknowledgement.png"),
         fullPage: true,
       });
 
-      // The destination is already canonical. Retrying the same move must
-      // perform only the pending source cleanup, not append another run.
-      await page.unroute("**/api/sync/**", cleanupFailureRoute);
-      await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
-      await expect(dialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
+      // The response was lost after commit. Reloading reads canonical state;
+      // the client does not blindly replay the command.
+      await page.unroute("**/api/sync/**", lostAcknowledgementRoute);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await dismissOnboardingIfPresent(page);
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+      const reloadedDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      await expect(reloadedDialog.getByTestId("schedule-today-card")).toContainText("2 runs on today's plan");
       await expect(page.getByTestId(`schedule-day-${fixture.futureDate}`)).toHaveCount(0);
 
       const canonical = await page.evaluate(async (date) => {
@@ -1912,10 +2285,280 @@ test(
         fixture.futureRunId,
       ]);
       expect(evidence.pageErrors).toEqual([]);
+      await page.screenshot({
+        path: testInfo.outputPath("06-lost-move-after-reload.png"),
+        fullPage: true,
+      });
     } finally {
-      await page.unroute("**/api/sync/**", cleanupFailureRoute).catch(() => {});
+      await page.unroute("**/api/sync/**", lostAcknowledgementRoute).catch(() => {});
       await attachScheduleMoveEvidence(testInfo, evidence);
       await cleanupScheduleMoveFixture(fixture);
+    }
+  },
+);
+
+test(
+  "manager can cancel, swap two schedules, and append without losing source runs",
+  async ({ page }: { page: Page }, testInfo: TestInfo) => {
+    const username = uid();
+    users.add(username);
+    const fixture = scheduleMoveFixture();
+    const secondDate = (() => {
+      const date = new Date(`${fixture.futureDate}T12:00:00`);
+      date.setDate(date.getDate() + 1);
+      return date.toISOString().slice(0, 10);
+    })();
+    const appendDate = (() => {
+      const date = new Date(`${fixture.futureDate}T12:00:00`);
+      date.setDate(date.getDate() + 2);
+      return date.toISOString().slice(0, 10);
+    })();
+    const secondRunId = `${fixture.futureRunId}-second`;
+    const appendRunId = `${fixture.futureRunId}-append`;
+    const evidence = observeScheduleMoveEvidence(page);
+    const readRunIds = (date: string) => page.evaluate(async (targetDate) => {
+      const response = await fetch(`/api/sync/${targetDate}`, { cache: "no-store" });
+      const data = await response.json() as { dayState?: { runs?: Array<{ id?: string }> } } | null;
+      return data?.dayState?.runs?.map((run) => run.id) ?? [];
+    }, date);
+
+    try {
+      await signUp(page, username);
+      await promoteToManager(page);
+      await seedScheduleMoveFixture(page, fixture);
+      await seedAdditionalScheduleDay(page, fixture.currentDate, secondDate, secondRunId);
+      await seedAdditionalScheduleDay(page, fixture.currentDate, appendDate, appendRunId);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+
+      const sourceDay = page.getByTestId(`schedule-day-${fixture.futureDate}`);
+      const beforeCancel = await Promise.all([readRunIds(fixture.futureDate), readRunIds(secondDate)]);
+      await sourceDay.getByTestId(`move-day-${fixture.futureDate}`).click();
+      const targetDateInput = sourceDay.locator('input[type="date"]');
+      await targetDateInput.fill(secondDate);
+      await expect(sourceDay.getByRole("button", { name: "Swap day schedules" })).toBeVisible();
+      await expect(sourceDay.getByRole("button", { name: "Append runs" })).toBeVisible();
+      await expect(sourceDay.getByRole("button", { name: "Cancel" })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("schedule-existing-destination-choices.png"), fullPage: true });
+      await sourceDay.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(await Promise.all([readRunIds(fixture.futureDate), readRunIds(secondDate)])).toEqual(beforeCancel);
+
+      await sourceDay.getByTestId(`move-day-${fixture.futureDate}`).click();
+      await sourceDay.locator('input[type="date"]').fill(secondDate);
+      await expect(sourceDay.getByRole("button", { name: "Swap day schedules" })).toBeVisible();
+      await sourceDay.getByRole("button", { name: "Swap day schedules" }).click();
+      await expect.poll(() => readRunIds(fixture.futureDate)).toEqual([secondRunId]);
+      await expect.poll(() => readRunIds(secondDate)).toEqual([fixture.futureRunId]);
+
+      await page.getByTestId(`move-day-${fixture.futureDate}`).click();
+      await sourceDay.locator('input[type="date"]').fill(appendDate);
+      await expect(sourceDay.getByRole("button", { name: "Append runs" })).toBeVisible();
+      await sourceDay.getByRole("button", { name: "Append runs" }).click();
+      await expect.poll(() => readRunIds(fixture.futureDate)).toEqual([]);
+      await expect.poll(() => readRunIds(appendDate)).toEqual([appendRunId, secondRunId]);
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+      await expect(page.getByTestId(`schedule-day-${fixture.futureDate}`)).toHaveCount(0);
+      expect(await readRunIds(appendDate)).toEqual([appendRunId, secondRunId]);
+      expect(evidence.pageErrors).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath("schedule-append-after-reload.png"), fullPage: true });
+    } finally {
+      await attachScheduleMoveEvidence(testInfo, evidence);
+      await cleanupScheduleMoveFixture(fixture, [secondDate, appendDate]);
+    }
+  },
+);
+
+test(
+  "manager can append when the server reports a started-today swap is unavailable",
+  async ({ page }: { page: Page }, testInfo: TestInfo) => {
+    const username = uid();
+    users.add(username);
+    const fixture = scheduleMoveFixture();
+    const evidence = observeScheduleMoveEvidence(page);
+    let eligibilityChecks = 0;
+    // API integration coverage checks the real started-run/time boundary.
+    // This browser fixture isolates the UI branch from wall-clock timing.
+    const blockTodaySwapRoute = async (route: Route) => {
+      const request = route.request();
+      if (
+        request.method() === "GET"
+        && new URL(request.url()).pathname === "/api/sync/schedule-swap-eligibility"
+      ) {
+        eligibilityChecks += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            today: fixture.currentDate,
+            sourceScheduled: true,
+            destinationScheduled: true,
+            canSwap: false,
+            reason: "today-started-after-6am",
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    };
+    const readRunIds = (date: string) => page.evaluate(async (targetDate) => {
+      const response = await fetch(`/api/sync/${targetDate}`, { cache: "no-store" });
+      const data = await response.json() as { dayState?: { runs?: Array<{ id?: string }> } } | null;
+      return data?.dayState?.runs?.map((run) => run.id) ?? [];
+    }, date);
+
+    try {
+      await signUp(page, username);
+      await promoteToManager(page);
+      await seedScheduleMoveFixture(page, fixture);
+      await page.route("**/api/sync/schedule-swap-eligibility**", blockTodaySwapRoute);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: /^Schedule/ }).click();
+
+      const sourceDay = page.getByTestId(`schedule-day-${fixture.futureDate}`);
+      const beforeCancel = await Promise.all([
+        readRunIds(fixture.currentDate),
+        readRunIds(fixture.futureDate),
+      ]);
+      await sourceDay.getByTestId(`move-day-${fixture.futureDate}`).click();
+      await sourceDay.locator('input[type="date"]').fill(fixture.currentDate);
+      await expect(sourceDay.getByRole("status")).toContainText(
+        "Today’s plan has started; swaps are unavailable after 6:59 a.m.",
+      );
+      await expect(sourceDay.getByRole("button", { name: "Swap day schedules" })).toHaveCount(0);
+      await expect(sourceDay.getByRole("button", { name: "Append runs" })).toBeVisible();
+      await expect(sourceDay.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+      expect(eligibilityChecks).toBeGreaterThan(0);
+
+      await sourceDay.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(await Promise.all([
+        readRunIds(fixture.currentDate),
+        readRunIds(fixture.futureDate),
+      ])).toEqual(beforeCancel);
+
+      await sourceDay.getByTestId(`move-day-${fixture.futureDate}`).click();
+      await sourceDay.locator('input[type="date"]').fill(fixture.currentDate);
+      await sourceDay.getByRole("button", { name: "Append runs" }).click();
+      await expect.poll(() => readRunIds(fixture.currentDate)).toEqual([
+        fixture.liveRunId,
+        fixture.futureRunId,
+      ]);
+      await expect.poll(() => readRunIds(fixture.futureDate)).toEqual([]);
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const canonical = await page.evaluate(async (date) => {
+        const response = await fetch(`/api/sync/today?today=${date}`, { cache: "no-store" });
+        return await response.json() as {
+          dayState?: { runs?: Array<{ id?: string; startedAt?: number }> };
+        };
+      }, fixture.currentDate);
+      expect(canonical.dayState?.runs?.map((run) => run.id)).toEqual([
+        fixture.liveRunId,
+        fixture.futureRunId,
+      ]);
+      expect(evidence.pageErrors).toEqual([]);
+    } finally {
+      await page.unroute("**/api/sync/schedule-swap-eligibility**", blockTodaySwapRoute).catch(() => {});
+      await attachScheduleMoveEvidence(testInfo, evidence);
+      await cleanupScheduleMoveFixture(fixture);
+    }
+  },
+);
+
+test(
+  "manager classification of a premade crust persists across reload",
+  async ({ page }: { page: Page }, testInfo: TestInfo) => {
+    const username = uid();
+    users.add(username);
+    const recipeId = `e2e-premade-${Date.now()}`;
+
+    const openDoughManager = async () => {
+      await page.getByTitle("More").click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+      await dialog.getByRole("button", { name: "Recipes", exact: true }).click();
+      const editor = dialog.getByTestId("dough-recipe-editor");
+      await expect(editor).toBeVisible();
+      await expect(editor.getByRole("button", { name: /E2E Premade Crust/ }))
+        .toBeVisible({ timeout: 15_000 });
+      return editor;
+    };
+
+    try {
+      await signUp(page, username);
+      await promoteToManager(page);
+      const seededStatus = await page.evaluate(async (id) => {
+        const response = await fetch("/api/dough-recipes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            items: [{
+              id,
+              name: "E2E Premade Crust",
+              notes: "",
+              components: [],
+              enabled: true,
+              isPremadeCrust: false,
+              brand: "",
+              flavors: [],
+            }],
+          }),
+        });
+        return response.status;
+      }, recipeId);
+      expect(seededStatus).toBe(200);
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      let editor = await openDoughManager();
+      const recipe = editor.getByRole("button", { name: /E2E Premade Crust/ });
+      await recipe.click();
+      const classification = editor.getByRole("checkbox", { name: "Premade crust" });
+      await expect(classification).not.toBeChecked();
+      await expect(editor.getByText(
+        "No formula recorded. Manager review is needed before treating this as premade.",
+      )).toBeVisible();
+      await classification.check();
+      await expect(editor.getByText(
+        "No in-house dough formula is needed for this premade crust.",
+      )).toBeVisible();
+      await expect.poll(() => page.evaluate(async (id) => {
+        const response = await fetch("/api/dough-recipes", { cache: "no-store" });
+        const data = await response.json() as { items: Array<{ id: string; isPremadeCrust?: boolean }> };
+        return data.items.find((item) => item.id === id)?.isPremadeCrust;
+      }, recipeId)).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath("manager-premade-crust-status.png"),
+        fullPage: true,
+      });
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+      editor = await openDoughManager();
+      const reopenedRecipe = editor.getByRole("button", { name: /E2E Premade Crust/ });
+      await expect(reopenedRecipe).toContainText("Premade crust");
+      await reopenedRecipe.click();
+      await expect(editor.getByRole("checkbox", { name: "Premade crust" })).toBeChecked();
+      await expect(editor.getByText(
+        "Manager classification. No in-house dough formula is needed; linked setup selects Crust mode. Existing runs are not changed.",
+      )).toBeVisible();
+    } finally {
+      const db = new Client({
+        connectionString: requireIsolatedTestDatabase("premade crust e2e cleanup"),
+      });
+      try {
+        await db.connect();
+        await db.query("DELETE FROM dough_recipes WHERE id = $1", [recipeId]);
+      } finally {
+        await db.end().catch(() => {});
+      }
     }
   },
 );

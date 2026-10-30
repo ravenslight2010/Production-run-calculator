@@ -859,6 +859,20 @@ test(`${remainingCase}: continue only the selected remaining browser flow`, asyn
       mark("phone-webkit-offline-pause-reconnect-resume");
     }
 
+    if (casePlan.verifyEndSummary) {
+      await a.page.getByTestId("tab-dough").click({ timeout: ACTION_TIMEOUT });
+      await expect(a.page.getByTestId("input-traysOnLine")).toHaveValue("2");
+      const correctionReceipt = await manualClick(
+        a.page, "btn-inc-traysOnLine", runIds[0], "dough",
+      );
+      expect(correctionReceipt.status(), "the manual Dough correction is acknowledged").toBe(200);
+      expect((await correctionReceipt.json() as { outcome?: string }).outcome).toBe("accepted");
+      await expect(a.page.getByTestId("input-traysOnLine")).toHaveValue("3");
+      expect((await canonical(a.page, date)).runValues[runIds[0]]?.traysOnLine)
+        .toBe(3);
+      mark("manual-dough-correction-canonical-before-end");
+    }
+
     // End only while the canonical run is running. No swallowed click and no
     // optional confirmation: require the UI action, server receipt, an explicit
     // zero-surplus receipt, and the prior-run freezer drain.
@@ -962,6 +976,63 @@ test(`${remainingCase}: continue only the selected remaining browser flow`, asyn
       path: testInfo.outputPath("accepted-end-drain.jpg"),
       fullPage: false,
     });
+    if (casePlan.verifyEndSummary) {
+      const openSummary = async () => {
+        await a!.page.getByRole("button", { name: "More" }).click({ timeout: ACTION_TIMEOUT });
+        await a!.page.getByRole("menuitem", { name: "Summary", exact: true })
+          .click({ timeout: ACTION_TIMEOUT });
+      };
+      await openSummary();
+      const finishedSummary = a.page.getByTestId(`run-summary-${runIds[0]}`);
+      await expect(finishedSummary).toBeVisible({ timeout: ACTION_TIMEOUT });
+      await expect(finishedSummary.getByText("Finished", { exact: true }))
+        .toBeVisible({ timeout: ACTION_TIMEOUT });
+
+      const completedHistoryRead = a.page.waitForResponse(
+        (response) => response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/completed-history",
+        { timeout: ACTION_TIMEOUT },
+      );
+      await a.page.reload({ waitUntil: "domcontentloaded", timeout: 12_000 });
+      await a.page.getByTestId("tab-run").waitFor({ state: "visible", timeout: 12_000 });
+      const historyResponse = await completedHistoryRead;
+      expect(historyResponse.status(), "completed history is read after reload").toBe(200);
+      const historyBody = await historyResponse.json() as {
+        history?: Array<{
+          runId: string;
+          date: string;
+          snapshot?: { runValues?: Record<string, { traysOnLine?: number }> };
+        }>;
+      };
+      const archivedCompletion = historyBody.history?.find(
+        (item) => item.runId === runIds[0] && item.date === date,
+      );
+      expect(archivedCompletion, "accepted End is retained in immutable history").toBeTruthy();
+      expect(archivedCompletion?.snapshot?.runValues?.[runIds[0]]?.traysOnLine)
+        .toBe(3);
+      const afterReload = await canonical(a.page, date);
+      const reloadedRun = afterReload.dayState.runs.find((run) => run.id === runIds[0]);
+      expect(reloadedRun?.endedAt, "accepted End survives canonical reload").toBe(receiptRun?.endedAt);
+      expect(afterReload.runValues[runIds[0]]?.traysOnLine, "accepted correction survives reload")
+        .toBe(3);
+      await openSummary();
+      const reloadedSummary = a.page.getByTestId(`run-summary-${runIds[0]}`);
+      await expect(reloadedSummary).toBeVisible({ timeout: ACTION_TIMEOUT });
+      await expect(reloadedSummary.getByText("Finished", { exact: true }))
+        .toBeVisible({ timeout: ACTION_TIMEOUT });
+      mark("corrected-run-end-summary-visible-after-reload");
+      await expect(a.page.getByText("History (1 day)", { exact: true }))
+        .toBeVisible({ timeout: ACTION_TIMEOUT });
+      const archivedDay = a.page.locator('button[aria-expanded="false"]')
+        .filter({ hasText: date });
+      await expect(archivedDay).toHaveCount(1);
+      await archivedDay.click({ timeout: ACTION_TIMEOUT });
+      const matchingSummaryCards = a.page.getByTestId(`run-summary-${runIds[0]}`);
+      await expect(matchingSummaryCards).toHaveCount(2);
+      await expect(matchingSummaryCards.last().getByText("Finished", { exact: true }))
+        .toBeVisible({ timeout: ACTION_TIMEOUT });
+      mark("accepted-end-archive-visible-after-reload");
+    }
   } finally {
     if (gatedPage) await releaseManualFetchGate(gatedPage).catch(() => {});
     try {

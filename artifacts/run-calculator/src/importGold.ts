@@ -1,9 +1,22 @@
 export type ImportGoldConfig = {
   enabled: boolean;
   localConfigured: boolean;
+  localAvailable: boolean;
+  localScoringSwitchAvailable: boolean;
+  localScoringEnabled: boolean;
+  syntheticFixtureAvailable: boolean;
   geminiConfigured: boolean;
   retention: string;
   persistsAcrossFactoryPurge: boolean;
+};
+
+export type ImportGoldSyntheticReview = {
+  fixtureVersion: string;
+  importType: string;
+  sourceLabel: string;
+  input: Record<string, unknown>;
+  expectedResult: Record<string, unknown>;
+  applyEffect: string;
 };
 
 export type ImportGoldScore = {
@@ -27,6 +40,11 @@ export type ImportGoldCase = {
   scores: ImportGoldScore[];
 };
 
+export type ImportGoldScoreBatchResult = {
+  scoredCount: number;
+  errorCount: number;
+};
+
 async function goldFetch(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(path, {
     ...init,
@@ -42,6 +60,24 @@ async function goldFetch(path: string, init?: RequestInit): Promise<Response> {
 
 export async function fetchImportGoldConfig(): Promise<ImportGoldConfig> {
   return await (await goldFetch("/api/import-gold/config")).json() as ImportGoldConfig;
+}
+
+export async function setImportGoldLocalScoringEnabled(enabled: boolean): Promise<void> {
+  await goldFetch("/api/import-gold/local-scoring", {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function fetchImportGoldSyntheticReview(): Promise<ImportGoldSyntheticReview> {
+  return await (await goldFetch("/api/import-gold/synthetic-review")).json() as ImportGoldSyntheticReview;
+}
+
+export async function applyImportGoldSyntheticReview(fixtureVersion: string): Promise<{ caseId: number; created: boolean }> {
+  return await (await goldFetch("/api/import-gold/synthetic-apply", {
+    method: "POST",
+    body: JSON.stringify({ fixtureVersion, reviewed: true }),
+  })).json() as { caseId: number; created: boolean };
 }
 
 export async function fetchImportGoldCases(): Promise<ImportGoldCase[]> {
@@ -60,11 +96,19 @@ export async function deleteImportGoldCase(id: number): Promise<void> {
   await goldFetch(`/api/import-gold/cases/${id}`, { method: "DELETE" });
 }
 
-export async function scoreImportGold(provider: "local" | "gemini", caseIds?: number[]): Promise<void> {
-  await goldFetch("/api/import-gold/score", {
+export async function scoreImportGold(provider: "local" | "gemini", caseIds?: number[]): Promise<ImportGoldScoreBatchResult> {
+  const response = await goldFetch("/api/import-gold/score", {
     method: "POST",
     body: JSON.stringify({ provider, ...(caseIds ? { caseIds } : {}) }),
   });
+  const body = await response.json() as Partial<ImportGoldScoreBatchResult> | null;
+  if (
+    !body || !Number.isInteger(body.scoredCount) || Number(body.scoredCount) < 0 ||
+    !Number.isInteger(body.errorCount) || Number(body.errorCount) < 0
+  ) {
+    throw new Error("The evaluator returned an unreadable score result. Refresh the lab before retrying.");
+  }
+  return { scoredCount: Number(body.scoredCount), errorCount: Number(body.errorCount) };
 }
 
 export async function downloadImportGoldJsonl(): Promise<void> {

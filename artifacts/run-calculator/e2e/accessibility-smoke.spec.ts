@@ -1099,7 +1099,20 @@ test.describe("accessibility smoke", () => {
         navigationPaths.add(new URL(request.url()).pathname);
       }
     };
-    page.on("pageerror", error => errors.push(error.message));
+    page.on("pageerror", error => {
+      const cancelledPath = cancelledDocumentMessage({
+        webkit: test.info().project.name.endsWith("webkit"),
+        text: error.message,
+        successfulOrigins,
+        navigationPaths,
+        duringReload: requestPhase === "persistence reload",
+      });
+      if (cancelledPath) {
+        expectedWebKitNavigationMessages.push(`cancelled page error: ${cancelledPath}`);
+      } else {
+        errors.push(error.message);
+      }
+    });
     page.on("console", message => {
       if (message.type() === "error") {
         const source = message.location().url;
@@ -1147,6 +1160,7 @@ test.describe("accessibility smoke", () => {
           ((requestPhase === "persistence reload" || navigationRequests.has(request)) && (
             (request.method() === "GET" && pathname === "/api/sync/events")
             || (pathname === "/api/factory-data" && ["GET", "PUT"].includes(request.method()))
+            || (request.method() === "GET" && pathname === "/api/incidents/actionable-count")
           ))
           || (requestPhase === "summary navigation"
             && request.method() === "GET"

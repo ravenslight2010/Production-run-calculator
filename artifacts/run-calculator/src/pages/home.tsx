@@ -39,12 +39,21 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse, isRetryableRecoveryStatus } from "../foregroundRecoveryResponse";
-import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
+import {
+  describeServerWinsConflictOutcome,
+  rebaseStaleSyncIntent,
+  selectUnchangedRunValueIdsForRecovery,
+  shouldResetLiveFormForSync,
+} from "../syncStaleBaseRecovery";
 import {
   clearPendingSyncIntent,
   loadPendingSyncIntent,
+  pendingSyncRecoveryCopyNotice,
+  saveRebasedPendingSyncIntent,
   savePendingSyncIntent,
+  type PendingSyncRecoveryCopyStatus,
 } from "../syncPendingIntent";
+import { shouldSendDistinctQueuedSyncWork } from "../syncPushQueue";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -551,7 +560,7 @@ import { DialogLayerProvider } from "../components/ui/dialog";
 import { RunEstimateBasis } from "../components/RunEstimateBasis";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
-import { moveEntries, relocateValues } from "@workspace/schedule-move";
+import { moveEntries } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
 import {
   dismissSauceAutoTrackFailure as dismissSauceAutoTrackFailureState,
@@ -3324,7 +3333,13 @@ export default function Home() {
   // name and hydrate their rows from the chosen recipe. We keep a name (case-
   // insensitive) → rows map for hydration and a sorted name list for the run-form
   // dropdowns.
-  const { items: doughRecipesList } = useNamedRecipes("dough");
+  const {
+    items: doughRecipesList,
+    hasData: hasDoughRecipesData,
+    isStale: areDoughRecipesStale,
+    ensureLoaded: ensureDoughRecipesLoaded,
+  } = useNamedRecipes("dough");
+  const profileApplyGenerationRef = useRef(0);
   const { items: sauceRecipesList } = useNamedRecipes("sauce");
   const serverDoughRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
@@ -6662,11 +6677,16 @@ export default function Home() {
   const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
   const [scheduleMoveDate, setScheduleMoveDate] = useState("");
   const [scheduleMoving, setScheduleMoving] = useState(false);
-  const scheduleMoveCleanupRef = useRef<{
-    fromDate: string;
-    toDate: string;
-    movedIds: string[];
+  const [scheduleSwapAvailability, setScheduleSwapAvailability] = useState<{
+    from: string;
+    to: string;
+    sourceScheduled: boolean;
+    destinationScheduled: boolean;
+    canSwap: boolean;
+    reason: string | null;
+    checking?: boolean;
   } | null>(null);
+  const scheduleSwapCheckRef = useRef(0);
 
   // ── Back-button trap (Android / PWA) ──────────────────────────────────────
   // Priority: close any open overlay first, then unwind tab history, then stay.
@@ -6934,6 +6954,7 @@ export default function Home() {
     payload: SyncPayload | null;
     available: boolean;
     snapshotId?: string;
+    revision?: number;
   }> {
     try {
       const res = date === todayStr()
@@ -6941,10 +6962,12 @@ export default function Home() {
         : await fetchWithTimeout(`/api/sync/${date}?today=${todayStr()}`, { cache: "no-store" }, 10_000);
       if (!res.ok) return { payload: null, available: false };
       const payload = await res.json() as SyncPayload | null;
+      const parsedRevision = Number(res.headers.get("X-Sync-Canonical-Revision") ?? 0);
       return {
         payload: payload?.dayState ? payload : null,
         available: true,
         snapshotId: res.headers.get("X-Sync-Snapshot") ?? undefined,
+        revision: Number.isSafeInteger(parsedRevision) && parsedRevision >= 0 ? parsedRevision : 0,
       };
     } catch {
       return { payload: null, available: false };
@@ -6956,18 +6979,71 @@ export default function Home() {
       setScheduledDays(normalizeScheduledDays(d));
     } catch {}
   }
-  // Move a whole scheduled day (sel "all") or a single run (sel.runId) to
-  // another future date or today's live plan. The live target is read from the
-  // canonical today row, then written through the normal today endpoint so its
-  // additive/tombstone/LWW protections and SSE peers remain in the loop.
-  // Target is written before the source is trimmed/deleted: a partial failure
-  // leaves the source intact and the move panel actionable instead of losing it.
+  async function refreshScheduleAfterMutation(fromDate: string, toDate: string) {
+    await refreshScheduledDays();
+    const today = todayStr();
+    if (fromDate === today || toDate === today) {
+      const canonicalToday = await fetchSchedulePayload(today);
+      if (canonicalToday.payload) applySyncCallbackRef.current(canonicalToday.payload);
+    }
+  }
+  async function checkScheduleSwapEligibility(from: string, to: string) {
+    const checkId = ++scheduleSwapCheckRef.current;
+    setScheduleSwapAvailability(null);
+    if (!from || !to || from === to) return;
+    const localToday = todayStr();
+    const localSourceExists = from === localToday || scheduledDays.some((day) => day.date === from);
+    const localDestinationExists = to === localToday || scheduledDays.some((day) => day.date === to);
+    setScheduleSwapAvailability({
+      from,
+      to,
+      sourceScheduled: localSourceExists,
+      destinationScheduled: localDestinationExists,
+      canSwap: false,
+      reason: null,
+      checking: true,
+    });
+    try {
+      const query = new URLSearchParams({ sourceDate: from, destinationDate: to });
+      const response = await fetch(`/api/sync/schedule-swap-eligibility?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("swap eligibility unavailable");
+      const result = await response.json() as {
+        sourceScheduled?: boolean;
+        destinationScheduled?: boolean;
+        canSwap?: boolean;
+        reason?: string | null;
+      };
+      if (checkId !== scheduleSwapCheckRef.current) return;
+      setScheduleSwapAvailability({
+        from,
+        to,
+        sourceScheduled: result.sourceScheduled === true,
+        destinationScheduled: result.destinationScheduled === true,
+        canSwap: result.canSwap === true,
+        reason: typeof result.reason === "string" ? result.reason : null,
+        checking: false,
+      });
+    } catch {
+      if (checkId !== scheduleSwapCheckRef.current) return;
+      setScheduleSwapAvailability({
+        from,
+        to,
+        sourceScheduled: localSourceExists,
+        destinationScheduled: localDestinationExists,
+        canSwap: false,
+        reason: "eligibility-unavailable",
+        checking: false,
+      });
+    }
+  }
+  // Run moves and swaps use server transactions: a lost response can be
+  // reconciled by reloading canonical dates without replaying a second write.
   async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string): Promise<boolean> {
     setScheduleError(null);
     const today = todayStr();
     if (!toDate || toDate === fromDate) return false;
-    if (fromDate <= today || toDate < today) {
-      setScheduleError("Choose a future scheduled day and today or a future date.");
+    if (fromDate < today || toDate < today) {
+      setScheduleError("Choose today or a future date.");
       return false;
     }
     const sourceFetch = await fetchSchedulePayload(fromDate);
@@ -6980,6 +7056,12 @@ export default function Home() {
       setScheduleError("That scheduled day is no longer available. Refresh and try again.");
       return false;
     }
+    const targetResult = await fetchSchedulePayload(toDate);
+    if (!targetResult.available) {
+      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
+      return false;
+    }
+    const destinationRuns = targetResult.payload?.dayState?.runs ?? [];
     let ids: string[] | "all";
     if (sel === "all") ids = "all";
     else {
@@ -6989,13 +7071,7 @@ export default function Home() {
       }
       ids = [sel.runId];
     }
-    const targetResult = await fetchSchedulePayload(toDate);
-    if (!targetResult.available) {
-      setScheduleError("Couldn't load the destination plan. The source is unchanged; check your connection and try again.");
-      return false;
-    }
-    const tgt = targetResult.payload;
-    const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
+    const { idMap } = moveEntries(src.dayState.runs, destinationRuns, ids, genId);
     if (idMap.length === 0) {
       setScheduleError("There were no runs to move. Refresh and try again.");
       return false;
@@ -7016,121 +7092,90 @@ export default function Home() {
       );
       return false;
     }
-    const vals = relocateValues(
-      (src.runValues ?? {}) as Record<string, FormValues>,
-      (tgt?.runValues ?? {}) as Record<string, FormValues>,
-      idMap,
-    );
-    const stamps = relocateValues(
-      src.runValuesUpdatedAt ?? {},
-      tgt?.runValuesUpdatedAt ?? {},
-      idMap,
-    );
-    const packaging = relocateValues(
-      src.packagingProgress ?? {},
-      tgt?.packagingProgress ?? {},
-      idMap,
-    );
-    const base = tgt ?? src;
-    const targetPayload: SyncPayload = {
-      ...base,
-      // A move is built from a canonical read, so send it as a complete
-      // merge. Reusing a cached partial-sync baseSnapshotId makes an otherwise
-      // valid move fall back when the normal live sync advances that snapshot
-      // between the read and this write.
-      syncVersion: 1,
-      completeness: "complete",
-      baseSnapshotId: targetResult.snapshotId,
-      dayState: {
-        ...(base.dayState ?? src.dayState),
-        runs: target,
-        date: toDate,
-        resetAt: writeDayResetAt(toDate, today, (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()),
-      },
-      runValues: vals.target,
-      runValuesUpdatedAt: stamps.target,
-      packagingProgress: packaging.target,
-    };
-    const selectedIds = idMap.map(({ from }) => from);
-    const pendingCleanup = scheduleMoveCleanupRef.current;
-    const retryingCleanup = !!pendingCleanup &&
-      pendingCleanup.fromDate === fromDate &&
-      pendingCleanup.toDate === toDate &&
-      pendingCleanup.movedIds.length === selectedIds.length &&
-      pendingCleanup.movedIds.every((id) => selectedIds.includes(id));
-    if (!retryingCleanup) {
-      let canonicalTarget: { body: unknown; stale: boolean };
-      try {
-        const tRes = await fetch(
-          toDate === today
-            ? `/api/sync/today?today=${today}&epoch=${getStoredResetEpoch()}`
-            : `/api/sync/${toDate}?today=${today}&epoch=${getStoredResetEpoch()}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: targetPayload }),
-          },
-        );
-        canonicalTarget = await consumeCanonicalSyncWriteResponse(tRes, toDate === today);
-        const canonicalTargetBody = canonicalTarget.body as { data?: unknown; partialFallback?: boolean } | null;
-        if (!tRes.ok || canonicalTarget.stale || canonicalTargetBody?.partialFallback || !canonicalTargetBody?.data) {
-          setScheduleError(
-            canonicalTarget.stale
-              ? "The destination was reset before the move completed. Refresh and try again."
-              : "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
-          );
-          return false;
-        }
-      } catch {
-        setScheduleError(
-          "Couldn't save the destination plan. The source is unchanged; check your connection and try again.",
-        );
+    try {
+      const response = await fetch("/api/sync/schedule-move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceDate: fromDate,
+          destinationDate: toDate,
+          sourceRevision: sourceFetch.revision ?? 0,
+          destinationRevision: targetResult.revision ?? 0,
+          resetEpoch: getStoredResetEpoch(),
+          runIds: ids,
+          senderId: clientId.current,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { code?: string };
+      if (!response.ok) {
+        setScheduleError(response.status >= 500
+          ? "The move result is uncertain. Refresh both dates before retrying; do not repeat it until confirmed."
+          : result.code === "SCHEDULE_REVISION_CONFLICT"
+            ? "A schedule changed before the move was saved. No changes were made; refresh and choose again."
+            : result.code === "SCHEDULE_RUN_ID_COLLISION"
+              ? "A run with the same ID is already on the destination date. The source was left unchanged."
+              : result.code === "SCHEDULE_RUN_ALREADY_STARTED"
+                ? "A run that has started cannot be moved."
+                : "The move was rejected. No changes were made; refresh and try again.");
+        await refreshScheduleAfterMutation(fromDate, toDate);
         return false;
       }
-      // If the second write fails, the next click can finish source cleanup
-      // without writing the already-canonical destination a second time.
-      scheduleMoveCleanupRef.current = { fromDate, toDate, movedIds: selectedIds };
-    }
-    try {
-      if (source.length === 0) {
-        const deleteRes = await fetch(`/api/sync/${fromDate}?today=${today}`, { method: "DELETE" });
-        if (!deleteRes.ok) {
-          setScheduleError("The run was added to today's plan, but the future source could not be removed. Retry Move to finish.");
-          return false;
-        }
-      } else {
-        const sourcePayload: SyncPayload = {
-          ...src,
-          dayState: {
-            ...src.dayState,
-            runs: source,
-            date: fromDate,
-          },
-          syncVersion: 1,
-          completeness: "complete",
-          baseSnapshotId: sourceFetch.snapshotId,
-          runValues: vals.source,
-          runValuesUpdatedAt: stamps.source,
-          packagingProgress: packaging.source,
-        };
-        const sRes = await fetch(`/api/sync/${fromDate}?today=${today}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payload: sourcePayload }),
-        });
-        const sourceResult = await consumeCanonicalSyncWriteResponse(sRes, false);
-        const sourceResultBody = sourceResult.body as { partialFallback?: boolean } | null;
-        if (!sRes.ok || sourceResult.stale || sourceResultBody?.partialFallback) {
-          setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
-          return false;
-        }
-      }
     } catch {
-      setScheduleError("The run was added to today's plan, but the future source could not be trimmed. Retry Move to finish.");
+      setScheduleError("The move could not be confirmed. Refresh both dates before trying again.");
+      await refreshScheduleAfterMutation(fromDate, toDate);
       return false;
     }
-    scheduleMoveCleanupRef.current = null;
-    await refreshScheduledDays();
+    await refreshScheduleAfterMutation(fromDate, toDate);
+    setScheduleSwapAvailability(null);
+    setScheduleError(null);
+    return true;
+  }
+
+  async function performScheduleSwap(fromDate: string, toDate: string): Promise<boolean> {
+    setScheduleError(null);
+    const sourceResult = await fetchSchedulePayload(fromDate);
+    const destinationResult = await fetchSchedulePayload(toDate);
+    if (
+      !sourceResult.available || !destinationResult.available
+      || !sourceResult.payload || !destinationResult.payload
+    ) {
+      setScheduleError("Both scheduled days must still be available. No changes were made; refresh and try again.");
+      await refreshScheduledDays();
+      return false;
+    }
+    try {
+      const response = await fetch("/api/sync/schedule-swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceDate: fromDate,
+          destinationDate: toDate,
+          sourceRevision: sourceResult.revision ?? 0,
+          destinationRevision: destinationResult.revision ?? 0,
+          resetEpoch: getStoredResetEpoch(),
+          senderId: clientId.current,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { code?: string };
+      if (!response.ok) {
+        setScheduleError(response.status >= 500
+          ? "The swap result is uncertain. Refresh both dates before retrying; do not repeat it until confirmed."
+          : result.code === "TODAY_SWAP_NOT_ELIGIBLE"
+          ? "Today's plan can no longer be swapped. You can append the runs or cancel."
+          : result.code === "SCHEDULE_REVISION_CONFLICT"
+            ? "A schedule changed before the swap. No changes were made; refresh and choose again."
+            : "The swap was not saved. No changes were made; refresh and try again.");
+        await refreshScheduleAfterMutation(fromDate, toDate);
+        await checkScheduleSwapEligibility(fromDate, toDate);
+        return false;
+      }
+    } catch {
+      setScheduleError("The swap could not be confirmed. Refresh both dates before trying again.");
+      await refreshScheduleAfterMutation(fromDate, toDate);
+      return false;
+    }
+    await refreshScheduleAfterMutation(fromDate, toDate);
+    setScheduleSwapAvailability(null);
     setScheduleError(null);
     return true;
   }
@@ -7208,6 +7253,7 @@ export default function Home() {
         peerReceivedAt?: number;
         peerResponseBytes?: number;
         allowForegroundCanonicalFormReset?: boolean;
+        acceptCanonicalRunValueIds?: string[];
       },
     ) => void
   >(() => {});
@@ -7860,6 +7906,7 @@ export default function Home() {
         peerReceivedAt?: number;
         peerResponseBytes?: number;
         allowForegroundCanonicalFormReset?: boolean;
+        acceptCanonicalRunValueIds?: string[];
       },
     ) => {
       let queuedIntentReapplied = false;
@@ -7914,17 +7961,23 @@ export default function Home() {
                 baseline: canonical,
                 payload: recovery.payload,
               });
+              const conflictOutcome = describeServerWinsConflictOutcome(
+                recovery.retainedServerConflicts,
+              );
               recordSyncEvent(
                 "merge",
-                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${saved ? "" : " (recovery copy could not be updated)"}.`,
+                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes${conflictOutcome ? `; ${conflictOutcome}` : ""}${saved ? "" : " (recovery copy could not be updated)"}.`,
                 "stale-base-recovered",
               );
             } else {
               clearPendingSyncIntent(scope, pending.date, pending.id);
               if (recovery.retainedServerConflicts > 0) {
+                const conflictOutcome = describeServerWinsConflictOutcome(
+                  recovery.retainedServerConflicts,
+                );
                 recordSyncEvent(
                   "merge",
-                  `Kept ${recovery.retainedServerConflicts} newer server values during queued sync recovery`,
+                  `Queued sync recovery ${conflictOutcome}.`,
                   "stale-base-conflicts",
                 );
               }
@@ -8023,6 +8076,9 @@ export default function Home() {
             rTs,
             lTs,
             runValueServerNow,
+          ) || (
+            options?.acceptCanonicalRunValueIds?.includes(id) === true
+            && !isEmptyOverPopulated(vals as FormValues, localVals)
           );
           let acceptedVals = localVals;
           if (!acceptWholeRun) {
@@ -8048,7 +8104,13 @@ export default function Home() {
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
             };
-            if (
+            if (options?.acceptCanonicalRunValueIds?.includes(id) === true) {
+              // An explicit stale-base rebase already resolved this run
+              // against the canonical server snapshot. Align its local stamp
+              // with that canonical value instead of letting the older
+              // queued edit's stamp reject the server-wins result.
+              mergedUpd[id] = rTs;
+            } else if (
               rTs > lTs
               || isRunValueStampAheadOfServerTime(lTs, runValueServerNow)
             ) mergedUpd[id] = rTs;
@@ -8405,27 +8467,22 @@ export default function Home() {
           !!currentId &&
           !!currentRunValues &&
           isEmptyOverPopulated(currentRunValues, loadRunValues(currentId));
-        const canResetLiveForm = Boolean(
-          currentId &&
-          (currentRunValues || adoptedPackaging) &&
-          (
-            adoptedPackaging ||
-            (
-              curLocalTs <= curRemoteTs &&
-              // A successful foreground pull has already resolved this run's
-              // LWW merge. Its canonical value may bypass the ordinary quiet/
-              // acknowledgment guard, but a strictly newer local edit remains.
-              (
-                options?.allowForegroundCanonicalFormReset ||
-                (
-                  localEditQuietMs > 2000 &&
-                  pushAcknowledgedRef.current
-                )
-              )
-            )
-          ) &&
-          !emptyOverPopulatedFormReset,
-        );
+        const explicitCanonicalRunAdoption =
+          !!currentId
+          && options?.acceptCanonicalRunValueIds?.includes(currentId) === true;
+        const canResetLiveForm = shouldResetLiveFormForSync({
+          currentRunId: currentId,
+          hasCurrentRunValues: !!currentRunValues,
+          adoptedPackaging,
+          explicitRebaseAdoption: explicitCanonicalRunAdoption,
+          localUpdatedAt: curLocalTs,
+          remoteUpdatedAt: curRemoteTs,
+          allowForegroundCanonicalFormReset:
+            options?.allowForegroundCanonicalFormReset === true,
+          localEditQuietMs,
+          pushAcknowledged: pushAcknowledgedRef.current,
+          emptyOverPopulated: emptyOverPopulatedFormReset,
+        });
         if (canResetLiveForm) {
           // Read the already-reconciled durable copy rather than the raw payload:
           // the whole-run LWW and packaging register may have selected different
@@ -8623,9 +8680,9 @@ export default function Home() {
   // Best-effort call to POST /inventory/consume-day-start on first load. The
   // server is idempotent per date (runId = "day-start:{today}"), so subsequent
   // calls within the same day return applied=false with zero side-effects.
-  // Managers-only gate on the server; non-managers get a harmless 403.
+  // Only managers need the daily stock pass; the server capability check remains authoritative.
   useEffect(() => {
-    if (screenMode !== null) return;
+    if (screenMode !== null || !canManageInventory) return;
     (async () => {
       try {
         await fetch("/api/inventory/consume-day-start", {
@@ -8637,7 +8694,7 @@ export default function Home() {
         /* best-effort — daily reset will retry next boot if needed */
       }
     })();
-  }, [screenMode]);
+  }, [screenMode, canManageInventory]);
 
     // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -10119,19 +10176,30 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount(0);
         setSyncRetryWaiting(false);
+        if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
         const queued = syncPushQueueRef.current.finish({ drainQueued: true });
         if (queued) {
           const freshPayload = buildSyncPayload(dayStateRef.current);
-          pushAcknowledgedRef.current = false;
-          setSyncPendingCount(1);
-          doFetch(
-            freshPayload,
-            3,
-            JSON.stringify(freshPayload),
-            syncPushGenerationRef.current,
-            false,
-            queued,
-          );
+          const freshSig = JSON.stringify(freshPayload);
+          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+            pushAcknowledgedRef.current = false;
+            setSyncPendingCount(1);
+            doFetch(
+              freshPayload,
+              3,
+              freshSig,
+              syncPushGenerationRef.current,
+              false,
+              queued,
+            );
+          } else {
+            recordSyncEvent(
+              "merge",
+              "Queued change already matches the confirmed server state; no duplicate write was sent",
+              "duplicate-suppressed",
+              currentRunId,
+            );
+          }
         }
         return;
       }
@@ -10200,14 +10268,14 @@ export default function Home() {
       clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
-       if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
-       if (payload.history !== undefined) {
-         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
-         if (work.payload.history !== payload.history) {
-           lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
-         }
-       } else if (work.payload.history !== undefined) {
-         lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
+      if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
+      if (payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+        if (work.payload.history !== payload.history) {
+          lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
+        }
+      } else if (work.payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
@@ -10220,17 +10288,33 @@ export default function Home() {
         if (replayedAfterPartialFallback) {
           const freshPayload = buildSyncPayload(dayStateRef.current);
           const freshSig = JSON.stringify(freshPayload);
-          pushAcknowledgedRef.current = false;
-          doFetch(
-            freshPayload,
-            3,
-            freshSig,
-            syncPushGenerationRef.current,
-            false,
-            queued,
-          );
-        } else {
+          if (shouldSendDistinctQueuedSyncWork(freshSig, work.sig)) {
+            pushAcknowledgedRef.current = false;
+            doFetch(
+              freshPayload,
+              3,
+              freshSig,
+              syncPushGenerationRef.current,
+              false,
+              queued,
+            );
+          } else {
+            recordSyncEvent(
+              "merge",
+              "Queued change already matches the confirmed server state; no duplicate write was sent",
+              "duplicate-suppressed",
+              currentRunId,
+            );
+          }
+        } else if (shouldSendDistinctQueuedSyncWork(queued.sig, work.sig)) {
           doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        } else {
+          recordSyncEvent(
+            "merge",
+            "Queued change already matches the confirmed server state; no duplicate write was sent",
+            "duplicate-suppressed",
+            currentRunId,
+          );
         }
       }
     }).catch(() => {
@@ -10604,6 +10688,9 @@ export default function Home() {
       if (!work.baseSnapshot) throw new Error("Stale sync write has no captured canonical baseline");
       if (!snapshotId) throw new Error("Stale sync response omitted its canonical snapshot identity");
 
+      // Preserve the exact request that received the stale-base response; work.payload
+      // is replaced with the rebased result below.
+      const sentRunValues = work.payload.runValues ?? {};
       const canonical = persistedSyncPayload(canonicalInput);
       const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
         snapshotId,
@@ -10622,10 +10709,10 @@ export default function Home() {
       const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
       const date = recovery.payload.dayState.date ?? todayStr();
       const pending = loadPendingSyncIntent(scope, date);
-      let durable = false;
-      if (recovery.reappliedChanges > 0 && scope && work.pendingIntentId) {
-        if (!pending || pending.id === work.pendingIntentId) {
-          durable = savePendingSyncIntent({
+      let recoveryCopyStatus: PendingSyncRecoveryCopyStatus | null = null;
+      if (recovery.reappliedChanges > 0) {
+        recoveryCopyStatus = saveRebasedPendingSyncIntent(
+          scope && work.pendingIntentId ? {
             version: 1,
             id: work.pendingIntentId,
             scope,
@@ -10634,24 +10721,53 @@ export default function Home() {
             baseSnapshotId: snapshotId,
             baseline: canonical,
             payload: recovery.payload,
-          });
-        }
+          } : null,
+          pending,
+        );
       } else if (scope && work.pendingIntentId) {
         clearPendingSyncIntent(scope, date, work.pendingIntentId);
       }
 
+      const currentPayload = buildSyncPayload(dayStateRef.current);
+      const canonicalRunValueIds = selectUnchangedRunValueIdsForRecovery(
+        sentRunValues,
+        recovery.payload.runValues ?? {},
+        currentPayload.runValues ?? {},
+      );
+      const applyRecoveryPayload = () => applySyncCallbackRef.current(
+        recovery.payload,
+        {
+          acceptCanonicalRunValueIds: canonicalRunValueIds,
+          allowForegroundCanonicalFormReset: canonicalRunValueIds.includes(currentRunId),
+        },
+      );
+
       if (recovery.reappliedChanges > 0) {
-        applySyncCallbackRef.current(recovery.payload);
+        applyRecoveryPayload();
+        const recoveryCopyNotice = recoveryCopyStatus
+          ? pendingSyncRecoveryCopyNotice(recoveryCopyStatus)
+          : "";
+        const conflictOutcome = describeServerWinsConflictOutcome(
+          recovery.retainedServerConflicts,
+        );
         recordSyncEvent(
           "merge",
-          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${durable ? "" : " (reload recovery copy unavailable)"}.`,
+          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes${conflictOutcome ? `; ${conflictOutcome}` : ""}${recoveryCopyNotice ? `; ${recoveryCopyNotice}` : ""}.`,
           "stale-base-recovered",
           currentRunId,
         );
       } else if (recovery.retainedServerConflicts > 0) {
+        // Conflict-only recovery must still adopt the canonical payload. The
+        // server-wins merge has discarded the local conflicting values; leaving
+        // the form untouched would show a value that no longer exists on the
+        // server and that the operator explicitly chose not to retain.
+        applyRecoveryPayload();
+        const conflictOutcome = describeServerWinsConflictOutcome(
+          recovery.retainedServerConflicts,
+        );
         recordSyncEvent(
           "merge",
-          `Kept ${recovery.retainedServerConflicts} newer server values during stale-base recovery`,
+          `Stale-base recovery ${conflictOutcome}.`,
           "stale-base-conflicts",
           currentRunId,
         );
@@ -10790,6 +10906,24 @@ export default function Home() {
     const persistedDay = loadDayState();
     const persistedRun = persistedDay.runs.find((run) => run.id === liveRun.id);
     if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
+    const savedSubTab = loadProfileSubTab(brand, flavor);
+    if (savedSubTab && liveRun.subTab !== savedSubTab) {
+      const nextDayState = {
+        ...liveDay,
+        runs: liveDay.runs.map((run) =>
+          run.id === liveRun.id ? { ...run, subTab: savedSubTab } : run,
+        ),
+      };
+      setDayState(nextDayState);
+      saveDayState(nextDayState);
+      setDoughSubTab(savedSubTab);
+      try {
+        const ack = await pushTodayCanonical(buildSyncPayload(nextDayState));
+        if (!ack.ok) return;
+      } catch {
+        return;
+      }
+    }
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
     await runSharedRecipeRefresh(liveRun, async () => {
@@ -11237,7 +11371,7 @@ export default function Home() {
       // make an acknowledged recipe edit look already propagated.
       if (acknowledgedNames && acknowledgedNames.size > 0) {
         const key = canonicalProfileKey(brand, flavor);
-        markProfileForceEdited(key);
+        markProfileForceEdited(key, { brand, flavor });
         propagateSigRef.current.delete(key);
       }
       return handleSetupProfileSaved(brand, flavor, undefined, backgroundGeneration);
@@ -11489,7 +11623,10 @@ export default function Home() {
         // row helper has already written the linked profile locally; upgrade
         // its queued operation before flushing so an older profile stamp cannot
         // prevent the pending-run fan-out.
-        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor));
+        markProfileForceEdited(canonicalProfileKey(profile.brand, profile.flavor), {
+          brand: profile.brand,
+          flavor: profile.flavor,
+        });
         // A recipe edit must always publish its dependent pending-run snapshot,
         // even if an earlier same-session profile propagation recorded an
         // identical signature before the manager acknowledgement completed.
@@ -12034,36 +12171,76 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
-  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
-  // target brand+flavor and make it current, in one dayState computation, so
-  // the existing current run is never renamed/clobbered. Saves the outgoing
-  // run's values/profile exactly like addRun, then loads the target profile
-  // into the form exactly like setRunBrandFlavor (single-tick sequencing of
-  // addRun()+setRunBrandFlavor() would work off a stale dayState closure and
-  // drop the new run). Returns false at the run cap — caller must fall back
-  // without touching anything.
-  function addRunWithIdentity(brand: string, flavor: string): boolean {
-    if (dayState.runs.length >= MAX_RUNS) return false;
+  function loadDoughRecipesForProfile(
+    profile: ReturnType<typeof loadProfile>,
+  ): typeof doughRecipesList | Promise<typeof doughRecipesList | null> {
+    if (!normalizeSelectableName(profile?.doughRecipeName ?? "")) {
+      return doughRecipesList;
+    }
+    if (hasDoughRecipesData && !areDoughRecipesStale) return doughRecipesList;
+    toast({
+      title: "Checking shared recipe status",
+      description: "This profile will be applied after recipe data loads.",
+    });
+    return ensureDoughRecipesLoaded().catch(() => {
+      toast({
+        title: "Profile not applied",
+        description: "Shared recipe details could not be loaded. No profile values or run mode were changed. Check your connection and select the profile again.",
+        variant: "destructive",
+      });
+      return null;
+    });
+  }
+
+  function commitAddRunWithIdentity(
+    brand: string,
+    flavor: string,
+    recipes: typeof doughRecipesList,
+    targetRunId: string | null,
+    requestGeneration: number,
+  ): boolean {
+    if (requestGeneration !== profileApplyGenerationRef.current) return false;
+    if (targetRunId !== currentRunIdRef.current) {
+      toast({
+        title: "Setup changed",
+        description: "The active run changed while recipe data was loading. Select the profile again.",
+        variant: "destructive",
+      });
+      return false;
+    }
     flushPendingHomeFormWrites();
+    if (targetRunId !== currentRunIdRef.current) return false;
+    const outgoingDay = dayStateRef.current;
+    const outgoingRun = outgoingDay.runs[outgoingDay.currentIndex] ?? outgoingDay.runs[0];
+    if (targetRunId && outgoingRun?.id !== targetRunId) return false;
+    if (outgoingDay.runs.length >= MAX_RUNS) return false;
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    if (outgoingRun) saveRunValues(outgoingRun.id, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && outgoingRun && (outgoingRun.brand || outgoingRun.flavor)) {
+      if (saveProfile(outgoingRun.brand, outgoingRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(outgoingRun.brand, outgoingRun.flavor);
       }
     }
     const newId = genId();
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
+    const profile = loadProfile(brand, flavor);
+    const profileDoughName = normalizeSelectableName(profile?.doughRecipeName ?? "").toLowerCase();
+    const linkedDoughRecipe = recipes.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === profileDoughName,
+    );
+    const preferredSubTab = linkedDoughRecipe?.isPremadeCrust
+      ? "crusts"
+      : loadProfileSubTab(brand, flavor);
     const newDs = {
-      runs: [...dayState.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
-      currentIndex: dayState.runs.length,
+      runs: [...outgoingDay.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
+      currentIndex: outgoingDay.runs.length,
     };
     setDayState(newDs);
     saveDayState(newDs);
     if (preferredSubTab) setDoughSubTab(preferredSubTab);
-    const profile = loadProfile(brand, flavor);
     if (profile) {
       // Strip mix recipe names from sauce fields — they belong in the applicator mix field
       if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
@@ -12080,42 +12257,92 @@ export default function Home() {
     return true;
   }
 
-  function setRunBrandFlavor(brand: string, flavor: string) {
+  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
+  // target brand+flavor and make it current, in one dayState computation, so
+  // the existing current run is never renamed/clobbered. It resolves false at
+  // the run cap and waits for linked shared recipe data before applying a profile.
+  function addRunWithIdentity(brand: string, flavor: string): boolean | Promise<boolean> {
+    if (dayStateRef.current.runs.length >= MAX_RUNS) return false;
+    const requestGeneration = ++profileApplyGenerationRef.current;
+    const targetRunId = currentRunIdRef.current;
+    const recipes = loadDoughRecipesForProfile(loadProfile(brand, flavor));
+    if (Array.isArray(recipes)) {
+      return commitAddRunWithIdentity(brand, flavor, recipes, targetRunId, requestGeneration);
+    }
+    return recipes.then((loadedRecipes) =>
+      loadedRecipes
+        ? commitAddRunWithIdentity(brand, flavor, loadedRecipes, targetRunId, requestGeneration)
+        : false,
+    );
+  }
+
+  function commitRunBrandFlavor(
+    brand: string,
+    flavor: string,
+    recipes: typeof doughRecipesList,
+    targetRunId: string | null,
+    requestGeneration: number,
+  ): void {
+    if (requestGeneration !== profileApplyGenerationRef.current) return;
+    if (targetRunId !== currentRunIdRef.current) {
+      toast({
+        title: "Setup changed",
+        description: "The active run changed while recipe data was loading. Select the profile again.",
+        variant: "destructive",
+      });
+      return;
+    }
     flushPendingHomeFormWrites();
-    // Save current values to old profile
+    if (targetRunId !== currentRunIdRef.current) return;
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay.runs[liveDay.currentIndex] ?? liveDay.runs[0];
+    if (!liveRun || (targetRunId && liveRun.id !== targetRunId)) return;
+    // Save current values to old profile.
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    saveRunValues(liveRun.id, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && (liveRun.brand || liveRun.flavor)) {
+      if (saveProfile(liveRun.brand, liveRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(liveRun.brand, liveRun.flavor);
       }
     }
 
     // Update run meta — also carry the saved line-type preference so the run
     // starts in Dough or Crust mode automatically, without needing the user to
     // toggle it every time they assign this brand+flavor.
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
-        ? { ...r, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
-        : r
+    const profile = loadProfile(brand, flavor);
+    const profileDoughName = normalizeSelectableName(profile?.doughRecipeName ?? "").toLowerCase();
+    const linkedDoughRecipe = recipes.find(
+      (recipe) =>
+        recipe.enabled !== false &&
+        normalizeSelectableName(recipe.name).toLowerCase() === profileDoughName,
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const currentRunHasStarted = Boolean(liveRun.startedAt || liveRun.endedAt);
+    const preferredSubTab = currentRunHasStarted
+      ? undefined
+      : linkedDoughRecipe?.isPremadeCrust
+        ? "crusts"
+        : loadProfileSubTab(brand, flavor);
+    const newRuns = liveDay.runs.map((run, index) =>
+      index === liveDay.currentIndex
+        ? { ...run, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
+        : run,
+    );
+    const newDs = { ...liveDay, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
     if (preferredSubTab) setDoughSubTab(preferredSubTab);
 
-    // Load profile for new brand+flavor if it exists
-    const profile = loadProfile(brand, flavor);
+    // Load profile for new brand+flavor if it exists.
     if (profile) {
-      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+      // Strip mix recipe names from sauce fields — they belong in the applicator mix field.
       if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
         profile.frontlineRecipeName = "";
         profile.frontlineRecipe = [];
       }
-      form.reset(profile); resetFieldArrays(profile);
+      form.reset(profile);
+      resetFieldArrays(profile);
     } else {
       // No saved profile for the new identity — reset to defaults. Keeping the
       // OLD run's values here silently rebrands them as the new brand/flavor,
@@ -12126,6 +12353,21 @@ export default function Home() {
       resetFieldArrays(DEFAULT_VALUES);
     }
     schedulePush(newDs, 0);
+  }
+
+  function setRunBrandFlavor(brand: string, flavor: string): void {
+    const requestGeneration = ++profileApplyGenerationRef.current;
+    const targetRunId = currentRunIdRef.current;
+    const recipes = loadDoughRecipesForProfile(loadProfile(brand, flavor));
+    if (Array.isArray(recipes)) {
+      commitRunBrandFlavor(brand, flavor, recipes, targetRunId, requestGeneration);
+      return;
+    }
+    void recipes.then((loadedRecipes) => {
+      if (loadedRecipes) {
+        commitRunBrandFlavor(brand, flavor, loadedRecipes, targetRunId, requestGeneration);
+      }
+    });
   }
 
   function addBrand(name: string) {
@@ -13698,7 +13940,7 @@ export default function Home() {
     const operationId = specImportOperationRef.current ?? createImportOperationId();
     specImportOperationRef.current = operationId;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
         await (await loadWorkbookWorkflow()).specImport.commitSpecImport(
           toCommit,
           forceUpdateProfileKeys,
@@ -13834,7 +14076,12 @@ export default function Home() {
             t.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
         );
         const profile = touched ? loadProfile(liveRun.brand, liveRun.flavor) : null;
-        if (profile) {
+        const persistedLiveRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+        const liveRunAlreadyStarted = Boolean(
+          liveRun.startedAt || liveRun.endedAt ||
+          persistedLiveRun?.startedAt || persistedLiveRun?.endedAt,
+        );
+        if (profile && !liveRunAlreadyStarted) {
           // Strip mix recipe names from sauce fields — they belong in the applicator mix field
           if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
             profile.frontlineRecipeName = "";
@@ -13846,21 +14093,22 @@ export default function Home() {
           lastLocalEditRef.current = now;
           form.reset(profile);
           resetFieldArrays(profile);
-          // If this profile is a purchased-crust product (no die type, crust-named
-          // doughName), automatically switch the run's Line Type to "Crust" so the
-          // operator doesn't have to toggle it manually. Mirrors the manual button
-          // handler at the "Crust" toggle (resolveCrustLineDefaults + subTab update).
-          const isImportedCrust = crustProfiles.some(
-            (c) =>
-              c.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
-              c.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
+          // Only an explicit manager classification on the linked shared recipe
+          // selects Crust mode. Workbook names and empty formulas are not proof.
+          const importedDoughName = normalizeSelectableName(profile.doughRecipeName ?? "").toLowerCase();
+          const linkedPremadeCrust = doughRecipesList.some(
+            (recipe) =>
+              recipe.enabled !== false &&
+              recipe.isPremadeCrust === true &&
+              normalizeSelectableName(recipe.name).toLowerCase() === importedDoughName,
           );
-          if (isImportedCrust && doughSubTab !== "crusts") {
+          if (linkedPremadeCrust && doughSubTab !== "crusts") {
             setDoughSubTab("crusts");
-            const updatedRuns = dayStateRef.current.runs.map((r: any, i: any) =>
-              i === dayStateRef.current.currentIndex ? { ...r, subTab: "crusts" as const } : r,
+            const currentDay = dayStateRef.current;
+            const updatedRuns = currentDay.runs.map((r) =>
+              r.id === liveRun.id ? { ...r, subTab: "crusts" as const } : r,
             );
-            const updatedDs = { ...dayStateRef.current, runs: updatedRuns };
+            const updatedDs = { ...currentDay, runs: updatedRuns };
             setDayState(updatedDs);
             saveDayState(updatedDs);
             const fills = resolveCrustLineDefaults(form.getValues());
@@ -15196,7 +15444,8 @@ export default function Home() {
     const byDate = payload.byDate ?? [];
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
-    let failed = 0;
+    let notSentDays = 0;
+    let unconfirmedDays = 0;
     let confirmedDays = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
@@ -15218,7 +15467,7 @@ export default function Home() {
         }
       } catch {}
       if (!existingSnapshotId) {
-        failed++;
+        notSentDays++;
         done++;
         lastErrorDetail = `Couldn't load the latest ${date} plan before saving it.`;
         setImportProgress({ done, total: byDate.length });
@@ -15303,7 +15552,7 @@ export default function Home() {
         setImportProgress(null);
         if (done > 0) {
           mixedImportQueue.outcome("schedule", "partial",
-            `${confirmedDays} days confirmed saved; ${failed} requests unconfirmed. Cancelled and remaining days were not sent. Earlier saves were not undone.`);
+            `${confirmedDays} days confirmed saved; ${unconfirmedDays} requests unconfirmed and ${notSentDays} days not sent. Cancelled and remaining days were not sent. Earlier saves were not undone.`);
           // Days are independently acknowledged. Cancelling a later proposal
           // cannot roll back earlier writes or claim the whole file was cancelled.
           void recordImportHistory({
@@ -15312,9 +15561,14 @@ export default function Home() {
             sourceLabel: "Schedule workbook",
             status: "partial",
             summary: {
-              counts: { confirmedDays, unconfirmedDays: failed, processedDays: done },
-              warnings: [`Stopped after ${done} processed days; ${confirmedDays} were confirmed saved. Earlier unconfirmed requests may still have reached the server.`],
-              followUp: ["Reload the schedule before importing again. The cancelled day and remaining days were not sent; earlier saves were not undone."],
+              counts: { confirmedDays, unconfirmedDays, notSentDays, processedDays: done },
+              warnings: [
+                `Stopped after ${done} processed days; ${confirmedDays} were confirmed saved, ${unconfirmedDays} requests were unconfirmed, and ${notSentDays} days were not sent.`,
+                ...(unconfirmedDays > 0 ? ["An unconfirmed request may have reached the server."] : []),
+              ],
+              followUp: [unconfirmedDays > 0
+                ? "Reload the schedule and inspect each unconfirmed day before deciding whether to retry. The cancelled day and remaining days were not sent; earlier saves were not undone."
+                : "The cancelled day and remaining days were not sent. Review the saved schedule before resuming; earlier acknowledged saves were not undone."],
             },
           }).catch(() => {});
           void fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(async (response) => {
@@ -15328,7 +15582,7 @@ export default function Home() {
           setImportIntoEditor(false);
           toast({
             title: "Schedule import stopped partway through",
-            description: `${confirmedDays} days were confirmed saved; ${failed} day requests were not confirmed. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
+            description: `${confirmedDays} days were confirmed saved; ${unconfirmedDays} requests were unconfirmed and ${notSentDays} days were not sent. The cancelled day and remaining days were not sent. Earlier saves were not undone.`,
           });
         }
         return;
@@ -15393,7 +15647,7 @@ export default function Home() {
       } catch (err) {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
-      if (!dayOk) failed += 1;
+      if (!dayOk) unconfirmedDays += 1;
       else {
         confirmedDays += 1;
         if (appliedValues) appliedScheduleRows.push(...appliedValues.runs);
@@ -15408,7 +15662,7 @@ export default function Home() {
     setImportIntoEditor(false);
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
-    if (failed === 0) {
+    if (unconfirmedDays === 0 && notSentDays === 0) {
       mixedImportQueue.outcome("schedule", skippedToday > 0 ? "partial" : "applied",
         `${byDate.length} day requests acknowledged separately; ${skippedToday} already-started rows skipped.`);
       payload.onApplied?.();
@@ -15434,25 +15688,51 @@ export default function Home() {
         description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.${skippedNote}`,
       });
     } else {
-      mixedImportQueue.outcome("schedule", "partial",
-        `${byDate.length - failed} day requests acknowledged; ${failed} unconfirmed. Earlier saves were not undone. Check current days before another review.`);
+      const sourceRunCount = byDate.reduce((n, day) => n + day.runs.length, 0);
+      const outcomeStatus = confirmedDays > 0 || unconfirmedDays > 0 ? "partial" : "failed";
+      const recoveryAction = unconfirmedDays > 0
+        ? "Reload the schedule and inspect each unconfirmed date before deciding whether to retry. The server may already have saved an unconfirmed request; do not resend without reviewing the current day."
+        : confirmedDays > 0
+          ? "The confirmed days are saved. The other days were not sent because their latest plans could not be loaded; restore the connection before reviewing those source rows again."
+          : "No schedule write was sent because the latest day could not be loaded. Restore the connection, then review the source again.";
+      mixedImportQueue.outcome("schedule", outcomeStatus,
+        `${confirmedDays} day requests acknowledged; ${unconfirmedDays} unconfirmed and ${notSentDays} not sent. Earlier saves were not undone. Reload and inspect current days before another review.`);
       void recordImportHistory({
         importType: "schedule",
+        sourceKey: payload.sourceKey,
         sourceLabel: "Schedule workbook",
-        status: "failed",
+        status: outcomeStatus,
         summary: {
-          phases: { parse: "deterministic multi-day parse", linking: "completed", commit: "partially saved" },
-          source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
-          landed: { days: byDate.length - failed, runs: 0 },
-          counts: { parsed: byDate.length, landedDays: byDate.length - failed, failedDays: failed, skipped: skippedToday },
-          mismatches: [`${failed} schedule day(s) could not be saved.`],
-          followUp: ["Retry the import after checking the failed day(s)."],
+          phases: {
+            parse: "deterministic multi-day parse",
+            linking: "completed",
+            commit: unconfirmedDays > 0 ? "some day requests have no confirmed reply" : "no day write was sent",
+          },
+          source: { days: byDate.length, runs: sourceRunCount },
+          counts: {
+            requestedDays: byDate.length,
+            confirmedDays,
+            unconfirmedDays,
+            notSentDays,
+            skippedToday,
+          },
+          mismatches: [
+            ...(unconfirmedDays > 0 ? [`${unconfirmedDays} schedule day request(s) ended without a confirmed reply; server state may have changed.`] : []),
+            ...(notSentDays > 0 ? [`${notSentDays} schedule day(s) were not sent because the latest plan could not be loaded.`] : []),
+          ],
+          followUp: [recoveryAction],
         },
       }).catch(() => {});
+      const resultNotConfirmed = unconfirmedDays > 0;
+      const resultPartlySaved = confirmedDays > 0 && notSentDays > 0;
       toast({
         variant: "destructive",
-        title: failed === byDate.length ? "Import failed" : "Import partly failed",
-        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.${skippedNote}`,
+        title: unconfirmedDays > 0
+          ? confirmedDays > 0 ? "Schedule import partly confirmed" : "Schedule result not confirmed"
+          : resultPartlySaved ? "Schedule import partly saved" : "Schedule was not saved",
+        description: resultNotConfirmed
+          ? `${confirmedDays} of ${byDate.length} day requests were confirmed; ${unconfirmedDays} did not receive a confirmed reply${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. An unconfirmed day may already have been saved. Reload and inspect affected dates before deciding whether to retry.${skippedNote}`
+          : `${confirmedDays} of ${byDate.length} day requests were confirmed; ${notSentDays} were not sent${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Restore the connection before reviewing those source rows again.${skippedNote}`,
       });
     }
     // OFFER (never auto-apply) new case counts for in-progress runs whose
@@ -19507,6 +19787,14 @@ export default function Home() {
                       </div>
                     ) : scheduledDays.map(day => {
                       const isExpanded = expandedScheduleDay === day.date;
+                      const moveChoice = scheduleSwapAvailability?.from === day.date
+                        && scheduleSwapAvailability.to === scheduleMoveDate
+                        ? scheduleSwapAvailability
+                        : null;
+                      const destinationAlreadyScheduled = !!moveChoice
+                        && !moveChoice.checking
+                        && moveChoice.sourceScheduled
+                        && moveChoice.destinationScheduled;
                       return (
                         <div key={day.date} data-testid={`schedule-day-${day.date}`} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
                           {/* ── Header row ── */}
@@ -19535,9 +19823,12 @@ export default function Home() {
                                 setScheduleError(null);
                                   if (scheduleMove?.from === day.date && scheduleMove.runId === null) {
                                     setScheduleMove(null);
+                                    setScheduleSwapAvailability(null);
                                   } else {
                                     setScheduleMove({ from: day.date, runId: null });
-                                    setScheduleMoveDate(tomorrowStr());
+                                    const nextDate = tomorrowStr();
+                                    setScheduleMoveDate(nextDate);
+                                    void checkScheduleSwapEligibility(day.date, nextDate);
                                   }
                                 }}
                                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
@@ -19571,35 +19862,153 @@ export default function Home() {
                           {scheduleMove?.from === day.date && scheduleMove.runId === null && (
                             <div className="border-t border-border/40 px-3 py-2.5 bg-primary/5">
                               <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Move all runs to</label>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <input
                                   type="date"
                                   value={scheduleMoveDate}
-                                   min={todayStr()}
-                                  onChange={e => setScheduleMoveDate(e.target.value)}
-                                  className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
-                                  onClick={async () => {
-                                    setScheduleMoving(true);
-                                   const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
-                                   setScheduleMoving(false);
-                                   if (moved) setScheduleMove(null);
+                                  min={todayStr()}
+                                  onChange={e => {
+                                    const nextDate = e.target.value;
+                                    setScheduleMoveDate(nextDate);
+                                    void checkScheduleSwapEligibility(day.date, nextDate);
                                   }}
-                                  className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                                >
-                                  {scheduleMoving ? "Moving…" : "Move"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setScheduleMove(null)}
-                                  className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                                >
-                                  Cancel
-                                </button>
+                                  className="w-full sm:flex-1 h-10 sm:h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
+                                />
                               </div>
+                              {moveChoice?.checking ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs text-muted-foreground" role="status">Checking destination options…</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : moveChoice && !moveChoice.sourceScheduled ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs text-muted-foreground" role="status">The source schedule is no longer available. Refresh before moving it.</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : destinationAlreadyScheduled ? (
+                                <div className="mt-2 space-y-2">
+                                  <p className="text-xs text-muted-foreground">
+                                    This date already has a schedule. Choose to swap the day schedules, append these runs, or cancel without changes.
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {moveChoice.canSwap ? (
+                                      <button
+                                        type="button"
+                                        disabled={scheduleMoving}
+                                        onClick={async () => {
+                                          setScheduleMoving(true);
+                                          const swapped = await performScheduleSwap(day.date, scheduleMoveDate);
+                                          setScheduleMoving(false);
+                                          if (swapped) setScheduleMove(null);
+                                        }}
+                                        className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                      >
+                                        {scheduleMoving ? "Saving…" : "Swap day schedules"}
+                                      </button>
+                                    ) : (
+                                      <p className="w-full text-xs text-muted-foreground" role="status">
+                                        {moveChoice.reason === "today-started-after-6am"
+                                          ? "Today’s plan has started; swaps are unavailable after 6:59 a.m. Append or cancel instead."
+                                          : "Swap availability could not be confirmed. Append runs or cancel instead."}
+                                      </p>
+                                    )}
+                                    <button
+                                      type="button"
+                                      disabled={scheduleMoving}
+                                      onClick={async () => {
+                                        setScheduleMoving(true);
+                                        const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                        setScheduleMoving(false);
+                                        if (moved) setScheduleMove(null);
+                                      }}
+                                      className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-foreground hover:bg-muted/80 disabled:opacity-50"
+                                    >
+                                      {scheduleMoving ? "Saving…" : "Append runs"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={scheduleMoving}
+                                      onClick={() => {
+                                        setScheduleMove(null);
+                                        setScheduleSwapAvailability(null);
+                                      }}
+                                      className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : moveChoice ? (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <button
+                                    type="button"
+                                    disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                    onClick={async () => {
+                                      setScheduleMoving(true);
+                                      const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                      setScheduleMoving(false);
+                                      if (moved) setScheduleMove(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                  >
+                                    {scheduleMoving ? "Moving…" : "Move"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <button
+                                    type="button"
+                                    disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                    onClick={async () => {
+                                      setScheduleMoving(true);
+                                      const moved = await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                      setScheduleMoving(false);
+                                      if (moved) setScheduleMove(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                                  >
+                                    {scheduleMoving ? "Moving…" : "Move"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setScheduleMove(null);
+                                      setScheduleSwapAvailability(null);
+                                    }}
+                                    className="min-h-10 px-3 py-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                           {/* ── Expandable run list ── */}
@@ -19639,10 +20048,12 @@ export default function Home() {
                                       onClick={() => {
                                         if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) {
                                           setScheduleMove(null);
+                                          setScheduleSwapAvailability(null);
                                         } else {
                                           setScheduleError(null);
                                           setScheduleMove({ from: day.date, runId: run.id });
                                           setScheduleMoveDate(tomorrowStr());
+                                          setScheduleSwapAvailability(null);
                                         }
                                       }}
                                       className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"

@@ -98,6 +98,12 @@ describe("normalizeNamedRecipe", () => {
     });
   });
 
+  it("preserves an explicit premade-crust classification and leaves omission unclassified", () => {
+    expect(normalizeNamedRecipe({ name: "Specialty Crust" })?.isPremadeCrust).toBeUndefined();
+    expect(normalizeNamedRecipe({ name: "Specialty Crust", isPremadeCrust: true })?.isPremadeCrust).toBe(true);
+    expect(normalizeNamedRecipe({ name: "Specialty Crust", isPremadeCrust: false })?.isPremadeCrust).toBe(false);
+  });
+
   it("keeps an explicit id and scope, clamps lbs, drops bad components", () => {
     const r = normalizeNamedRecipe({
       id: "dough:x",

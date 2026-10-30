@@ -50,6 +50,12 @@ import {
 } from "@workspace/db";
 import { and, eq, gt, gte, lte, asc, desc, sql, inArray } from "drizzle-orm";
 import { currentScope, runWithScope, type Scope } from "../lib/requestScope";
+import {
+  isTodayScheduleSwapAllowed,
+  moveEntries,
+  relocateValues,
+  swapDateScopedScheduleState,
+} from "@workspace/schedule-move";
 import { protectRunValues, preserveAndInvalidateAutoTrackCoordination, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
@@ -2991,6 +2997,520 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
     })
   );
 });
+
+router.post(
+  "/sync/schedule-move",
+  requireCapability("manage-factory-settings"),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = req.body as Record<string, unknown> | null;
+    const sourceDate = body?.sourceDate;
+    const destinationDate = body?.destinationDate;
+    const sourceRevision = body?.sourceRevision;
+    const destinationRevision = body?.destinationRevision;
+    const expectedEpoch = body?.resetEpoch;
+    const requestedIds = body?.runIds;
+    const senderId = typeof body?.senderId === "string" ? body.senderId.slice(0, 160) : "";
+    const validIds = requestedIds === "all"
+      || (
+        Array.isArray(requestedIds)
+        && requestedIds.length > 0
+        && requestedIds.length <= 100
+        && requestedIds.every((id) => typeof id === "string" && /^[A-Za-z0-9:_-]{1,160}$/.test(id))
+        && new Set(requestedIds).size === requestedIds.length
+      );
+    if (
+      typeof sourceDate !== "string" || !isValidDate(sourceDate)
+      || typeof destinationDate !== "string" || !isValidDate(destinationDate)
+      || sourceDate === destinationDate
+      || !Number.isSafeInteger(sourceRevision) || Number(sourceRevision) < 0
+      || !Number.isSafeInteger(destinationRevision) || Number(destinationRevision) < 0
+      || !Number.isSafeInteger(expectedEpoch) || Number(expectedEpoch) < 0
+      || !validIds
+    ) {
+      res.status(400).json({ error: "Invalid schedule move request" });
+      return;
+    }
+
+    const scope = currentScope();
+    const nowMs = Date.now();
+    const today = facilityDate(nowMs);
+    if (sourceDate < today || destinationDate < today) {
+      res.status(400).json({ error: "Schedule moves only support today and future dates" });
+      return;
+    }
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(nowMs) })
+          .onConflictDoNothing();
+        const [reset] = await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
+        if ((reset?.epoch ?? 0) !== Number(expectedEpoch)) return { kind: "stale-epoch" as const };
+
+        const [sourceRow] = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)))
+          .for("update");
+        if (!sourceRow) return { kind: "missing-source" as const };
+        const currentSourceRevision = sourceRow.canonicalRevision ?? 0;
+        if (currentSourceRevision !== Number(sourceRevision)) {
+          return {
+            kind: "revision-conflict" as const,
+            sourceRevision: currentSourceRevision,
+            destinationRevision: Number(destinationRevision),
+          };
+        }
+
+        const sourceData = completeSyncData(sourceRow.data);
+        if (
+          !sourceData || typeof sourceData !== "object" || Array.isArray(sourceData)
+          || !isSyncRecord((sourceData as Record<string, unknown>).dayState)
+        ) return { kind: "invalid-source" as const };
+        const sourceDocument = sourceData as Record<string, unknown>;
+        const sourceDay = sourceDocument.dayState as Record<string, unknown>;
+        const rawSourceRuns = Array.isArray(sourceDay.runs) ? sourceDay.runs : [];
+        if (rawSourceRuns.some((run) => !isSyncRecord(run) || typeof run.id !== "string")) {
+          return { kind: "invalid-source" as const };
+        }
+        const sourceRuns = rawSourceRuns as Array<Record<string, unknown> & { id: string }>;
+        const movingIds = requestedIds === "all" ? sourceRuns.map((run) => run.id) : requestedIds as string[];
+        if (
+          movingIds.length === 0
+          || movingIds.some((id) => !sourceRuns.some((run) => run.id === id))
+        ) return { kind: "invalid-selection" as const };
+        const movingRuns = sourceRuns.filter((run) => movingIds.includes(String(run.id)));
+        if (movingRuns.some((run) => run.startedAt != null || run.endedAt != null)) {
+          return { kind: "started-run" as const };
+        }
+
+        let [destinationRow] = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)))
+          .for("update");
+        let createdDestination = false;
+        if (!destinationRow) {
+          const [inserted] = await tx.insert(dailySyncTable).values({
+            scope,
+            date: destinationDate,
+            data: emptySyncData(destinationDate) as any,
+            canonicalRevision: 0,
+            updatedAt: new Date(nowMs),
+          }).onConflictDoNothing().returning({ date: dailySyncTable.date });
+          createdDestination = !!inserted;
+          [destinationRow] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)))
+            .for("update");
+        }
+        if (!destinationRow) return { kind: "missing-destination" as const };
+        const currentDestinationRevision = destinationRow.canonicalRevision ?? 0;
+        if (currentDestinationRevision !== Number(destinationRevision)) {
+          if (createdDestination) {
+            await tx.delete(dailySyncTable).where(and(
+              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
+            ));
+          }
+          return {
+            kind: "revision-conflict" as const,
+            sourceRevision: currentSourceRevision,
+            destinationRevision: currentDestinationRevision,
+          };
+        }
+
+        const destinationData = completeSyncData(destinationRow.data);
+        if (
+          !destinationData || typeof destinationData !== "object" || Array.isArray(destinationData)
+          || !isSyncRecord((destinationData as Record<string, unknown>).dayState)
+        ) return { kind: "invalid-destination" as const };
+        const destinationDocument = destinationData as Record<string, unknown>;
+        const destinationDay = destinationDocument.dayState as Record<string, unknown>;
+        const rawDestinationRuns = Array.isArray(destinationDay.runs) ? destinationDay.runs : [];
+        if (rawDestinationRuns.some((run) => !isSyncRecord(run) || typeof run.id !== "string")) {
+          if (createdDestination) {
+            await tx.delete(dailySyncTable).where(and(
+              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
+            ));
+          }
+          return { kind: "invalid-destination" as const };
+        }
+        const destinationRuns = rawDestinationRuns as Array<Record<string, unknown> & { id: string }>;
+        const moved = moveEntries(sourceRuns, destinationRuns, movingIds, () => randomUUID());
+        if (moved.idMap.some(({ from, to }) => from !== to)) {
+          if (createdDestination) {
+            await tx.delete(dailySyncTable).where(and(
+              eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate),
+            ));
+          }
+          return { kind: "run-id-collision" as const };
+        }
+
+        const relocateMap = (
+          left: Record<string, unknown>,
+          right: Record<string, unknown>,
+          key: string,
+          idMap: typeof moved.idMap,
+        ): [Record<string, unknown>, Record<string, unknown>] => {
+          if (
+            !Object.prototype.hasOwnProperty.call(left, key)
+            && !Object.prototype.hasOwnProperty.call(right, key)
+          ) return [left, right];
+          const movedMap = relocateValues(
+            isSyncRecord(left[key]) ? left[key] as Record<string, unknown> : {},
+            isSyncRecord(right[key]) ? right[key] as Record<string, unknown> : {},
+            idMap,
+          );
+          return [{ ...left, [key]: movedMap.source }, { ...right, [key]: movedMap.target }];
+        };
+        let nextSource = { ...sourceDocument };
+        let nextDestination = { ...destinationDocument };
+        const values = relocateValues(
+          isSyncRecord(sourceDocument.runValues) ? sourceDocument.runValues as Record<string, unknown> : {},
+          isSyncRecord(destinationDocument.runValues) ? destinationDocument.runValues as Record<string, unknown> : {},
+          moved.idMap,
+        );
+        const stamps = relocateValues(
+          isSyncRecord(sourceDocument.runValuesUpdatedAt) ? sourceDocument.runValuesUpdatedAt as Record<string, unknown> : {},
+          isSyncRecord(destinationDocument.runValuesUpdatedAt) ? destinationDocument.runValuesUpdatedAt as Record<string, unknown> : {},
+          moved.idMap,
+        );
+        const packaging = relocateValues(
+          isSyncRecord(sourceDocument.packagingProgress) ? sourceDocument.packagingProgress as Record<string, unknown> : {},
+          isSyncRecord(destinationDocument.packagingProgress) ? destinationDocument.packagingProgress as Record<string, unknown> : {},
+          moved.idMap,
+        );
+        nextSource = { ...nextSource, runValues: values.source, runValuesUpdatedAt: stamps.source, packagingProgress: packaging.source };
+        nextDestination = { ...nextDestination, runValues: values.target, runValuesUpdatedAt: stamps.target, packagingProgress: packaging.target };
+        [nextSource, nextDestination] = relocateMap(nextSource, nextDestination, "doughTimerControls", moved.idMap);
+        for (const field of ["autoTrackCoordination", "autoTrackServerState"] as const) {
+          const leftState = isSyncRecord(nextSource[field]) ? nextSource[field] as Record<string, unknown> : {};
+          const rightState = isSyncRecord(nextDestination[field]) ? nextDestination[field] as Record<string, unknown> : {};
+          const nestedKeys = field === "autoTrackCoordination"
+            ? ["runs"] as const
+            : ["netOwnership", "wallClockBookkeeping"] as const;
+          let nextLeftState = leftState;
+          let nextRightState = rightState;
+          for (const nestedKey of nestedKeys) {
+            if (
+              !Object.prototype.hasOwnProperty.call(nextLeftState, nestedKey)
+              && !Object.prototype.hasOwnProperty.call(nextRightState, nestedKey)
+            ) continue;
+            const nested = relocateValues(
+              isSyncRecord(nextLeftState[nestedKey]) ? nextLeftState[nestedKey] as Record<string, unknown> : {},
+              isSyncRecord(nextRightState[nestedKey]) ? nextRightState[nestedKey] as Record<string, unknown> : {},
+              moved.idMap,
+            );
+            nextLeftState = { ...nextLeftState, [nestedKey]: nested.source };
+            nextRightState = { ...nextRightState, [nestedKey]: nested.target };
+          }
+          nextSource[field] = nextLeftState;
+          nextDestination[field] = nextRightState;
+        }
+        const sourceStaged = isSyncRecord(sourceDay.stagedItems)
+          ? sourceDay.stagedItems as Record<string, unknown>
+          : {};
+        const destinationStaged = isSyncRecord(destinationDay.stagedItems)
+          ? destinationDay.stagedItems as Record<string, unknown>
+          : {};
+        const sourceStagedNext = { ...sourceStaged };
+        const destinationStagedNext = { ...destinationStaged };
+        for (const [key, value] of Object.entries(sourceStaged)) {
+          if (movingIds.some((id) => key.startsWith(`${id}::`))) {
+            delete sourceStagedNext[key];
+            destinationStagedNext[key] = value;
+          }
+        }
+        const sourceDayNext = {
+          ...sourceDay,
+          runs: moved.source,
+          stagedItems: sourceStagedNext,
+        };
+        const destinationDayBase = destinationRuns.length > 0 || !createdDestination
+          ? destinationDay
+          : sourceDay;
+        nextSource.dayState = { ...sourceDayNext, date: sourceDate };
+        nextDestination.dayState = {
+          ...destinationDayBase,
+          runs: moved.target,
+          date: destinationDate,
+          stagedItems: destinationStagedNext,
+        };
+
+        const sourceRemoved = moved.source.length === 0;
+        const nextSourceRevision = currentSourceRevision + 1;
+        const nextDestinationRevision = currentDestinationRevision + 1;
+        if (sourceRemoved) {
+          await tx.delete(dailySyncTable).where(and(
+            eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate),
+          ));
+        } else {
+          await tx.update(dailySyncTable).set({
+            data: completeSyncData(nextSource) as any,
+            canonicalRevision: nextSourceRevision,
+            updatedAt: new Date(nowMs),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)));
+        }
+        const canonicalDestination = completeSyncData(nextDestination) as Record<string, unknown>;
+        await tx.update(dailySyncTable).set({
+          data: canonicalDestination as any,
+          canonicalRevision: nextDestinationRevision,
+          updatedAt: new Date(nowMs),
+        }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)));
+        await appendSyncOutboxEvent(tx, {
+          kind: "day-state", scope, date: sourceDate, senderId,
+          canonicalRevision: nextSourceRevision,
+        });
+        await appendSyncOutboxEvent(tx, {
+          kind: "day-state", scope, date: destinationDate, senderId,
+          canonicalRevision: nextDestinationRevision,
+        });
+        return {
+          kind: "moved" as const,
+          sourceRemoved,
+          sourceRevision: nextSourceRevision,
+          destinationRevision: nextDestinationRevision,
+          destinationSnapshotId: syncSnapshotId(canonicalDestination),
+        };
+      });
+
+      if (result.kind === "stale-epoch") {
+        res.status(409).json({ error: "The schedule changed during reset", code: "SYNC_RESET_CHANGED" });
+      } else if (result.kind === "missing-source" || result.kind === "missing-destination") {
+        res.status(404).json({ error: "A scheduled day is no longer available", code: "SCHEDULE_DAY_NOT_FOUND" });
+      } else if (result.kind === "revision-conflict") {
+        res.status(409).json({
+          error: "A schedule changed before the move could be saved",
+          code: "SCHEDULE_REVISION_CONFLICT",
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+        });
+      } else if (result.kind === "invalid-source" || result.kind === "invalid-destination") {
+        res.status(409).json({ error: "A scheduled day could not be safely moved", code: "SCHEDULE_DAY_INVALID" });
+      } else if (result.kind === "invalid-selection") {
+        res.status(409).json({ error: "One or more selected runs are no longer on the source day", code: "SCHEDULE_RUN_SELECTION_CHANGED" });
+      } else if (result.kind === "started-run") {
+        res.status(409).json({ error: "A run that has started cannot be moved", code: "SCHEDULE_RUN_ALREADY_STARTED" });
+      } else if (result.kind === "run-id-collision") {
+        res.status(409).json({ error: "A run ID already exists on the destination date", code: "SCHEDULE_RUN_ID_COLLISION" });
+      } else {
+        res.json({
+          moved: true,
+          sourceRemoved: result.sourceRemoved,
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+          destinationSnapshotId: result.destinationSnapshotId,
+        });
+      }
+    } catch (error) {
+      req.log.error({ err: error }, "Failed to move scheduled runs");
+      res.status(500).json({ error: "Failed to move scheduled runs" });
+    }
+  },
+);
+
+router.get(
+  "/sync/schedule-swap-eligibility",
+  requireCapability("manage-factory-settings"),
+  async (req: Request, res: Response): Promise<void> => {
+    const sourceDate = typeof req.query.sourceDate === "string" ? req.query.sourceDate : "";
+    const destinationDate = typeof req.query.destinationDate === "string" ? req.query.destinationDate : "";
+    if (
+      !isValidDate(sourceDate)
+      || !isValidDate(destinationDate)
+      || sourceDate === destinationDate
+    ) {
+      res.status(400).json({ error: "Invalid schedule dates" });
+      return;
+    }
+    const nowMs = Date.now();
+    const today = facilityDate(nowMs);
+    if (sourceDate < today || destinationDate < today) {
+      res.status(400).json({ error: "Schedule swaps only support today and future dates" });
+      return;
+    }
+    const scope = currentScope();
+    const dates = [sourceDate, destinationDate].sort();
+    const rows = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)));
+    const sourceRow = rows.find((row) => row.date === sourceDate);
+    const destinationRow = rows.find((row) => row.date === destinationDate);
+    let todayAllowed = true;
+    if (sourceDate === today || destinationDate === today) {
+      const todayRow = sourceDate === today ? sourceRow : destinationRow;
+      const todayData = completeSyncData(todayRow?.data) as Record<string, any> | null;
+      const runs = Array.isArray(todayData?.dayState?.runs) ? todayData.dayState.runs : [];
+      todayAllowed = isTodayScheduleSwapAllowed(runs, nowMs, facilityTimeZone());
+    }
+    res.json({
+      today,
+      sourceScheduled: !!sourceRow,
+      destinationScheduled: !!destinationRow,
+      canSwap: !!sourceRow && !!destinationRow && todayAllowed,
+      reason: todayAllowed ? null : "today-started-after-6am",
+    });
+  },
+);
+
+router.post(
+  "/sync/schedule-swap",
+  requireCapability("manage-factory-settings"),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = req.body as Record<string, unknown> | null;
+    const sourceDate = body?.sourceDate;
+    const destinationDate = body?.destinationDate;
+    const sourceRevision = body?.sourceRevision;
+    const destinationRevision = body?.destinationRevision;
+    const expectedEpoch = body?.resetEpoch;
+    const senderId = typeof body?.senderId === "string" ? body.senderId.slice(0, 160) : "";
+    if (
+      typeof sourceDate !== "string" || !isValidDate(sourceDate)
+      || typeof destinationDate !== "string" || !isValidDate(destinationDate)
+      || sourceDate === destinationDate
+      || !Number.isSafeInteger(sourceRevision) || Number(sourceRevision) < 0
+      || !Number.isSafeInteger(destinationRevision) || Number(destinationRevision) < 0
+      || !Number.isSafeInteger(expectedEpoch) || Number(expectedEpoch) < 0
+    ) {
+      res.status(400).json({ error: "Invalid schedule swap request" });
+      return;
+    }
+
+    const scope = currentScope();
+    const nowMs = Date.now();
+    const today = facilityDate(nowMs);
+    if (sourceDate < today || destinationDate < today) {
+      res.status(400).json({ error: "Schedule swaps only support today and future dates" });
+      return;
+    }
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        // Reset lock first, matching the ordering used by canonical sync writes.
+        await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(nowMs) })
+          .onConflictDoNothing();
+        const [reset] = await tx.select().from(dataResetTable)
+          .where(eq(dataResetTable.scope, scope)).for("update");
+        if ((reset?.epoch ?? 0) !== Number(expectedEpoch)) {
+          return { kind: "stale-epoch" as const };
+        }
+
+        const dates = [sourceDate, destinationDate].sort();
+        const rows = await tx.select().from(dailySyncTable)
+          .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
+          .orderBy(asc(dailySyncTable.date))
+          .for("update");
+        const sourceRow = rows.find((row) => row.date === sourceDate);
+        const destinationRow = rows.find((row) => row.date === destinationDate);
+        if (!sourceRow || !destinationRow) return { kind: "missing-day" as const };
+
+        const currentSourceRevision = sourceRow.canonicalRevision ?? 0;
+        const currentDestinationRevision = destinationRow.canonicalRevision ?? 0;
+        if (
+          currentSourceRevision !== Number(sourceRevision)
+          || currentDestinationRevision !== Number(destinationRevision)
+        ) {
+          return {
+            kind: "revision-conflict" as const,
+            sourceRevision: currentSourceRevision,
+            destinationRevision: currentDestinationRevision,
+          };
+        }
+
+        if (sourceDate === today || destinationDate === today) {
+          const todayRow = sourceDate === today ? sourceRow : destinationRow;
+          const todayData = completeSyncData(todayRow.data) as Record<string, any>;
+          const runs = Array.isArray(todayData?.dayState?.runs) ? todayData.dayState.runs : [];
+          if (!isTodayScheduleSwapAllowed(runs, nowMs, facilityTimeZone())) {
+            return { kind: "today-ineligible" as const };
+          }
+        }
+
+        const sourceData = completeSyncData(sourceRow.data);
+        const destinationData = completeSyncData(destinationRow.data);
+        if (
+          !sourceData || typeof sourceData !== "object" || Array.isArray(sourceData)
+          || !destinationData || typeof destinationData !== "object" || Array.isArray(destinationData)
+        ) {
+          return { kind: "invalid-day" as const };
+        }
+        const swapped = swapDateScopedScheduleState(
+          sourceData as Record<string, unknown>,
+          destinationData as Record<string, unknown>,
+          sourceDate,
+          destinationDate,
+        );
+        const nextSource = completeSyncData(swapped.left) as Record<string, unknown>;
+        const nextDestination = completeSyncData(swapped.right) as Record<string, unknown>;
+        const sourceChanged = syncSnapshotId(sourceData) !== syncSnapshotId(nextSource);
+        const destinationChanged = syncSnapshotId(destinationData) !== syncSnapshotId(nextDestination);
+        const nextSourceRevision = currentSourceRevision + (sourceChanged ? 1 : 0);
+        const nextDestinationRevision = currentDestinationRevision + (destinationChanged ? 1 : 0);
+
+        if (sourceChanged) {
+          await tx.update(dailySyncTable).set({
+            data: nextSource as any,
+            canonicalRevision: nextSourceRevision,
+            updatedAt: new Date(nowMs),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, sourceDate)));
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state", scope, date: sourceDate, senderId,
+            canonicalRevision: nextSourceRevision,
+          });
+        }
+        if (destinationChanged) {
+          await tx.update(dailySyncTable).set({
+            data: nextDestination as any,
+            canonicalRevision: nextDestinationRevision,
+            updatedAt: new Date(nowMs),
+          }).where(and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, destinationDate)));
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state", scope, date: destinationDate, senderId,
+            canonicalRevision: nextDestinationRevision,
+          });
+        }
+        return {
+          kind: "swapped" as const,
+          sourceRevision: nextSourceRevision,
+          destinationRevision: nextDestinationRevision,
+          sourceSnapshotId: syncSnapshotId(nextSource),
+          destinationSnapshotId: syncSnapshotId(nextDestination),
+        };
+      });
+
+      if (result.kind === "stale-epoch") {
+        res.status(409).json({ error: "The schedule changed during reset", code: "SYNC_RESET_CHANGED" });
+      } else if (result.kind === "missing-day") {
+        res.status(404).json({
+          error: "One of the scheduled days is no longer available",
+          code: "SCHEDULE_DAY_NOT_FOUND",
+        });
+      } else if (result.kind === "revision-conflict") {
+        res.status(409).json({
+          error: "A schedule changed before the swap could be saved",
+          code: "SCHEDULE_REVISION_CONFLICT",
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+        });
+      } else if (result.kind === "today-ineligible") {
+        res.status(409).json({
+          error: "Today's schedule can only be swapped before 7:00 a.m. or before any run starts",
+          code: "TODAY_SWAP_NOT_ELIGIBLE",
+        });
+      } else if (result.kind === "invalid-day") {
+        res.status(409).json({
+          error: "A scheduled day could not be safely swapped",
+          code: "SCHEDULE_DAY_INVALID",
+        });
+      } else {
+        res.json({
+          swapped: true,
+          sourceRevision: result.sourceRevision,
+          destinationRevision: result.destinationRevision,
+          sourceSnapshotId: result.sourceSnapshotId,
+          destinationSnapshotId: result.destinationSnapshotId,
+        });
+      }
+    } catch (error) {
+      req.log.error({ err: error }, "Failed to swap scheduled days");
+      res.status(500).json({ error: "Failed to swap scheduled days" });
+    }
+  },
+);
 
 router.get(
   "/sync/health",

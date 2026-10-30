@@ -392,6 +392,9 @@ importers:
       '@workspace/production-rules':
         specifier: workspace:*
         version: link:../../lib/production-rules
+      '@workspace/schedule-move':
+        specifier: workspace:*
+        version: link:../../lib/schedule-move
       '@workspace/schedule-optimize':
         specifier: workspace:*
         version: link:../../lib/schedule-optimize

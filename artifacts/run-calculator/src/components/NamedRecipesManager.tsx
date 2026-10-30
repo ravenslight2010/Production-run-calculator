@@ -212,6 +212,11 @@ export default function NamedRecipesManager({
                         <span className="flex-1 min-w-0 text-xs font-medium truncate">
                           {recipe.name || "Unnamed recipe"}
                         </span>
+                        {kind === "dough" && recipe.isPremadeCrust === true && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded border border-primary/50 text-foreground font-semibold shrink-0">
+                            Premade crust
+                          </span>
+                        )}
                         {!recipe.enabled && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
                             Off
@@ -447,6 +452,27 @@ function NamedRecipeEditor({
         className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
       />
 
+      {kind === "dough" && (
+        <div className="rounded-md border border-border/60 bg-background/70 px-2.5 py-2 space-y-1">
+          <label className="flex min-h-8 items-center gap-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={draft.isPremadeCrust === true}
+              onChange={(e) => {
+                const next = { ...draft, isPremadeCrust: e.target.checked };
+                setDraft(next);
+                commit(next);
+              }}
+              disabled={disabled}
+            />
+            Premade crust
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            Manager classification. No in-house dough formula is needed; linked setup selects Crust mode. Existing runs are not changed.
+          </p>
+        </div>
+      )}
+
       {/* Dough only: per-variant doughball numbers this family recipe covers.
           A spec import fills these automatically (label = the variant's sheet
           name); managers can correct or add them here. Blank labels or rows
@@ -591,7 +617,13 @@ function NamedRecipeEditor({
           )}
         </div>
         {draft.components.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">No ingredients yet.</p>
+          <p className="text-[11px] text-muted-foreground">
+            {kind === "dough" && draft.isPremadeCrust === true
+              ? "No in-house dough formula is needed for this premade crust."
+              : kind === "dough"
+                ? "No formula recorded. Manager review is needed before treating this as premade."
+                : "No ingredients yet."}
+          </p>
         ) : (
           <div className="flex flex-col gap-1.5">
             {draft.components.map((c, idx) => (

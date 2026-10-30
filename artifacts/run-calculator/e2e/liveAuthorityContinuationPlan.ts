@@ -5,6 +5,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: false,
     offlineManualRecovery: false,
     offlineLifecycle: false,
+    verifyEndSummary: false,
   },
   "chromium-phone-lifecycle-end": {
     project: "chromium-phone",
@@ -12,6 +13,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: false,
     offlineManualRecovery: false,
     offlineLifecycle: true,
+    verifyEndSummary: true,
   },
   "chromium-tablet-portrait-end": {
     project: "chromium-tablet-portrait",
@@ -19,6 +21,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: false,
     offlineManualRecovery: false,
     offlineLifecycle: false,
+    verifyEndSummary: false,
   },
   "chromium-tablet-landscape-recovery-end": {
     project: "chromium-tablet-landscape",
@@ -26,6 +29,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: false,
     offlineManualRecovery: true,
     offlineLifecycle: false,
+    verifyEndSummary: false,
   },
   "webkit-desktop-recovery-lifecycle-end": {
     project: "webkit-desktop",
@@ -33,6 +37,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: false,
     offlineManualRecovery: true,
     offlineLifecycle: true,
+    verifyEndSummary: false,
   },
   "webkit-phone-lifecycle-end": {
     project: "webkit-phone",
@@ -40,6 +45,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: false,
     offlineManualRecovery: false,
     offlineLifecycle: true,
+    verifyEndSummary: false,
   },
   "webkit-tablet-portrait-full-remaining": {
     project: "webkit-tablet-portrait",
@@ -47,6 +53,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: true,
     offlineManualRecovery: true,
     offlineLifecycle: true,
+    verifyEndSummary: false,
   },
   "webkit-tablet-landscape-full-remaining": {
     project: "webkit-tablet-landscape",
@@ -54,6 +61,7 @@ export const liveAuthorityContinuationCases = {
     webkitHeldResponse: true,
     offlineManualRecovery: true,
     offlineLifecycle: true,
+    verifyEndSummary: false,
   },
 } as const;
 

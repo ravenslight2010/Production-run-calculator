@@ -1,5 +1,10 @@
 # New primary-source research and decision implications
 
+> **Current audit overlay:** [the 2026-10-29 app-wide report](app-wide-audit-2026-10-29.md)
+> uses this source research as historical input. No fresh public research was
+> fetched for that audit; nothing below is an app test, product approval, or
+> production observation.
+
 Access date **2026-10-26**. Public sources were fetched directly, not adopted from
 search snippets. These are engineering inputs, **not app tests, facility policy,
 legal advice or production approval**. Repository comparison uses source B in

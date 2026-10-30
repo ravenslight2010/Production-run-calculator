@@ -29,6 +29,10 @@ test("Import Gold manager panel fits and remains reviewable at this browser view
       body: JSON.stringify({
         enabled: true,
         localConfigured: false,
+        localAvailable: false,
+        localScoringSwitchAvailable: false,
+        localScoringEnabled: false,
+        syntheticFixtureAvailable: false,
         geminiConfigured: false,
         retention: "Cases remain until a manager deletes them.",
         persistsAcrossFactoryPurge: true,

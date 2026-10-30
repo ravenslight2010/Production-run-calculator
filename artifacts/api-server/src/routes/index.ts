@@ -9,6 +9,7 @@ import sourceLibraryReconciliationCaptureRouter, {
   publicSourceLibraryReconciliationCaptureRouter,
 } from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
+import backgroundOperationDiagnosticsRouter from "./backgroundOperationDiagnostics";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
 import masterDataImportsRouter from "./capabilities/masterDataImports";
@@ -70,6 +71,10 @@ export const directAuthorizationCoverageRouters = [
       "POST /run-templates",
       "DELETE /run-templates",
     ],
+  },
+  {
+    name: "background operation diagnostics",
+    router: backgroundOperationDiagnosticsRouter,
   },
 ] as const;
 
@@ -133,6 +138,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/profile-data/health-check", "/profile-data/health-workspace",
     "/ai-memory/health-check", "/background-operations/diagnostics",
     "/import-gold/config", "/import-gold/cases", "/import-gold/export.jsonl",
+    "/import-gold/synthetic-review",
   ]),
   ...reads(["manage-staff"], "all", "live-only", ["/sync/health", "/health/diagnostics"]),
   ...reads(["manage-inventory"], "all", "scoped", [
@@ -161,6 +167,9 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/master-data-operations"]),
+  ...reads(["manage-factory-settings"], "all", "scoped", [
+    "/sync/schedule-swap-eligibility",
+  ]),
   ...reads(["review-incidents"], "all", "scoped", [
     "/incidents", "/incidents/unreviewed-count", "/incidents/actionable-count",
     "/incidents/assignees", "/incidents/:id", "/field-checks",
@@ -196,6 +205,7 @@ export const authenticatedCapabilityFamilies = [
   { name: "administration", router: administrationRouter },
   { name: "retained-ai", router: retainedAiRouter },
   { name: "server-jobs", router: serverJobsRouter },
+  { name: "background-operation-diagnostics", router: backgroundOperationDiagnosticsRouter },
 ] as const;
 
 // Stale-data protection runs first, including public health/auth routes.
@@ -288,7 +298,8 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "manage-staff", [
     "PATCH /import-gold/cases/:id/exclusion",
     "DELETE /import-gold/cases/:id",
-    "POST /import-gold/score",
+    "POST /import-gold/score", "PATCH /import-gold/local-scoring",
+    "POST /import-gold/synthetic-apply",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-inventory", [
     "POST /cheese-recipes", "DELETE /cheese-recipes", "POST /cycle-count-schedules", "DELETE /cycle-count-schedules",
@@ -339,6 +350,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-factory-settings", [
     "PUT /factory-data", "POST /runs", "DELETE /runs/:id", "PUT /sync/:date", "DELETE /sync/:date",
+    "POST /sync/schedule-move", "POST /sync/schedule-swap",
   ]),
   ...writes("manager-only", "live-only", "denied", "manage-staff", [
     "POST /roles", "PUT /roles/:name", "DELETE /roles/:name", "PUT /users/:userId/role",

@@ -314,6 +314,13 @@ class EndpointHandler(BaseHTTPRequestHandler):
             self._send_json(404, error_body("Route not found.", "invalid_request_error"))
             return
 
+        # Health probes are part of app configuration refresh and must remain
+        # available while the single inference slot is occupied.
+        if self.path == "/healthz":
+            status, body = forward_health()
+            self._send_json(status, body)
+            return
+
         if not REQUEST_SLOT.acquire(blocking=False):
             self._send_json(
                 429,
@@ -325,10 +332,7 @@ class EndpointHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            if self.path == "/healthz":
-                status, body = forward_health()
-            else:
-                status, body = forward_model_list()
+            status, body = forward_model_list()
             self._send_json(status, body)
         finally:
             REQUEST_SLOT.release()

@@ -22,8 +22,43 @@ export function importGoldEndpoint(base: string): URL {
   return endpoint;
 }
 
+export function importGoldHealthEndpoint(base: string): URL {
+  const endpoint = importGoldEndpoint(base);
+  endpoint.pathname = "/healthz";
+  return endpoint;
+}
+
 export function fetchImportGoldLocal(base: string, init: RequestInit): Promise<Response> {
   return fetch(importGoldEndpoint(base), { ...init, redirect: "error" });
+}
+
+export function isImportGoldDevelopmentRuntime(env = process.env): boolean {
+  const deploymentId = env.REPLIT_DEPLOYMENT_ID?.trim();
+  const deploymentMarker = env.REPLIT_DEPLOYMENT?.trim().toLowerCase();
+  return env.NODE_ENV !== "production"
+    && !deploymentId
+    && deploymentMarker !== "1"
+    && deploymentMarker !== "true";
+}
+
+export async function isImportGoldLocalAvailable(
+  base: string,
+  expectedModel = "qwen3.5-9b-q3_k_m",
+): Promise<boolean> {
+  try {
+    const response = await fetch(importGoldHealthEndpoint(base), {
+      redirect: "error",
+      cache: "no-store",
+      signal: AbortSignal.timeout(700),
+    });
+    if (!response.ok) return false;
+    const health = await response.json() as Record<string, unknown>;
+    return health.status === "healthy"
+      && health.model === expectedModel
+      && health.contextLimit === 4096;
+  } catch {
+    return false;
+  }
 }
 
 /** Configuration validity only; deliberately not a live availability probe. */

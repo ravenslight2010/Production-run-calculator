@@ -10,7 +10,13 @@ export function cancelledDocumentMessage(input: {
   duringReload: boolean;
 }): string | undefined {
   if (!input.webkit || !input.text.endsWith("due to access control checks.")) return;
-  const paths = ["/api/incidents", "/api/field-checks/observations", "/api/sync/today", "/api/factory-data"];
+  const paths = [
+    "/api/incidents/actionable-count",
+    "/api/incidents",
+    "/api/field-checks/observations",
+    "/api/sync/today",
+    "/api/factory-data",
+  ];
   for (const origin of input.successfulOrigins) {
     const host = new URL(origin).host;
     const path = paths.find(path =>

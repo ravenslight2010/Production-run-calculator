@@ -12,6 +12,7 @@ describe("bounded browser navigation evidence classification", () => {
   it("retains the exact cancelled API path even when API and page origins differ", () => {
     expect(cancelledDocumentMessage(input)).toBe("/api/factory-data");
     expect(cancelledDocumentMessage({ ...input, text: "Fetch API cannot load http://127.0.0.1:55395/api/incidents due to access control checks." })).toBe("/api/incidents");
+    expect(cancelledDocumentMessage({ ...input, text: "Fetch API cannot load http://127.0.0.1:55395/api/incidents/actionable-count due to access control checks." })).toBe("/api/incidents/actionable-count");
   });
   it("requires a known navigation, not merely an access-control message", () => {
     expect(cancelledDocumentMessage({ ...input, duringReload: false })).toBeUndefined();
@@ -23,6 +24,7 @@ describe("bounded browser navigation evidence classification", () => {
     for (const text of [
       "/127.0.0.1:55395/api/sync/other due to access control checks.",
       "/127.0.0.1:55395/api/factory-data-other due to access control checks.",
+      "/127.0.0.1:55395/api/incidents/actionable-count-extra due to access control checks.",
       "404 GET /api/factory-data",
       "Save failed",
     ]) expect(cancelledDocumentMessage({ ...input, text })).toBeUndefined();

@@ -1,10 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { fetchImportGoldLocal, isImportGoldLocalConfigured } from "../lib/importGoldEndpoint";
+import {
+  fetchImportGoldLocal,
+  isImportGoldDevelopmentRuntime,
+  isImportGoldLocalAvailable,
+  isImportGoldLocalConfigured,
+} from "../lib/importGoldEndpoint";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   db,
+  factoryKvTable,
   importHistoryTable,
   importOperationsTable,
   importGoldCasesTable,
@@ -55,6 +61,37 @@ const MAX_GOLD_SCORE_CASES = 3;
 const MAX_GOLD_DIFFS = 30;
 const MAX_GOLD_DIFF_VALUE_CHARS = 400;
 const GOLD_SOURCE_LABELS = { spec: "Spec import", premix: "Premix import", cheese: "Cheese import" } as const;
+const LOCAL_GOLD_SCORING_SETTING = "importGoldLocalScoringEnabled";
+const SYNTHETIC_GOLD_SOURCE_LABEL = "Synthetic local scoring fixture";
+const SYNTHETIC_GOLD_OPERATION_ID = "dev-synthetic-local-score:v1";
+const SYNTHETIC_GOLD_FIXTURE_VERSION = "synthetic-mix-v1";
+const SYNTHETIC_GOLD_FIXTURE = {
+  importType: "premix",
+  input: {
+    candidates: [{
+      name: "Synthetic Sample Mix",
+      brand: "Synthetic Brand",
+      flavor: "Synthetic Flavor",
+      batchSize: 4,
+      components: [
+        { ingredient: "Synthetic Flour", lbs: 2.5 },
+        { ingredient: "Synthetic Water", lbs: 1.5 },
+      ],
+    }],
+  },
+  expectedResult: {
+    mixes: [{
+      name: "Synthetic Sample Mix",
+      brand: "Synthetic Brand",
+      flavor: "Synthetic Flavor",
+      batchSize: 4,
+      components: [
+        { ingredient: "Synthetic Flour", lbs: 2.5 },
+        { ingredient: "Synthetic Water", lbs: 1.5 },
+      ],
+    }],
+  },
+} as const;
 const TABLES = {
   mixes: { table: mixesTable, key: "id" },
   cheeseRecipes: { table: cheeseRecipesTable, key: "id" },
@@ -164,7 +201,7 @@ function goldExpectedSnapshot(after: Record<string, unknown[]>, importType: stri
     brandProfiles: ["key", "brand", "flavor", "values", "crustValues"],
     mixes: ["name", "brand", "flavor", "batchSize", "daysEarly", "notes", "amountAlreadyMade", "components", "isPrep", "enabled"],
     cheeseRecipes: ["name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled"],
-    doughRecipes: ["name", "notes", "components", "enabled", "brand", "flavors", "doughballWeightOz", "doughballsPerTray", "doughballVariants"],
+    doughRecipes: ["name", "notes", "components", "enabled", "isPremadeCrust", "brand", "flavors", "doughballWeightOz", "doughballsPerTray", "doughballVariants"],
     sauceRecipes: ["name", "notes", "components", "enabled", "brand", "flavors"],
     freezerPullItems: ["ingredient", "freezerDaysEarly", "enabled"],
   };
@@ -233,12 +270,54 @@ function safeDiffValue(value: unknown): unknown {
     : value;
 }
 
-function parseGoldPrediction(content: unknown): Record<string, unknown> {
+function parseGoldPrediction(content: unknown, allowSingleObjectWrapper = false): Record<string, unknown> {
   if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_GOLD_EXPECTED_BYTES) {
     throw new Error("invalid_output");
   }
   let value: unknown;
-  try { value = JSON.parse(content); } catch { throw new Error("invalid_output"); }
+  try {
+    value = JSON.parse(content);
+  } catch {
+    if (!allowSingleObjectWrapper) throw new Error("invalid_output");
+    // The pinned local model can return one valid object inside a reasoning
+    // wrapper even with server-side reasoning disabled. Never guess between
+    // multiple objects; Gemini keeps the strict whole-response JSON contract.
+    const objectCandidates: string[] = [];
+    let depth = 0;
+    let objectStart = -1;
+    let inString = false;
+    let escaped = false;
+    let malformedBraces = false;
+    for (let index = 0; index < content.length; index += 1) {
+      const character = content.charAt(index);
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === "\"") inString = false;
+        continue;
+      }
+      if (character === "\"") {
+        inString = true;
+      } else if (character === "{") {
+        if (depth === 0) objectStart = index;
+        depth += 1;
+      } else if (character === "}") {
+        if (depth === 0) {
+          malformedBraces = true;
+          continue;
+        }
+        depth -= 1;
+        if (depth === 0 && objectStart >= 0) {
+          objectCandidates.push(content.slice(objectStart, index + 1));
+          objectStart = -1;
+        }
+      }
+    }
+    if (malformedBraces || depth !== 0 || objectCandidates.length !== 1) {
+      throw new Error("invalid_output");
+    }
+    try { value = JSON.parse(objectCandidates[0]!); } catch { throw new Error("invalid_output"); }
+  }
   if (!value || typeof value !== "object" || Array.isArray(value) || jsonBytes(value) > MAX_GOLD_EXPECTED_BYTES) {
     throw new Error("invalid_output");
   }
@@ -291,12 +370,12 @@ async function requestLocalGoldPrediction(input: Record<string, unknown>, import
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: process.env.IMPORT_GOLD_LOCAL_MODEL ?? "qwen3.5-9b-q3_k_m",
+      model: "qwen3.5-9b-q3_k_m",
       messages: [
-        { role: "system", content: `Score-only import evaluator. Extract a ${importType} import result from evaluatedInput. Return JSON matching the keys and value types in expectedShape; do not copy placeholder values. No prose, tools, or extra keys.` },
+        { role: "system", content: `Score-only import evaluator. Extract a ${importType} import result from evaluatedInput. Return exactly one JSON object matching the keys and value types in expectedShape; do not copy placeholder values. No reasoning tags, prose, Markdown, tools, or extra keys.` },
         { role: "user", content: JSON.stringify({ evaluatedInput: input, expectedShape: outputShape(expected) }) },
       ],
-      response_format: { type: "json_object" },
+      temperature: 0,
       max_tokens: 256,
       stream: false,
     }),
@@ -304,7 +383,7 @@ async function requestLocalGoldPrediction(input: Record<string, unknown>, import
   });
   if (!response.ok) throw new Error("provider_unavailable");
   const body = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
-  return parseGoldPrediction(body.choices?.[0]?.message?.content);
+  return parseGoldPrediction(body.choices?.[0]?.message?.content, true);
 }
 
 async function requestGeminiGoldPrediction(input: Record<string, unknown>, importType: string, expected: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -985,25 +1064,117 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
   }
 });
 
-router.get("/import-gold/config", requireCapability("manage-staff"), (_req, res) => {
+async function getLocalGoldScoringEnabled(scope = currentScope()): Promise<boolean> {
+  if (!isImportGoldDevelopmentRuntime()) return false;
+  const [row] = await db.select({ value: factoryKvTable.value }).from(factoryKvTable).where(and(
+    eq(factoryKvTable.scope, scope),
+    eq(factoryKvTable.key, LOCAL_GOLD_SCORING_SETTING),
+  )).limit(1);
+  return row?.value === true;
+}
+
+function syntheticGoldCaseCondition() {
+  return and(
+    eq(importGoldCasesTable.operationId, SYNTHETIC_GOLD_OPERATION_ID),
+    eq(importGoldCasesTable.sourceLabel, SYNTHETIC_GOLD_SOURCE_LABEL),
+  );
+}
+
+router.get("/import-gold/config", requireCapability("manage-staff"), async (_req, res) => {
+  const developmentRuntime = isImportGoldDevelopmentRuntime();
+  const localConfigured = developmentRuntime && isImportGoldLocalConfigured();
+  const localBase = process.env.IMPORT_GOLD_LOCAL_BASE_URL ?? "http://127.0.0.1:11434/v1";
   res.json({
     enabled: importGoldEnabled(),
-    localConfigured: importGoldEnabled() && isImportGoldLocalConfigured(),
+    localConfigured,
+    localAvailable: localConfigured && await isImportGoldLocalAvailable(localBase),
+    localScoringSwitchAvailable: developmentRuntime,
+    localScoringEnabled: developmentRuntime && await getLocalGoldScoringEnabled(),
+    syntheticFixtureAvailable: developmentRuntime,
     geminiConfigured: importGoldEnabled() && isGeminiProviderConfigured(),
-    retention: "Cases remain until a manager deletes them; exclusion only removes them from scoring and export. Source-use and retention approval are required before enablement.",
+    retention: "Real-source cases require recorded source-use and retention approval. Cases remain until a manager deletes them; exclusion only removes them from scoring and export.",
     persistsAcrossFactoryPurge: true,
   });
 });
 
+router.patch("/import-gold/local-scoring", requireCapability("manage-staff"), async (req, res) => {
+  if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only setting is unavailable" }); return; }
+  const body = objectBody(req);
+  if (!body || Object.keys(body).length !== 1 || typeof body.enabled !== "boolean") {
+    res.status(400).json({ error: "Invalid local-scoring setting" }); return;
+  }
+  const scope = currentScope();
+  await db.insert(factoryKvTable).values({
+    scope,
+    key: LOCAL_GOLD_SCORING_SETTING,
+    value: body.enabled,
+  }).onConflictDoUpdate({
+    target: [factoryKvTable.scope, factoryKvTable.key],
+    set: { value: body.enabled, updatedAt: new Date() },
+  });
+  res.json({ enabled: body.enabled });
+});
+
+router.get("/import-gold/synthetic-review", requireCapability("manage-staff"), (_req, res) => {
+  if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only fixture is unavailable" }); return; }
+  res.json({
+    fixtureVersion: SYNTHETIC_GOLD_FIXTURE_VERSION,
+    importType: SYNTHETIC_GOLD_FIXTURE.importType,
+    sourceLabel: SYNTHETIC_GOLD_SOURCE_LABEL,
+    input: SYNTHETIC_GOLD_FIXTURE.input,
+    expectedResult: SYNTHETIC_GOLD_FIXTURE.expectedResult,
+    applyEffect: "Creates a fixed synthetic evaluation case only; it does not change recipes, inventory, import approvals, or evaluator workflow state.",
+  });
+});
+
+router.post("/import-gold/synthetic-apply", requireCapability("manage-staff"), async (req, res) => {
+  if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only fixture is unavailable" }); return; }
+  const body = objectBody(req);
+  if (
+    !body || Object.keys(body).length !== 2 ||
+    body.fixtureVersion !== SYNTHETIC_GOLD_FIXTURE_VERSION ||
+    body.reviewed !== true
+  ) {
+    res.status(400).json({ error: "Review the available synthetic sample before applying it" }); return;
+  }
+  const scope = currentScope();
+  const [created] = await db.insert(importGoldCasesTable).values({
+    scope,
+    operationId: SYNTHETIC_GOLD_OPERATION_ID,
+    importType: SYNTHETIC_GOLD_FIXTURE.importType,
+    sourceLabel: SYNTHETIC_GOLD_SOURCE_LABEL,
+    evaluatedInput: SYNTHETIC_GOLD_FIXTURE.input,
+    expectedResult: SYNTHETIC_GOLD_FIXTURE.expectedResult,
+    createdBy: req.userId ?? null,
+  }).onConflictDoNothing({
+    target: [importGoldCasesTable.scope, importGoldCasesTable.operationId],
+  }).returning({ id: importGoldCasesTable.id });
+  const [stored] = created
+    ? [created]
+    : await db.select({ id: importGoldCasesTable.id }).from(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.scope, scope),
+      eq(importGoldCasesTable.operationId, SYNTHETIC_GOLD_OPERATION_ID),
+      eq(importGoldCasesTable.sourceLabel, SYNTHETIC_GOLD_SOURCE_LABEL),
+    )).limit(1);
+  if (!stored) { res.status(500).json({ error: "The synthetic evaluation case could not be saved" }); return; }
+  res.status(created ? 201 : 200).json({ caseId: stored.id, created: Boolean(created) });
+});
+
 router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) {
+    res.status(404).json({ error: "Import gold is disabled" }); return;
+  }
   const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_GOLD_CASES) {
     res.status(400).json({ error: `Limit must be an integer from 1 to ${MAX_GOLD_CASES}` }); return;
   }
   const scope = currentScope();
   const cases = await db.select().from(importGoldCasesTable)
-    .where(eq(importGoldCasesTable.scope, scope))
+    .where(and(
+      eq(importGoldCasesTable.scope, scope),
+      ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
+    ))
     .orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id))
     .limit(limit);
   const scores = cases.length
@@ -1030,7 +1201,8 @@ router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, 
 });
 
 router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
   const body = objectBody(req);
   if (!Number.isSafeInteger(id) || id < 1 || !body || typeof body.excluded !== "boolean") {
@@ -1039,29 +1211,37 @@ router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff
   const scope = currentScope();
   const [row] = await db.update(importGoldCasesTable)
     .set({ excluded: body.excluded, excludedAt: body.excluded ? new Date() : null })
-    .where(and(eq(importGoldCasesTable.id, id), eq(importGoldCasesTable.scope, scope)))
+    .where(and(
+      eq(importGoldCasesTable.id, id),
+      eq(importGoldCasesTable.scope, scope),
+      ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
+    ))
     .returning({ id: importGoldCasesTable.id, excluded: importGoldCasesTable.excluded });
   if (!row) { res.status(404).json({ error: "Evaluation case not found" }); return; }
   res.json(row);
 });
 
 router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) { res.status(400).json({ error: "Invalid case identity" }); return; }
   const deleted = await db.delete(importGoldCasesTable).where(and(
     eq(importGoldCasesTable.id, id),
     eq(importGoldCasesTable.scope, currentScope()),
+    ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
   )).returning({ id: importGoldCasesTable.id });
   if (!deleted.length) { res.status(404).json({ error: "Evaluation case not found" }); return; }
   res.status(204).end();
 });
 
 router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async (_req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const realSourceAccess = importGoldEnabled();
+  if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const cases = await db.select().from(importGoldCasesTable).where(and(
     eq(importGoldCasesTable.scope, currentScope()),
     eq(importGoldCasesTable.excluded, false),
+    ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
   )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_CASES);
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="import-gold-cases.jsonl"');
@@ -1075,7 +1255,8 @@ router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async
 });
 
 router.post("/import-gold/score", requireCapability("manage-staff"), async (req, res) => {
-  if (!importGoldEnabled()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
+  const realSourceAccess = importGoldEnabled();
+  const developmentRuntime = isImportGoldDevelopmentRuntime();
   const body = objectBody(req);
   const provider = body?.provider;
   const requestedIds = body?.caseIds;
@@ -1086,10 +1267,19 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
   ) {
     res.status(400).json({ error: "Invalid score request" }); return;
   }
+  if (!realSourceAccess && !(developmentRuntime && provider === "local")) {
+    res.status(404).json({ error: "Import gold is disabled" }); return;
+  }
+  if (provider === "local" && !developmentRuntime) {
+    res.status(403).json({ error: "Local scoring is available only in a development workspace" }); return;
+  }
+  if (provider === "local" && !await getLocalGoldScoringEnabled()) {
+    res.status(403).json({ error: "Local scoring is disabled in this development workspace" }); return;
+  }
   if (provider === "local" && !isImportGoldLocalConfigured()) {
     res.status(503).json({ error: "The local evaluator is not configured" }); return;
   }
-  if (provider === "gemini" && !isGeminiProviderConfigured()) {
+  if (provider === "gemini" && (!realSourceAccess || !isGeminiProviderConfigured())) {
     res.status(503).json({ error: "Gemini comparison is not configured" }); return;
   }
   const scope = currentScope();
@@ -1097,6 +1287,7 @@ router.post("/import-gold/score", requireCapability("manage-staff"), async (req,
   const eligible = await db.select().from(importGoldCasesTable).where(and(
     eq(importGoldCasesTable.scope, scope),
     eq(importGoldCasesTable.excluded, false),
+    ...(!realSourceAccess ? [syntheticGoldCaseCondition()!] : []),
     ...(ids ? [inArray(importGoldCasesTable.id, ids)] : []),
   )).orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id)).limit(MAX_GOLD_SCORE_CASES);
   const results = [];

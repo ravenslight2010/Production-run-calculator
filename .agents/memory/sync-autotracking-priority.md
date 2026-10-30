@@ -44,3 +44,9 @@ Every server-accepted automatic progress channel that peers merge independently 
 **Why:** Cross-tab applicator stock stayed stale even though the accepted claim updated canonical state and SSE delivery had no errors; one producer path lacked the ownership proof required by the peer merge.
 
 **How to apply:** When adding or changing auto-track producers or peer merge rules, verify the accepted sequence, generation, and timestamp proof survives both direct claims and server ticks, then test a second client adopting canonical progress.
+
+After a successful canonical acknowledgement, suppress a queued snapshot only when its signature exactly matches the acknowledged state. Keep sending when a signature is missing or the queued snapshot differs.
+
+**Why:** A wake sequence can leave an identical full-state snapshot queued after a successful response, producing duplicate writes; browser-observed request counts varied and did not identify the triggering caller.
+
+**How to apply:** Compare queued work against the state actually acknowledged or rebased, not an obsolete pre-recovery body. Test canonical convergence and distinct write contents rather than relying on a fixed request count.

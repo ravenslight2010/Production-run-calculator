@@ -15,6 +15,12 @@ export type PendingSyncIntent = {
   operationalReviewRequired?: boolean;
 };
 
+export type PendingSyncRecoveryCopyStatus =
+  | "saved"
+  | "different-intent-preserved"
+  | "storage-unavailable"
+  | "identity-unavailable";
+
 const MAX_PENDING_RECORD_CHARS = 2_500_000;
 
 function recordKey(scope: string, date: string): string {
@@ -73,6 +79,33 @@ export function savePendingSyncIntent(intent: PendingSyncIntent): boolean {
     () => null,
     { decode: (value) => isPendingIntent(value) ? value : null },
   ).write(intent);
+}
+
+export function saveRebasedPendingSyncIntent(
+  intent: PendingSyncIntent | null,
+  existing: PendingSyncIntent | null,
+): PendingSyncRecoveryCopyStatus {
+  if (!intent?.scope || !intent.date || !intent.id) return "identity-unavailable";
+  if (
+    existing
+    && (existing.scope !== intent.scope || existing.date !== intent.date || existing.id !== intent.id)
+  ) {
+    return "different-intent-preserved";
+  }
+  return savePendingSyncIntent(intent) ? "saved" : "storage-unavailable";
+}
+
+export function pendingSyncRecoveryCopyNotice(status: PendingSyncRecoveryCopyStatus): string {
+  switch (status) {
+    case "saved":
+      return "";
+    case "different-intent-preserved":
+      return "another pending change is already saved; this rebase did not replace it";
+    case "storage-unavailable":
+      return "browser storage did not save this rebase for reload";
+    case "identity-unavailable":
+      return "the recovery identity is unavailable; this rebase was not saved for reload";
+  }
 }
 
 export function clearPendingSyncIntent(

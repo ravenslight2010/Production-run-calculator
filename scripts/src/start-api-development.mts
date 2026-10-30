@@ -48,7 +48,12 @@ export async function startApiDevelopment(
   runCommand: RunCommand = run,
 ): Promise<void> {
   assertDevelopmentStartupAllowed(environment);
-  await runCommand("pnpm", ["--filter", "@workspace/db", "run", "push-force"]);
+  await runCommand("pnpm", [
+    "--filter",
+    "@workspace/db",
+    "run",
+    "apply-audit-log-protection",
+  ]);
   await runCommand("pnpm", [
     "--filter",
     "@workspace/api-server",

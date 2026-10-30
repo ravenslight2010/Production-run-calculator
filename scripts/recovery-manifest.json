@@ -302,7 +302,7 @@
         },
         {
           "file": "artifacts/run-calculator/src/pages/home.tsx",
-          "contains": "screenMode ? <ScreenModeView />"
+          "contains": "load={loadScreenModeView}"
         }
       ],
       "tests": [

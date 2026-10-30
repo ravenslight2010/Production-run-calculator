@@ -49,6 +49,9 @@ export interface NamedRecipe {
   components: NamedRecipeComponent[];
   // Disabled recipes are kept (so toggling is easy) but hidden from run pickers.
   enabled: boolean;
+  // DOUGH only: explicit manager classification for a premade crust with no
+  // in-house dough formula. Omitted by older clients; the server preserves it.
+  isPremadeCrust?: boolean;
   // Optional "who it goes to" tag: the customer (brand) this recipe is made
   // for. Empty string = shared/untagged. Display-only (never filters pickers).
   brand: string;
@@ -185,6 +188,9 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
     brand,
     flavors,
   };
+  if (typeof raw.isPremadeCrust === "boolean") {
+    recipe.isPremadeCrust = raw.isPremadeCrust;
+  }
   if (typeof raw.updatedAt === "string" && raw.updatedAt.trim()) {
     recipe.updatedAt = raw.updatedAt.trim();
   } else if (raw.updatedAt instanceof Date && Number.isFinite(raw.updatedAt.getTime())) {

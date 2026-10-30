@@ -124,6 +124,8 @@ import type {
   GetQcTargetsParams,
   GetShiftHandoffDigestParams,
   GetSignupCodeStatus200,
+  GetSyncScheduleSwapEligibility200,
+  GetSyncScheduleSwapEligibilityParams,
   GetSyncTodayParams,
   HardwareFieldCheckConfirmation,
   HealthStatus,
@@ -133,8 +135,13 @@ import type {
   ImportGoldCasesResponse,
   ImportGoldConfig,
   ImportGoldExclusionRequest,
+  ImportGoldLocalScoringRequest,
+  ImportGoldLocalScoringResponse,
   ImportGoldScoreRequest,
   ImportGoldScoreResponse,
+  ImportGoldSyntheticApplyRequest,
+  ImportGoldSyntheticApplyResponse,
+  ImportGoldSyntheticReview,
   ImportHistoryInput,
   ImportHistoryList,
   ImportHistoryResponse,
@@ -210,6 +217,7 @@ import type {
   MixReconcileResult,
   MixSurplusLedger,
   MixSurplusMutationResponse,
+  MoveSyncScheduledRuns200,
   NamedRecipeList,
   ObserveRunSuggestion200,
   ObserveRunSuggestionInput,
@@ -324,7 +332,9 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  ScheduledDaySwapRequest,
   ScheduledJobCleanupPlan,
+  ScheduledRunMoveRequest,
   SearchFinalizedOperationalReportsParams,
   ServerJob,
   SetFloorMode,
@@ -351,6 +361,7 @@ import type {
   SupervisorPin,
   SupervisorPinStatus,
   SupervisorPinVerificationInput,
+  SwapSyncScheduleDays200,
   SyncOperationalConflictResponse,
   SyncPeerFrame,
   SyncRecoveryPayload,
@@ -24437,6 +24448,293 @@ export const useFinalizeApplicatorBatchTotal = <TError = ErrorType<void | Applic
       return useMutation(getFinalizeApplicatorBatchTotalMutationOptions(options), queryClient);
     }
 
+export const getMoveSyncScheduledRunsUrl = () => {
+
+
+
+
+  return `/api/sync/schedule-move`
+}
+
+/**
+ * Moves one, several or all unstarted runs in one scoped transaction. The source and destination revisions and reset epoch are checked before either date changes. Setup values, run-value stamps, packaging progress, timers, automatic-tracking state and staged run items follow the moved runs. A rejected or stale request leaves both dates unchanged.
+ * @summary Atomically move selected runs between dates
+ */
+export const moveSyncScheduledRuns = async (scheduledRunMoveRequest: ScheduledRunMoveRequest, options?: Parameters<typeof customFetch>[1]): Promise<MoveSyncScheduledRuns200> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<MoveSyncScheduledRuns200>(getMoveSyncScheduledRunsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(scheduledRunMoveRequest)
+  }
+);}
+
+
+
+
+
+export const getMoveSyncScheduledRunsMutationKey = () => ['moveSyncScheduledRuns'] as const;
+
+export const getMoveSyncScheduledRunsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveSyncScheduledRuns>>, TError,MoveSyncScheduledRunsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof moveSyncScheduledRuns>>, TError,MoveSyncScheduledRunsMutationVariables, TContext> => {
+
+const mutationKey = getMoveSyncScheduledRunsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof moveSyncScheduledRuns>>, MoveSyncScheduledRunsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  moveSyncScheduledRuns(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MoveSyncScheduledRunsMutationResult = NonNullable<Awaited<ReturnType<typeof moveSyncScheduledRuns>>>
+    export type MoveSyncScheduledRunsMutationBody = BodyType<ScheduledRunMoveRequest>
+    export type MoveSyncScheduledRunsMutationError = ErrorType<void>
+    export type MoveSyncScheduledRunsMutationVariables = {data: BodyType<ScheduledRunMoveRequest>}
+
+    /**
+ * @summary Atomically move selected runs between dates
+ */
+export const useMoveSyncScheduledRuns = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveSyncScheduledRuns>>, TError,MoveSyncScheduledRunsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof moveSyncScheduledRuns>>,
+        TError,
+        MoveSyncScheduledRunsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getMoveSyncScheduledRunsMutationOptions(options), queryClient);
+    }
+
+export const getGetSyncScheduleSwapEligibilityUrl = (params: GetSyncScheduleSwapEligibilityParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/schedule-swap-eligibility?${stringifiedParams}` : `/api/sync/schedule-swap-eligibility`
+}
+
+/**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
+ * @summary Check whether a whole-day schedule swap is available
+ */
+export const getSyncScheduleSwapEligibility = async (params: GetSyncScheduleSwapEligibilityParams, options?: Parameters<typeof customFetch>[1]): Promise<GetSyncScheduleSwapEligibility200> => {
+
+  return customFetch<GetSyncScheduleSwapEligibility200>(getGetSyncScheduleSwapEligibilityUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSyncScheduleSwapEligibilityQueryKey = (params?: GetSyncScheduleSwapEligibilityParams,) => {
+    return [
+    `/api/sync/schedule-swap-eligibility`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSyncScheduleSwapEligibilityQueryOptions = <TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSyncScheduleSwapEligibilityQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>> = ({ signal }) => getSyncScheduleSwapEligibility(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetSyncScheduleSwapEligibilityQueryResult = NonNullable<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>>
+export type GetSyncScheduleSwapEligibilityQueryError = ErrorType<void>
+
+
+export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
+ params: GetSyncScheduleSwapEligibilityParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>,
+          TError,
+          Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
+ params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>,
+          TError,
+          Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
+ params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Check whether a whole-day schedule swap is available
+ */
+
+export function useGetSyncScheduleSwapEligibility<TData = Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError = ErrorType<void>>(
+ params: GetSyncScheduleSwapEligibilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSyncScheduleSwapEligibility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetSyncScheduleSwapEligibilityQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSwapSyncScheduleDaysUrl = () => {
+
+
+
+
+  return `/api/sync/schedule-swap-eligibility`
+}
+
+/**
+ * Exchanges run metadata, values, per-run stamps, packaging progress, timers, automatic-tracking state and date-specific settings. Factory-wide data remains attached to its original date. Both canonical revisions, scope, reset epoch and the today eligibility rule are checked under transaction locks before either date is written. Rejected or stale requests leave both dates unchanged.
+ * @summary Atomically exchange two date-scoped schedules
+ */
+export const swapSyncScheduleDays = async (scheduledDaySwapRequest: ScheduledDaySwapRequest, options?: Parameters<typeof customFetch>[1]): Promise<SwapSyncScheduleDays200> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SwapSyncScheduleDays200>(getSwapSyncScheduleDaysUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(scheduledDaySwapRequest)
+  }
+);}
+
+
+
+
+
+export const getSwapSyncScheduleDaysMutationKey = () => ['swapSyncScheduleDays'] as const;
+
+export const getSwapSyncScheduleDaysMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof swapSyncScheduleDays>>, TError,SwapSyncScheduleDaysMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof swapSyncScheduleDays>>, TError,SwapSyncScheduleDaysMutationVariables, TContext> => {
+
+const mutationKey = getSwapSyncScheduleDaysMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof swapSyncScheduleDays>>, SwapSyncScheduleDaysMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  swapSyncScheduleDays(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SwapSyncScheduleDaysMutationResult = NonNullable<Awaited<ReturnType<typeof swapSyncScheduleDays>>>
+    export type SwapSyncScheduleDaysMutationBody = BodyType<ScheduledDaySwapRequest>
+    export type SwapSyncScheduleDaysMutationError = ErrorType<void>
+    export type SwapSyncScheduleDaysMutationVariables = {data: BodyType<ScheduledDaySwapRequest>}
+
+    /**
+ * @summary Atomically exchange two date-scoped schedules
+ */
+export const useSwapSyncScheduleDays = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof swapSyncScheduleDays>>, TError,SwapSyncScheduleDaysMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof swapSyncScheduleDays>>,
+        TError,
+        SwapSyncScheduleDaysMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSwapSyncScheduleDaysMutationOptions(options), queryClient);
+    }
+
 export const getGetSyncTodayUrl = (params?: GetSyncTodayParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -25342,6 +25640,285 @@ export function useGetImportGoldConfig<TData = Awaited<ReturnType<typeof getImpo
 
 
 
+
+export const getSetImportGoldLocalScoringUrl = () => {
+
+
+
+
+  return `/api/import-gold/local-scoring`
+}
+
+/**
+ * This setting does not enable real-source capture approvals, Gemini, or the private evaluator workflow.
+ * @summary Enable or disable app-side local scoring in a development workspace
+ */
+export const setImportGoldLocalScoring = async (importGoldLocalScoringRequest: ImportGoldLocalScoringRequest, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldLocalScoringResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportGoldLocalScoringResponse>(getSetImportGoldLocalScoringUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldLocalScoringRequest)
+  }
+);}
+
+
+
+
+
+export const getSetImportGoldLocalScoringMutationKey = () => ['setImportGoldLocalScoring'] as const;
+
+export const getSetImportGoldLocalScoringMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setImportGoldLocalScoring>>, TError,SetImportGoldLocalScoringMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setImportGoldLocalScoring>>, TError,SetImportGoldLocalScoringMutationVariables, TContext> => {
+
+const mutationKey = getSetImportGoldLocalScoringMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setImportGoldLocalScoring>>, SetImportGoldLocalScoringMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setImportGoldLocalScoring(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetImportGoldLocalScoringMutationResult = NonNullable<Awaited<ReturnType<typeof setImportGoldLocalScoring>>>
+    export type SetImportGoldLocalScoringMutationBody = BodyType<ImportGoldLocalScoringRequest>
+    export type SetImportGoldLocalScoringMutationError = ErrorType<void>
+    export type SetImportGoldLocalScoringMutationVariables = {data: BodyType<ImportGoldLocalScoringRequest>}
+
+    /**
+ * @summary Enable or disable app-side local scoring in a development workspace
+ */
+export const useSetImportGoldLocalScoring = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setImportGoldLocalScoring>>, TError,SetImportGoldLocalScoringMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setImportGoldLocalScoring>>,
+        TError,
+        SetImportGoldLocalScoringMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetImportGoldLocalScoringMutationOptions(options), queryClient);
+    }
+
+export const getGetImportGoldSyntheticReviewUrl = () => {
+
+
+
+
+  return `/api/import-gold/synthetic-review`
+}
+
+/**
+ * @summary Read the fixed development-only synthetic evaluation sample
+ */
+export const getImportGoldSyntheticReview = async ( options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldSyntheticReview> => {
+
+  return customFetch<ImportGoldSyntheticReview>(getGetImportGoldSyntheticReviewUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportGoldSyntheticReviewQueryKey = () => {
+    return [
+    `/api/import-gold/synthetic-review`
+    ] as const;
+    }
+
+
+export const getGetImportGoldSyntheticReviewQueryOptions = <TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportGoldSyntheticReviewQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>> = ({ signal }) => getImportGoldSyntheticReview({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetImportGoldSyntheticReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>>
+export type GetImportGoldSyntheticReviewQueryError = ErrorType<void>
+
+
+export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportGoldSyntheticReview>>,
+          TError,
+          Awaited<ReturnType<typeof getImportGoldSyntheticReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportGoldSyntheticReview>>,
+          TError,
+          Awaited<ReturnType<typeof getImportGoldSyntheticReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read the fixed development-only synthetic evaluation sample
+ */
+
+export function useGetImportGoldSyntheticReview<TData = Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportGoldSyntheticReview>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetImportGoldSyntheticReviewQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getApplyImportGoldSyntheticReviewUrl = () => {
+
+
+
+
+  return `/api/import-gold/synthetic-apply`
+}
+
+/**
+ * Creates an idempotent synthetic evaluation case only and does not change recipes, inventory, or real-source approval settings.
+ * @summary Apply the reviewed fixed synthetic sample to the development evaluation lab
+ */
+export const applyImportGoldSyntheticReview = async (importGoldSyntheticApplyRequest: ImportGoldSyntheticApplyRequest, options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldSyntheticApplyResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportGoldSyntheticApplyResponse>(getApplyImportGoldSyntheticReviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importGoldSyntheticApplyRequest)
+  }
+);}
+
+
+
+
+
+export const getApplyImportGoldSyntheticReviewMutationKey = () => ['applyImportGoldSyntheticReview'] as const;
+
+export const getApplyImportGoldSyntheticReviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyImportGoldSyntheticReview>>, TError,ApplyImportGoldSyntheticReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyImportGoldSyntheticReview>>, TError,ApplyImportGoldSyntheticReviewMutationVariables, TContext> => {
+
+const mutationKey = getApplyImportGoldSyntheticReviewMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyImportGoldSyntheticReview>>, ApplyImportGoldSyntheticReviewMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  applyImportGoldSyntheticReview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyImportGoldSyntheticReviewMutationResult = NonNullable<Awaited<ReturnType<typeof applyImportGoldSyntheticReview>>>
+    export type ApplyImportGoldSyntheticReviewMutationBody = BodyType<ImportGoldSyntheticApplyRequest>
+    export type ApplyImportGoldSyntheticReviewMutationError = ErrorType<void>
+    export type ApplyImportGoldSyntheticReviewMutationVariables = {data: BodyType<ImportGoldSyntheticApplyRequest>}
+
+    /**
+ * @summary Apply the reviewed fixed synthetic sample to the development evaluation lab
+ */
+export const useApplyImportGoldSyntheticReview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyImportGoldSyntheticReview>>, TError,ApplyImportGoldSyntheticReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof applyImportGoldSyntheticReview>>,
+        TError,
+        ApplyImportGoldSyntheticReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getApplyImportGoldSyntheticReviewMutationOptions(options), queryClient);
+    }
 
 export const getListImportGoldCasesUrl = (params?: ListImportGoldCasesParams,) => {
   const normalizedParams = new URLSearchParams();

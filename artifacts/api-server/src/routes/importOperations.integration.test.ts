@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import express from "express";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
@@ -112,10 +112,11 @@ beforeEach(async () => {
   delete process.env.IMPORT_GOLD_LOCAL_ENABLED;
   delete process.env.IMPORT_GOLD_LOCAL_BASE_URL;
   route?.setImportGoldProviderForTest();
-  await db.execute(sql`TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.cheeseRecipesTable}, ${tables.importGoldScoresTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.qcWorkflowEventsTable}, ${tables.cheeseRecipesTable}, ${tables.importGoldScoresTable}, ${tables.importGoldCasesTable}, ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.factoryKvTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
+    { id: "inventory-peer", username: "inventory-peer", passwordHash: "x" },
     { id: "profiles", username: "profiles", passwordHash: "x" },
     { id: "sandbox", username: "sandbox", passwordHash: "x", sandbox: true },
     { id: "qc-reviewer", username: "qc-reviewer", passwordHash: "x" },
@@ -123,13 +124,14 @@ beforeEach(async () => {
   ]);
   await db.insert(tables.userRolesTable).values([
     { userId: "inventory", role: "manager" },
+    { userId: "inventory-peer", role: "manager" },
     { userId: "profiles", role: "operator" },
     { userId: "sandbox", role: "manager" },
     { userId: "qc-reviewer", role: "qc-manager" },
     { userId: "qc-peer", role: "qc-manager" },
   ]);
   sessionTokens.clear();
-  for (const user of ["inventory", "profiles", "sandbox", "qc-reviewer", "qc-peer"]) {
+  for (const user of ["inventory", "inventory-peer", "profiles", "sandbox", "qc-reviewer", "qc-peer"]) {
     const token = signLegacyTokenForTests(user);
     sessionTokens.set(user, token);
     await recordSession(user, token);
@@ -140,6 +142,13 @@ function headers(user = "inventory") {
   const token = sessionTokens.get(user);
   if (!token) throw new Error(`No test session established for ${user}`);
   return { "content-type": "application/json", authorization: `Bearer ${token}` };
+}
+async function enableLocalGoldScoring(enabled = true, user = "inventory") {
+  return fetch(`${baseUrl}/api/import-gold/local-scoring`, {
+    method: "PATCH",
+    headers: headers(user),
+    body: JSON.stringify({ enabled }),
+  });
 }
 function change(id = "mix-atomic") {
   return {
@@ -374,6 +383,51 @@ async function apply(
 }
 
 describe("atomic import operations", () => {
+  it("preserves premade-crust classification on re-import and leaves new names unclassified", async () => {
+    const existing = {
+      id: "premade-import-existing",
+      name: "Premade Crust",
+      notes: "",
+      components: [],
+      enabled: true,
+      isPremadeCrust: true,
+      brand: "",
+      flavors: [],
+    };
+    expect((await apply("premade-import-initial", {
+      importType: "spec",
+      sourceLabel: "synthetic-premade-crust",
+      changes: { doughRecipes: { upsert: [existing] } },
+    })).status).toBe(200);
+
+    const reimported = { ...existing, notes: "Updated by workbook" };
+    delete (reimported as Partial<typeof existing>).isPremadeCrust;
+    expect((await apply("premade-import-reimport", {
+      importType: "spec",
+      sourceLabel: "synthetic-premade-crust",
+      changes: { doughRecipes: { upsert: [reimported] } },
+    })).status).toBe(200);
+
+    const unclassified = {
+      id: "premade-import-unclassified",
+      name: "Premade Crust Vendor",
+      notes: "",
+      components: [],
+      enabled: true,
+      brand: "",
+      flavors: [],
+    };
+    expect((await apply("premade-import-new-unclassified", {
+      importType: "spec",
+      sourceLabel: "synthetic-premade-crust",
+      changes: { doughRecipes: { upsert: [unclassified] } },
+    })).status).toBe(200);
+
+    const stored = await db.select().from(tables.doughRecipesTable);
+    expect(stored.find((row) => row.id === existing.id)?.isPremadeCrust).toBe(true);
+    expect(stored.find((row) => row.id === unclassified.id)?.isPremadeCrust).toBe(false);
+  });
+
   it("previews the actual normalized write set without learning, applying or writing audit/stock", async () => {
     const body = { ...change(), sourceKey: "synthetic-source" };
     const response = await fetch(`${baseUrl}/api/import-operations/preview`, {
@@ -606,7 +660,7 @@ describe("atomic import operations", () => {
         family: "dough_recipe",
         id: dough.id,
         fields: [
-          "name", "notes", "components", "enabled", "brand", "flavors",
+          "name", "notes", "components", "enabled", "isPremadeCrust", "brand", "flavors",
           "doughballWeightOz", "doughballsPerTray", "doughballVariants",
         ],
         updatedFields: ["notes"],
@@ -1177,6 +1231,7 @@ describe("atomic import operations", () => {
   it("reports invalid local configuration without probing and rejects production test overrides", async () => {
     process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
     process.env.IMPORT_GOLD_LOCAL_BASE_URL = "http://169.254.169.254/private";
+    expect((await enableLocalGoldScoring()).status).toBe(200);
     const configResponse = await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() });
     expect(configResponse.status).toBe(200);
     expect(await configResponse.json()).toMatchObject({ enabled: true, localConfigured: false });
@@ -1222,7 +1277,9 @@ describe("atomic import operations", () => {
       }),
       fetch(`${baseUrl}/api/import-gold/cases/${caseId}`, { method: "DELETE", headers: headers() }),
     ]);
-    expect(disabledCaseRoutes.map((response) => response.status)).toEqual([404, 404, 404, 404, 404]);
+    expect(disabledCaseRoutes.map((response) => response.status)).toEqual([200, 200, 403, 404, 404]);
+    expect((await disabledCaseRoutes[0]!.json() as { cases: unknown[] }).cases).toEqual([]);
+    expect(await disabledCaseRoutes[1]!.text()).toBe("");
     process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "not_required";
 
     const invalidLimit = await fetch(`${baseUrl}/api/import-gold/cases?limit=101`, { headers: headers() });
@@ -1312,6 +1369,7 @@ describe("atomic import operations", () => {
     const cases = await db.select({ id: tables.importGoldCasesTable.id, evaluatedInput: tables.importGoldCasesTable.evaluatedInput })
       .from(tables.importGoldCasesTable).orderBy(tables.importGoldCasesTable.id);
     process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+    expect((await enableLocalGoldScoring()).status).toBe(200);
     route.setImportGoldProviderForTest(async (_provider, input) => {
       const candidate = (input.candidates as Array<{ name?: string }>)[0];
       if (candidate?.name === "Provider outage case") throw new Error("provider_unavailable");
@@ -1349,6 +1407,254 @@ describe("atomic import operations", () => {
       results: [{ status: "error", errorCode: "invalid_output" }],
     });
     expect(await db.select().from(tables.importGoldScoresTable)).toHaveLength(3);
+  });
+
+  it("keeps local scoring and the fixed synthetic review separate from real-source approval", async () => {
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
+    process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+    const configResponse = await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() });
+    expect(configResponse.status).toBe(200);
+    expect(await configResponse.json()).toMatchObject({
+      enabled: false,
+      localConfigured: true,
+      localScoringSwitchAvailable: true,
+      localScoringEnabled: false,
+      syntheticFixtureAvailable: true,
+    });
+
+    expect((await enableLocalGoldScoring(true, "profiles")).status).toBe(403);
+    const reviewResponse = await fetch(`${baseUrl}/api/import-gold/synthetic-review`, { headers: headers() });
+    expect(reviewResponse.status).toBe(200);
+    const review = await reviewResponse.json() as {
+      fixtureVersion: string; input: Record<string, unknown>; expectedResult: Record<string, unknown>;
+      applyEffect: string;
+    };
+    expect(review).toMatchObject({
+      fixtureVersion: "synthetic-mix-v1",
+      applyEffect: expect.stringContaining("does not change recipes, inventory"),
+      input: { candidates: [{ name: "Synthetic Sample Mix" }] },
+      expectedResult: { mixes: [{ name: "Synthetic Sample Mix" }] },
+    });
+    expect((await fetch(`${baseUrl}/api/import-gold/synthetic-apply`, {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ fixtureVersion: review.fixtureVersion, reviewed: false }),
+    })).status).toBe(400);
+    const applyBody = { fixtureVersion: review.fixtureVersion, reviewed: true };
+    const applied = await fetch(`${baseUrl}/api/import-gold/synthetic-apply`, {
+      method: "POST", headers: headers(), body: JSON.stringify(applyBody),
+    });
+    expect(applied.status).toBe(201);
+    const first = await applied.json() as { caseId: number; created: boolean };
+    expect(first.created).toBe(true);
+    const duplicate = await fetch(`${baseUrl}/api/import-gold/synthetic-apply`, {
+      method: "POST", headers: headers(), body: JSON.stringify(applyBody),
+    });
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.json()).toEqual({ caseId: first.caseId, created: false });
+    expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+    expect((await db.select().from(tables.importGoldCasesTable)).map((row) => row.sourceLabel))
+      .toEqual(["Synthetic local scoring fixture"]);
+
+    expect((await fetch(`${baseUrl}/api/import-gold/score`, {
+      method: "POST", headers: headers(), body: JSON.stringify({ provider: "local" }),
+    })).status).toBe(403);
+    expect((await enableLocalGoldScoring()).status).toBe(200);
+    const managerConfig = await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() });
+    expect(await managerConfig.json()).toMatchObject({
+      enabled: false,
+      localScoringSwitchAvailable: true,
+      localScoringEnabled: true,
+      syntheticFixtureAvailable: true,
+    });
+    const peerDeviceConfig = await fetch(`${baseUrl}/api/import-gold/config`, {
+      headers: headers("inventory-peer"),
+    });
+    expect(await peerDeviceConfig.json()).toMatchObject({
+      localScoringSwitchAvailable: true,
+      localScoringEnabled: true,
+      syntheticFixtureAvailable: true,
+    });
+    route.setImportGoldProviderForTest(async () => review.expectedResult);
+    const scored = await fetch(`${baseUrl}/api/import-gold/score`, {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ provider: "local", caseIds: [first.caseId] }),
+    });
+    expect(scored.status).toBe(200);
+    expect(await scored.json()).toMatchObject({ scoredCount: 1, errorCount: 0 });
+    expect(await db.select().from(tables.importGoldScoresTable)).toMatchObject([
+      { caseId: first.caseId, provider: "local", status: "scored" },
+    ]);
+
+    const realCapture = await apply("gold-real-source-stays-blocked-001", {
+      ...change("gold-real-source-stays-blocked"),
+      goldCapture: { input: { candidates: [{ name: "not permitted" }] } },
+    });
+    expect(realCapture.status).toBe(404);
+    expect((await db.select().from(tables.importGoldCasesTable)).map((row) => row.sourceLabel))
+      .toEqual(["Synthetic local scoring fixture"]);
+    expect((await fetch(`${baseUrl}/api/import-gold/score`, {
+      method: "POST", headers: headers(), body: JSON.stringify({ provider: "gemini" }),
+    })).status).toBe(404);
+
+    const previousNodeEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      expect(((await (await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() })).json()) as {
+        localScoringSwitchAvailable: boolean; localScoringEnabled: boolean; syntheticFixtureAvailable: boolean;
+      })).toMatchObject({ localScoringSwitchAvailable: false, localScoringEnabled: false, syntheticFixtureAvailable: false });
+      expect((await enableLocalGoldScoring(false)).status).toBe(404);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
+  it("uses the bounded local JSON contract and retains a retry after provider failure", async () => {
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
+    process.env.IMPORT_GOLD_RETENTION_APPROVED = "false";
+    process.env.IMPORT_GOLD_LOCAL_ENABLED = "true";
+    route.setImportGoldProviderForTest();
+
+    let expectedResult: Record<string, unknown> | undefined;
+    const evaluatorRequests: Array<{
+      hasResponseFormat: boolean;
+      model: unknown;
+      maxTokens: unknown;
+      stream: unknown;
+      roles: unknown[];
+    }> = [];
+    const evaluator = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk: string) => { body += chunk; });
+      request.on("end", () => {
+        if (request.url !== "/v1/chat/completions" || request.method !== "POST") {
+          response.statusCode = 404;
+          response.end();
+          return;
+        }
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(body) as Record<string, unknown>;
+        } catch {
+          response.statusCode = 400;
+          response.end();
+          return;
+        }
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        evaluatorRequests.push({
+          hasResponseFormat: Object.hasOwn(payload, "response_format"),
+          model: payload.model,
+          maxTokens: payload.max_tokens,
+          stream: payload.stream,
+          roles: messages.map((message) =>
+            message && typeof message === "object" && "role" in message
+              ? (message as { role: unknown }).role
+              : null,
+          ),
+        });
+        response.setHeader("content-type", "application/json");
+        if (Object.hasOwn(payload, "response_format")) {
+          response.statusCode = 400;
+          response.end(JSON.stringify({ error: { type: "invalid_request_error" } }));
+          return;
+        }
+        if (evaluatorRequests.length === 1) {
+          response.statusCode = 503;
+          response.end(JSON.stringify({ error: { type: "provider_unavailable" } }));
+          return;
+        }
+        response.statusCode = 200;
+        const prediction = JSON.stringify(expectedResult);
+        response.end(JSON.stringify({
+          choices: [{
+            message: {
+              content: evaluatorRequests.length === 2
+                ? `<think>synthetic wrapper</think>\n${prediction}`
+                : `${prediction}\n${prediction}`,
+            },
+          }],
+        }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      evaluator.once("error", reject);
+      evaluator.listen(0, "127.0.0.1", resolve);
+    });
+    const evaluatorAddress = evaluator.address() as AddressInfo;
+    process.env.IMPORT_GOLD_LOCAL_BASE_URL = `http://127.0.0.1:${evaluatorAddress.port}/v1`;
+
+    try {
+      const reviewResponse = await fetch(`${baseUrl}/api/import-gold/synthetic-review`, {
+        headers: headers(),
+      });
+      expect(reviewResponse.status).toBe(200);
+      const review = await reviewResponse.json() as {
+        fixtureVersion: string;
+        expectedResult: Record<string, unknown>;
+      };
+      expectedResult = review.expectedResult;
+      const applied = await fetch(`${baseUrl}/api/import-gold/synthetic-apply`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ fixtureVersion: review.fixtureVersion, reviewed: true }),
+      });
+      expect(applied.status).toBe(201);
+      const { caseId } = await applied.json() as { caseId: number };
+      expect((await enableLocalGoldScoring()).status).toBe(200);
+
+      const scoreSyntheticCase = () => fetch(`${baseUrl}/api/import-gold/score`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ provider: "local", caseIds: [caseId] }),
+      });
+      const failedAttempt = await scoreSyntheticCase();
+      expect(failedAttempt.status).toBe(200);
+      expect(await failedAttempt.json()).toMatchObject({
+        scoredCount: 0,
+        errorCount: 1,
+        results: [{ caseId, provider: "local", status: "error", errorCode: "provider_unavailable" }],
+      });
+
+      const retry = await scoreSyntheticCase();
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toMatchObject({
+        scoredCount: 1,
+        errorCount: 0,
+        results: [{ caseId, provider: "local", status: "scored", accuracy: 100 }],
+      });
+      const ambiguousOutput = await scoreSyntheticCase();
+      expect(ambiguousOutput.status).toBe(200);
+      expect(await ambiguousOutput.json()).toMatchObject({
+        scoredCount: 0,
+        errorCount: 1,
+        results: [{ caseId, provider: "local", status: "error", errorCode: "invalid_output" }],
+      });
+      expect(evaluatorRequests).toHaveLength(3);
+      expect(evaluatorRequests.every((request) =>
+        request.hasResponseFormat === false &&
+        request.model === "qwen3.5-9b-q3_k_m" &&
+        request.maxTokens === 256 &&
+        request.stream === false &&
+        JSON.stringify(request.roles) === JSON.stringify(["system", "user"]),
+      )).toBe(true);
+      const persistedScores = await db.select({
+        provider: tables.importGoldScoresTable.provider,
+        status: tables.importGoldScoresTable.status,
+        errorCode: tables.importGoldScoresTable.errorCode,
+      }).from(tables.importGoldScoresTable)
+        .where(eq(tables.importGoldScoresTable.caseId, caseId))
+        .orderBy(tables.importGoldScoresTable.id);
+      expect(persistedScores).toEqual([
+        { provider: "local", status: "error", errorCode: "provider_unavailable" },
+        { provider: "local", status: "scored", errorCode: null },
+        { provider: "local", status: "error", errorCode: "invalid_output" },
+      ]);
+      expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+    } finally {
+      await new Promise<void>((resolve) => evaluator.close(() => resolve()));
+    }
   });
 
   it("compares nested values by field without mutating the applied result", () => {

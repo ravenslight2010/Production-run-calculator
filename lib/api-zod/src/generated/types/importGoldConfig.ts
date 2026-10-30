@@ -9,6 +9,10 @@
 export interface ImportGoldConfig {
   enabled: boolean;
   localConfigured: boolean;
+  localAvailable: boolean;
+  localScoringSwitchAvailable: boolean;
+  localScoringEnabled: boolean;
+  syntheticFixtureAvailable: boolean;
   geminiConfigured: boolean;
   retention: string;
   persistsAcrossFactoryPurge: boolean;

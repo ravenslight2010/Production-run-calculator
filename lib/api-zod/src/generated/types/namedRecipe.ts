@@ -23,6 +23,8 @@ export interface NamedRecipe {
   /** The ingredients that make up the recipe */
   components: NamedRecipeComponent[];
   enabled: boolean;
+  /** Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification. */
+  isPremadeCrust?: boolean;
   /** Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers. */
   brand?: string;
   /** Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes). */

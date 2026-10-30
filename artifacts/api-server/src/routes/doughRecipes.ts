@@ -27,6 +27,7 @@ const DOUGH_RECIPE_AUDIT_FIELDS = [
   "notes",
   "components",
   "enabled",
+  "isPremadeCrust",
   "brand",
   "flavors",
   "doughballWeightOz",
@@ -54,6 +55,7 @@ function comparable(item: NamedRecipe): string {
     notes: item.notes,
     components: item.components,
     enabled: item.enabled,
+    isPremadeCrust: item.isPremadeCrust,
     brand: item.brand,
     flavors: item.flavors,
     doughballWeightOz: item.doughballWeightOz,
@@ -70,6 +72,7 @@ function toApiItem(row: DoughRecipeRow): NamedRecipe {
     notes: row.notes,
     components: row.components ?? [],
     enabled: row.enabled,
+    isPremadeCrust: row.isPremadeCrust,
     brand: row.brand ?? "",
     flavors: row.flavors ?? [],
   };
@@ -88,6 +91,7 @@ function toDbValues(item: NamedRecipe) {
     notes: item.notes ?? "",
     components: item.components,
     enabled: item.enabled,
+    isPremadeCrust: item.isPremadeCrust ?? false,
     brand: item.brand ?? "",
     flavors: item.flavors ?? [],
     doughballWeightOz: item.doughballWeightOz ?? 0,
@@ -179,16 +183,22 @@ router.post(
 
         for (const recipe of byId.values()) {
           const existing = existingById.get(recipe.id);
-          const values = toDbValues(recipe);
+          // Older clients omit new fields. Omission is not a request to clear
+          // a manager's explicit classification.
+          const canonicalRecipe: NamedRecipe = {
+            ...recipe,
+            isPremadeCrust: recipe.isPremadeCrust ?? existing?.isPremadeCrust ?? false,
+          };
+          const values = toDbValues(canonicalRecipe);
           values.updatedAt = nextRevision(existing?.updatedAt);
           const fieldNames = existing
-            ? changedRecipeFields(recipe, existing)
+            ? changedRecipeFields(canonicalRecipe, existing)
             : [...DOUGH_RECIPE_AUDIT_FIELDS];
           if (
             existing &&
             recipe.updatedAt &&
             new Date(recipe.updatedAt).getTime() === existing.updatedAt.getTime() &&
-            comparable(recipe) === comparable(toApiItem(existing))
+            comparable(canonicalRecipe) === comparable(toApiItem(existing))
           ) {
             continue;
           }
@@ -202,6 +212,7 @@ router.post(
                 notes: values.notes,
                 components: values.components,
                 enabled: values.enabled,
+                isPremadeCrust: values.isPremadeCrust,
                 brand: values.brand,
                 flavors: values.flavors,
                 doughballWeightOz: values.doughballWeightOz,
@@ -210,7 +221,7 @@ router.post(
                 updatedAt: values.updatedAt,
               },
             });
-          const capture = buildRecipeQcCapture("dough", recipe.id, existing ? toApiItem(existing) : undefined, recipe);
+          const capture = buildRecipeQcCapture("dough", recipe.id, existing ? toApiItem(existing) : undefined, canonicalRecipe);
           if (capture) {
             await tx.insert(qcWorkflowEventsTable).values({
               scope: currentScope(),

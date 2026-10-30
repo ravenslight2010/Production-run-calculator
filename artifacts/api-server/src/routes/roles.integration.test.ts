@@ -341,6 +341,13 @@ function routeCapabilities(
 const ROUTES: GatedRoute[] = [
   // --- manage-inventory ---
   {
+    name: "POST /inventory/consume-day-start",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/inventory/consume-day-start",
+    okStatus: 200,
+  },
+  {
     name: "POST /inventory/items",
     capability: "manage-inventory",
     method: "POST",
@@ -977,6 +984,13 @@ const ROUTES: GatedRoute[] = [
     path: () => "/api/ai-memory/health-check",
     okStatus: 200,
   },
+  {
+    name: "GET /background-operations/diagnostics",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/background-operations/diagnostics",
+    okStatus: 200,
+  },
 ];
 
 type ExpressRouteLayer = {
@@ -1355,11 +1369,25 @@ describe("manager action queue manual resolution", () => {
     `);
 
     try {
-      const initialResponse = await req(
-        MANAGER,
-        "GET",
-        "/api/manager-action-queue?category=incident&status=all",
-      );
+      const concurrentQueryWarnings: string[] = [];
+      const onWarning = (warning: Error) => {
+        if (warning.message.includes("Calling client.query() when the client is already executing a query")) {
+          concurrentQueryWarnings.push(warning.message);
+        }
+      };
+      process.on("warning", onWarning);
+      let initialResponse: Awaited<ReturnType<typeof req>>;
+      try {
+        initialResponse = await req(
+          MANAGER,
+          "GET",
+          "/api/manager-action-queue?category=incident&status=all",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      } finally {
+        process.off("warning", onWarning);
+      }
+      expect(concurrentQueryWarnings).toEqual([]);
       expect(initialResponse.status).toBe(200);
       const initial = await initialResponse.json() as {
         items: Array<{ id: number; dedupKey: string; status: string; version: number }>;

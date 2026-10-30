@@ -42,6 +42,14 @@ export default defineConfig({
       name: "phone-chromium",
       use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } },
     },
+    {
+      name: "tablet-portrait-chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
+    },
+    {
+      name: "tablet-landscape-chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 768 } },
+    },
     ...(frontlineMatrix ? [
       { name: "desktop-webkit", use: { ...devices["Desktop Safari"], launchOptions: frontlineWebkitOptions ?? {} } },
       { name: "phone-webkit", use: { ...devices["iPhone 13"], launchOptions: frontlineWebkitOptions ?? {} } },

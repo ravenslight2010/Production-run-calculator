@@ -3510,7 +3510,7 @@ export async function commitSpecImport(
   // ordinary autosaves; only this deliberate Apply action overrides it.
   if (!operationId) {
     for (const { brand, flavor } of touchedProfiles) {
-      markProfileForceEdited(canonicalProfileKey(brand, flavor));
+      markProfileForceEdited(canonicalProfileKey(brand, flavor), { brand, flavor });
     }
   }
   // A spec import is an explicit manager repair, not an eventually-consistent

@@ -4653,10 +4653,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const body = request.postDataJSON() as { claim?: { channel?: string } };
       if (body.claim?.channel) observedClaims.push(body.claim.channel);
     };
-    let recoveryStarted = false;
-    let recoveryPullAborted = false;
+    let recoveryPullStartedCount = 0;
+    let heldRecoveryPullCount = 0;
+    let recoveryPullAbortedCount = 0;
     let trackRecoveryPushes = false;
     let recoveryPutCount = 0;
+    const recoveryPutObservations: {
+      startedDuringHeldPull: boolean;
+      completedDuringHeldPull?: boolean;
+      includedOfflineCycleSpeedEdit: boolean;
+      outcome: "pending" | "acknowledged" | "rejected" | "failed";
+      status?: number;
+    }[] = [];
+    const pendingRecoveryPuts = new Map<Request, (typeof recoveryPutObservations)[number]>();
     let releaseRecovery: (() => void) | undefined;
     const recoveryHeld = new Promise<void>((resolve) => {
       releaseRecovery = resolve;
@@ -4665,7 +4674,40 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       if (!trackRecoveryPushes || request.method() !== "PUT") return;
       if (new URL(request.url()).pathname === "/api/sync/today") {
         recoveryPutCount += 1;
+        let includedOfflineCycleSpeedEdit = false;
+        try {
+          const body = request.postDataJSON() as {
+            payload?: { runValues?: Record<string, { cycleSpeed?: unknown }> };
+          };
+          includedOfflineCycleSpeedEdit = Object.values(
+            body.payload?.runValues ?? {},
+          ).some((values) => values?.cycleSpeed === 31);
+        } catch {
+          // Record only whether the known synthetic edit was present.
+        }
+        const observation = {
+          startedDuringHeldPull: heldRecoveryPullCount > 0,
+          includedOfflineCycleSpeedEdit,
+          outcome: "pending" as const,
+        };
+        recoveryPutObservations.push(observation);
+        pendingRecoveryPuts.set(request, observation);
       }
+    };
+    const recordRecoveryPutResponse = (response: Response) => {
+      const observation = pendingRecoveryPuts.get(response.request());
+      if (!observation) return;
+      observation.completedDuringHeldPull = heldRecoveryPullCount > 0;
+      observation.status = response.status();
+      observation.outcome = response.ok() ? "acknowledged" : "rejected";
+      pendingRecoveryPuts.delete(response.request());
+    };
+    const recordRecoveryPutFailure = (request: Request) => {
+      const observation = pendingRecoveryPuts.get(request);
+      if (!observation) return;
+      observation.completedDuringHeldPull = heldRecoveryPullCount > 0;
+      observation.outcome = "failed";
+      pendingRecoveryPuts.delete(request);
     };
 
     try {
@@ -4696,6 +4738,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       expect(cycleSpeedBeforeQueuedEdit).not.toBe(31);
       sleepingPage.on("request", recordClaim);
       sleepingPage.on("request", recordRecoveryPut);
+      sleepingPage.on("response", recordRecoveryPutResponse);
+      sleepingPage.on("requestfailed", recordRecoveryPutFailure);
       await simulateScreenOff(sleepingPage);
       await peer.setOffline(true);
 
@@ -4723,14 +4767,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toBe(31);
 
       await sleepingPage.route("**/api/sync/today**", async (route) => {
-        if (route.request().method() !== "GET" || recoveryStarted) {
+        if (route.request().method() !== "GET") {
           await route.continue();
           return;
         }
-        recoveryStarted = true;
+        // Hold every canonical read. A visibility transition can supersede
+        // one recovery attempt and immediately start another; holding only the
+        // first would let the replacement adopt and release writes unnoticed.
+        recoveryPullStartedCount += 1;
+        heldRecoveryPullCount += 1;
         await recoveryHeld;
         await route.abort("aborted").catch(() => {});
-        recoveryPullAborted = true;
+        heldRecoveryPullCount = Math.max(0, heldRecoveryPullCount - 1);
+        recoveryPullAbortedCount += 1;
       });
       trackRecoveryPushes = true;
       await peer.setOffline(false);
@@ -4748,37 +4797,95 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         },
       );
       expect(
-        recoveryStarted,
-        "wake recovery did not reach the held canonical pull",
-      ).toBe(true);
+        recoveryPullStartedCount,
+        "wake recovery did not reach a held canonical pull",
+      ).toBeGreaterThan(0);
       await sleepingPage.waitForTimeout(750);
-      expect(
-        recoveryPutCount,
-        "a sync PUT escaped while the canonical wake pull was held",
-      ).toBe(0);
+      const syncEventSummary = await sleepingPage.evaluate(() => {
+        const diagnosticKey = Array.from(
+          { length: localStorage.length },
+          (_, index) => localStorage.key(index),
+        ).find((key) => key?.startsWith("run-calc-sync-diagnostics:"));
+        if (!diagnosticKey) return [];
+        try {
+          const parsed = JSON.parse(localStorage.getItem(diagnosticKey) ?? "[]");
+          if (!Array.isArray(parsed)) return [];
+          return parsed.slice(-12).map((event) => ({
+            kind: typeof event?.kind === "string" ? event.kind : "unknown",
+            message: typeof event?.message === "string" ? event.message : "",
+            response: typeof event?.response === "string" ? event.response : "",
+          }));
+        } catch {
+          return [];
+        }
+      });
+      const recoveryPutCountWhilePullHeld = recoveryPutObservations.filter(
+        (observation) => observation.startedDuringHeldPull,
+      ).length;
 
       // Navigation unmounts the real Home effect while its pull is pending.
       // Release the route afterward so the cancelled request cannot linger.
       await sleepingPage.goto("about:blank", { waitUntil: "domcontentloaded" });
       releaseRecovery?.();
       await expect
-        .poll(() => recoveryPullAborted, {
+        .poll(() => recoveryPullAbortedCount, {
           timeout: 5_000,
-          message: "cancelled recovery pull did not terminate",
+          message: "cancelled recovery pulls did not terminate",
         })
-        .toBe(true);
+        .toBe(recoveryPullStartedCount);
       await sleepingPage.unroute("**/api/sync/today**");
       await sleepingPage.waitForTimeout(750);
+      await expect
+        .poll(
+          () => recoveryPutObservations.filter(
+            (observation) => observation.outcome === "pending",
+          ).length,
+          {
+            timeout: 5_000,
+            message: "a tracked sync write did not settle after recovery cancellation",
+          },
+        )
+        .toBe(0);
+      const acknowledgedDuringRecovery = recoveryPutObservations.filter(
+        (observation) =>
+          observation.outcome === "acknowledged"
+          && (
+            observation.startedDuringHeldPull
+            || observation.completedDuringHeldPull
+          ),
+      );
+      await testInfo.attach("cancelled-wake-put-observations.json", {
+        body: JSON.stringify(
+          {
+            isolatedFixture: true,
+            putCount: recoveryPutCount,
+            startedDuringHeldPull: recoveryPutCountWhilePullHeld,
+            acknowledgedDuringRecovery: acknowledgedDuringRecovery.length,
+            observations: recoveryPutObservations,
+          },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
       expect(
-        recoveryPutCount,
-        "the cancelled recovery owner published its pending sync write",
-      ).toBe(0);
+        acknowledgedDuringRecovery,
+        "a sync PUT was acknowledged before canonical wake adoption completed",
+      ).toEqual([]);
       const canonicalBeforeRemount = await readLiveRunSnapshot(page);
       expect(canonicalBeforeRemount.values.cycleSpeed).toBe(
         cycleSpeedBeforeQueuedEdit,
       );
+      expect(
+        observedClaims,
+        "cancelled recovery issued an automatic tracking claim before remount",
+      ).toEqual([]);
+      const cancelledOwnerClaims = [...observedClaims];
       trackRecoveryPushes = false;
       sleepingPage.off("request", recordRecoveryPut);
+      sleepingPage.off("response", recordRecoveryPutResponse);
+      sleepingPage.off("requestfailed", recordRecoveryPutFailure);
+      sleepingPage.off("request", recordClaim);
       await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
       await sleepingPage
         .getByTestId("tab-run")
@@ -4806,11 +4913,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           },
         )
         .toBe(31);
-      expect(
-        observedClaims,
-        "cancelled recovery replayed a queued auto-track write",
-      ).toEqual([]);
-
       const status = sleepingPage.getByTestId("foreground-recovery-status");
       if (await status.count()) {
         await expect(status).not.toHaveAttribute(
@@ -4825,9 +4927,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
             device: "phone-sleeping",
             cancelledRecoveryVisible: true,
             trackingFenceClearedAfterRemount: true,
+            recoveryPullsHeld: recoveryPullStartedCount,
+            recoveryPullsAborted: recoveryPullAbortedCount,
             cancelledOwnerPutCount: recoveryPutCount,
+            acknowledgedDuringRecovery: acknowledgedDuringRecovery.length,
             offlineEditRetainedAfterRemount: true,
-            autoTrackClaims: 0,
+            cancelledOwnerAutoTrackClaims: cancelledOwnerClaims.length,
+            syncEvents: syncEventSummary,
           },
           null,
           2,

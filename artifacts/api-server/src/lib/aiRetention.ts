@@ -10,6 +10,7 @@ import {
   usersTable,
 } from "@workspace/db";
 import { currentScope } from "./requestScope";
+import { executeReadQueries } from "./queryReads";
 
 export const AI_RETENTION_VERSION = "retired-ai-retention-v1";
 export const AI_RETENTION_BATCH_LIMIT = 500;
@@ -68,24 +69,25 @@ async function limitedCandidates(
   executor: RetentionExecutor,
   scope: string,
   now: Date,
+  sequentialQueries = false,
 ) {
   const conversationBefore = cutoff(now, CONVERSATION_RETENTION_DAYS);
   const thumbnailBefore = cutoff(now, THUMBNAIL_RETENTION_DAYS);
   const observationBefore = cutoff(now, OBSERVATION_RETENTION_DAYS);
   const [turns, facts, incidents, operationalIncidents, thumbnails, observations, qualityRows, openObservations, marker] =
-    await Promise.all([
-      executor.select({ id: aiConversationTurnsTable.id }).from(aiConversationTurnsTable)
+    await executeReadQueries([
+      () => executor.select({ id: aiConversationTurnsTable.id }).from(aiConversationTurnsTable)
         .innerJoin(usersTable, eq(aiConversationTurnsTable.userId, usersTable.id))
         .where(and(
           lt(aiConversationTurnsTable.createdAt, conversationBefore),
           eq(usersTable.sandbox, scope === "sandbox"),
         )).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: facilityKnowledgeTable.id }).from(facilityKnowledgeTable)
+      () => executor.select({ id: facilityKnowledgeTable.id }).from(facilityKnowledgeTable)
         .where(and(
           eq(facilityKnowledgeTable.scope, scope),
           inArray(facilityKnowledgeTable.domain, [...RETIRED_FACILITY_DOMAINS]),
         )).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: incidentsTable.id }).from(incidentsTable)
+      () => executor.select({ id: incidentsTable.id }).from(incidentsTable)
         .where(and(
           eq(incidentsTable.scope, scope),
           sql`(
@@ -94,30 +96,30 @@ async function limitedCandidates(
             (${incidentsTable.workaround} is not null and ${incidentsTable.workaround} not like '[Unverified generated text]%')
           )`,
         )).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: incidentsTable.id }).from(incidentsTable)
+      () => executor.select({ id: incidentsTable.id }).from(incidentsTable)
         .where(eq(incidentsTable.scope, scope)).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: qualityChecksTable.id }).from(qualityChecksTable)
+      () => executor.select({ id: qualityChecksTable.id }).from(qualityChecksTable)
         .where(and(
           eq(qualityChecksTable.scope, scope),
           lt(qualityChecksTable.createdAt, thumbnailBefore),
           sql`${qualityChecksTable.thumbnail} is not null`,
         )).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: inventoryObservationsTable.id }).from(inventoryObservationsTable)
+      () => executor.select({ id: inventoryObservationsTable.id }).from(inventoryObservationsTable)
         .where(and(
           eq(inventoryObservationsTable.scope, scope),
           lt(inventoryObservationsTable.updatedAt, observationBefore),
           inArray(inventoryObservationsTable.status, ["applied", "cancelled"]),
           sql`(${inventoryObservationsTable.photos} <> '[]'::jsonb or ${inventoryObservationsTable.draft} <> '{}'::jsonb)`,
         )).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: qualityChecksTable.id }).from(qualityChecksTable)
+      () => executor.select({ id: qualityChecksTable.id }).from(qualityChecksTable)
         .where(eq(qualityChecksTable.scope, scope)).limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ id: inventoryObservationsTable.id }).from(inventoryObservationsTable)
+      () => executor.select({ id: inventoryObservationsTable.id }).from(inventoryObservationsTable)
         .where(and(eq(inventoryObservationsTable.scope, scope), eq(inventoryObservationsTable.status, "draft")))
         .limit(AI_RETENTION_BATCH_LIMIT + 1),
-      executor.select({ appliedAt: dataHealsTable.appliedAt }).from(dataHealsTable)
+      () => executor.select({ appliedAt: dataHealsTable.appliedAt }).from(dataHealsTable)
         .where(like(dataHealsTable.id, `${markerPrefix(scope)}:%`))
         .orderBy(desc(dataHealsTable.appliedAt)).limit(1),
-    ]);
+    ] as const, sequentialQueries ? "sequential" : "parallel");
   return {
     conversationBefore, thumbnailBefore, observationBefore,
     turns, facts, incidents, operationalIncidents, thumbnails, observations, qualityRows, openObservations,
@@ -128,9 +130,10 @@ async function limitedCandidates(
 export async function buildAiRetentionReport(
   executor: RetentionExecutor = db,
   now = new Date(),
+  sequentialQueries = false,
 ): Promise<AiRetentionReport> {
   const scope = currentScope();
-  const c = await limitedCandidates(executor, scope, now);
+  const c = await limitedCandidates(executor, scope, now, sequentialQueries);
   const counts = [c.turns, c.facts, c.incidents, c.thumbnails, c.observations].map((rows) => rows.length);
   const total = counts.reduce((sum, value) => sum + value, 0);
   const overflow = counts.some((value) => value > AI_RETENTION_BATCH_LIMIT) || total > AI_RETENTION_BATCH_LIMIT;

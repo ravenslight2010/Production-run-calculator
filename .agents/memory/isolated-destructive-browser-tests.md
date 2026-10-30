@@ -27,3 +27,17 @@ afterward.
 For browser suites that only need to inspect layout or exercise a newly created
 test account, do not inherit a shared configuration with destructive global
 setup at all. Give them a dedicated, non-destructive configuration instead.
+
+The managed development API must not run a general Drizzle schema push at
+startup. Preserve the append-only audit-log protection step, then launch the
+API without automatic schema synchronization. Deliberate schema changes belong
+to the approved schema/release process, not a workflow restart.
+
+**Why:** The owner chose no-push startup after a shared development restart
+invoked schema push and its before/after schema delta could not be established.
+The owner also chose to leave development data unchanged.
+
+**How to apply:** Keep development startup guarded against schema push and test
+that ordering. Do not infer safety from a restart log or attempt an automatic
+restore; use an isolated disposable database for tests that require schema
+creation.

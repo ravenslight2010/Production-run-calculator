@@ -101,3 +101,75 @@ export function relocateValues<V>(
   }
   return { source, target };
 }
+
+const DATE_SCOPED_SCHEDULE_FIELDS = [
+  "dayState",
+  "runValues",
+  "runValuesUpdatedAt",
+  "packagingProgress",
+  "autoTrackCoordination",
+  "autoTrackServerState",
+  "doughTimerControls",
+] as const;
+
+/**
+ * Exchange only the date/run-owned portion of two canonical sync documents.
+ * Factory-wide lists and other document metadata remain attached to their
+ * original date rows.
+ */
+export function swapDateScopedScheduleState<T extends Record<string, unknown>>(
+  left: T,
+  right: T,
+  leftDate: string,
+  rightDate: string,
+): { left: T; right: T } {
+  const nextLeft: Record<string, unknown> = { ...left };
+  const nextRight: Record<string, unknown> = { ...right };
+
+  for (const field of DATE_SCOPED_SCHEDULE_FIELDS) {
+    const leftHas = Object.prototype.hasOwnProperty.call(left, field);
+    const rightHas = Object.prototype.hasOwnProperty.call(right, field);
+    if (rightHas) nextLeft[field] = right[field];
+    else delete nextLeft[field];
+    if (leftHas) nextRight[field] = left[field];
+    else delete nextRight[field];
+  }
+
+  for (const [document, date] of [[nextLeft, leftDate], [nextRight, rightDate]] as const) {
+    const dayState = document.dayState;
+    if (dayState && typeof dayState === "object" && !Array.isArray(dayState)) {
+      document.dayState = { ...(dayState as Record<string, unknown>), date };
+    }
+  }
+
+  return { left: nextLeft as T, right: nextRight as T };
+}
+
+/** Owner-approved eligibility rule for a whole-day swap that includes today. */
+export function isTodayScheduleSwapAllowed(
+  runs: readonly unknown[],
+  nowMs: number,
+  timeZone: string,
+): boolean {
+  const hasStartedRun = runs.some((run) =>
+    !!run
+    && typeof run === "object"
+    && !Array.isArray(run)
+    && (
+      (run as Record<string, unknown>).startedAt != null
+      || (run as Record<string, unknown>).endedAt != null
+    ),
+  );
+  if (!hasStartedRun) return true;
+
+  try {
+    const hour = Number(new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(nowMs)).find((part) => part.type === "hour")?.value);
+    return Number.isInteger(hour) && hour < 7;
+  } catch {
+    return false;
+  }
+}

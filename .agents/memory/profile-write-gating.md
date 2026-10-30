@@ -35,3 +35,17 @@ breaks consistent setup on another browser.
 fields and scoped cache ownership, and keep the mode of an existing run distinct
 from a profile default. Do not replace shared-default regression checks with
 device-local-only expectations.
+
+**Linked-recipe bootstrap rule:** When a linked shared dough/crust recipe determines
+the new run's mode, wait for canonical recipe data before applying the profile. If
+the data is missing or stale and the fetch fails, leave the profile values and mode
+unchanged and offer an explicit retry. Never interpret an unloaded list as an
+unmarked recipe, and do not change an already-started run retroactively.
+
+**Why:** Treating an unavailable recipe list as authoritative can silently start a
+premade-crust profile in Dough mode. The owner chose wait-then-apply so incomplete
+bootstrap cannot create a partial or incorrect setup.
+
+**How to apply:** Resolve the current canonical marker before committing linked
+profile values to a new run. Cover the pending, failed-fetch, explicit-retry and
+already-started-run paths in browser tests.

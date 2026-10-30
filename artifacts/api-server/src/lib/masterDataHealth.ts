@@ -15,6 +15,7 @@ import {
   savedSpecSheetsTable,
   importHistoryTable,
 } from "@workspace/db";
+import { executeReadQueries } from "./queryReads";
 
 type Executor = Pick<typeof db, "select">;
 export type HealthSeverity = "error" | "warning" | "info";
@@ -118,10 +119,6 @@ const ACCEPTED_EMPTY_RECIPES = new Set([
   "dough:bonici 12\"",
   "dough:bonici 9\"",
   "dough:brand recipe",
-  // Purchased crusts intentionally have no in-house formula. Keep these
-  // visible for periodic setup review without treating them as defects.
-  "dough:pedone crust 7\"x12\" oval",
-  "dough:pinsa 12\" crust - pedone (wbf-1200-r)",
   "cheese:bbq chicken cheese mix",
   "cheese:lowe's/hannaford 5cheese mix",
   "mixes:bobo breakfast mix",
@@ -254,69 +251,74 @@ function aliasResolution(
   return "ambiguous";
 }
 
-export async function buildMasterDataHealthReport(executor: Executor, scope: string, at = new Date()): Promise<MasterDataHealthReport> {
+export async function buildMasterDataHealthReport(
+  executor: Executor,
+  scope: string,
+  at = new Date(),
+  sequentialQueries = false,
+): Promise<MasterDataHealthReport> {
   if (scope !== "live" && scope !== "sandbox") {
     throw new Error("Master-data health scans require a recognized data scope");
   }
   const window = dateWindow(at);
-  const [profiles, dough, sauce, cheese, mixes, ingredients, importAliases, specAliases, mergeAliases, sheets, days] = await Promise.all([
-    executor.select({
+  const [profiles, dough, sauce, cheese, mixes, ingredients, importAliases, specAliases, mergeAliases, sheets, days] =
+    await executeReadQueries([
+    () => executor.select({
       key: brandProfilesTable.key, scope: brandProfilesTable.scope, brand: brandProfilesTable.brand,
       flavor: brandProfilesTable.flavor, values: brandProfilesTable.values, updatedAtMs: brandProfilesTable.updatedAtMs,
     }).from(brandProfilesTable).where(eq(brandProfilesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: doughRecipesTable.id, name: doughRecipesTable.name, components: doughRecipesTable.components,
       doughballVariants: doughRecipesTable.doughballVariants,
+      isPremadeCrust: doughRecipesTable.isPremadeCrust,
       enabled: doughRecipesTable.enabled,
     }).from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: sauceRecipesTable.id, name: sauceRecipesTable.name, components: sauceRecipesTable.components,
       enabled: sauceRecipesTable.enabled,
     }).from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: cheeseRecipesTable.id, name: cheeseRecipesTable.name, components: cheeseRecipesTable.components,
       enabled: cheeseRecipesTable.enabled,
     }).from(cheeseRecipesTable).where(eq(cheeseRecipesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: mixesTable.id, name: mixesTable.name, components: mixesTable.components,
       enabled: mixesTable.enabled,
     }).from(mixesTable).where(eq(mixesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: ingredientsTable.id, name: ingredientsTable.name, enabled: ingredientsTable.enabled,
       mergedInto: ingredientsTable.mergedInto,
     }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: importAliasesTable.id, type: importAliasesTable.type, externalName: importAliasesTable.externalName,
       canonicalName: importAliasesTable.canonicalName, brandContext: importAliasesTable.brandContext,
     }).from(importAliasesTable).where(eq(importAliasesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: specImportAliasesTable.id, kind: specImportAliasesTable.kind, externalName: specImportAliasesTable.externalName,
       canonicalName: specImportAliasesTable.canonicalName, context: specImportAliasesTable.context,
     }).from(specImportAliasesTable).where(eq(specImportAliasesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({
+    () => executor.select({
       id: mergeAliasesTable.id, category: mergeAliasesTable.category, brand: mergeAliasesTable.brand,
       externalName: mergeAliasesTable.externalName, canonicalName: mergeAliasesTable.canonicalName,
     }).from(mergeAliasesTable).where(eq(mergeAliasesTable.scope, scope)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({ data: savedSpecSheetsTable.data, createdAt: savedSpecSheetsTable.createdAt })
+    () => executor.select({ data: savedSpecSheetsTable.data, createdAt: savedSpecSheetsTable.createdAt })
       .from(savedSpecSheetsTable).where(eq(savedSpecSheetsTable.scope, scope))
       .orderBy(desc(savedSpecSheetsTable.createdAt)).limit(MAX_ROWS_PER_TABLE + 1),
-    executor.select({ date: dailySyncTable.date, data: dailySyncTable.data })
+    () => executor.select({ date: dailySyncTable.date, data: dailySyncTable.data })
       .from(dailySyncTable).where(and(
         eq(dailySyncTable.scope, scope),
         gte(dailySyncTable.date, window.from),
         lte(dailySyncTable.date, window.to),
       )).orderBy(desc(dailySyncTable.date)).limit(MAX_ROWS_PER_TABLE + 1),
-  ]);
-  const [history] = await Promise.all([
-    executor.select({
+  ] as const, sequentialQueries ? "sequential" : "parallel");
+  const history = await executor.select({
       id: importHistoryTable.id, createdAt: importHistoryTable.createdAt,
       importType: importHistoryTable.importType, status: importHistoryTable.status,
     }).from(importHistoryTable).where(and(
       eq(importHistoryTable.scope, scope),
       gte(importHistoryTable.createdAt, new Date(`${window.from}T00:00:00.000Z`)),
       lte(importHistoryTable.createdAt, new Date(`${window.to}T23:59:59.999Z`)),
-    )).orderBy(desc(importHistoryTable.createdAt)).limit(MAX_ROWS_PER_TABLE + 1),
-  ]);
+    )).orderBy(desc(importHistoryTable.createdAt)).limit(MAX_ROWS_PER_TABLE + 1);
   const limited = {
     profiles: boundedRows(profiles), dough: boundedRows(dough), sauce: boundedRows(sauce),
     cheese: boundedRows(cheese), mixes: boundedRows(mixes), ingredients: boundedRows(ingredients),
@@ -481,7 +483,7 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
     }
   }
 
-  const inspectRecipes = (category: "dough" | "sauce" | "cheese" | "mixes", rows: Array<{ id: string; name: string; components: unknown; enabled: boolean }>) => {
+  const inspectRecipes = (category: "dough" | "sauce" | "cheese" | "mixes", rows: Array<{ id: string; name: string; components: unknown; enabled: boolean; isPremadeCrust?: boolean }>) => {
     rows.forEach((row) => {
       const components = boundedComponents(row.components);
       const hasPositive = components.some((component) => positive(component.lbs) || positive(component.perPizza));
@@ -489,7 +491,8 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
       // from regular spec sheets intentionally store ratio shares while lbs
       // remains zero; neither is a missing formula.
       const hasPositiveShare = components.some((component) => positive(component.sharePct));
-      const isValidEmpty = category === "sauce" && !components.length
+      const isValidEmpty = category === "dough" && row.isPremadeCrust === true
+        || category === "sauce" && !components.length
         || category === "cheese" && hasPositiveShare;
        if (row.enabled && (!components.length || !hasPositive) && !isValidEmpty) {
          const stableName = key(row.name);

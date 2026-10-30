@@ -286,6 +286,11 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       registration: ServiceWorkerRegistration | undefined,
     ) => {
       stopUpdateWatchRef.current?.();
+      stopUpdateWatchRef.current = undefined;
+      if (import.meta.env.DEV) {
+        registrationRef.current = undefined;
+        return;
+      }
       registrationRef.current = registration;
       if (!registration) return;
 
@@ -324,8 +329,8 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   useRegisterSW({
     onRegisteredSW,
     // Detection is not permission to reload. The coordinator owns navigation.
-    onNeedReload: () => { void coordinator.check(); },
-    onRegisterError: () => { void coordinator.check(); },
+    onNeedReload: () => { if (!import.meta.env.DEV) void coordinator.check(); },
+    onRegisterError: () => { if (!import.meta.env.DEV) void coordinator.check(); },
   });
   const handleUpdateAndReload = useCallback(
     (canReload: () => boolean = getAutomaticUpdateReloadSafety, verifyBeforeReload?: () => Promise<boolean>) =>
@@ -364,6 +369,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      setUpdateState({ phase: "unchecked", running: WEB_BUILD_ID, stage: "development" });
+      return;
+    }
     const initial = coordinator.start();
     setUpdateState(initial);
     if (initial.phase === "confirmed") emitFieldCheckSignal("pwa-update-handoff", "success");
@@ -423,7 +432,8 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
         update={() => void coordinator.requestUpdate()}
         cancelUpdate={() => coordinator.cancelQueuedUpdate()}
         autoReloadSafe={calculatorSafe}
-        autoReloadIdle={updateIdle} />
+        autoReloadIdle={updateIdle}
+        developmentPreview={import.meta.env.DEV} />
       {children}
     </AppUpdateContext.Provider>
   );
@@ -431,10 +441,11 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
 
 function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
   const updateContext = useContext(AppUpdateContext);
+  const publishedUpdateRecoveryEnabled = !import.meta.env.DEV;
   return (
     <ErrorBoundary
-      onUpdateAndReload={updateContext?.updateAndReload}
-      scheduleSafeIdleRecovery={updateContext?.scheduleSafeIdleRecovery}
+      onUpdateAndReload={publishedUpdateRecoveryEnabled ? updateContext?.updateAndReload : undefined}
+      scheduleSafeIdleRecovery={publishedUpdateRecoveryEnabled ? updateContext?.scheduleSafeIdleRecovery : undefined}
     >
       {children}
     </ErrorBoundary>

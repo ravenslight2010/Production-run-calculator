@@ -5,6 +5,7 @@ python3 docs/research-reconciliation/inventory.py > docs/research-reconciliation
 The output is an intentional maintained research record, not a runtime artifact.
 """
 import collections
+from datetime import date
 import hashlib
 import json
 import re
@@ -38,6 +39,43 @@ def digest(path):
         for chunk in iter(lambda: source.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def worktree_identity():
+    """Bind the catalog to HEAD plus its current tracked and untracked changes."""
+    excluded = ":(exclude)docs/research-reconciliation/inventory.json"
+    tracked_diff = subprocess.check_output(
+        ["git", "diff", "--no-ext-diff", "--binary", "HEAD", "--", ".", excluded],
+        cwd=ROOT,
+    )
+    untracked = subprocess.check_output(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+        cwd=ROOT,
+    ).split(b"\0")
+    paths = sorted(
+        path.decode("utf-8", errors="surrogateescape")
+        for path in untracked
+        if path and path.decode("utf-8", errors="surrogateescape")
+        != "docs/research-reconciliation/inventory.json"
+    )
+    fingerprint = hashlib.sha256()
+    fingerprint.update(b"tracked-diff\0")
+    fingerprint.update(tracked_diff)
+    for relative in paths:
+        fingerprint.update(b"\0untracked\0")
+        fingerprint.update(relative.encode("utf-8", errors="surrogateescape"))
+        fingerprint.update(b"\0")
+        fingerprint.update((ROOT / relative).read_bytes())
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "--", ".", excluded],
+        cwd=ROOT,
+        text=True,
+    )
+    return {
+        "worktreeDirty": bool(status.strip()),
+        "worktreeChangedFileCount": len(status.splitlines()),
+        "worktreePatchSha256": fingerprint.hexdigest(),
+    }
 
 
 def main():
@@ -83,9 +121,10 @@ def main():
             hashes[row["sha256"]].append(row["path"])
         families[row["familyCandidate"]].append(row["path"])
     result = {
-        "schemaVersion": 1, "accessDate": "2026-10-26",
+        "schemaVersion": 1, "accessDate": date.today().isoformat(),
         "sourceRevision": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        **worktree_identity(),
         "method": "Local metadata inventory, not an exhaustive content or authorization review. "
                   "Date/family/domain fields are discovery hints. No archive extraction, "
                   "attachment execution, remote task retrieval or production access.",
@@ -93,6 +132,9 @@ def main():
         "recordDefaults": {
             "dateAuthority": "filename hint only; inspect source for effective date",
             "approval": "unknown; filename, task plan and heading are not approval",
+            "catalogClass": "unclassified local candidate unless explicitly mapped in sources.md",
+            "authority": "unknown unless an accessible authoritative source is explicitly identified",
+            "decisionDisposition": "unresolved unless explicitly assessed in sources.md or the current audit",
             "review": "metadata-only unless explicitly assessed in sources.md or matrix.md",
             "supersession": "unresolved unless explicitly assessed in sources.md",
         },

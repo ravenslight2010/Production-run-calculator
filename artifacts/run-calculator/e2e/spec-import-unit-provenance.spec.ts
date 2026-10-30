@@ -149,6 +149,7 @@ async function openWorkbookImport(
   page: Page,
   fileName: string,
   buffer: Buffer,
+  useNativePicker = true,
 ): Promise<void> {
   await page.getByRole("button", { name: /more/i }).click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
@@ -157,13 +158,25 @@ async function openWorkbookImport(
   await settings.getByRole("button", { name: "Tools", exact: true }).click();
   await settings.getByRole("button", { name: "Import", exact: true }).click();
 
-  const chooser = page.waitForEvent("filechooser");
-  await settings.getByRole("button", { name: "Import Spec Sheet", exact: true }).click();
-  await (await chooser).setFiles({
+  const importButton = settings.getByRole("button", { name: "Import Spec Sheet", exact: true });
+  await expect(importButton).toBeVisible();
+  const input = page.getByTestId("spec-workbook-input");
+  const file = {
     name: fileName,
     mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     buffer,
-  });
+  };
+  if (useNativePicker) {
+    const chooser = page.waitForEvent("filechooser");
+    await importButton.click();
+    await (await chooser).setFiles(file);
+    return;
+  }
+
+  // Headless WebKit did not emit a filechooser event on the second manager
+  // case in the same run, even though Chromium and the preceding WebKit case
+  // did. Exercise the same hidden input change path directly for that case.
+  await input.setInputFiles(file);
 }
 
 async function openSetupProfileEditor(page: Page) {
@@ -460,7 +473,12 @@ test("a manager can replace a missing formula result and only redacted source ev
     ]),
   );
 
-  await openWorkbookImport(page, FORMULA_FILE_NAME, missingFormulaResultWorkbook());
+  await openWorkbookImport(
+    page,
+    FORMULA_FILE_NAME,
+    missingFormulaResultWorkbook(),
+    testInfo.project.name !== "tablet-webkit",
+  );
   const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
   await expect(review).toContainText("Step 1 of 2 — products", { timeout: 20_000 });
   const missingResult = review.getByTestId("spec-import-missing-formula-results");

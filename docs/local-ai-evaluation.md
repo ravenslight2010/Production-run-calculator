@@ -1,8 +1,9 @@
 # Private local AI evaluator
 
-Use this environment only for bounded, authorized evaluation. It is not a
-production provider, an app feature, or a substitute for human-reviewed data.
-Production remains on the existing Gemini route.
+Use this environment only for bounded, authorized evaluation. The application
+exposes a development-only scoring path in Import Gold Lab; this is not a
+production provider or a substitute for human-reviewed data. Production remains
+on the existing Gemini route.
 
 ## Start and operate
 
@@ -32,6 +33,37 @@ python3 scripts/local_model_eval_setup.py stop
 # Remove only the verified, marked local evaluation cache.
 python3 scripts/local_model_eval_setup.py remove
 ```
+
+## Use the development app's synthetic Gold Lab path
+
+To make the private evaluator available to the app, set
+`IMPORT_GOLD_LOCAL_ENABLED=true` in the **development workspace only**. Unless
+overridden for a local test, the app uses
+`http://127.0.0.1:11434/v1`. Do not set this up as a production provider. The
+server also checks its runtime and loopback endpoint; a configured URL is not
+proof that the model is available.
+
+1. Start the managed **Local AI evaluator (private)** workflow and confirm
+   `python3 scripts/local_model_eval_setup.py health` reports the pinned model.
+   For the isolated live-scoring browser check, `IMPORT_GOLD_LOCAL_LIVE=true`
+   selects the test only; also set `IMPORT_GOLD_LOCAL_ENABLED=true` (and, if
+   needed, `IMPORT_GOLD_LOCAL_BASE_URL=http://127.0.0.1:11434/v1`) so the
+   development API is configured to use the loopback evaluator.
+2. In the app, open **Settings → Data Health & Audit → Import Gold Lab**.
+3. As a manager, confirm the separate configured/available status and enable
+   **app-side local scoring**. This preference persists across reloads and
+   devices; it does not start or stop the workflow.
+4. Review the fixed synthetic sample, check the review confirmation, and apply
+   it. This creates only a synthetic evaluation case; it does not import a
+   workbook or change recipes, inventory, source approvals, or workflow state.
+5. Select **Score locally**. The app saves the bounded score or a visible,
+   persisted error result. If the evaluator is unavailable, start it and select
+   **Score locally** again to make a new attempt; the failed attempt is retained
+   for review. Reload the lab to confirm the latest result remains visible.
+
+Real-source capture and Gemini comparison remain separately gated by the
+required approvals and configuration. Neither the development switch nor the
+synthetic fixture grants those approvals or changes general AI routing.
 
 CPU-only cold startup can take several minutes: the model runtime has a bounded
 480-second readiness deadline after launch, and the detached helper allows up to

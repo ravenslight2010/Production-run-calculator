@@ -867,6 +867,24 @@ export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
 export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
 export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
 export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const moveSyncScheduledRunsBodySourceRevisionMin = 0;
+export const moveSyncScheduledRunsBodyDestinationRevisionMin = 0;
+export const moveSyncScheduledRunsBodyResetEpochMin = 0;
+export const moveSyncScheduledRunsBodySenderIdMax = 160;
+export const moveSyncScheduledRunsBodyRunIdsTwoItemMax = 160;
+export const moveSyncScheduledRunsBodyRunIdsTwoItemRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const moveSyncScheduledRunsBodyRunIdsTwoMax = 100;
+export const moveSyncScheduledRunsResponseSourceRevisionMin = 0;
+export const moveSyncScheduledRunsResponseDestinationRevisionMin = 0;
+export const moveSyncScheduledRunsResponseDestinationSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const swapSyncScheduleDaysBodySourceRevisionMin = 0;
+export const swapSyncScheduleDaysBodyDestinationRevisionMin = 0;
+export const swapSyncScheduleDaysBodyResetEpochMin = 0;
+export const swapSyncScheduleDaysBodySenderIdMax = 160;
+export const swapSyncScheduleDaysResponseSourceRevisionMin = 0;
+export const swapSyncScheduleDaysResponseDestinationRevisionMin = 0;
+export const swapSyncScheduleDaysResponseSourceSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const swapSyncScheduleDaysResponseDestinationSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -6297,6 +6315,7 @@ export const ListDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6337,6 +6356,7 @@ export const SaveDoughRecipesBody = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6364,6 +6384,7 @@ export const SaveDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6408,6 +6429,7 @@ export const DeleteDoughRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6448,6 +6470,7 @@ export const ListSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6488,6 +6511,7 @@ export const SaveSauceRecipesBody = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6515,6 +6539,7 @@ export const SaveSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -6559,6 +6584,7 @@ export const DeleteSauceRecipesResponse = zod.object({
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
   "enabled": zod.boolean(),
+  "isPremadeCrust": zod.boolean().optional().describe('Dough recipes only. Manager-controlled classification for a premade crust that does not require an in-house dough formula. Omit on older-client updates to preserve the stored classification.'),
   "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers.'),
   "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).'),
   "doughballWeightOz": zod.number().optional().describe('Dough recipes only — target weight of one doughball in ounces (the spec sheet\'s "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form\'s Target Doughball Weight from this. Sauce recipes never set it.'),
@@ -9341,6 +9367,68 @@ export const FinalizeApplicatorBatchTotalResponse = zod.object({
 })
 
 /**
+ * Moves one, several or all unstarted runs in one scoped transaction. The source and destination revisions and reset epoch are checked before either date changes. Setup values, run-value stamps, packaging progress, timers, automatic-tracking state and staged run items follow the moved runs. A rejected or stale request leaves both dates unchanged.
+ * @summary Atomically move selected runs between dates
+ */
+
+export const MoveSyncScheduledRunsBody = zod.object({
+  "sourceDate": zod.coerce.date(),
+  "destinationDate": zod.coerce.date(),
+  "sourceRevision": zod.int().min(moveSyncScheduledRunsBodySourceRevisionMin),
+  "destinationRevision": zod.int().min(moveSyncScheduledRunsBodyDestinationRevisionMin),
+  "resetEpoch": zod.int().min(moveSyncScheduledRunsBodyResetEpochMin),
+  "senderId": zod.string().max(moveSyncScheduledRunsBodySenderIdMax).optional(),
+  "runIds": zod.union([zod.literal("all"),zod.array(zod.string().min(1).max(moveSyncScheduledRunsBodyRunIdsTwoItemMax).regex(moveSyncScheduledRunsBodyRunIdsTwoItemRegExp)).min(1).max(moveSyncScheduledRunsBodyRunIdsTwoMax)])
+})
+
+export const MoveSyncScheduledRunsResponse = zod.object({
+  "moved": zod.literal(true),
+  "sourceRemoved": zod.boolean(),
+  "sourceRevision": zod.int().min(moveSyncScheduledRunsResponseSourceRevisionMin),
+  "destinationRevision": zod.int().min(moveSyncScheduledRunsResponseDestinationRevisionMin),
+  "destinationSnapshotId": zod.string().regex(moveSyncScheduledRunsResponseDestinationSnapshotIdRegExp)
+})
+
+/**
+ * Returns scoped schedule presence and server facility-local eligibility. A swap involving today is allowed only when no run has started or the facility-local time is before 7:00 a.m. This read is manager-only; the swap endpoint rechecks all conditions transactionally.
+ * @summary Check whether a whole-day schedule swap is available
+ */
+export const GetSyncScheduleSwapEligibilityQueryParams = zod.object({
+  "sourceDate": zod.date(),
+  "destinationDate": zod.date()
+})
+
+export const GetSyncScheduleSwapEligibilityResponse = zod.object({
+  "today": zod.coerce.date(),
+  "sourceScheduled": zod.boolean(),
+  "destinationScheduled": zod.boolean(),
+  "canSwap": zod.boolean(),
+  "reason": zod.union([zod.literal('today-started-after-6am'),zod.literal(null)]).nullable()
+})
+
+/**
+ * Exchanges run metadata, values, per-run stamps, packaging progress, timers, automatic-tracking state and date-specific settings. Factory-wide data remains attached to its original date. Both canonical revisions, scope, reset epoch and the today eligibility rule are checked under transaction locks before either date is written. Rejected or stale requests leave both dates unchanged.
+ * @summary Atomically exchange two date-scoped schedules
+ */
+
+export const SwapSyncScheduleDaysBody = zod.object({
+  "sourceDate": zod.coerce.date(),
+  "destinationDate": zod.coerce.date(),
+  "sourceRevision": zod.int().min(swapSyncScheduleDaysBodySourceRevisionMin),
+  "destinationRevision": zod.int().min(swapSyncScheduleDaysBodyDestinationRevisionMin),
+  "resetEpoch": zod.int().min(swapSyncScheduleDaysBodyResetEpochMin),
+  "senderId": zod.string().max(swapSyncScheduleDaysBodySenderIdMax).optional()
+})
+
+export const SwapSyncScheduleDaysResponse = zod.object({
+  "swapped": zod.literal(true),
+  "sourceRevision": zod.int().min(swapSyncScheduleDaysResponseSourceRevisionMin),
+  "destinationRevision": zod.int().min(swapSyncScheduleDaysResponseDestinationRevisionMin),
+  "sourceSnapshotId": zod.string().regex(swapSyncScheduleDaysResponseSourceSnapshotIdRegExp),
+  "destinationSnapshotId": zod.string().regex(swapSyncScheduleDaysResponseDestinationSnapshotIdRegExp)
+})
+
+/**
  * @summary Read the client-local current-day sync snapshot
  */
 
@@ -10131,9 +10219,51 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
 export const GetImportGoldConfigResponse = zod.object({
   "enabled": zod.boolean(),
   "localConfigured": zod.boolean(),
+  "localAvailable": zod.boolean(),
+  "localScoringSwitchAvailable": zod.boolean(),
+  "localScoringEnabled": zod.boolean(),
+  "syntheticFixtureAvailable": zod.boolean(),
   "geminiConfigured": zod.boolean(),
   "retention": zod.string(),
   "persistsAcrossFactoryPurge": zod.boolean()
+})
+
+/**
+ * This setting does not enable real-source capture approvals, Gemini, or the private evaluator workflow.
+ * @summary Enable or disable app-side local scoring in a development workspace
+ */
+export const SetImportGoldLocalScoringBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const SetImportGoldLocalScoringResponse = zod.object({
+  "enabled": zod.boolean()
+})
+
+/**
+ * @summary Read the fixed development-only synthetic evaluation sample
+ */
+export const GetImportGoldSyntheticReviewResponse = zod.object({
+  "fixtureVersion": zod.string(),
+  "importType": zod.enum(['premix']),
+  "sourceLabel": zod.string(),
+  "input": zod.record(zod.string(), zod.unknown()),
+  "expectedResult": zod.record(zod.string(), zod.unknown()),
+  "applyEffect": zod.string()
+})
+
+/**
+ * Creates an idempotent synthetic evaluation case only and does not change recipes, inventory, or real-source approval settings.
+ * @summary Apply the reviewed fixed synthetic sample to the development evaluation lab
+ */
+export const ApplyImportGoldSyntheticReviewBody = zod.object({
+  "fixtureVersion": zod.enum(['synthetic-mix-v1']),
+  "reviewed": zod.literal(true)
+})
+
+export const ApplyImportGoldSyntheticReviewResponse = zod.object({
+  "caseId": zod.int().min(1),
+  "created": zod.boolean()
 })
 
 /**

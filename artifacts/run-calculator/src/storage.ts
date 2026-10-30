@@ -1029,8 +1029,8 @@ export function saveProfile(
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
   if (!profileSyncSuppressed) {
-    if (options.authoritative) markProfileForceEdited(key);
-    else markProfileEdited(key);
+    if (options.authoritative) markProfileForceEdited(key, { brand, flavor });
+    else markProfileEdited(key, { brand, flavor });
   }
   return true;
 }
@@ -1051,7 +1051,7 @@ export async function saveProfileAndWaitForServer(
   // If a previous attempt failed after writing the same local values, promote
   // its pending plain operation to an authoritative manager write so Retry
   // does not get mistaken for an unchanged form.
-  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key);
+  if (!changed && hasPendingProfileWrite(key)) markProfileForceEdited(key, { brand, flavor });
   if (!changed && !hasPendingProfileWrite(key)) return "unchanged";
   await flushProfileQueueStrict();
   return "saved";
@@ -1085,7 +1085,7 @@ export function saveProfileSubTab(
   }
   if (profile._subTab === subTab) return;
   writeProfileBlob(profileKey, "dough", JSON.stringify({ ...profile, _subTab: subTab }));
-  markProfileEdited(profileKey);
+  markProfileEdited(profileKey, { brand, flavor });
 }
 
 /**
@@ -1139,8 +1139,9 @@ export function applyPackagingPatchToProfile(
       if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
     } catch {}
     for (const k of keys) existing[k] = patch[k];
-    writeProfileBlob(canonicalProfileKey(brand, flavor), "dough", JSON.stringify(existing));
-    markProfileEdited(canonicalProfileKey(brand, flavor));
+    const key = canonicalProfileKey(brand, flavor);
+    writeProfileBlob(key, "dough", JSON.stringify(existing));
+    markProfileEdited(key, { brand, flavor });
   } catch {}
 }
 
@@ -1359,7 +1360,7 @@ export function refreshProfilesFromNamedRecipes(
       if (weightDiffers) obj.targetDoughballWeight = effectiveWeight;
       if (trayDiffers) obj.doughballsPerTray = wantTray;
       writeProfileBlobEntry(entry, JSON.stringify(obj));
-      markProfileEdited(entry.key);
+      markProfileEdited(entry.key, { brand: profileBrand, flavor: profileFlavor });
       touched.push({ brand: profileBrand, flavor: profileFlavor });
     } catch {
       // Skip an unreadable profile — never let one bad row block the fan-out.

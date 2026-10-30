@@ -16,6 +16,12 @@ The reviewed total remains 216. This follows the current whole-batch UI and
 retains off-tab server depletion, manual adjustment, pause, and reload coverage;
 the replaced case's direct fractional-pound edit is no longer exposed by the UI.
 
+On 2026-10-30, the owner approved the current default inventory at **227**
+identities after a fresh no-test listing found 12 additions and one retired
+identity against the prior 216-case contract (net +11). The updated exact set is
+recorded in the linked contract. This is inventory approval only; no browser
+tests were run, and #3692 retains ownership of the full runtime suite.
+
 The exact default identities are the file and complete title path strings in
 [`full-browser-case-contract.mts`](../scripts/src/full-browser-case-contract.mts).
 Every one belongs to project **`chromium`**, selected by
@@ -31,15 +37,16 @@ No browser cases were deleted or skipped to meet a numeric target.
 | --- | ---: | --- |
 | Previous reviewed contract | 172 | Exact identities, despite the release matrix's stale 170-case prose |
 | Historical A37 collection | 249 | Collection mismatch recorded in `server-live-state-authority.md`; not runtime results |
-| Current pre-change collection | 252 | Zero collection errors; all in `chromium`; 81 added identities, one removed |
+| Historical pre-change collection | 252 | Zero collection errors; all in `chromium`; 81 added identities, one removed |
 | Retained unchanged identities | 171 | No retired coverage or duplicate identities identified |
 | Renamed die-timer identity | 1 | Existing fill/switch/preserve-time test, suite renamed from `run-form die tunnel defaults` to `run-form die defaults and split timer` |
 | Additional intended app regressions | 44 | Explicitly accepted below |
 | Dedicated-only additions | 36 | Explicit harness/engine/opt-in decisions below, not deletion |
-| Approved default | **216** | `171 + 1 + 44`; equivalently `252 - 36` |
+| Previously approved default (2026-10-23) | **216** | `171 + 1 + 44`; equivalently `252 - 36` |
+| Current owner-approved default (2026-10-30) | **227** | Fresh current listing: 12 added, 1 retired from the prior contract |
 
-The historical 249-case observation is not reused as current discovery evidence.
-The current pre-change discovery was read-only, using the pinned release runner
+The historical 249-case observation and 252-case collection are not reused as
+current discovery evidence. The 252-case discovery above was read-only, using the pinned release runner
 and `playwright test --config=playwright.config.ts --list --reporter=json`,
 with explicit local API/web origins and no server-start request.
 Its two leading Node-test diagnostics revealed a helper `.test.mjs` being loaded
@@ -119,7 +126,12 @@ retired or silently dropped:
 
 No ownership changed for these lanes:
 
-- `task3494-audited-import.spec.ts`: focused audited import config, not default.
+- `task3494-audited-import.spec.ts`: focused audited import config, not default;
+  the shared-dialog matrix uses Vite source mode so its direct module import
+  shares the app's singleton. The standard 227-case release lane remains built
+  preview and excludes this file.
+- `completed-history-archive.spec.ts`: focused synthetic archive read/reload
+  check via `playwright.release-debug.config.ts`, not default.
 - `live-authority.spec.ts` and `live-authority-continuation.spec.ts`:
   their respective standalone authority configs, never part of this inventory.
   Previously passing selected authority runs were not repeated here.
@@ -247,9 +259,20 @@ stdout, checks errors and project names, rejects configured server commands,
 requires browser-spec filenames and unique identities, and compares the SHA-256
 of the complete sorted file/title identity array:
 `4de725cd89e5874ca2be37d171ce284f3f260ada8847637dcb6e2c3b5fa2a3cf`.
-That fingerprint is for release-debug's own 264 identities, not a new default
-contract or a runtime result. Legitimate future identity changes require review
-of that standalone selection before updating the fingerprint.
+That fingerprint is the historical release-debug baseline of 264 identities,
+not a default contract or runtime result.
+
+### Current standalone release-debug inventory
+
+On 2026-10-30, the owner separately approved the discovered 278-identity
+release-debug set. A fresh `--list` returned 278 cases in 66 files, all under
+the Chromium project. The selection is distinct from the 227-case default
+contract. Its reviewed identity SHA-256 is
+`95096de5dc942ddd1afd9c2eb5aa4e41cf3ec2ad55cfc4b387ef653542766562`.
+The reporter regression now locks both the 278 count and the exact identities.
+This was listing-only evidence: no browser tests, server startup, database
+setup, or production access occurred. The prior 264-case result remains
+historical; the full release runtime remains owned by #3692.
 
 Each discovery subprocess has a 60-second timeout, explicit local origins and
 `RELEASE_BROWSER_LOCAL_SERVERS=0`, regardless of inherited caller settings.
