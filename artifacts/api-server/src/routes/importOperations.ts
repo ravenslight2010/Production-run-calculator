@@ -1415,12 +1415,21 @@ router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async
   if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) { res.status(400).json({ error: "Invalid case identity" }); return; }
-  const deleted = await db.delete(importGoldCasesTable).where(and(
-    eq(importGoldCasesTable.id, id),
-    eq(importGoldCasesTable.scope, currentScope()),
-    ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
-  )).returning({ id: importGoldCasesTable.id });
-  if (!deleted.length) { res.status(404).json({ error: "Evaluation case not found" }); return; }
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx.delete(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.id, id),
+      eq(importGoldCasesTable.scope, currentScope()),
+      ...(realSourceAccess ? [] : [syntheticGoldCaseCondition()!]),
+    )).returning({ id: importGoldCasesTable.id });
+    if (!row) return false;
+    await writeAuditEvent(tx, {
+      action: "import_gold_case_deleted",
+      resource: "import_gold_case",
+      changes: { outcome: "success", targetId: String(row.id) },
+    });
+    return true;
+  });
+  if (!deleted) { res.status(404).json({ error: "Evaluation case not found" }); return; }
   res.status(204).end();
 });
 

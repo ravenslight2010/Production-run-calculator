@@ -1316,6 +1316,107 @@ describe("atomic import operations", () => {
     expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
   });
 
+  it("audits standard Gold Lab case deletion atomically within the active scope", async () => {
+    const [liveCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "synthetic-standard-delete-live-001",
+      importType: "premix",
+      sourceLabel: "Synthetic standard deletion fixture",
+      evaluatedInput: { candidates: [{ name: "Synthetic input" }] },
+      expectedResult: { mixes: [{ name: "Synthetic expected result" }] },
+      createdBy: "inventory",
+    }).returning({ id: tables.importGoldCasesTable.id });
+    const [sandboxCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "sandbox",
+      operationId: "synthetic-standard-delete-sandbox-001",
+      importType: "cheese",
+      sourceLabel: "Synthetic sandbox deletion fixture",
+      evaluatedInput: { recipes: [{ name: "Synthetic sandbox input" }] },
+      expectedResult: { recipes: [{ name: "Synthetic sandbox expected result" }] },
+      createdBy: "sandbox",
+    }).returning({ id: tables.importGoldCasesTable.id });
+    await db.insert(tables.importGoldScoresTable).values({
+      scope: "live",
+      caseId: liveCase!.id,
+      provider: "local",
+      status: "scored",
+      accuracy: 1,
+      comparedFields: 1,
+      equalFields: 1,
+      fieldDiffs: [{ field: "synthetic", expected: "Synthetic", predicted: "Synthetic" }],
+    });
+
+    const sandboxCannotDeleteLiveCase = await fetch(`${baseUrl}/api/import-gold/cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers("sandbox"),
+    });
+    expect(sandboxCannotDeleteLiveCase.status).toBe(404);
+    const liveCannotDeleteSandboxCase = await fetch(`${baseUrl}/api/import-gold/cases/${sandboxCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(liveCannotDeleteSandboxCase.status).toBe(404);
+    expect(await db.select().from(tables.auditLogsTable)
+      .where(eq(tables.auditLogsTable.action, "import_gold_case_deleted"))).toHaveLength(0);
+
+    await pool.query(`
+      CREATE FUNCTION fail_import_gold_standard_delete_audit_for_test() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'import_gold_case_deleted' THEN
+          RAISE EXCEPTION 'test-only forced standard deletion audit insert failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await pool.query(`
+      CREATE TRIGGER fail_import_gold_standard_delete_audit_for_test
+      BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION fail_import_gold_standard_delete_audit_for_test()
+    `);
+    let failedDeleteStatus = 0;
+    try {
+      const failedDelete = await fetch(`${baseUrl}/api/import-gold/cases/${liveCase!.id}`, {
+        method: "DELETE", headers: headers(),
+      });
+      failedDeleteStatus = failedDelete.status;
+    } finally {
+      await pool.query("DROP TRIGGER IF EXISTS fail_import_gold_standard_delete_audit_for_test ON audit_logs");
+      await pool.query("DROP FUNCTION IF EXISTS fail_import_gold_standard_delete_audit_for_test()");
+    }
+    expect(failedDeleteStatus).toBe(500);
+    expect(await db.select().from(tables.importGoldCasesTable)
+      .where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(1);
+    expect(await db.select().from(tables.importGoldScoresTable)
+      .where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(1);
+    expect(await db.select().from(tables.auditLogsTable)
+      .where(eq(tables.auditLogsTable.action, "import_gold_case_deleted"))).toHaveLength(0);
+
+    const deleted = await fetch(`${baseUrl}/api/import-gold/cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(deleted.status).toBe(204);
+    expect(await db.select().from(tables.importGoldCasesTable)
+      .where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(0);
+    expect(await db.select().from(tables.importGoldScoresTable)
+      .where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(0);
+    const deletionAudit = await db.select().from(tables.auditLogsTable)
+      .where(eq(tables.auditLogsTable.action, "import_gold_case_deleted"));
+    expect(deletionAudit).toHaveLength(1);
+    expect(deletionAudit[0]).toMatchObject({
+      scope: "live",
+      actor: "inventory",
+      resource: "import_gold_case",
+      changes: { outcome: "success", targetId: String(liveCase!.id) },
+    });
+    expect(deletionAudit[0]!.changes).toEqual({
+      outcome: "success",
+      targetId: String(liveCase!.id),
+    });
+    expect(JSON.stringify(deletionAudit[0])).not.toMatch(/Synthetic input|Synthetic expected result|fieldDiffs/);
+    expect(await db.select().from(tables.importGoldCasesTable)
+      .where(eq(tables.importGoldCasesTable.id, sandboxCase!.id))).toHaveLength(1);
+  });
+
   it("allows scoped metadata-only cleanup after approval withdrawal without reopening Gold Lab reads", async () => {
     process.env.IMPORT_GOLD_ENABLED = "false";
     process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
