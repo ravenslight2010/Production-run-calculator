@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { Client } from "pg";
 import {
   cleanupDailySync,
@@ -695,4 +695,180 @@ test("manager removes saved copies repeatedly without touching pending or active
     });
     console.warn(`[${testInfo.project.name}] ${description}`);
   }
+});
+
+test.describe("facility reconnect delivery", () => {
+test.use({ serviceWorkers: "block" });
+
+test("pending facility edit is acknowledged once after connectivity returns", async ({ page }) => {
+  const username = uniqueTestId("e2e_facility_reconnect");
+  const fixtureId = uniqueTestId("facility_reconnect");
+  testUsernames.add(username);
+
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+  });
+  await dismissOnboardingIfPresent(page);
+  await promoteToManager(username);
+  const key = "run-calc-stop-reasons";
+  const baseline = [`BASELINE_${fixtureId}`];
+  const intended = [`ACKNOWLEDGED_${fixtureId}`];
+  const editedAt = Date.now();
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("seed facility reconnect fixture"),
+  });
+  await db.connect();
+  try {
+    const user = await db.query<{ id: string }>(
+      "SELECT id FROM users WHERE username = $1",
+      [username],
+    );
+    expect(user.rows).toHaveLength(1);
+    const userId = user.rows[0].id;
+    await db.query(
+      `INSERT INTO factory_kv (scope, key, value, updated_at)
+       VALUES ('live', $1, $2::jsonb, $3)
+       ON CONFLICT (scope, key) DO UPDATE
+       SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+      [key, JSON.stringify(baseline), new Date(editedAt - 60_000)],
+    );
+
+    const identity = `live:${userId}`;
+    const queueKey = `run-calc-fkv-queue-v2:${encodeURIComponent(identity)}`;
+    const pendingQueue = JSON.stringify([{
+      key,
+      value: intended,
+      updatedAt: editedAt,
+      g: 1,
+    }]);
+    const unrelatedQueueKey =
+      `run-calc-fkv-queue-v2:${encodeURIComponent(`live:unrelated_${fixtureId}`)}`;
+    const unrelatedQueue = JSON.stringify([{
+      key: "run-calc-brands",
+      value: [`KEEP_QUEUE_${fixtureId}`],
+      updatedAt: editedAt,
+      g: 1,
+    }]);
+    const unrelatedOutboxKey =
+      `run-calc-completed-history-outbox.live:unrelated_${fixtureId}`;
+    const unrelatedOutbox = JSON.stringify([{ fixtureId, pending: true }]);
+    const anotherOutboxKey = `run-calc-facility-unrelated-outbox:${fixtureId}`;
+    const anotherOutbox = `KEEP_OUTBOX_${fixtureId}`;
+
+    await page.evaluate((data) => {
+      localStorage.setItem(data.queueKey, data.pendingQueue);
+      localStorage.setItem(data.unrelatedQueueKey, data.unrelatedQueue);
+      localStorage.setItem(data.unrelatedOutboxKey, data.unrelatedOutbox);
+      localStorage.setItem(data.anotherOutboxKey, data.anotherOutbox);
+    }, {
+      queueKey,
+      pendingQueue,
+      unrelatedQueueKey,
+      unrelatedQueue,
+      unrelatedOutboxKey,
+      unrelatedOutbox,
+      anotherOutboxKey,
+      anotherOutbox,
+    });
+
+    let offline = true;
+    let targetPutAttempts = 0;
+    let successfulAcknowledgments = 0;
+    const abortWhileOffline = async (route: Route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      const body = route.request().postDataJSON() as { key?: unknown } | null;
+      if (body?.key === key) targetPutAttempts++;
+      if (offline) {
+        await route.abort("internetdisconnected");
+        return;
+      }
+      await route.continue();
+    };
+    await page.route("**/api/factory-data", abortWhileOffline);
+    page.on("response", (response) => {
+      const body = response.request().postDataJSON() as { key?: unknown } | null;
+      if (body?.key === key && response.request().method() === "PUT"
+        && new URL(response.url()).pathname === "/api/factory-data" && response.ok()) {
+        successfulAcknowledgments++;
+      }
+    });
+
+    try {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("tab-run")).toHaveAttribute(
+        "data-state",
+        "active",
+      );
+      await expect.poll(() => targetPutAttempts, {
+        message: "the pending facility edit should attempt delivery while offline",
+      }).toBeGreaterThan(0);
+      const queueWhileOffline = await page.evaluate((storageKey) => {
+        const raw = localStorage.getItem(storageKey);
+        return raw ? JSON.parse(raw) as Array<{ key: string; value: unknown }> : [];
+      }, queueKey);
+      expect(queueWhileOffline).toEqual(expect.arrayContaining([
+        expect.objectContaining({ key, value: intended }),
+      ]));
+      expect(successfulAcknowledgments).toBe(0);
+      const stillBaseline = await db.query<{ value: unknown }>(
+        "SELECT value FROM factory_kv WHERE scope = 'live' AND key = $1",
+        [key],
+      );
+      expect(stillBaseline.rows).toHaveLength(1);
+      expect(stillBaseline.rows[0].value).toEqual(baseline);
+
+      const preservedBeforeReconnect = await page.evaluate((storageKeys) =>
+        Object.fromEntries(storageKeys.map((storageKey) => [
+          storageKey,
+          localStorage.getItem(storageKey),
+        ])), [unrelatedQueueKey, unrelatedOutboxKey, anotherOutboxKey]);
+      expect(preservedBeforeReconnect).toEqual({
+        [unrelatedQueueKey]: unrelatedQueue,
+        [unrelatedOutboxKey]: unrelatedOutbox,
+        [anotherOutboxKey]: anotherOutbox,
+      });
+
+      // Keep the browser on the same page and let its real online event retry
+      // the retained command; no reload or new edit is used to trigger delivery.
+      offline = false;
+      await page.context().setOffline(true);
+      await page.context().setOffline(false);
+
+      await expect.poll(() => successfulAcknowledgments, {
+        message: "exactly one successful facility-data acknowledgment is expected",
+      }).toBe(1);
+      await expect.poll(async () => page.evaluate((storageKey) =>
+        localStorage.getItem(storageKey), queueKey)).toBe("[]");
+
+      const canonical = await readCanonicalFactoryValues(page);
+      expect(canonical[key]).toEqual(intended);
+      const persisted = await db.query<{ value: unknown; rowCount: string }>(
+        `SELECT value, COUNT(*) OVER ()::text AS "rowCount"
+         FROM factory_kv WHERE scope = 'live' AND key = $1`,
+        [key],
+      );
+      expect(persisted.rows).toHaveLength(1);
+      expect(persisted.rows[0]).toMatchObject({
+        value: intended,
+        rowCount: "1",
+      });
+      const preservedAfterReconnect = await page.evaluate((storageKeys) =>
+        Object.fromEntries(storageKeys.map((storageKey) => [
+          storageKey,
+          localStorage.getItem(storageKey),
+        ])), [unrelatedQueueKey, unrelatedOutboxKey, anotherOutboxKey]);
+      expect(preservedAfterReconnect).toEqual(preservedBeforeReconnect);
+      expect(successfulAcknowledgments).toBe(1);
+    } finally {
+      offline = false;
+      await page.context().setOffline(false);
+      await page.unroute("**/api/factory-data", abortWhileOffline);
+    }
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
 });

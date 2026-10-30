@@ -208,6 +208,20 @@ describe("memory directory and scoped durable commands", () => {
     await flushFactoryQueue();
     expect(pending()).toEqual([]);
   });
+  it("retries a retained facility edit when browser connectivity returns", async () => {
+    const fetcher = vi.fn()
+      .mockImplementationOnce(async () => response({}, 503))
+      .mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => ack(init));
+    vi.stubGlobal("fetch", fetcher);
+    putFactoryKey(BRANDS_KEY, ["Reconnect delivery"]);
+    await flushFactoryQueue();
+    expect(pending()).toHaveLength(1);
+
+    window.dispatchEvent(new Event("online"));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(pending()).toEqual([]);
+    expect(JSON.parse(directoryRaw(BRANDS_KEY)!)).toEqual(["Reconnect delivery"]);
+  });
   it("coalesces a newer edit without an earlier in-flight acknowledgment dropping it", async () => {
     let release!: () => void;
     let count = 0;

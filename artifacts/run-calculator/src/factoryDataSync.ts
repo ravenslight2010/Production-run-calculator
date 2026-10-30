@@ -223,6 +223,9 @@ export function flushFactoryQueue(): Promise<void> {
   flushInFlight = request;
   return request;
 }
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => { void flushFactoryQueue(); });
+}
 function cleanLegacy(key: string, canonical: unknown): void {
   if (!MEMORY_DIRECTORY_KEYS.has(key)) return;
   try {
