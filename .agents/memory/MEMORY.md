@@ -20,6 +20,7 @@
 - [Database test fixtures](isolated-db-may-predate-migrations.md) + [sessions](session-boundary-integration-fixtures.md) + [pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve migration-aware setup, dynamic imports, and isolated writes.
 - [Development DB boundary](isolated-destructive-browser-tests.md) — Replit development is separate from published production, but shared and not disposable.
 - [Browser test evidence](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) + [visuals](visual-regression-baselines.md) + [a11y](a11y-coverage-gate.md) + [fixtures](browser-fixture-seeding.md) + [IDs](browser-fixture-server-identifiers.md) — isolate state and stabilize browser evidence.
+- [WebKit review timing](webkit-review-test-timing.md) — mutate stale local evidence and click in one browser task so rerenders cannot refresh the tested version.
 - [Browser compatibility](browser-compatibility-index.md) + [native selects](webkit-native-select-color-scheme.md) — auth/touch fixtures, WebKit TLS/IPv6/push constraints and dark select color-scheme.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground FRONTLINE, bound prompts, and regenerate snapshots under pinned Node.

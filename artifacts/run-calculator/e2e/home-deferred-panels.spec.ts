@@ -70,6 +70,27 @@ async function promoteToManager(username: string): Promise<void> {
   }
 }
 
+async function readCanonicalFactoryValues(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/factory-data", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Canonical factory-data read failed (${response.status})`);
+    }
+    const snapshot = await response.json() as {
+      data?: Record<string, { value?: unknown }>;
+    };
+    if (!snapshot.data || typeof snapshot.data !== "object") {
+      throw new Error("Canonical factory-data response has no data map");
+    }
+    return Object.fromEntries(Object.entries(snapshot.data).map(([key, entry]) => {
+      if (!entry || typeof entry !== "object" || !("value" in entry)) {
+        throw new Error(`Canonical factory-data row is malformed (${key})`);
+      }
+      return [key, entry.value];
+    }));
+  });
+}
+
 test.beforeAll(() => {
   requireIsolatedTestDatabase("Home deferred panels browser check");
 });
@@ -382,4 +403,296 @@ test("Home opens each deferred panel in the selected browser and viewport", asyn
 
   expect(pageErrors).toEqual([]);
   expect(failedScriptRequests).toEqual([]);
+});
+
+test("manager removes saved copies repeatedly without touching pending or active data", async ({
+  page,
+}, testInfo) => {
+  const username = uniqueTestId("e2e_saved_copy_removal");
+  const fixtureId = uniqueTestId("savedcopy");
+  const pageErrors: string[] = [];
+  testUsernames.add(username);
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+  });
+  await dismissOnboardingIfPresent(page);
+  await promoteToManager(username);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("tab-run")).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await expect(page.getByTestId("button-start-run")).toBeEnabled();
+  await page.getByTestId("button-start-run").click();
+  await expect(page.getByRole("button", { name: /PAUSE RUN/ })).toBeVisible();
+
+  const legacyItems = [
+    { key: "run-calc-stop-reasons", label: "Stop reasons" },
+    { key: "run-calc-circles", label: "Packaging circles" },
+    { key: "run-calc-shippers", label: "Shippers" },
+  ];
+  const pendingQueueKey = "run-calc-fkv-queue-v1";
+  const pendingQueue = JSON.stringify([{
+    key: "run-calc-brands",
+    value: [`PENDING_${fixtureId}`],
+    updatedAt: 1,
+    g: 1,
+  }]);
+  const historyKey = "run-calc-history";
+  const historyDates = ["2026-02-11", "2026-02-12", "2026-02-13", "2026-02-14"];
+  const history = historyDates.map((date, index) => ({
+    date,
+    runs: [],
+    runValues: {},
+    fixture: `${fixtureId}_${index + 1}`,
+  }));
+  const unrelatedKey = `run-calc-saved-copy-unrelated:${fixtureId}`;
+  const unrelatedValue = `KEEP_${fixtureId}`;
+  const unrelatedOutboxKey = `run-calc-completed-history-outbox.live:unrelated_${fixtureId}`;
+  const unrelatedOutboxValue = `[{"fixture":"${fixtureId}","pending":true}]`;
+
+  await page.evaluate((data) => {
+    for (const [key, value] of Object.entries(data.legacyItems)) {
+      localStorage.setItem(
+        `run-calc-fkv-legacy-review:unowned:${key}`,
+        JSON.stringify(value),
+      );
+    }
+    localStorage.setItem(data.pendingQueueKey, data.pendingQueue);
+    localStorage.setItem(data.historyKey, JSON.stringify(data.history));
+    localStorage.setItem(data.unrelatedKey, data.unrelatedValue);
+    localStorage.setItem(data.unrelatedOutboxKey, data.unrelatedOutboxValue);
+  }, {
+    legacyItems: Object.fromEntries(legacyItems.map(({ key }, index) => [
+      key,
+      [`SAVED_${fixtureId}_${index + 1}`],
+    ])),
+    pendingQueueKey,
+    pendingQueue,
+    historyKey,
+    history,
+    unrelatedKey,
+    unrelatedValue,
+    unrelatedOutboxKey,
+    unrelatedOutboxValue,
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("tab-run")).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await expect(page.getByRole("button", { name: /PAUSE RUN/ })).toBeVisible();
+  const factoryReview = page.getByTestId("factory-directory-review");
+  const sharedReview = page.getByTestId("shared-records-status");
+  await expect(factoryReview).toBeVisible();
+  await expect(sharedReview).toBeVisible();
+  await factoryReview.locator("summary").click();
+  await sharedReview.locator("summary").click();
+  await expect(factoryReview).toContainText("4 saved facility-list edits need review");
+  await expect(sharedReview).toContainText("4 saved local items to review");
+  await expect(factoryReview.getByRole("button", { name: "Removal unavailable" })).toBeDisabled();
+  await expect(factoryReview).toContainText("may not have been sent to the facility yet");
+  const activeRunBeforeRemoval = await page.evaluate(() => {
+    const raw = localStorage.getItem("run-calc-day");
+    if (!raw) throw new Error("Synthetic active-run recovery was not saved");
+    const state = JSON.parse(raw);
+    const run = state.runs?.[state.currentIndex];
+    if (!run?.id) throw new Error("Synthetic active run has no stable identity");
+    return { date: state.date as string, runId: run.id as string };
+  });
+  const preservedBefore = await page.evaluate(({ queueKey, unrelatedKey, outboxKey }) => ({
+    activeRecovery: localStorage.getItem("run-calc-day"),
+    pendingQueue: localStorage.getItem(queueKey),
+    unrelated: localStorage.getItem(unrelatedKey),
+    outbox: localStorage.getItem(outboxKey),
+  }), { queueKey: pendingQueueKey, unrelatedKey, outboxKey: unrelatedOutboxKey });
+  const canonicalBefore = await readCanonicalFactoryValues(page);
+  await page.screenshot({
+    path: testInfo.outputPath("saved-copy-removal-before.png"),
+    fullPage: false,
+  });
+
+  let confirmations = 0;
+  page.on("dialog", async (dialog) => {
+    if (dialog.type() === "confirm") confirmations += 1;
+    await dialog.accept();
+  });
+
+  // Change the first source after review but before confirming. Its stale
+  // evidence must remain and show an actionable failure rather than disappear.
+  const staleLegacyKey = `run-calc-fkv-legacy-review:unowned:${legacyItems[0].key}`;
+  const staleLegacyCard = page.getByRole("heading", {
+    name: legacyItems[0].label,
+    exact: true,
+  }).locator("..");
+  await page.evaluate(({ key, value, label }) => {
+    const heading = Array.from(
+      document.querySelectorAll('[data-testid="factory-directory-review"] h3'),
+    ).find((candidate) => candidate.textContent === label);
+    const removeButton = Array.from(heading?.parentElement?.querySelectorAll("button") ?? [])
+      .find((button) => button.textContent?.includes("Remove saved copy from this device"));
+    if (!removeButton) throw new Error("Synthetic stale directory button was not found");
+    removeButton.addEventListener("click", () => {
+      localStorage.setItem(key, value);
+    }, { capture: true, once: true });
+  }, {
+    key: staleLegacyKey,
+    value: JSON.stringify([`UPDATED_${fixtureId}`]),
+    label: legacyItems[0].label,
+  });
+  await staleLegacyCard.getByRole("button", {
+    name: "Remove saved copy from this device",
+  }).click();
+  await expect(factoryReview.getByRole("alert").filter({
+    hasText: "The copy changed or could not be removed",
+  })).toBeVisible();
+  await expect(staleLegacyCard).toContainText(`UPDATED_${fixtureId}`);
+  expect(confirmations).toBe(1);
+
+  for (const [index, item] of legacyItems.entries()) {
+    const card = page.getByRole("heading", {
+      name: item.label,
+      exact: true,
+    }).locator("..");
+    const removeButton = card.getByRole("button", {
+      name: "Remove saved copy from this device",
+    });
+    if (index === 0) {
+      await removeButton.focus();
+      await removeButton.press("Enter");
+    } else {
+      await removeButton.click();
+    }
+    await expect(factoryReview.getByRole("status")).toContainText(
+      "Saved copy removed from this device.",
+    );
+    await expect(card).toHaveCount(0);
+    expect(confirmations).toBe(index + 2);
+  }
+  await expect(factoryReview.getByRole("button", { name: "Removal unavailable" })).toBeDisabled();
+  await expect(factoryReview).toContainText("PENDING_");
+  await expect(factoryReview.getByRole("button", {
+    name: "Remove saved copy from this device",
+  })).toHaveCount(0);
+
+  // The same local UI reports a changed retained record, then allows three
+  // unchanged records to be removed one at a time, including the last one.
+  const firstHistoryItem = sharedReview.locator("li").filter({
+    hasText: historyDates[0],
+  });
+  await page.evaluate(({ date, key, fixture }) => {
+    const item = Array.from(
+      document.querySelectorAll('[data-testid="shared-records-status"] li'),
+    ).find((candidate) => candidate.textContent?.includes(`Date: ${date}.`));
+    const removeButton = Array.from(item?.querySelectorAll("button") ?? [])
+      .find((button) => button.textContent?.includes("Remove this saved copy from this device"));
+    if (!removeButton) throw new Error("Synthetic stale-review button was not found");
+    // Write during the trusted click, before React handles it, so an unrelated
+    // rerender cannot replace the reviewed evidence between two automation steps.
+    removeButton.addEventListener("click", () => {
+      const records = JSON.parse(localStorage.getItem(key) ?? "[]") as Array<Record<string, unknown>>;
+      const index = records.findIndex((record) => record.date === date);
+      if (index < 0) throw new Error("Synthetic retained record was not found");
+      records[index] = { ...records[index], fixture };
+      localStorage.setItem(key, JSON.stringify(records));
+    }, { capture: true, once: true });
+  }, {
+    key: historyKey,
+    date: historyDates[0],
+    fixture: `UPDATED_${fixtureId}`,
+  });
+  await firstHistoryItem.getByRole("button", {
+    name: "Remove this saved copy from this device",
+  }).click();
+  await expect(sharedReview.getByRole("alert").filter({
+    hasText: "This saved copy changed or could not be removed",
+  })).toBeVisible();
+  await expect(firstHistoryItem).toContainText(historyDates[0]);
+  expect(confirmations).toBe(5);
+
+  for (const [index, date] of historyDates.entries()) {
+    const item = sharedReview.locator("li").filter({ hasText: date });
+    await item.getByRole("button", {
+      name: "Remove this saved copy from this device",
+    }).click();
+    await expect(sharedReview.getByText("Saved copy removed from this device.", {
+      exact: true,
+    })).toBeVisible();
+    await expect(item).toHaveCount(0);
+    expect(confirmations).toBe(index + 6);
+  }
+  await expect(page.getByText("4 saved local items to review")).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath("saved-copy-removal-after.png"),
+    fullPage: false,
+  });
+
+  const activeRunBeforeReload = await page.evaluate(() => {
+    const raw = localStorage.getItem("run-calc-day");
+    if (!raw) throw new Error("Active-run recovery disappeared during local cleanup");
+    const state = JSON.parse(raw);
+    const run = state.runs?.[state.currentIndex];
+    if (!run?.id) throw new Error("Active-run identity disappeared during local cleanup");
+    return { date: state.date as string, runId: run.id as string };
+  });
+  expect(activeRunBeforeReload).toEqual(activeRunBeforeRemoval);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("tab-run")).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await expect(page.getByRole("button", { name: /PAUSE RUN/ })).toBeVisible();
+  await expect(page.getByTestId("factory-directory-review")).toBeVisible();
+  const reloadedFactoryReview = page.getByTestId("factory-directory-review");
+  await reloadedFactoryReview.locator("summary").click();
+  await expect(reloadedFactoryReview).toContainText("PENDING_");
+  await expect(reloadedFactoryReview.getByRole("button", {
+    name: "Removal unavailable",
+  })).toBeDisabled();
+  await expect(page.getByTestId("shared-records-status")).toHaveCount(0);
+
+  const preservedAfter = await page.evaluate(({ queueKey, unrelatedKey, outboxKey }) => ({
+    activeRecovery: localStorage.getItem("run-calc-day"),
+    pendingQueue: localStorage.getItem(queueKey),
+    unrelated: localStorage.getItem(unrelatedKey),
+    outbox: localStorage.getItem(outboxKey),
+    removedLegacy: Object.keys(localStorage).filter((key) =>
+      key.startsWith("run-calc-fkv-legacy-review:unowned:run-calc-")
+      && !key.endsWith("run-calc-brands"),
+    ),
+    history: localStorage.getItem("run-calc-history"),
+  }), { queueKey: pendingQueueKey, unrelatedKey, outboxKey: unrelatedOutboxKey });
+  expect(preservedAfter).toMatchObject({
+    pendingQueue: preservedBefore.pendingQueue,
+    unrelated: preservedBefore.unrelated,
+    outbox: preservedBefore.outbox,
+    removedLegacy: [],
+    history: null,
+  });
+  const activeRunAfterReload = JSON.parse(preservedAfter.activeRecovery ?? "null");
+  expect({
+    date: activeRunAfterReload?.date,
+    runId: activeRunAfterReload?.runs?.[activeRunAfterReload.currentIndex]?.id,
+  }).toEqual(activeRunBeforeRemoval);
+  const canonicalAfter = await readCanonicalFactoryValues(page);
+  expect(canonicalAfter).toEqual(canonicalBefore);
+  const knownWebKitBackgroundApiErrors = testInfo.project.name.includes("webkit")
+    ? pageErrors.filter((message) =>
+      message.includes("due to access control checks")
+      && /\/api\/(incidents|factory-data|sync\/auto-track\/claim)(?:\?| |$)/.test(message))
+    : [];
+  const unexpectedPageErrors = pageErrors.filter(
+    (message) => !knownWebKitBackgroundApiErrors.includes(message),
+  );
+  expect(unexpectedPageErrors).toEqual([]);
+  if (knownWebKitBackgroundApiErrors.length > 0) {
+    const description = knownWebKitBackgroundApiErrors.join("; ");
+    testInfo.annotations.push({
+      type: "WebKit background API access-control errors",
+      description,
+    });
+    console.warn(`[${testInfo.project.name}] ${description}`);
+  }
 });
