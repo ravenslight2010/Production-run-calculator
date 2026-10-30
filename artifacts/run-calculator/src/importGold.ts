@@ -127,6 +127,37 @@ export async function fetchImportGoldRetention(offset = 0): Promise<ImportGoldRe
   return listImportGoldRetention({ limit: 100, offset });
 }
 
+export async function fetchImportGoldRetentionReminderCounts(): Promise<{
+  dueSoonCount: number;
+  overdueCount: number;
+}> {
+  let offset = 0;
+  let dueSoonCount = 0;
+  let overdueCount = 0;
+
+  while (true) {
+    const page = await fetchImportGoldRetention(offset);
+    let reachedPastReminderWindow = false;
+
+    for (const record of page.records) {
+      // The API orders unverified records by deadline, followed by verified
+      // records. Once a non-reminder status marks the end of the deadline
+      // window, later pages cannot contain due-soon or overdue reminders.
+      if (record.status === "within_limit" || record.status === "verified") {
+        reachedPastReminderWindow = true;
+        break;
+      }
+      if (record.status === "due_soon") dueSoonCount += 1;
+      if (record.status === "overdue") overdueCount += 1;
+    }
+
+    if (reachedPastReminderWindow || page.nextOffset === null) {
+      return { dueSoonCount, overdueCount };
+    }
+    offset = page.nextOffset;
+  }
+}
+
 export async function recordImportGoldCaseDeletionVerified(caseId: number): Promise<void> {
   await recordImportGoldDeletionVerification(caseId);
 }

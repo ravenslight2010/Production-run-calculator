@@ -514,7 +514,11 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
-import { fetchImportGoldConfig, makeImportGoldInput } from "../importGold";
+import {
+  fetchImportGoldConfig,
+  fetchImportGoldRetentionReminderCounts,
+  makeImportGoldInput,
+} from "../importGold";
 import {
   clearPendingImportOperation,
   createImportOperationId,
@@ -3271,6 +3275,14 @@ export default function Home() {
     queryFn: fetchImportGoldConfig,
     enabled: canManageStaff,
     staleTime: 30_000,
+    retry: false,
+  });
+  const importGoldRetentionReminders = useQuery({
+    queryKey: ["import-gold-retention-reminder-counts", me?.userId, me?.sandbox],
+    queryFn: fetchImportGoldRetentionReminderCounts,
+    enabled: (canManageStaff || canManageQc) && screenMode === null,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
     retry: false,
   });
   const goldCaptureEnabled = canManageStaff && importGoldConfig?.enabled === true;
@@ -18669,6 +18681,77 @@ export default function Home() {
 
         <Form {...form}>
           <form>
+            {activeTab === "run" && screenMode === null && (canManageStaff || canManageQc) && (
+              importGoldRetentionReminders.isError ? (
+                <div
+                  className="mb-3 flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  role="status"
+                  data-testid="gold-retention-reminder-error"
+                >
+                  <span>Gold Lab deadline reminders are unavailable. Open the retention register to retry.</span>
+                  <button
+                    type="button"
+                    className="min-h-11 shrink-0 rounded border border-border px-3 py-2 text-sm font-medium"
+                    onClick={() => {
+                      setManageCategory("gold-retention");
+                      setManageInput("");
+                      setPinChangeMsg("");
+                      setShowManageDialog(true);
+                    }}
+                  >
+                    Open retention register
+                  </button>
+                </div>
+              ) : (
+                (importGoldRetentionReminders.data?.dueSoonCount ?? 0) +
+                  (importGoldRetentionReminders.data?.overdueCount ?? 0) > 0 && (
+                  <section
+                    className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+                    aria-label="Gold Lab retention reminders"
+                    data-testid="gold-retention-reminders"
+                  >
+                    <p className="mb-2 text-sm font-medium">Gold Lab retention reminders</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {Boolean(importGoldRetentionReminders.data?.dueSoonCount) && (
+                        <button
+                          type="button"
+                          className="min-h-11 rounded border border-border px-3 py-2 text-left text-sm font-medium"
+                          data-testid="gold-retention-due-soon-reminder"
+                          onClick={() => {
+                            setManageCategory("gold-retention");
+                            setManageInput("");
+                            setPinChangeMsg("");
+                            setShowManageDialog(true);
+                          }}
+                        >
+                          {importGoldRetentionReminders.data!.dueSoonCount} deadline
+                          {importGoldRetentionReminders.data!.dueSoonCount === 1 ? "" : "s"} due within 7 days
+                        </button>
+                      )}
+                      {Boolean(importGoldRetentionReminders.data?.overdueCount) && (
+                        <button
+                          type="button"
+                          className="min-h-11 rounded border border-destructive/40 px-3 py-2 text-left text-sm font-medium text-destructive"
+                          data-testid="gold-retention-overdue-reminder"
+                          onClick={() => {
+                            setManageCategory("gold-retention");
+                            setManageInput("");
+                            setPinChangeMsg("");
+                            setShowManageDialog(true);
+                          }}
+                        >
+                          {importGoldRetentionReminders.data!.overdueCount} overdue deadline
+                          {importGoldRetentionReminders.data!.overdueCount === 1 ? "" : "s"}
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Manual reminders only; no case details or customer data are shown here.
+                    </p>
+                  </section>
+                )
+              )
+            )}
             {(syncPushFailed || writeError) && (
               <div className="print:hidden mb-3 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
