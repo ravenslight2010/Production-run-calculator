@@ -54,7 +54,7 @@ const ALL_CAPS: Capability[] = [
 const ROLE_CAPS: Record<string, Capability[]> = {
   manager: [...ALL_CAPS],
   operator: [],
-  supervisor: ["review-incidents", "edit-production-rules"],
+  supervisor: ["review-incidents", "edit-production-rules", "approve-password-resets"],
   "qc-operator": ["use-ai-tools", "record-qc"],
   "qc-manager": ["use-ai-tools", "review-incidents", "manage-allergens", "record-qc", "manage-qc"],
   warehouse: [],
@@ -2355,6 +2355,16 @@ describe("privilege-escalation guard", () => {
   });
 });
 
+async function listEnabledManagerCount(): Promise<number> {
+  const managers = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
+    .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+    .where(sql`${usersTable.sandbox} = false AND ${usersTable.disabled} = false AND ${rolesTable.capabilities} ? 'manage-staff'`);
+  return managers.length;
+}
+
 describe("last-manager guard", () => {
   // The guard blocks demoting the only manager to ANY non-manager role, not just
   // operator — so each of the six other roles must be rejected identically.
@@ -2402,26 +2412,43 @@ describe("last-manager guard", () => {
     expect(row.role).toBe("operator");
   });
 
-  it("serializes concurrent final-manager disable attempts", async () => {
+  it("does not count a disabled manager when protecting the last enabled manager", async () => {
+    await db.insert(usersTable).values({
+      id: "disabled-manager",
+      username: "disabled-manager",
+      passwordHash: "x",
+      disabled: true,
+    });
+    await db.insert(userRolesTable).values({ userId: "disabled-manager", role: "manager" });
+
+    const res = await req(MANAGER, "PUT", `/api/users/${MANAGER}/role`, {
+      role: "operator",
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringMatching(/last staff manager/i),
+    });
+  });
+
+  it("serializes concurrent attempts to demote the final manager", async () => {
     await db.insert(usersTable).values({
       id: "manager-race-2",
       username: "manager-race-2",
       passwordHash: "x",
     });
     await db.insert(userRolesTable).values({ userId: "manager-race-2", role: "manager" });
+    expect(await listEnabledManagerCount()).toBe(2);
 
-    // Equal-privilege targets remain protected, even when requests arrive at
-    // the same time. The target must not be left disabled by either request.
+    // Two managers each try to demote the other. At most one demotion may
+    // commit, even if both requests pass authorization before either commits.
     const responses = await Promise.all([
-      req(MANAGER, "PATCH", `/api/users/manager-race-2/status`, { disabled: true }),
-      req("manager-race-2", "PATCH", `/api/users/${MANAGER}/status`, { disabled: true }),
+      req(MANAGER, "PUT", "/api/users/manager-race-2/role", { role: "operator" }),
+      req("manager-race-2", "PUT", `/api/users/${MANAGER}/role`, { role: "operator" }),
     ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([403, 403]);
-    const rows = await db.select({ id: usersTable.id, disabled: usersTable.disabled })
-      .from(usersTable);
-    const relevant = rows.filter((row) => row.id === MANAGER || row.id === "manager-race-2");
-    expect(relevant).toHaveLength(2);
-    expect(relevant.every((row) => row.disabled === false)).toBe(true);
+    const statuses = responses.map((response) => response.status);
+    expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+    expect(statuses.some((status) => status === 400 || status === 403)).toBe(true);
+    expect(await listEnabledManagerCount()).toBe(1);
   });
 
   it("rejects removing the only manager (DELETE /users/:id → 400)", async () => {
@@ -2453,9 +2480,53 @@ describe("last-manager guard", () => {
       .where(sql`${usersTable.id} = ${"manager-2"}`);
     expect(row).toBeUndefined();
   });
+
+  it("serializes concurrent manager deletions so one enabled manager remains", async () => {
+    await db.insert(usersTable).values({
+      id: "manager-delete-race-2",
+      username: "manager-delete-race-2",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({
+      userId: "manager-delete-race-2",
+      role: "manager",
+    });
+
+    const responses = await Promise.all([
+      req(MANAGER, "DELETE", `/api/users/${MANAGER}`),
+      req("manager-delete-race-2", "DELETE", "/api/users/manager-delete-race-2"),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([204, 400]);
+    expect(await listEnabledManagerCount()).toBe(1);
+  });
 });
 
 describe("staff account administration", () => {
+  it("preserves approved manage-staff-only deletion of a higher-capability account", async () => {
+    await db.insert(rolesTable).values({
+      name: "limited-staff-deleter",
+      capabilities: ["manage-staff"],
+      builtin: false,
+    });
+    await db.insert(usersTable).values({
+      id: "limited-staff-deleter",
+      username: "limited-staff-deleter",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({
+      userId: "limited-staff-deleter",
+      role: "limited-staff-deleter",
+    });
+
+    const response = await req(
+      "limited-staff-deleter",
+      "DELETE",
+      `/api/users/${MANAGER}`,
+    );
+    expect(response.status).toBe(204);
+    expect(await listEnabledManagerCount()).toBe(1);
+  });
+
   it("removes a staff member and cascades their role row (DELETE → 204)", async () => {
     const res = await req(MANAGER, "DELETE", `/api/users/${OPERATOR}`);
     expect(res.status).toBe(204);

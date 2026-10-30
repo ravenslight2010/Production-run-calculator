@@ -732,6 +732,7 @@ import {
 } from "@workspace/production-rules";
 import { saveProductionRules, deleteProductionRules } from "../productionRules";
 import { useMe } from "../useRole";
+import { hasRoleSurfaceAccess } from "../roleSurfaceAccess";
 import { getImportAccess } from "../importAccess";
 import {
   Factory,
@@ -3276,6 +3277,15 @@ export default function Home() {
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
   const canManageFactorySettings = hasCapability("manage-factory-settings");
+  const canAccessQcWorkflow = hasRoleSurfaceAccess(
+    "qcWorkflow",
+    me?.capabilities ?? [],
+  );
+  useEffect(() => {
+    if (me && !canAccessQcWorkflow && activeTab === "quality") {
+      setActiveTab("run");
+    }
+  }, [activeTab, canAccessQcWorkflow, me, setActiveTab]);
   // Keep import/export controls aligned to their server-authorized commit paths,
   // rather than relying on the broad manage-staff-derived `isManager` alias.
   const {
@@ -6610,6 +6620,11 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  useEffect(() => {
+    if (!canManageFactorySettings && showScheduleDialog) {
+      setShowScheduleDialog(false);
+    }
+  }, [canManageFactorySettings, showScheduleDialog]);
   // Automatic blank placeholders are device-local, not shared planned runs.
   const todayPlannedRunCount = dayState.runs.filter((run) => !isPristineSeedRun(run)).length;
   const {
@@ -16960,7 +16975,7 @@ export default function Home() {
 
         const settingsTabs: { key: string; label: string }[] = [
           { key: "import", label: "Import" },
-          ...(isSupervisor ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
+          ...(canManageProfiles ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageInventory ? [{ key: "mixes", label: "Mix Recipes" }] : []),
@@ -17020,7 +17035,7 @@ export default function Home() {
           {
             key: "tools",
             label: "Tools",
-            subTabs: ["import", ...(isSupervisor ? ["setupProfiles"] : []), "merge"],
+            subTabs: ["import", ...(canManageProfiles ? ["setupProfiles"] : []), "merge"],
           },
         ] as { key: string; label: string; subTabs: string[] }[]).filter(s => s.subTabs.length > 0);
         const sectionForTab: Record<string, string> = {};
@@ -17822,7 +17837,7 @@ export default function Home() {
                 )}
 
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
-                {manageCategory === "setupProfiles" && isSupervisor && (
+                {manageCategory === "setupProfiles" && canManageProfiles && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">
                       Edit the saved setup for any brand &amp; flavor — line settings, recipes, and packaging — without touching the current run. New runs auto-load these saved profiles.
@@ -18242,7 +18257,7 @@ export default function Home() {
                 {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}
 
                 {/* Manage runs — supervisor-only panel to remove individual or blank runs */}
-                {manageCategory === "runs" && isSupervisor && <ManageRunsPanel />}
+                {manageCategory === "runs" && canManageFactorySettings && <ManageRunsPanel />}
 
                 {confirmationDialog}
                 {serverRole === "manager" && canManageFactorySettings && !["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
@@ -18570,7 +18585,7 @@ export default function Home() {
                     <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
-                {(canRecordQc || isManager) && (
+                {canAccessQcWorkflow && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
                     <ShieldCheck className="w-4 h-4 mr-2" /> QC workflows &amp; history
                   </DropdownMenuItem>
@@ -18585,7 +18600,7 @@ export default function Home() {
                     <Users className="w-4 h-4 mr-2" /> Staff roster
                   </DropdownMenuItem>
                 )}
-                {isSupervisor && (
+                {canManageFactorySettings && (
                   <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
@@ -18819,7 +18834,7 @@ export default function Home() {
                 {isManager && <QcDowntimeSurface days={downtimeDays} />}
               </TabsContent>
 
-              <TabsContent value="quality">
+              {canAccessQcWorkflow && <TabsContent value="quality">
                 <QcQualitySurface
                   runId={currentRunId}
                   runStartedAt={currentRun?.startedAt ?? null}
@@ -18833,7 +18848,7 @@ export default function Home() {
                   canManageQc={canManageQc}
                   canViewPhotos={canManageInventory}
                 />
-              </TabsContent>
+              </TabsContent>}
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
@@ -19708,7 +19723,7 @@ export default function Home() {
         )}
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
-        {showScheduleDialog && (
+        {showScheduleDialog && canManageFactorySettings && (
           <DialogLayerProvider value={80}>
           <div className={HOME_DIALOG_OVERLAY_CLASS} onClick={() => setShowScheduleDialog(false)}>
             <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className={`${HOME_DIALOG_CARD_SCROLL_CLASS} bg-background border border-border rounded-xl shadow-2xl w-full max-w-md flex flex-col`} onClick={e => e.stopPropagation()}>

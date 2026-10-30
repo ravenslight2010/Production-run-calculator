@@ -12,6 +12,7 @@ import {
   LABEL_POSITION_OPTIONS,
   PACKAGING_TYPE_OPTIONS,
 } from "../types";
+import { useMe } from "../useRole";
 
 /**
  * SetupMathConflictBadge — aggregate math conflicts for the Setup header.
@@ -59,6 +60,8 @@ export function SetupMathConflictBadge({
 // it — only setup-relevant data (form watch, editable packaging lists, role /
 // current-run fields) does.
 export default memo(function SetupContent() {
+  const { hasCapability } = useMe();
+  const canManageProfiles = hasCapability("manage-profiles");
   const {
     v,
     form,
@@ -109,7 +112,7 @@ export default memo(function SetupContent() {
                     })}
                     brand={currentRun?.brand ?? ""}
                     flavor={currentRun?.flavor ?? ""}
-                    canEdit={isSupervisor}
+                    canEdit={canManageProfiles}
                     onCommit={commitMissingField}
                   />
                 </div>
