@@ -55,6 +55,30 @@ describe("Gold Lab retention reminder counts", () => {
     expect(listRetention).toHaveBeenNthCalledWith(2, { limit: 100, offset: 100 });
   });
 
+  it("stops at the verified-record boundary because later pages cannot contain reminders", async () => {
+    listRetention
+      .mockResolvedValueOnce({
+        records: [retentionRecord(1, "due_soon")],
+        hasMore: true,
+        nextOffset: 100,
+      })
+      .mockResolvedValueOnce({
+        records: [
+          retentionRecord(2, "verified"),
+          retentionRecord(3, "overdue"),
+        ],
+        hasMore: true,
+        nextOffset: 200,
+      });
+
+    await expect(fetchImportGoldRetentionReminderCounts()).resolves.toEqual({
+      dueSoonCount: 1,
+      overdueCount: 0,
+    });
+    expect(listRetention).toHaveBeenCalledTimes(2);
+    expect(listRetention).toHaveBeenNthCalledWith(2, { limit: 100, offset: 100 });
+  });
+
   it("returns zero counts for an empty retention register", async () => {
     listRetention.mockResolvedValueOnce({
       records: [],

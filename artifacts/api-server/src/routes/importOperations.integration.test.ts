@@ -8,7 +8,6 @@ import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
-import { enhancedErrorMessages } from "../middlewares/errorMessagesEnhanced";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -21,6 +20,7 @@ let baseUrl: string;
 let tables: typeof import("@workspace/db");
 let route: typeof import("./importOperations");
 let importHistoryRoute: typeof import("./importHistory");
+let enhancedErrorMessages: typeof import("../middlewares/errorMessagesEnhanced")["enhancedErrorMessages"];
 let seedRoles: () => Promise<void>;
 let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
@@ -60,6 +60,7 @@ beforeAll(async () => {
   ({ signLegacyTokenForTests } = await import("../lib/auth"));
   ({ recordSession } = await import("../lib/authSessions"));
   ({ observabilityMiddleware } = await import("../lib/observability"));
+  ({ enhancedErrorMessages } = await import("../middlewares/errorMessagesEnhanced"));
   tables = await import("@workspace/db");
   db = tables.db; pool = tables.pool;
   route = await import("./importOperations");
@@ -1783,6 +1784,127 @@ describe("atomic import operations", () => {
         expect.objectContaining({ caseId: liveCase!.id }),
         expect.objectContaining({ caseId: secondLiveCase!.id }),
       ]));
+  });
+
+  it("keeps reminder-relevant retention rows ordered across pages before verified records", async () => {
+    const now = Date.now();
+    const caseRows = await db.insert(tables.importGoldCasesTable).values([
+      {
+        scope: "live",
+        operationId: "retention-order-overdue",
+        importType: "spec",
+        sourceLabel: "Synthetic fixture",
+        evaluatedInput: { synthetic: true },
+        expectedResult: { synthetic: true },
+        createdAt: new Date(now - 40 * 24 * 60 * 60 * 1000),
+      },
+      {
+        scope: "live",
+        operationId: "retention-order-due-soon",
+        importType: "spec",
+        sourceLabel: "Synthetic fixture",
+        evaluatedInput: { synthetic: true },
+        expectedResult: { synthetic: true },
+        createdAt: new Date(now - 28 * 24 * 60 * 60 * 1000),
+      },
+      {
+        scope: "live",
+        operationId: "retention-order-within-limit",
+        importType: "spec",
+        sourceLabel: "Synthetic fixture",
+        evaluatedInput: { synthetic: true },
+        expectedResult: { synthetic: true },
+        createdAt: new Date(now - 10 * 24 * 60 * 60 * 1000),
+      },
+    ]).returning({ id: tables.importGoldCasesTable.id });
+    const [overdueCase, dueSoonCase, withinLimitCase] = caseRows;
+    expect(overdueCase).toBeDefined();
+    expect(dueSoonCase).toBeDefined();
+    expect(withinLimitCase).toBeDefined();
+
+    const verificationNeededCaseId = 900001;
+    const verifiedCaseId = 900002;
+    await db.insert(tables.importGoldRetentionTable).values([
+      {
+        scope: "live",
+        caseId: verificationNeededCaseId,
+        capturedAt: new Date(now - 26 * 24 * 60 * 60 * 1000),
+        deleteBy: new Date(now + 4 * 24 * 60 * 60 * 1000),
+      },
+      {
+        scope: "live",
+        caseId: verifiedCaseId,
+        capturedAt: new Date(now - 50 * 24 * 60 * 60 * 1000),
+        deleteBy: new Date(now - 20 * 24 * 60 * 60 * 1000),
+        verifiedAt: new Date(now - 24 * 60 * 60 * 1000),
+        verifiedBy: "synthetic-reviewer",
+      },
+    ]);
+
+    const sandboxCase = await db.insert(tables.importGoldCasesTable).values({
+      scope: "sandbox",
+      operationId: "retention-order-sandbox",
+      importType: "spec",
+      sourceLabel: "Synthetic fixture",
+      evaluatedInput: { synthetic: true },
+      expectedResult: { synthetic: true },
+      createdAt: new Date(now - 40 * 24 * 60 * 60 * 1000),
+    }).returning({ id: tables.importGoldCasesTable.id });
+
+    const managerPages: Array<{
+      records: Array<{ caseId: number; status: string; verifiedAt: string | null; verifiedBy: string | null }>;
+      hasMore: boolean;
+      nextOffset: number | null;
+    }> = [];
+    for (const offset of [0, 2, 4]) {
+      const response = await fetch(`${baseUrl}/api/import-gold/retention?limit=2&offset=${offset}`, {
+        headers: headers(),
+      });
+      expect(response.status).toBe(200);
+      managerPages.push(await response.json() as typeof managerPages[number]);
+    }
+
+    expect(managerPages.map((page) => page.records.map((record) => record.status))).toEqual([
+      ["overdue", "due_soon"],
+      ["verification_needed", "within_limit"],
+      ["verified"],
+    ]);
+    expect(managerPages.map((page) => [page.hasMore, page.nextOffset])).toEqual([
+      [true, 2],
+      [true, 4],
+      [false, null],
+    ]);
+    expect(managerPages.flatMap((page) => page.records.map((record) => record.caseId))).toEqual([
+      overdueCase!.id,
+      dueSoonCase!.id,
+      verificationNeededCaseId,
+      withinLimitCase!.id,
+      verifiedCaseId,
+    ]);
+    expect(managerPages.flatMap((page) => page.records)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        caseId: verifiedCaseId,
+        verifiedAt: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        verifiedBy: "synthetic-reviewer",
+      }),
+    ]));
+    for (const record of managerPages.flatMap((page) => page.records)) {
+      expect(record).not.toHaveProperty("evaluatedInput");
+      expect(record).not.toHaveProperty("expectedResult");
+    }
+
+    const qcResponse = await fetch(`${baseUrl}/api/import-gold/retention?limit=2&offset=0`, {
+      headers: headers("qc-reviewer"),
+    });
+    expect(qcResponse.status).toBe(200);
+    expect(await qcResponse.json()).toEqual(managerPages[0]);
+
+    const sandboxResponse = await fetch(`${baseUrl}/api/import-gold/retention`, {
+      headers: headers("sandbox"),
+    });
+    expect(sandboxResponse.status).toBe(200);
+    expect((await sandboxResponse.json() as { records: Array<{ caseId: number; status: string }> }).records)
+      .toMatchObject([{ caseId: sandboxCase[0]!.id, status: "overdue" }]);
   });
 
   it("gates capture and manager controls, bounds input, and records provider errors without failing the batch", async () => {
