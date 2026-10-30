@@ -8,6 +8,7 @@ import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
+import { enhancedErrorMessages } from "../middlewares/errorMessagesEnhanced";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -72,6 +73,9 @@ beforeAll(async () => {
   app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
   app.use(observabilityMiddleware);
   app.use("/api", requireAuth, route.default, importHistoryRoute.default, importQcRoute.default, qcWorkflowRoute.default);
+  // Match app.ts's terminal production error middleware so route failures in this
+  // integration harness exercise the same JSON response contract as production.
+  app.use(enhancedErrorMessages);
   await new Promise<void>((resolve, reject) => {
     server = app.listen(0, () => resolve());
     server.once("error", reject);
@@ -1550,7 +1554,7 @@ describe("atomic import operations", () => {
       LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.action = 'import_gold_case_deleted' THEN
-          RAISE EXCEPTION 'test-only forced cleanup audit insert failure';
+          RAISE EXCEPTION 'SYNTHETIC_PRIVATE forced audit INSERT INTO audit_logs SECRET_STACK_TRACE';
         END IF;
         RETURN NEW;
       END;
@@ -1562,16 +1566,27 @@ describe("atomic import operations", () => {
       FOR EACH ROW EXECUTE FUNCTION fail_import_gold_cleanup_audit_for_test()
     `);
     let failedCleanupStatus = 0;
+    let failedCleanupContentType: string | null = null;
+    let failedCleanupBody: unknown;
     try {
       const failedCleanup = await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
         method: "DELETE", headers: headers(),
       });
       failedCleanupStatus = failedCleanup.status;
+      failedCleanupContentType = failedCleanup.headers.get("content-type");
+      failedCleanupBody = await failedCleanup.json();
     } finally {
       await pool.query("DROP TRIGGER IF EXISTS fail_import_gold_cleanup_audit_for_test ON audit_logs");
       await pool.query("DROP FUNCTION IF EXISTS fail_import_gold_cleanup_audit_for_test()");
     }
     expect(failedCleanupStatus).toBe(500);
+    expect(failedCleanupContentType).toMatch(/application\/json/);
+    expect(failedCleanupBody).toEqual({
+      error: "Something went wrong on the server. Our team has been notified. Please try again later.",
+    });
+    expect(JSON.stringify(failedCleanupBody)).not.toMatch(
+      /SYNTHETIC_PRIVATE|INSERT INTO|audit_logs|SECRET_STACK_TRACE/,
+    );
     expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(1);
     expect(await db.select().from(tables.importGoldScoresTable).where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(1);
     expect(await db.select().from(tables.auditLogsTable)
