@@ -147,3 +147,4 @@
 - [Replit staging boundary](replit-staging-project-boundary.md) — published staging needs a separate project; approved local testing needs its own app/cluster.
 - [Prep](prep-mix-identities.md) + [inventory](prep-inventory-accounting.md) + [stock corrections](completed-run-stock-corrections.md) — prepare from raw; use prepared stock; reconcile edits durably.
 - [Line Map activity](line-map-station-activity.md) + [deployment logs](deployment-log-fallback.md) — require run-bound activity, Tunnel/Warehouse confirmation and serving-revision logs.
+- [Staging test handoff](staging-test-handoff.md) — owner created a dedicated testing environment; stale isolated copies may lack its setup.
