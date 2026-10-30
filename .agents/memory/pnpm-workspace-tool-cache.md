@@ -47,3 +47,14 @@ script after npm-based provisioning consumed or detached stdin.
 **How to apply:** Pass inline scripts through `--eval`, or use a script file,
 and require an explicit result marker rather than treating exit zero as proof
 that the probe ran.
+
+Managed Replit workflows can present a terminal to Corepack even when an
+ordinary child-process test has no terminal.
+
+**Why:** Cold-cache provisioning passed in a piped test but stalled on the
+download-confirmation prompt in the actual managed workflow. Disabling that
+prompt for the approved exact pin does not disable signature or TLS checks.
+
+**How to apply:** Retain cold-cache PTY coverage with a deadline and a
+fixture-owned process-session guard; a non-TTY version probe alone does not
+prove unattended workflow startup.
