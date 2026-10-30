@@ -10218,6 +10218,7 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
  */
 export const GetImportGoldConfigResponse = zod.object({
   "enabled": zod.boolean(),
+  "cleanupEnabled": zod.boolean().describe('True only when explicitly configured and source approvals are disabled'),
   "localConfigured": zod.boolean(),
   "localAvailable": zod.boolean(),
   "localScoringSwitchAvailable": zod.boolean(),
@@ -10298,6 +10299,28 @@ export const ListImportGoldCasesResponse = zod.object({
 }))
 }))
 })
+
+/**
+ * @summary List minimal scoped case metadata when cleanup-only mode is enabled
+ */
+
+export const ListImportGoldCleanupCasesResponse = zod.object({
+  "cases": zod.array(zod.object({
+  "id": zod.int().min(1),
+  "importType": zod.enum(['spec', 'premix', 'cheese']),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+/**
+ * @summary Delete one scoped case and its score history in cleanup-only mode
+ */
+
+export const DeleteImportGoldCleanupCaseParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const DeleteImportGoldCleanupCaseResponse = zod.void()
 
 /**
  * @summary Exclude or restore a case for scoring and export

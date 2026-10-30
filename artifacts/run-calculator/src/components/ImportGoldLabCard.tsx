@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyImportGoldSyntheticReview,
+  deleteImportGoldCleanupCase,
   deleteImportGoldCase,
   downloadImportGoldJsonl,
+  fetchImportGoldCleanupCases,
   fetchImportGoldCases,
   fetchImportGoldConfig,
   fetchImportGoldSyntheticReview,
@@ -10,6 +12,7 @@ import {
   setImportGoldLocalScoringEnabled,
   setImportGoldExcluded,
   type ImportGoldCase,
+  type ImportGoldCleanupCase,
   type ImportGoldConfig,
   type ImportGoldSyntheticReview,
 } from "@/importGold";
@@ -17,6 +20,7 @@ import {
 export default function ImportGoldLabCard() {
   const [config, setConfig] = useState<ImportGoldConfig | null>(null);
   const [cases, setCases] = useState<ImportGoldCase[]>([]);
+  const [cleanupCases, setCleanupCases] = useState<ImportGoldCleanupCase[]>([]);
   const [syntheticReview, setSyntheticReview] = useState<ImportGoldSyntheticReview | null>(null);
   const [reviewedSynthetic, setReviewedSynthetic] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,15 +41,23 @@ export default function ImportGoldLabCard() {
         setError(null);
         const nextConfig = await fetchImportGoldConfig();
         setConfig(nextConfig);
-        if (nextConfig.enabled || nextConfig.syntheticFixtureAvailable) {
+        if (nextConfig.cleanupEnabled) {
+          setCases([]);
+          setCleanupCases([]);
+          setSyntheticReview(null);
+          setCleanupCases(await fetchImportGoldCleanupCases());
+        } else if (nextConfig.enabled || nextConfig.syntheticFixtureAvailable) {
+          setCleanupCases([]);
           const [nextCases, nextReview] = await Promise.all([
             fetchImportGoldCases(),
             nextConfig.syntheticFixtureAvailable ? fetchImportGoldSyntheticReview() : Promise.resolve(null),
           ]);
           setCases(nextCases);
+          setCleanupCases([]);
           setSyntheticReview(nextReview);
         } else {
           setCases([]);
+          setCleanupCases([]);
           setSyntheticReview(null);
         }
       } catch (cause) {
@@ -141,6 +153,20 @@ export default function ImportGoldLabCard() {
       setOperationBusy(false);
     }
   };
+  const removeCleanupCase = async (item: ImportGoldCleanupCase) => {
+    if (!window.confirm(
+      `Permanently delete evaluation case #${item.id} and its score history from application storage? This does not delete source workbooks, exports, or backups.`,
+    )) return;
+    setOperationBusy(true);
+    try {
+      await deleteImportGoldCleanupCase(item.id);
+      await refresh(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete the case.");
+    } finally {
+      setOperationBusy(false);
+    }
+  };
   const exportCases = async () => {
     try { await downloadImportGoldJsonl(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not export evaluation cases."); }
@@ -161,7 +187,7 @@ export default function ImportGoldLabCard() {
             Evaluation cases use only results that a person reviewed and successfully applied. Scoring never writes to recipes or inventory.
           </p>
         </div>
-        {config && (config.enabled || config.syntheticFixtureAvailable) && (
+        {config && !config.cleanupEnabled && (config.enabled || config.syntheticFixtureAvailable) && (
           <div className="flex flex-wrap gap-2">
             {config.localScoringEnabled && config.localConfigured && (
               <button type="button" disabled={busy || activeCount === 0} onClick={() => void runScore("local")} className="min-h-11 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">Score locally</button>
@@ -176,7 +202,7 @@ export default function ImportGoldLabCard() {
       {error && <p role="alert" className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-sm text-destructive">{error}</p>}
       {!config ? <p className="mt-3 text-sm text-muted-foreground">Checking evaluator settings…</p> : (
         <>
-          {config.localScoringSwitchAvailable && (
+          {!config.cleanupEnabled && config.localScoringSwitchAvailable && (
             <div className="mt-3 rounded-md border border-border p-3">
               <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium">
                 <input
@@ -203,7 +229,7 @@ export default function ImportGoldLabCard() {
               )}
             </div>
           )}
-          {!config.localScoringSwitchAvailable && (
+          {!config.cleanupEnabled && !config.localScoringSwitchAvailable && (
             <p className="mt-3 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
               Local scoring controls are available only in a development workspace.
             </p>
@@ -252,7 +278,37 @@ export default function ImportGoldLabCard() {
           )}
         </>
       )}
-      {config && (config.enabled || config.syntheticFixtureAvailable) && (
+      {config?.cleanupEnabled && (
+        <div className="mt-3 rounded-md border border-border p-3" data-testid="import-gold-cleanup-only">
+          <h3 className="font-medium">Cleanup retained evaluation cases</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Source approval is off. This view shows only case IDs, import types, and creation times; it does not read case contents or score details.
+            Deletion removes the case and score history from application storage, not source workbooks, exports, or backups.
+          </p>
+          <div className="mt-3 space-y-2">
+            {cleanupCases.map((item) => (
+              <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3" data-testid={`import-gold-cleanup-case-${item.id}`}>
+                <div>
+                  <div className="font-medium capitalize">{item.importType} · #{item.id}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</div>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void removeCleanupCase(item)}
+                  className="min-h-11 rounded-md border border-destructive/40 px-3 py-2 text-sm font-medium text-destructive disabled:opacity-50"
+                >
+                  Delete case and scores
+                </button>
+              </article>
+            ))}
+            {cleanupCases.length === 0 && (
+              <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">No retained cases are available for cleanup in this scope.</p>
+            )}
+          </div>
+        </div>
+      )}
+      {config && !config.cleanupEnabled && (config.enabled || config.syntheticFixtureAvailable) && (
         <>
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div className="rounded-md bg-muted/40 p-3 text-sm"><span className="font-medium">{activeCount}</span> active / {cases.length} cases</div>

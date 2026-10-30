@@ -6,6 +6,21 @@
 Synthetic cases only until source-specific evidence and deletion compatibility
 are verified.**
 
+### Implementation update — 2026-10-30
+
+A cleanup-only application path is now implemented for retained cases when
+source approval is disabled. It requires the separate
+`IMPORT_GOLD_CLEANUP_ENABLED=true` setting and the existing `manage-staff`
+capability. Its inventory returns only case ID, import type, and creation time;
+deletion removes the scoped case and score rows and appends an audit entry with
+the authenticated actor, scope, case ID, and timestamp. Cleanup-only mode also
+blocks ordinary case and score content APIs, including development-only
+synthetic review and scoring tools. The setting does not enable capture,
+scoring, export, or case-content reads. This implementation update is based on
+source and isolated synthetic integration tests; it does not establish the
+setting's value or database constraint status in production, and does not
+change the NO-GO for real-source work.
+
 The project owner identified the Manager and QC Manager as authorized roles and
 subsequently confirmed that they approve the proposed local workbook evaluation
 and that privacy review was completed and approved. These are user-reported
@@ -136,19 +151,24 @@ by this documentation change.
 | Approved requirement | Current behavior and disposition |
 | --- | --- |
 | Maximum 30 days for evaluation cases and scores | Manual case deletion exists and score cascade is declared. No automatic deadline enforcement exists. Compliance requires an actual deletion register, reminders, and timely execution; it is not established by policy approval. |
-| Earlier deletion on source-owner request | The same manual route can remove a scoped case while real-source authorization is enabled. The handler also gates real-source deletion on current approval, so revoking approval can prevent ordinary real-case cleanup. Do not re-enable capture merely to delete retained data; require a separately authorized, verified cleanup procedure before admitting real sources. |
-| Delete evaluation working copies and approved exports | Case deletion cannot recall downloads or delete separately retained workbook copies. The responsible authorized role must inventory destinations and verify their cleanup separately. |
+| Earlier deletion on source-owner request | When source approval is disabled, an independently enabled cleanup-only route lists only scoped case IDs, import types, and creation times and deletes the selected application case and its score history. It requires `IMPORT_GOLD_CLEANUP_ENABLED=true` and `manage-staff`; it does not restore the ordinary case list, content reads, scoring, capture, or export. |
+| Delete evaluation working copies and approved exports | Application cleanup cannot recall downloads or delete separately retained workbook copies. The responsible authorized role must inventory destinations and verify their cleanup separately. |
 | Record actual backup retention without promising unsupported erasure | Backup retention and deletion behavior were not inspected and remain unknown. No complete-erasure claim is supported. |
 | Keep original business records under their existing policy | The lab's case DELETE targets evaluation rows, not original workbooks; cleanup of external files must distinguish working copies from business records. |
 
-Evidence is implementation inspection, not an executed deletion rehearsal:
-the DELETE handler in `importOperations.ts`, the score foreign key in
-`importGold.ts`, and the existing synthetic integration case
-`lists, excludes, exports, and deletes only manager-visible scoped cases` in
-`importOperations.integration.test.ts`. That test's source asserts disabled
-real-case deletion returns 404 and enabled case deletion returns 204; it was
-not run for this documentation-only decision. It does not establish backup
-erasure or a runtime score-cascade result.
+Evidence for the cleanup-only implementation is source inspection and the
+synthetic-only isolated integration case
+`allows scoped metadata-only cleanup after approval withdrawal without
+reopening Gold Lab reads` in `importOperations.integration.test.ts`. It checks
+scope, role revocation, disabled capture/scoring/export/content reads,
+score-row deletion, audit minimization, invalid IDs, and repeated deletion.
+The cleanup interface and confirmation/refresh behavior were also exercised
+with synthetic API fixtures at desktop, phone, tablet portrait, and tablet
+landscape sizes in Chromium and WebKit. That browser matrix verifies the UI,
+not persistence; the isolated API test verifies the real database cascade.
+Neither is a production deletion rehearsal or establishes backup erasure,
+source-workbook deletion, export recall, evaluator-side deletion, or the
+published database's foreign-key state.
 
 These limitations mean the approved policy cannot yet be attested as operationally
 satisfied. The decision therefore uses the task's conservative branch: no real

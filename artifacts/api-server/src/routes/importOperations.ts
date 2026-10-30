@@ -159,6 +159,16 @@ function importGoldEnabled(): boolean {
     (privacyReviewStatus === "approved" || privacyReviewStatus === "not_required");
 }
 
+function importGoldCleanupOnlyEnabled(): boolean {
+  return process.env.IMPORT_GOLD_CLEANUP_ENABLED === "true" && !importGoldEnabled();
+}
+
+function rejectImportGoldContentDuringCleanup(res: Response): boolean {
+  if (!importGoldCleanupOnlyEnabled()) return false;
+  res.status(404).json({ error: "Import Gold content operations are unavailable during cleanup-only mode" });
+  return true;
+}
+
 function jsonBytes(value: unknown): number {
   try { return Buffer.byteLength(JSON.stringify(value), "utf8"); } catch { return Number.POSITIVE_INFINITY; }
 }
@@ -1082,22 +1092,25 @@ function syntheticGoldCaseCondition() {
 
 router.get("/import-gold/config", requireCapability("manage-staff"), async (_req, res) => {
   const developmentRuntime = isImportGoldDevelopmentRuntime();
-  const localConfigured = developmentRuntime && isImportGoldLocalConfigured();
+  const cleanupOnly = importGoldCleanupOnlyEnabled();
+  const localConfigured = !cleanupOnly && developmentRuntime && isImportGoldLocalConfigured();
   const localBase = process.env.IMPORT_GOLD_LOCAL_BASE_URL ?? "http://127.0.0.1:11434/v1";
   res.json({
     enabled: importGoldEnabled(),
+    cleanupEnabled: cleanupOnly,
     localConfigured,
     localAvailable: localConfigured && await isImportGoldLocalAvailable(localBase),
-    localScoringSwitchAvailable: developmentRuntime,
-    localScoringEnabled: developmentRuntime && await getLocalGoldScoringEnabled(),
-    syntheticFixtureAvailable: developmentRuntime,
-    geminiConfigured: importGoldEnabled() && isGeminiProviderConfigured(),
+    localScoringSwitchAvailable: !cleanupOnly && developmentRuntime,
+    localScoringEnabled: !cleanupOnly && developmentRuntime && await getLocalGoldScoringEnabled(),
+    syntheticFixtureAvailable: !cleanupOnly && developmentRuntime,
+    geminiConfigured: !cleanupOnly && importGoldEnabled() && isGeminiProviderConfigured(),
     retention: "Real-source cases require recorded source-use and retention approval. Cases remain until a manager deletes them; exclusion only removes them from scoring and export.",
     persistsAcrossFactoryPurge: true,
   });
 });
 
 router.patch("/import-gold/local-scoring", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only setting is unavailable" }); return; }
   const body = objectBody(req);
   if (!body || Object.keys(body).length !== 1 || typeof body.enabled !== "boolean") {
@@ -1116,6 +1129,7 @@ router.patch("/import-gold/local-scoring", requireCapability("manage-staff"), as
 });
 
 router.get("/import-gold/synthetic-review", requireCapability("manage-staff"), (_req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only fixture is unavailable" }); return; }
   res.json({
     fixtureVersion: SYNTHETIC_GOLD_FIXTURE_VERSION,
@@ -1128,6 +1142,7 @@ router.get("/import-gold/synthetic-review", requireCapability("manage-staff"), (
 });
 
 router.post("/import-gold/synthetic-apply", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   if (!isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Development-only fixture is unavailable" }); return; }
   const body = objectBody(req);
   if (
@@ -1161,6 +1176,7 @@ router.post("/import-gold/synthetic-apply", requireCapability("manage-staff"), a
 });
 
 router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   const realSourceAccess = importGoldEnabled();
   if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) {
     res.status(404).json({ error: "Import gold is disabled" }); return;
@@ -1201,6 +1217,7 @@ router.get("/import-gold/cases", requireCapability("manage-staff"), async (req, 
 });
 
 router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   const realSourceAccess = importGoldEnabled();
   if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
@@ -1222,6 +1239,7 @@ router.patch("/import-gold/cases/:id/exclusion", requireCapability("manage-staff
 });
 
 router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   const realSourceAccess = importGoldEnabled();
   if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const id = Number(req.params.id);
@@ -1235,7 +1253,60 @@ router.delete("/import-gold/cases/:id", requireCapability("manage-staff"), async
   res.status(204).end();
 });
 
+router.get("/import-gold/cleanup-cases", requireCapability("manage-staff"), async (_req, res) => {
+  if (!importGoldCleanupOnlyEnabled()) {
+    res.status(404).json({ error: "Import gold cleanup is unavailable" });
+    return;
+  }
+  const cases = await db.select({
+    id: importGoldCasesTable.id,
+    importType: importGoldCasesTable.importType,
+    createdAt: importGoldCasesTable.createdAt,
+  }).from(importGoldCasesTable)
+    .where(eq(importGoldCasesTable.scope, currentScope()))
+    .orderBy(desc(importGoldCasesTable.createdAt), desc(importGoldCasesTable.id))
+    .limit(MAX_GOLD_CASES);
+  res.json({
+    cases: cases.map((row) => ({
+      id: row.id,
+      importType: row.importType,
+      createdAt: row.createdAt.toISOString(),
+    })),
+  });
+});
+
+router.delete("/import-gold/cleanup-cases/:id", requireCapability("manage-staff"), async (req, res) => {
+  if (!importGoldCleanupOnlyEnabled()) {
+    res.status(404).json({ error: "Import gold cleanup is unavailable" });
+    return;
+  }
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) {
+    res.status(400).json({ error: "Invalid case identity" });
+    return;
+  }
+  const deleted = await db.transaction(async (tx) => {
+    const [row] = await tx.delete(importGoldCasesTable).where(and(
+      eq(importGoldCasesTable.id, id),
+      eq(importGoldCasesTable.scope, currentScope()),
+    )).returning({ id: importGoldCasesTable.id });
+    if (!row) return false;
+    await writeAuditEvent(tx, {
+      action: "import_gold_case_deleted",
+      resource: "import_gold_case",
+      changes: { outcome: "success", targetId: String(row.id) },
+    });
+    return true;
+  });
+  if (!deleted) {
+    res.status(404).json({ error: "Evaluation case not found" });
+    return;
+  }
+  res.status(204).end();
+});
+
 router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async (_req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   const realSourceAccess = importGoldEnabled();
   if (!realSourceAccess && !isImportGoldDevelopmentRuntime()) { res.status(404).json({ error: "Import gold is disabled" }); return; }
   const cases = await db.select().from(importGoldCasesTable).where(and(
@@ -1255,6 +1326,7 @@ router.get("/import-gold/export.jsonl", requireCapability("manage-staff"), async
 });
 
 router.post("/import-gold/score", requireCapability("manage-staff"), async (req, res) => {
+  if (rejectImportGoldContentDuringCleanup(res)) return;
   const realSourceAccess = importGoldEnabled();
   const developmentRuntime = isImportGoldDevelopmentRuntime();
   const body = objectBody(req);

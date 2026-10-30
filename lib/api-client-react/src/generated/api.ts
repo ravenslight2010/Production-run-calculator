@@ -133,6 +133,7 @@ import type {
   IdentifyPhotoResult,
   ImportAliasList,
   ImportGoldCasesResponse,
+  ImportGoldCleanupCasesResponse,
   ImportGoldConfig,
   ImportGoldExclusionRequest,
   ImportGoldLocalScoringRequest,
@@ -26027,6 +26028,181 @@ export function useListImportGoldCases<TData = Awaited<ReturnType<typeof listImp
 
 
 
+
+export const getListImportGoldCleanupCasesUrl = () => {
+
+
+
+
+  return `/api/import-gold/cleanup-cases`
+}
+
+/**
+ * @summary List minimal scoped case metadata when cleanup-only mode is enabled
+ */
+export const listImportGoldCleanupCases = async ( options?: Parameters<typeof customFetch>[1]): Promise<ImportGoldCleanupCasesResponse> => {
+
+  return customFetch<ImportGoldCleanupCasesResponse>(getListImportGoldCleanupCasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListImportGoldCleanupCasesQueryKey = () => {
+    return [
+    `/api/import-gold/cleanup-cases`
+    ] as const;
+    }
+
+
+export const getListImportGoldCleanupCasesQueryOptions = <TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportGoldCleanupCasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportGoldCleanupCases>>> = ({ signal }) => listImportGoldCleanupCases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListImportGoldCleanupCasesQueryResult = NonNullable<Awaited<ReturnType<typeof listImportGoldCleanupCases>>>
+export type ListImportGoldCleanupCasesQueryError = ErrorType<void>
+
+
+export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldCleanupCases>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldCleanupCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listImportGoldCleanupCases>>,
+          TError,
+          Awaited<ReturnType<typeof listImportGoldCleanupCases>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List minimal scoped case metadata when cleanup-only mode is enabled
+ */
+
+export function useListImportGoldCleanupCases<TData = Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listImportGoldCleanupCases>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListImportGoldCleanupCasesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDeleteImportGoldCleanupCaseUrl = (id: number,) => {
+
+
+
+
+  return `/api/import-gold/cleanup-cases/${id}`
+}
+
+/**
+ * @summary Delete one scoped case and its score history in cleanup-only mode
+ */
+export const deleteImportGoldCleanupCase = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteImportGoldCleanupCaseUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteImportGoldCleanupCaseMutationKey = () => ['deleteImportGoldCleanupCase'] as const;
+
+export const getDeleteImportGoldCleanupCaseMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>, TError,DeleteImportGoldCleanupCaseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>, TError,DeleteImportGoldCleanupCaseMutationVariables, TContext> => {
+
+const mutationKey = getDeleteImportGoldCleanupCaseMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>, DeleteImportGoldCleanupCaseMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteImportGoldCleanupCase(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteImportGoldCleanupCaseMutationResult = NonNullable<Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>>
+
+    export type DeleteImportGoldCleanupCaseMutationError = ErrorType<void>
+    export type DeleteImportGoldCleanupCaseMutationVariables = {id: number}
+
+    /**
+ * @summary Delete one scoped case and its score history in cleanup-only mode
+ */
+export const useDeleteImportGoldCleanupCase = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>, TError,DeleteImportGoldCleanupCaseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteImportGoldCleanupCase>>,
+        TError,
+        DeleteImportGoldCleanupCaseMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteImportGoldCleanupCaseMutationOptions(options), queryClient);
+    }
 
 export const getSetImportGoldCaseExclusionUrl = (id: number,) => {
 

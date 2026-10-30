@@ -1149,6 +1149,8 @@ export interface ImportOperationApplyInput {
 
 export interface ImportGoldConfig {
   enabled: boolean;
+  /** True only when explicitly configured and source approvals are disabled */
+  cleanupEnabled: boolean;
   localConfigured: boolean;
   localAvailable: boolean;
   localScoringSwitchAvailable: boolean;
@@ -1282,6 +1284,26 @@ export interface ImportGoldCase {
 
 export interface ImportGoldCasesResponse {
   cases: ImportGoldCase[];
+}
+
+export type ImportGoldCleanupCaseImportType = typeof ImportGoldCleanupCaseImportType[keyof typeof ImportGoldCleanupCaseImportType];
+
+
+export const ImportGoldCleanupCaseImportType = {
+  spec: 'spec',
+  premix: 'premix',
+  cheese: 'cheese',
+} as const;
+
+export interface ImportGoldCleanupCase {
+  /** @minimum 1 */
+  id: number;
+  importType: ImportGoldCleanupCaseImportType;
+  createdAt: string;
+}
+
+export interface ImportGoldCleanupCasesResponse {
+  cases: ImportGoldCleanupCase[];
 }
 
 export type ImportGoldScoreResponseResultsItemProvider = typeof ImportGoldScoreResponseResultsItemProvider[keyof typeof ImportGoldScoreResponseResultsItemProvider];

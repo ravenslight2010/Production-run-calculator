@@ -1,5 +1,6 @@
 export type ImportGoldConfig = {
   enabled: boolean;
+  cleanupEnabled: boolean;
   localConfigured: boolean;
   localAvailable: boolean;
   localScoringSwitchAvailable: boolean;
@@ -38,6 +39,12 @@ export type ImportGoldCase = {
   excluded: boolean;
   createdAt: string;
   scores: ImportGoldScore[];
+};
+
+export type ImportGoldCleanupCase = {
+  id: number;
+  importType: string;
+  createdAt: string;
 };
 
 export type ImportGoldScoreBatchResult = {
@@ -83,6 +90,29 @@ export async function applyImportGoldSyntheticReview(fixtureVersion: string): Pr
 export async function fetchImportGoldCases(): Promise<ImportGoldCase[]> {
   const body = await (await goldFetch("/api/import-gold/cases?limit=50")).json() as { cases?: ImportGoldCase[] };
   return Array.isArray(body.cases) ? body.cases : [];
+}
+
+export async function fetchImportGoldCleanupCases(): Promise<ImportGoldCleanupCase[]> {
+  const body = await (await goldFetch("/api/import-gold/cleanup-cases")).json() as unknown;
+  if (!body || typeof body !== "object" || !Array.isArray((body as { cases?: unknown }).cases)) {
+    throw new Error("The cleanup inventory returned an unreadable response. Refresh the lab before retrying.");
+  }
+  const cases = (body as { cases: unknown[] }).cases;
+  if (!cases.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item as Record<string, unknown>;
+    return Number.isSafeInteger(candidate.id) && Number(candidate.id) > 0 &&
+      ["spec", "premix", "cheese"].includes(String(candidate.importType)) &&
+      typeof candidate.createdAt === "string" && Number.isFinite(Date.parse(candidate.createdAt)) &&
+      Object.keys(candidate).sort().join(",") === "createdAt,id,importType";
+  })) {
+    throw new Error("The cleanup inventory returned invalid case metadata. Refresh the lab before retrying.");
+  }
+  return cases as ImportGoldCleanupCase[];
+}
+
+export async function deleteImportGoldCleanupCase(id: number): Promise<void> {
+  await goldFetch(`/api/import-gold/cleanup-cases/${id}`, { method: "DELETE" });
 }
 
 export async function setImportGoldExcluded(id: number, excluded: boolean): Promise<void> {

@@ -25,6 +25,7 @@ let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
 let observabilityMiddleware: typeof import("../lib/observability")["observabilityMiddleware"];
 const originalGoldEnabled = process.env.IMPORT_GOLD_ENABLED;
+const originalGoldCleanupEnabled = process.env.IMPORT_GOLD_CLEANUP_ENABLED;
 const originalGoldSourceApproved = process.env.IMPORT_GOLD_SOURCE_USE_APPROVED;
 const originalGoldRetentionApproved = process.env.IMPORT_GOLD_RETENTION_APPROVED;
 const originalGoldApprovalRecordRef = process.env.IMPORT_GOLD_APPROVAL_RECORD_REF;
@@ -88,6 +89,8 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalUrl;
   if (originalGoldEnabled === undefined) delete process.env.IMPORT_GOLD_ENABLED;
   else process.env.IMPORT_GOLD_ENABLED = originalGoldEnabled;
+  if (originalGoldCleanupEnabled === undefined) delete process.env.IMPORT_GOLD_CLEANUP_ENABLED;
+  else process.env.IMPORT_GOLD_CLEANUP_ENABLED = originalGoldCleanupEnabled;
   if (originalGoldSourceApproved === undefined) delete process.env.IMPORT_GOLD_SOURCE_USE_APPROVED;
   else process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = originalGoldSourceApproved;
   if (originalGoldRetentionApproved === undefined) delete process.env.IMPORT_GOLD_RETENTION_APPROVED;
@@ -105,6 +108,7 @@ afterAll(async () => {
 beforeEach(async () => {
   route?.setImportOperationFailureHookForTest();
   process.env.IMPORT_GOLD_ENABLED = "true";
+  delete process.env.IMPORT_GOLD_CLEANUP_ENABLED;
   process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "true";
   process.env.IMPORT_GOLD_RETENTION_APPROVED = "true";
   process.env.IMPORT_GOLD_APPROVAL_RECORD_REF = "test-only://synthetic-import-gold-approval";
@@ -1304,6 +1308,163 @@ describe("atomic import operations", () => {
     const deleted = await fetch(`${baseUrl}/api/import-gold/cases/${caseId}`, { method: "DELETE", headers: headers() });
     expect(deleted.status).toBe(204);
     expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+  });
+
+  it("allows scoped metadata-only cleanup after approval withdrawal without reopening Gold Lab reads", async () => {
+    process.env.IMPORT_GOLD_ENABLED = "false";
+    process.env.IMPORT_GOLD_SOURCE_USE_APPROVED = "false";
+    process.env.IMPORT_GOLD_RETENTION_APPROVED = "false";
+    process.env.IMPORT_GOLD_PRIVACY_REVIEW_STATUS = "pending";
+    process.env.IMPORT_GOLD_CLEANUP_ENABLED = "false";
+
+    const rejectedCapture = await apply("gold-cleanup-capture-disabled-001", {
+      ...change("gold-cleanup-capture-disabled"),
+      goldCapture: { input: { candidates: [{ name: "Synthetic capture must stay disabled" }] } },
+    });
+    expect(rejectedCapture.status).toBe(404);
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(0);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() })).status).toBe(404);
+
+    const [liveCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "live",
+      operationId: "synthetic-cleanup-case-live-001",
+      importType: "premix",
+      sourceLabel: "Synthetic cleanup fixture",
+      evaluatedInput: { candidates: [{ name: "SYNTHETIC_PRIVATE_INPUT" }] },
+      expectedResult: { mixes: [{ name: "SYNTHETIC_PRIVATE_EXPECTED" }] },
+      createdBy: "inventory",
+    }).returning({ id: tables.importGoldCasesTable.id });
+    const [sandboxCase] = await db.insert(tables.importGoldCasesTable).values({
+      scope: "sandbox",
+      operationId: "synthetic-cleanup-case-sandbox-001",
+      importType: "cheese",
+      sourceLabel: "Synthetic sandbox cleanup fixture",
+      evaluatedInput: { recipes: [{ name: "SYNTHETIC_SANDBOX_INPUT" }] },
+      expectedResult: { recipes: [{ name: "SYNTHETIC_SANDBOX_EXPECTED" }] },
+      createdBy: "sandbox",
+    }).returning({ id: tables.importGoldCasesTable.id });
+    await db.insert(tables.importGoldScoresTable).values({
+      scope: "live",
+      caseId: liveCase!.id,
+      provider: "local",
+      status: "scored",
+      accuracy: 1,
+      comparedFields: 1,
+      equalFields: 1,
+      fieldDiffs: [{ field: "synthetic", expected: "SYNTHETIC_PRIVATE_EXPECTED", predicted: "SYNTHETIC_PRIVATE_PREDICTED" }],
+    });
+
+    process.env.IMPORT_GOLD_CLEANUP_ENABLED = "true";
+    const configResponse = await fetch(`${baseUrl}/api/import-gold/config`, { headers: headers() });
+    expect(configResponse.status).toBe(200);
+    expect(await configResponse.json()).toMatchObject({
+      enabled: false,
+      cleanupEnabled: true,
+      localConfigured: false,
+      localAvailable: false,
+      localScoringSwitchAvailable: false,
+      localScoringEnabled: false,
+      syntheticFixtureAvailable: false,
+      geminiConfigured: false,
+    });
+
+    const listed = await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() });
+    expect(listed.status).toBe(200);
+    const listBody = await listed.json() as { cases: Array<Record<string, unknown>> };
+    expect(listBody.cases).toHaveLength(1);
+    expect(listBody.cases[0]).toEqual(expect.objectContaining({
+      id: liveCase!.id,
+      importType: "premix",
+    }));
+    expect(Object.keys(listBody.cases[0]!).sort()).toEqual(["createdAt", "id", "importType"]);
+    expect(JSON.stringify(listBody)).not.toMatch(/SYNTHETIC_PRIVATE|sourceLabel|scores|fieldDiffs|evaluatedInput|expectedResult/);
+
+    const ordinaryList = await fetch(`${baseUrl}/api/import-gold/cases`, { headers: headers() });
+    expect(ordinaryList.status).toBe(404);
+    const exported = await fetch(`${baseUrl}/api/import-gold/export.jsonl`, { headers: headers() });
+    expect(exported.status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/import-gold/synthetic-review`, {
+      headers: headers(),
+    })).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/import-gold/synthetic-apply`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ fixtureVersion: "synthetic-mix-v1", reviewed: true }),
+    })).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/import-gold/local-scoring`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify({ enabled: true }),
+    })).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/import-gold/cases/${liveCase!.id}/exclusion`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify({ excluded: true }),
+    })).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/import-gold/cases/${liveCase!.id}`, {
+      method: "DELETE",
+      headers: headers(),
+    })).status).toBe(404);
+    for (const provider of ["local", "gemini"] as const) {
+      expect((await fetch(`${baseUrl}/api/import-gold/score`, {
+        method: "POST", headers: headers(), body: JSON.stringify({ provider }),
+      })).status).toBe(404);
+    }
+    expect(await db.select().from(tables.importGoldCasesTable)).toHaveLength(2);
+    expect(await db.select().from(tables.importGoldScoresTable).where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(1);
+
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers("profiles") })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers("profiles"),
+    })).status).toBe(403);
+    const sandboxList = await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers("sandbox") });
+    expect(sandboxList.status).toBe(200);
+    expect((await sandboxList.json() as { cases: Array<{ id: number }> }).cases.map((item) => item.id)).toEqual([sandboxCase!.id]);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers("sandbox"),
+    })).status).toBe(404);
+
+    await db.update(tables.userRolesTable).set({ role: "operator" }).where(eq(tables.userRolesTable.userId, "inventory"));
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    })).status).toBe(403);
+    expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(1);
+    await db.update(tables.userRolesTable).set({ role: "manager" }).where(eq(tables.userRolesTable.userId, "inventory"));
+
+    const deleted = await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(deleted.status).toBe(204);
+    expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(0);
+    expect(await db.select().from(tables.importGoldScoresTable).where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(0);
+    const cleanupAudit = await db.select().from(tables.auditLogsTable)
+      .where(eq(tables.auditLogsTable.action, "import_gold_case_deleted"));
+    expect(cleanupAudit).toHaveLength(1);
+    expect(cleanupAudit[0]).toMatchObject({
+      scope: "live",
+      actor: "inventory",
+      resource: "import_gold_case",
+      changes: { outcome: "success", targetId: String(liveCase!.id) },
+    });
+    expect(JSON.stringify(cleanupAudit[0])).not.toMatch(/SYNTHETIC_PRIVATE|fieldDiffs|evaluatedInput|expectedResult/);
+
+    const retry = await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    });
+    expect(retry.status).toBe(404);
+    expect(await db.select().from(tables.auditLogsTable)
+      .where(eq(tables.auditLogsTable.action, "import_gold_case_deleted"))).toHaveLength(1);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases/0`, {
+      method: "DELETE", headers: headers(),
+    })).status).toBe(400);
+
+    process.env.IMPORT_GOLD_CLEANUP_ENABLED = "false";
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases`, { headers: headers() })).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${sandboxCase!.id}`, {
+      method: "DELETE", headers: headers(),
+    })).status).toBe(404);
+    expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, sandboxCase!.id))).toHaveLength(1);
   });
 
   it("gates capture and manager controls, bounds input, and records provider errors without failing the batch", async () => {

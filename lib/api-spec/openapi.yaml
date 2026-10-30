@@ -6947,6 +6947,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ImportGoldCasesResponse" }
         "403": { description: Manager capability required }
+  /import-gold/cleanup-cases:
+    get:
+      operationId: listImportGoldCleanupCases
+      tags: [specImport]
+      summary: List minimal scoped case metadata when cleanup-only mode is enabled
+      responses:
+        "200":
+          description: Bounded case identifiers for cleanup; case and score contents are not returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportGoldCleanupCasesResponse" }
+        "403": { description: Manager capability required }
+        "404": { description: Cleanup-only mode is unavailable }
+  /import-gold/cleanup-cases/{id}:
+    delete:
+      operationId: deleteImportGoldCleanupCase
+      tags: [specImport]
+      summary: Delete one scoped case and its score history in cleanup-only mode
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "204": { description: "Case and score history deleted; audit evidence contains only actor, scope, case ID, and time" }
+        "400": { description: Invalid case identity }
+        "403": { description: Manager capability required }
+        "404": { description: Cleanup-only mode unavailable or case not found in the current scope }
   /import-gold/cases/{id}/exclusion:
     patch:
       operationId: setImportGoldCaseExclusion
@@ -7831,9 +7859,10 @@ components:
           additionalProperties: true
     ImportGoldConfig:
       type: object
-      required: [enabled, localConfigured, localAvailable, localScoringSwitchAvailable, localScoringEnabled, syntheticFixtureAvailable, geminiConfigured, retention, persistsAcrossFactoryPurge]
+      required: [enabled, cleanupEnabled, localConfigured, localAvailable, localScoringSwitchAvailable, localScoringEnabled, syntheticFixtureAvailable, geminiConfigured, retention, persistsAcrossFactoryPurge]
       properties:
         enabled: { type: boolean }
+        cleanupEnabled: { type: boolean, description: True only when explicitly configured and source approvals are disabled }
         localConfigured: { type: boolean }
         localAvailable: { type: boolean }
         localScoringSwitchAvailable: { type: boolean }
@@ -7932,6 +7961,20 @@ components:
         cases:
           type: array
           items: { $ref: "#/components/schemas/ImportGoldCase" }
+    ImportGoldCleanupCase:
+      type: object
+      required: [id, importType, createdAt]
+      properties:
+        id: { type: integer, minimum: 1 }
+        importType: { type: string, enum: [spec, premix, cheese] }
+        createdAt: { type: string, format: date-time }
+    ImportGoldCleanupCasesResponse:
+      type: object
+      required: [cases]
+      properties:
+        cases:
+          type: array
+          items: { $ref: "#/components/schemas/ImportGoldCleanupCase" }
     ImportGoldScoreResponse:
       type: object
       required: [results, scoredCount, errorCount]
