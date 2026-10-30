@@ -1444,6 +1444,38 @@ describe("atomic import operations", () => {
     expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(1);
     await db.update(tables.userRolesTable).set({ role: "manager" }).where(eq(tables.userRolesTable.userId, "inventory"));
 
+    await pool.query(`
+      CREATE FUNCTION fail_import_gold_cleanup_audit_for_test() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'import_gold_case_deleted' THEN
+          RAISE EXCEPTION 'test-only forced cleanup audit insert failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await pool.query(`
+      CREATE TRIGGER fail_import_gold_cleanup_audit_for_test
+      BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION fail_import_gold_cleanup_audit_for_test()
+    `);
+    let failedCleanupStatus = 0;
+    try {
+      const failedCleanup = await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
+        method: "DELETE", headers: headers(),
+      });
+      failedCleanupStatus = failedCleanup.status;
+    } finally {
+      await pool.query("DROP TRIGGER IF EXISTS fail_import_gold_cleanup_audit_for_test ON audit_logs");
+      await pool.query("DROP FUNCTION IF EXISTS fail_import_gold_cleanup_audit_for_test()");
+    }
+    expect(failedCleanupStatus).toBe(500);
+    expect(await db.select().from(tables.importGoldCasesTable).where(eq(tables.importGoldCasesTable.id, liveCase!.id))).toHaveLength(1);
+    expect(await db.select().from(tables.importGoldScoresTable).where(eq(tables.importGoldScoresTable.caseId, liveCase!.id))).toHaveLength(1);
+    expect(await db.select().from(tables.auditLogsTable)
+      .where(eq(tables.auditLogsTable.action, "import_gold_case_deleted"))).toHaveLength(0);
+
     const deleted = await fetch(`${baseUrl}/api/import-gold/cleanup-cases/${liveCase!.id}`, {
       method: "DELETE", headers: headers(),
     });
@@ -1458,6 +1490,10 @@ describe("atomic import operations", () => {
       actor: "inventory",
       resource: "import_gold_case",
       changes: { outcome: "success", targetId: String(liveCase!.id) },
+    });
+    expect(cleanupAudit[0]!.changes).toEqual({
+      outcome: "success",
+      targetId: String(liveCase!.id),
     });
     expect(JSON.stringify(cleanupAudit[0])).not.toMatch(/SYNTHETIC_PRIVATE|fieldDiffs|evaluatedInput|expectedResult/);
     const retentionAfterCleanup = await fetch(`${baseUrl}/api/import-gold/retention`, { headers: headers() });
