@@ -120,3 +120,89 @@ open with the same owner and next actions recorded above.
 Code checkpoint: `6d0356f0a5542d27677aedc68d077f7e6d85d91a` on the existing
 feature branch. No main/Replit mutation or runtime activation. Native hosted
 foundation results are recorded in PR #142 when available.
+
+## Hosted regression investigation (same owning task)
+
+The first code checkpoint's Linux foundation job passed, but Windows failed the
+new synthetic contract step in runs 41206388189 / 41206380089. A generic exit-1
+annotation was insufficient; no operational input or production failure is
+inferred from it. Added a bounded, escaped failure reporter alongside the normal
+spec output. Three diagnostic contracts cover escaping, event filtering and
+preserving the real failing Node exit. A nested-test-context inheritance issue
+in the reporter test was fixed by an explicitly minimal child environment.
+
+Annotated runs 41206723702 / 41206718140 then identified two Windows failures:
+(1) fresh synthetic Git binding returned unavailable instead of the fixture
+commit; (2) the nested reporter CLI returned 7 instead of 1. The reporter test
+now supplies a portable file URL (rather than a Windows drive-letter module
+specifier) and bounded stderr on unexpected exit. The Git fixture adds boolean-
+only diagnostics for root spelling/canonical identity, source-set count, modes,
+blob equality and batch header line endings. Neither a Git-binding assertion nor
+any failure gate is skipped. Both failures remain open until native reruns pass.
+
+Local suite including diagnostics: 130 tests passed (95 self-host/diagnostic,
+35 production identity/promotion/release-source). The diagnostic checkpoint's
+full root typecheck also passed. Hosted results remain distinct from local tests.
+The actual committed source at 8cdb4443c43e0871eaccc927f72e21cb061bd699 produced
+an honestly verified fresh Git binding without historical input restoration.
+A local remote-tracking check initially used a stale feature reference because
+this checkout's fetch mapping tracks main only. An explicit feature refspec
+resolved it; all 12 published file contents were compared exactly before local
+HEAD/index reconciliation, with working files preserved. No remote ref mismatch
+or another contributor's change was overwritten.
+
+### Confirmed Windows root cause and bounded repair
+
+Annotated native run 41207058991 isolated the remaining binding failure:
+root spelling differed while native canonical roots, source counts, modes and
+individual blob contents all matched; the batch header did not have CRLF.
+The original literal path comparison rejected Windows' alternate (including 8.3)
+filesystem spelling. This was a provenance-availability bug, not a source mismatch.
+
+The shared Git probe now permits a differing Windows spelling **only when both
+native realpaths are exactly equal**. Linux retains its original strict spelling
+comparison. No case-folding guess, directory-prefix acceptance, optional proof
+flag or fallback revision was added. All captured path/mode/SHA-256 byte checks
+against the immutable Git commit remain. A repository-subdirectory negative
+assertion verifies that the source-root boundary is still enforced. Local combined
+130-test and 15-workflow runs passed after this repair; native rerun and final
+root typecheck are recorded when complete. Reporter Windows file-URL portability
+is included; the earlier annotated failure history is preserved above.
+
+### Final identity checkpoint result
+
+Code repair `59ab3711b288f468723e1d3893c1ffacfc07b6bc` passed **both native
+Windows and Linux foundation jobs** in
+[run 41207331604](https://github.com/ravenslight2010/Production-run-calculator/actions/runs/41207331604).
+This closes the introduced Windows Git-root and reporter portability failures;
+all earlier failed runs and causes remain above. No assertion was removed or
+converted to a skip. The two Windows symlink-privilege exceptions (existing
+preflight and new source-escape test) remain explicit; Linux exercises both.
+The Windows job also executes the original blocked-initialization refusal path.
+
+Final local code: **130 Node contracts PASS**, all **15 workflow policy/actionlint
+checks PASS**, and authoritative **`CI=true pnpm run typecheck` PASS, exit 0**
+after the Windows repair. No new API/web runtime, DB, image, deployment, physical
+device or updater readiness is implied. Existing full-app/private-input failures
+remain open. The installer still deliberately refuses the original missing
+production prerequisites. PR #142 remains draft and main/deployment NO-GO.
+
+### Remaining publication capability / next owner-controlled action
+
+The upcoming honest fresh-profile API/status contract needs official codegen,
+not a hand-edit or a bypass of the generated validation schemas. Current generated
+aggregates are 671,550 bytes (`lib/api-zod/src/generated/api.ts`) and 317,535 bytes
+(`lib/api-client-react/src/generated/api.schemas.ts`). Each exceeds the connected
+GitHub writer's 65,536-byte request boundary already encountered in this task.
+File-backed MCP calls do not bypass that connection boundary. No patch/append or
+Actions-log capability was discovered in the enabled GitHub tools; normal
+public reads and bounded feature writes are working.
+
+The local checkout has no authenticated normal git push route or GitHub CLI.
+An owner-approved GitHub device-code sign-in would supply that route without
+putting passwords/tokens in chat. This is the next user-controlled authorization,
+not a request for the owner to retrieve logs, reports or build fingerprints.
+Do not fabricate/omit generated output, publish private historical evidence or
+add a write-enabled codegen workflow merely to work around the connector.
+Until the route is approved, schema publication and the rest of the runtime/
+packaging activation stay incomplete under the same owning objective.

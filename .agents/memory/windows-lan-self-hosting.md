@@ -91,3 +91,32 @@ No API generated files changed yet; large generated aggregates exceed connected
 write-request bounds, so establish an authorized publication route before schema
 changes. Full CI/private workbook/Windows/device/import/offline/update evidence
 is still open in the same objective; PR #142 remains draft and deployment NO-GO.
+
+
+## Native fresh-identity checkpoint validation and publication boundary
+
+Added a bounded escaped CI reporter plus three synthetic diagnostic contracts
+because connected tools exposed job annotations but not logs. Windows revealed
+an existing literal-root comparison problem: Git/Node spelled the same temporary
+root differently, while canonical roots, modes, blobs and source sets matched.
+The Git probe now accepts differing Windows spellings only for exactly equal
+native realpaths; Linux remains strict. No prefix/case-folding guess, forged SHA
+or skipped provenance assertion. Added repository-subdirectory negative coverage.
+The nested reporter test uses a file URL and minimal child environment (no parent
+NODE_TEST_CONTEXT/credentials) so failures retain their real nonzero exit.
+
+Final code 59ab3711b288f468723e1d3893c1ffacfc07b6bc: Windows+Linux foundation
+jobs PASS in run 41207331604. Local 130 combined contracts, all 15 workflow checks
+and authoritative root typecheck PASS. Initial Windows/reporting failures and
+local lint/OOM incident remain in `docs/self-host/fresh-build-profile.md`.
+The two explicit Windows symlink-privilege exceptions are covered on Linux.
+These passes validate identity/refusal paths only, not a working fresh runtime.
+
+Next owner-controlled authorization: normal GitHub device-code sign-in for git
+push. No authenticated CLI route exists locally; API generated aggregates are
+671,550/317,535 bytes, larger than the connected writer's 65,536-byte request
+boundary. Do not hand-edit generated outputs or add write-enabled workflow tricks.
+Runtime/schema/legacy repair/capture/package/installer work is still incomplete,
+not a deferred separate task; request authorization without asking for tokens in
+chat. PR #142 remains draft; full-app/private-input/device qualification and
+main merge/deployment remain NO-GO. No main/Replit writes or deployment occurred.
