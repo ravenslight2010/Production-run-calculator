@@ -2,7 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import { startBrowserAttempt } from "./browser-attempt-progress.mjs";
 import { existsSync } from "node:fs";
 import { assessmentRevision, captureReleaseIdentity, isAssessmentRevision, isDeploymentRevision, isEvidenceRevision, isSourceRevision } from "./release-source-identity.mjs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import {
   access,
   appendFile,
@@ -14,7 +15,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   validateComparableEvaluationManifest,
   validateEvaluationManifest,
@@ -303,6 +304,10 @@ const RELEASE_BROWSER_ENV = {
   PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18084",
 } as const;
 const rootDir = new URL("../../", import.meta.url).pathname;
+// Raw Playwright outputs include .last-run.json and may include failure traces
+// or page bodies. Keep them private and outside the strictly allowlisted bundle.
+// UUID allocation has no filesystem side effects when this module is imported.
+const browserScratchRoot = resolve(tmpdir(), `production-release-browser-${randomUUID()}`);
 function approvedSourceLibraryPoolExceptionSha256(reportBytes: Buffer): string {
   const approval = loadSourceLibraryPoolExceptionApproval(
     resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
@@ -2008,7 +2013,7 @@ const steps: ReleaseStep[] = [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.smoke.config.ts",
       "--output",
-      resolve(rootDir, releaseEvidenceDir, "browser-smoke/test-results"),
+      resolve(browserScratchRoot, "browser-smoke/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2023,7 +2028,7 @@ const steps: ReleaseStep[] = [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.calendar.config.ts",
       "--output",
-      resolve(rootDir, releaseEvidenceDir, "browser-calendar/test-results"),
+      resolve(browserScratchRoot, "browser-calendar/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2038,7 +2043,7 @@ const steps: ReleaseStep[] = [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.a11y.config.ts",
       "--output",
-      resolve(rootDir, releaseEvidenceDir, "browser-accessibility/test-results"),
+      resolve(browserScratchRoot, "browser-accessibility/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2053,7 +2058,7 @@ const steps: ReleaseStep[] = [
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.webkit.config.ts",
       "--output",
-      resolve(rootDir, releaseEvidenceDir, "browser-webkit/test-results"),
+      resolve(browserScratchRoot, "browser-webkit/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -2077,7 +2082,7 @@ export const FULL_RESPONSIVE_WEBKIT_GATE_STEP: ReleaseStep = {
     "--project=phone-webkit",
     "--project=tablet-webkit",
     "--output",
-    resolve(rootDir, releaseEvidenceDir, "browser-compatibility/test-results"),
+    resolve(browserScratchRoot, "browser-compatibility/test-results"),
   ],
   env: {
     ...RELEASE_BROWSER_ENV,
@@ -2099,7 +2104,7 @@ if (fullRun) {
       "scripts/src/run-isolated-browser-suite.sh",
       "--playwright-config=playwright.config.ts",
       "--output",
-      resolve(rootDir, releaseEvidenceDir, "browser-full/test-results"),
+      resolve(browserScratchRoot, "browser-full/test-results"),
     ],
     env: {
       ...RELEASE_BROWSER_ENV,
@@ -4738,6 +4743,14 @@ async function main(): Promise<void> {
   const checkpointPath = resolve(evidenceRoot, "release-check-state.json");
   const checkpointReportPath = resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT);
   const logPath = resolve(evidenceRoot, "release-check.log");
+  const scratchRelativeToEvidence = relative(evidenceRoot, browserScratchRoot);
+  if (!isAbsolute(scratchRelativeToEvidence)
+      && !scratchRelativeToEvidence.startsWith(`..${sep}`) && scratchRelativeToEvidence !== "..") {
+    throw new Error("Private browser scratch output must be outside the retained evidence root.");
+  }
+  // Parent permissions protect all nested raw artifacts on success and failure.
+  // CI runner teardown removes these diagnostics; never upload them as evidence.
+  await mkdir(browserScratchRoot, { mode: 0o700 });
   if (localOnly) {
     // Private per-run parent also protects nested browser traces and payloads.
     await prepareLocalReleaseDirectory(rootDir, evidenceRoot);

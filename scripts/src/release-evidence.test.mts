@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { captureReleaseIdentity } from "./release-source-identity.mjs";
 import { formatLocalReleaseReport, localReleaseEvidenceDirectory, prepareLocalReleaseDirectory, readLocalReleaseReport, verifyLocalReleaseReport } from "./local-release-evidence.mts";
@@ -1455,7 +1455,7 @@ async function run(): Promise<void> {
     FULL_RESPONSIVE_WEBKIT_GATE_STEP.args[5]?.endsWith(
       "/browser-compatibility/test-results",
     ),
-    "responsive WebKit artifacts must stay inside the release evidence directory",
+    "responsive WebKit raw artifacts must use their own scratch subdirectory",
   );
   assert.ok(
     FULL_RESPONSIVE_WEBKIT_GATE_STEP.env?.PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH?.endsWith(
@@ -4075,11 +4075,23 @@ async function verifyLocalOnlyContract(): Promise<void> {
     assert.equal(fullBrowser.warningMs, 80 * 60_000);
     assert.ok(fullBrowser.args.includes("--playwright-config=playwright.config.ts"));
     assert.ok(plan.find((step) => step.label === releaseCheck.FULL_RESPONSIVE_WEBKIT_GATE_LABEL));
-    for (const step of plan.filter((step) => step.args.includes("scripts/src/run-isolated-browser-suite.sh"))) {
+    const browserSteps = plan.filter((step) => step.args.includes("scripts/src/run-isolated-browser-suite.sh"));
+    assert.equal(browserSteps.length, 6, "all standard and full browser output paths must be checked");
+    const outputs = new Set<string>();
+    for (const step of browserSteps) {
       assert.equal(step.concurrencyLimit, 1);
       assert.equal(step.env?.E2E_TEST_DB, "1");
       assert.equal(step.env?.E2E_APPROVED_DESTRUCTIVE_MODE, "1");
+      const output = step.args[step.args.indexOf("--output") + 1];
+      assert.ok(output && isAbsolute(output), "browser scratch output must be explicit and absolute");
+      const scratchRelative = relative(tmpdir(), output);
+      assert.match(scratchRelative, /^production-release-browser-[0-9a-f-]{36}[/\\]browser-[a-z-]+[/\\]test-results$/);
+      const retainedRelative = relative(root, output);
+      assert.ok(isAbsolute(retainedRelative) || retainedRelative === ".." || retainedRelative.startsWith(`..${sep}`),
+        "raw Playwright bookkeeping, traces and page bodies must stay outside retained evidence");
+      outputs.add(output);
     }
+    assert.equal(outputs.size, 6, "concurrent browser gates must not share raw output directories");
     assert.ok(!plan.some((step) => /source-library.*reconciliation|signing-key.*preflight/i.test(step.label)));
     // Exercise the real read-only CLI with the real inventory, not the runner's
     // fixture override. Metadata fixtures are not evidence that the checks ran.

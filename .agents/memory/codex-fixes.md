@@ -1594,3 +1594,18 @@ and report abort after the timeline rendered. Record newly started requests duri
 explicit navigation and wait for both actual200Summary reads plus ready canonical
 snapshot UI. Keep exact cancellation predicates, mandatory recovery, HTTP/console
 checks unchanged. No production/auth changes or blanket normal-operation exemption.
+
+Release raw-output isolation: c528a2eb passed all46standard test gates,48a11y and
+3WebKit smoke cases, but privacy verification correctly rejected four .last-run.json
+files. release-check.mts now routes all6standard/full Playwright raw output paths
+to a unique700OS-temp parent outside retained evidence. Canonical explicit summaries
+unchanged; no allowlist widening or deletion of prior user evidence. Full-plan
+release-evidence.test.mts checks all6distinct absolute temporary output directories
+and unchanged disposable DB/concurrency guards. Local validation first exposed
+missing canonical report/checksum; exact manifest-pinned local Git report and exact
+checksum restored privately, never printed or committed. New full release required.
+
+Complete release-evidence contract exposed API package.json's existing schedule-move
+dependency missing from artifacts/api-server/tsconfig.json references. Add that one
+buildable reference; preserve exact graph-completeness assertion and routes-only
+diagnostic config. Full root types/contract rerun required; no dependency changes.

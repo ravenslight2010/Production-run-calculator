@@ -875,3 +875,45 @@ independent review remains a separate user-owned merge blocker.
 Pre-push navigation repair:23focused timeline/classifier tests PASS, authoritative
 root typecheck PASS under pinned toolchain. Real browser/hosted replacement-head
 gates remain pending. No failed run is relabeled as a pass.
+
+### All test gates pass; raw Playwright scratch blocked retained reporting
+
+At c528a2eb, required CI41246947246 PASS. Standard release41246947216 completed
+all46test gates PASS, including12/12API shards, build-source integration,48/48
+accessibility cases,3/3WebKit smoke, calendar/browser smoke and all unit suites.
+This closes the clock and destination-request identity failures. The workflow is
+still FAIL: report writing and independent privacy verification reject Playwright's
+.last-run.json under each of4standard browser test-results directories. These raw
+outputs must not be allowlisted, regardless of successful tests; failure traces and
+page bodies could occupy the same output paths on another run.
+
+Move all6standard/full browser raw output directories to one unique OS-temporary
+scratch parent, created700before execution. Each gate retains a distinct child;
+summary reports/count-only WebKit JSON still use their explicit canonical paths.
+Reject an evidence-root override that would enclose the scratch path. Importing
+the release plan has no filesystem side effects. No recursive cleanup of existing
+user evidence, privacy allowlist expansion, test/gate removal, timeout changes,
+report fabrication or CI retry-as-proof. Private raw diagnostics stay on the local
+runner and disappear with CI runner teardown, outside uploaded retained bundles.
+The existing full-plan contract now verifies all6paths are absolute, distinct,
+temporary and outside retained evidence while retaining destructive DB safeguards.
+
+Local release-evidence test initially stopped at the absent canonical report, then
+its absent checksum counterpart (neither failure was hidden). Restore only the
+previously authorized exact manifest-pinned report from an existing local Git
+object, verify SHA256/budget, create its exact checksum privately600, and rerun.
+No report content or source workbook bytes printed, no gate authorization spoofed.
+Owner remains agent for reporting closure; independent review remains user-owned.
+
+Full local release contract then exposed an existing graph omission: API already
+depends on @workspace/schedule-move but its primary tsconfig lacked that buildable
+library reference. Add only the missing reference; do not weaken the contract or
+touch diagnostic-only routes config. Root/shared-library build and complete contract
+must rerun. This is the same owning task's safely actionable verification repair.
+
+Pre-push reporting repair: complete release-evidence contract PASS, including
+local-only CLI/full-plan6-output isolation and unchanged forbidden-file/symlink/
+allowlist checks. Authoritative full root typecheck PASS with pinned toolchain.
+The contract's deliberate timeout/failed-child/signaled-child fixture diagnostics
+are asserted negative cases, not hidden real gate failures. Replacement-head hosted
+CI and uninterrupted standard release must still pass before reporting closure.
